@@ -141,6 +141,10 @@ struct CarEvent @0x9b1657f34caf3ad3 {
 
     rebootImminent @129;
 
+    #Road speed Limiter
+    slowingDownSpeed @130;
+    slowingDownSpeedSound @131;
+
     driverMonitorLowAccDEPRECATED @68;
     radarCanErrorDEPRECATED @15;
     radarCommIssueDEPRECATED @67;
@@ -292,6 +296,7 @@ struct CarState {
     standstill @4 :Bool;
     nonAdaptive @5 :Bool;
     speedLimit @6 :Float32;
+    resumeButton @7 :Bool;
   }
 
   enum GearShifter {
@@ -388,6 +393,17 @@ struct CarControl {
   onePedalD @14 :Float32;
   onePedalF @15 :Float32;
 
+  #Road speed Limiter
+  sccSmoother @16 :SccSmoother;
+
+  struct SccSmoother {
+    roadLimitSpeedActive @0 :Int32;
+    longControl @1:Bool;
+    logMessage @2 :Text;
+    roadLimitSpeed @3 :UInt32;
+    roadLimitSpeedLeftDist @4 :UInt32;
+    autoTrGap @5 :UInt32;
+  }
 
   struct Actuators {
     # range from 0.0 - 1.0
@@ -453,6 +469,10 @@ struct CarControl {
       chimeWarningRepeat @6;
       chimePrompt @7;
       chimeWarning2Repeat @8;
+
+      #Road speed Limiter
+      chimeSlowingDownSpeed @9;
+      chimeAutoHoldOn @10;
     }
   }
 

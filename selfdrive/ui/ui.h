@@ -25,6 +25,7 @@
 #include "selfdrive/common/params.h"
 #include "selfdrive/common/util.h"
 #include "selfdrive/common/visionimg.h"
+#include "selfdrive/common/touch.h"
 
 #define COLOR_BLACK nvgRGBA(0, 0, 0, 255)
 #define COLOR_BLACK_ALPHA(x) nvgRGBA(0, 0, 0, x)
@@ -197,7 +198,7 @@ typedef enum UIMeasure { //rearrange here to adjust order when cycling measures
   COOLANT_TEMPC,
   COOLANT_TEMPF,
   ACCELERATION,
-  LAT_ACCEL,//JERK,
+  LAT_ACCEL,//10
   DRAG_FORCE,
   DRAG_POWER,
   DRAG_POWER_HP,
@@ -207,7 +208,7 @@ typedef enum UIMeasure { //rearrange here to adjust order when cycling measures
   ACCEL_POWER_HP,
   EV_FORCE,
   EV_POWER,
-  EV_POWER_HP,
+  EV_POWER_HP,//20
   REGEN_FORCE,
   REGEN_POWER,
   REGEN_POWER_HP,
@@ -217,7 +218,7 @@ typedef enum UIMeasure { //rearrange here to adjust order when cycling measures
   DRIVE_POWER,
   DRIVE_POWER_HP,
   ICE_POWER,
-  ICE_POWER_HP,
+  ICE_POWER_HP,//30
   // Location/road info
   ALTITUDE,
   BEARING,
@@ -228,7 +229,7 @@ typedef enum UIMeasure { //rearrange here to adjust order when cycling measures
   LANE_WIDTH,
   LANE_DIST_FROM_CENTER,
   DISTANCE_TRAVELED_SESSION,
-  DISTANCE_TRAVELED_TOTAL,
+  DISTANCE_TRAVELED_TOTAL,//40
   DISTANCE_ENGAGED,
   DISTANCE_ENGAGED_SESSION,
   DISTANCE_ENGAGED_TOTAL,
@@ -238,7 +239,7 @@ typedef enum UIMeasure { //rearrange here to adjust order when cycling measures
   TIME_CAR_RUNNING_TOTAL,
   TIME_OPENPILOT_ENGAGED_SESSION,
   TIME_OPENPILOT_ENGAGED_TOTAL,
-  TIME_OPENPILOT_ENGAGED,
+  TIME_OPENPILOT_ENGAGED,//50
   TIME_ENGAGED_PERCENT_SESSION,
   TIME_ENGAGED_PERCENT_TOTAL,
   DISENGAGEMENT_COUNT_SESSION,
@@ -248,7 +249,7 @@ typedef enum UIMeasure { //rearrange here to adjust order when cycling measures
   INTERVENTION_COUNT_SESSION,
   INTERVENTION_COUNT_TOTAL,
   DISTRACTION_COUNT_SESSION,
-  DISTRACTION_COUNT_TOTAL,
+  DISTRACTION_COUNT_TOTAL,//60
   INTERACTION_DISTANCE,
   INTERVENTION_DISTANCE,
   DISTRACTION_DISTANCE,
@@ -258,7 +259,7 @@ typedef enum UIMeasure { //rearrange here to adjust order when cycling measures
   DISTANCE_PER_INTERACTION_TOTAL,
   DISTANCE_PER_INTERVENTION_SESSION,
   DISTANCE_PER_INTERVENTION_TOTAL,
-  DISTANCE_PER_DISTRACTION_SESSION,
+  DISTANCE_PER_DISTRACTION_SESSION,//70
   DISTANCE_PER_DISTRACTION_TOTAL,
   TIME_PER_DISENGAGEMENT_SESSION,
   TIME_PER_DISENGAGEMENT_TOTAL,
@@ -268,7 +269,7 @@ typedef enum UIMeasure { //rearrange here to adjust order when cycling measures
   TIME_PER_INTERVENTION_TOTAL,
   TIME_PER_DISTRACTION_SESSION,
   TIME_PER_DISTRACTION_TOTAL,
-  INTERACTION_TIMER,
+  INTERACTION_TIMER,//80
   INTERVENTION_TIMER,
   DISTRACTION_TIMER,
   // Lead/traffic info
@@ -279,7 +280,7 @@ typedef enum UIMeasure { //rearrange here to adjust order when cycling measures
   LEAD_DESIRED_DISTANCE_LENGTH,
   LEAD_DESIRED_DISTANCE_TIME,
   LEAD_COSTS,
-  LEAD_VELOCITY_RELATIVE,
+  LEAD_VELOCITY_RELATIVE,//90
   LEAD_VELOCITY_ABS,
   LANE_POSITION,
   LANE_OFFSET,
@@ -290,7 +291,7 @@ typedef enum UIMeasure { //rearrange here to adjust order when cycling measures
   TRAFFIC_COUNT_ADJACENT_ONGOING,
   TRAFFIC_ADJ_ONGOING_MIN_DISTANCE,
   // EV info
-  HVB_VOLTAGE,
+  HVB_VOLTAGE,//100
   HVB_CURRENT,
   HVB_WATTAGE,
   HVB_WATTVOLT,
@@ -300,7 +301,7 @@ typedef enum UIMeasure { //rearrange here to adjust order when cycling measures
   EV_CONSUM_NOW,
   EV_CONSUM_RECENT,
   EV_CONSUM_TRIP,
-  EV_BOTH_NOW,
+  EV_BOTH_NOW,//110
   EV_OBSERVED_DRIVETRAIN_EFF,
   // Device info
   CPU_TEMP_AND_PERCENTF,
@@ -311,7 +312,7 @@ typedef enum UIMeasure { //rearrange here to adjust order when cycling measures
   MEMORY_TEMPF,
   MEMORY_TEMPC,
   AMBIENT_TEMPF,
-  AMBIENT_TEMPC,
+  AMBIENT_TEMPC,//120
   FANSPEED_PERCENT,
   FANSPEED_RPM,
   MEMORY_USAGE_PERCENT,
@@ -322,7 +323,7 @@ typedef enum UIMeasure { //rearrange here to adjust order when cycling measures
   VISION_CURLATACCEL,
   VISION_MAXVFORCURCURV,
   VISION_MAXPREDLATACCEL,
-  VISION_VF,
+  VISION_VF,//130
   
   NUM_MEASURES
 } UIMeasure;
@@ -454,6 +455,7 @@ typedef struct UIScene {
   float angleSteers, angleSteersDes, angleSteersErr;
   float lateralCorrection;
   int engineRPM;
+  bool recording;
   bool steerOverride;
   int thermalStatus;
   int percentGradeRollingIter = 0, percentGradeNumSamples = 10;
@@ -598,8 +600,14 @@ typedef struct UIState {
   
   bool is_metric;
 
+  //road speed limiter
+  Rect video_rect, viz_rect;
+
   float car_space_transform[6];
   bool wide_camera;
+
+  TouchState touch;
+
 } UIState;
 
 

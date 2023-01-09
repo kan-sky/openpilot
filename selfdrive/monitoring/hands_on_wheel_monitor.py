@@ -4,9 +4,9 @@ from selfdrive.config import Conversions as CV
 EventName = car.CarEvent.EventName
 HandsOnWheelState = log.DriverMonitoringState.HandsOnWheelState
 
-_PRE_ALERT_THRESHOLD = 150  # 15s
-_PROMPT_ALERT_THRESHOLD = 300  # 30s
-_TERMINAL_ALERT_THRESHOLD = 600  # 60s
+_PRE_ALERT_THRESHOLD = 276000  #27600s = 4 Hours
+_PROMPT_ALERT_THRESHOLD = 162000  #16200s = 4.5 Hours
+_TERMINAL_ALERT_THRESHOLD = 180000  #18000s = 5 Hours
 
 _MIN_MONITORING_SPEED = 10 * CV.KPH_TO_MS  # No monitoring underd 10kph
 

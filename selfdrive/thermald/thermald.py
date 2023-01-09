@@ -21,6 +21,8 @@ from selfdrive.controls.lib.pid import PIDController
 from selfdrive.hardware import EON, TICI, PC, HARDWARE
 from selfdrive.loggerd.config import get_available_percent
 from selfdrive.pandad import get_expected_signature
+from selfdrive.kegman_kans_conf import kegman_kans_conf
+
 from selfdrive.swaglog import cloudlog
 from selfdrive.thermald.power_monitoring import PowerMonitoring
 from selfdrive.version import tested_branch, terms_version, training_version
@@ -52,6 +54,7 @@ OFFROAD_DANGER_TEMP = 70.0
 
 prev_offroad_states: Dict[str, Tuple[bool, Optional[str]]] = {}
 
+LEON = False
 def read_tz(x):
   if x is None:
     return 0
@@ -73,25 +76,29 @@ def read_thermal(thermal_config):
 
 
 def setup_eon_fan():
+  global LEON
+
   os.system("echo 2 > /sys/module/dwc3_msm/parameters/otg_switch")
 
 
 last_eon_fan_val = None
 def set_eon_fan(val):
-  global last_eon_fan_val
+  global LEON, last_eon_fan_val
 
   if last_eon_fan_val is None or last_eon_fan_val != val:
     bus = SMBus(7, force=True)
-    try:
-      i = [0x1, 0x3 | 0, 0x3 | 0x08, 0x3 | 0x10][val]
-      bus.write_i2c_block_data(0x3d, 0, [i])
-    except IOError:
-      # tusb320
-      if val == 0:
-        bus.write_i2c_block_data(0x67, 0xa, [0])
-      else:
-        bus.write_i2c_block_data(0x67, 0xa, [0x20])
-        bus.write_i2c_block_data(0x67, 0x8, [(val - 1) << 6])
+    if LEON:
+      try:
+        i = [0x1, 0x3 | 0, 0x3 | 0x08, 0x3 | 0x10][val]
+        bus.write_i2c_block_data(0x3d, 0, [i])
+      except IOError:
+        # tusb320
+        if val == 0:
+          bus.write_i2c_block_data(0x67, 0xa, [0])
+        else:
+          bus.write_i2c_block_data(0x67, 0xa, [0x20])
+          bus.write_i2c_block_data(0x67, 0x8, [(val - 1) << 6])
+
     bus.close()
     last_eon_fan_val = val
 
@@ -141,6 +148,28 @@ def handle_fan_tici(controller, max_cpu_temp, fan_speed, ignition):
 
   return fan_pwr_out
 
+def check_car_battery_voltage(should_start, pandaState, charging_disabled, msg):
+  sm = messaging.SubMaster(["pandaState"])
+  sm.update(0)
+  pandaState = sm['pandaState']
+  if sm.updated['pandaState']:
+    print(pandaState)
+
+  kegman_kans = kegman_kans_conf()
+  if charging_disabled and (pandaState is None) and msg.deviceState.batteryPercent < int(kegman_kans.conf['battChargeMin']):
+    charging_disabled = False
+    os.system('echo "1" > /sys/class/power_supply/battery/charging_enabled')
+  elif (charging_disabled or not charging_disabled) and (msg.deviceState.batteryPercent < int(kegman_kans.conf['battChargeMax']) or (pandaState is None and not should_start)):
+    charging_disabled = False
+    os.system('echo "1" > /sys/class/power_supply/battery/charging_enabled')
+  elif not charging_disabled and (msg.deviceState.batteryPercent > int(kegman_kans.conf['battChargeMax']) or (pandaState is not None and not should_start)):
+    charging_disabled = True
+    os.system('echo "0" > /sys/class/power_supply/battery/charging_enabled')
+  elif msg.deviceState.batteryCurrent < 0 and msg.deviceState.batteryPercent > int(kegman_kans.conf['battChargeMax']):
+    charging_disabled = True
+    os.system('echo "0" > /sys/class/power_supply/battery/charging_enabled')
+
+  return charging_disabled
 
 def set_offroad_alert_if_changed(offroad_alert: str, show_alert: bool, extra_text: Optional[str]=None):
   if prev_offroad_states.get(offroad_alert, None) == (show_alert, extra_text):
@@ -174,12 +203,14 @@ def thermald_thread():
 
   network_type = NetworkType.none
   network_strength = NetworkStrength.unknown
+  wifiIpAddress = 'N/A'
   network_info = None
   modem_version = None
   registered_count = 0
 
   current_filter = FirstOrderFilter(0., CURRENT_TAU, DT_TRML)
   temp_filter = FirstOrderFilter(0., TEMP_TAU, DT_TRML)
+  charging_disabled = False
   pandaState_prev = None
   should_start_prev = False
   handle_fan = None
@@ -192,7 +223,7 @@ def thermald_thread():
 
   HARDWARE.initialize_hardware()
   thermal_config = HARDWARE.get_thermal_config()
-  
+  restart_triggered_ts = 0.
   ignore_missing_nvme = params.get_bool("IgnoreMissingNVME")
 
   # TODO: use PI controller for UNO
@@ -218,6 +249,16 @@ def thermald_thread():
   while 1:
     pandaState = messaging.recv_sock(pandaState_sock, wait=True)
     msg = read_thermal(thermal_config)
+
+    # neokii
+    if sec_since_boot() - restart_triggered_ts < 5.:
+      startup_conditions["not_restart_triggered"] = False
+    else:
+      startup_conditions["not_restart_triggered"] = True
+
+      if params.get_bool("SoftRestartTriggered"):
+        params.put_bool("SoftRestartTriggered", False)
+        restart_triggered_ts = sec_since_boot()
 
     if pandaState is not None:
       usb_power = pandaState.pandaState.usbPowerMode != log.PandaState.UsbPowerMode.client
@@ -265,6 +306,7 @@ def thermald_thread():
         network_type = HARDWARE.get_network_type()
         network_strength = HARDWARE.get_network_strength(network_type)
         network_info = HARDWARE.get_network_info()  # pylint: disable=assignment-from-none
+        wifiIpAddress = HARDWARE.get_ip_address()
 
         # Log modem version once
         if modem_version is None:
@@ -294,7 +336,9 @@ def thermald_thread():
     if network_info is not None:
       msg.deviceState.networkInfo = network_info
 
+    msg.deviceState.wifiIpAddress = wifiIpAddress
     msg.deviceState.batteryPercent = HARDWARE.get_battery_capacity()
+    msg.deviceState.batteryStatus = HARDWARE.get_battery_status()
     msg.deviceState.batteryCurrent = HARDWARE.get_battery_current()
     msg.deviceState.usbOnline = HARDWARE.get_usb_present()
     current_filter.update(msg.deviceState.batteryCurrent / 1e6)
@@ -326,17 +370,17 @@ def thermald_thread():
     now = datetime.datetime.utcnow()
 
     # show invalid date/time alert
-    startup_conditions["time_valid"] = (now.year > 2020) or (now.year == 2020 and now.month >= 10)
+    startup_conditions["time_valid"] = True #(now.year > 2020) or (now.year == 2020 and now.month >= 10)
     set_offroad_alert_if_changed("Offroad_InvalidTime", (not startup_conditions["time_valid"]))
 
     # Show update prompt
     try:
-      last_update = datetime.datetime.fromisoformat(params.get("LastUpdateTime", encoding='utf8'))
+      last_update = now #datetime.datetime.fromisoformat(params.get("LastUpdateTime", encoding='utf8'))
     except (TypeError, ValueError):
       last_update = now
     dt = now - last_update
 
-    update_failed_count = params.get("UpdateFailedCount")
+    update_failed_count = 0 #params.get("UpdateFailedCount")
     update_failed_count = 0 if update_failed_count is None else int(update_failed_count)
     last_update_exception = params.get("LastUpdateException", encoding='utf8')
 
@@ -404,6 +448,16 @@ def thermald_thread():
       started_ts = None
       if off_ts is None:
         off_ts = sec_since_boot()
+    # from bellow line, to control charging
+    charging_disabled = check_car_battery_voltage(should_start, pandaState, charging_disabled, msg)
+
+    if msg.deviceState.batteryCurrent > 0:
+      msg.deviceState.batteryStatus = "Discharging"
+    else:
+      msg.deviceState.batteryStatus = "Charging"
+
+
+    msg.deviceState.chargingDisabled = charging_disabled # to this line
 
     # Offroad power monitoring
     power_monitor.calculate(pandaState)
@@ -440,6 +494,7 @@ def thermald_thread():
     pm.send("deviceState", msg)
 
     if EON and not is_uno:
+      print(msg) # for charging
       set_offroad_alert_if_changed("Offroad_ChargeDisabled", (not usb_power))
 
     should_start_prev = should_start

@@ -63,6 +63,7 @@ services = {
   "uploaderState": (True, 0., 1),
   "liveMapData": (True, 0.),
   "liveWeatherData": (True, 0.02, 1),
+  "roadLimitSpeed": (False, 0.),
 
   # debug
   "testJoystick": (False, 0.),

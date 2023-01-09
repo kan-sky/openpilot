@@ -16,6 +16,7 @@ class Sidebar : public QFrame {
   Q_PROPERTY(ItemStatus tempStatus MEMBER temp_status NOTIFY valueChanged);
   Q_PROPERTY(QString netType MEMBER net_type NOTIFY valueChanged);
   Q_PROPERTY(int netStrength MEMBER net_strength NOTIFY valueChanged);
+  Q_PROPERTY(QString wifiAddr MEMBER wifi_addr NOTIFY valueChanged);
 
 public:
   explicit Sidebar(QWidget* parent = 0);
@@ -52,4 +53,15 @@ protected:
   ItemStatus connect_status, panda_status, temp_status;
   QString net_type;
   int net_strength = 0;
+  QString wifi_addr = "--";
+  float m_ambientTemp = 0.0;
+
+  //battery
+  int m_batteryPercent = 0;
+  int m_battery_img;
+
+  const QMap<int, QImage> battery_imgs = {
+    {0, QImage("../assets/images/battery.png")},
+    {1, QImage("../assets/images/battery_charging.png")},
+  };
 };

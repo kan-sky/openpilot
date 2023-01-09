@@ -34,6 +34,8 @@ from selfdrive.locationd.calibrationd import Calibration
 from selfdrive.modeld.constants import T_IDXS
 from selfdrive.hardware import HARDWARE, TICI, EON
 from selfdrive.manager.process_config import managed_processes
+from selfdrive.road_speed_limiter import road_speed_limiter_get_max_speed, road_speed_limiter_get_active, \
+  get_road_speed_limiter
 
 LDW_MIN_SPEED = 31 * CV.MPH_TO_MS
 LANE_DEPARTURE_THRESHOLD = 0.1
@@ -247,6 +249,13 @@ class Controls:
     self.op_params_override_lateral = self._params.get_bool('OPParamsLateralOverride')
     self.op_params_override_long = self._params.get_bool('OPParamsLongitudinalOverride')
 
+    self.v_cruise_kph_limit = 0
+    self.road_limit_speed = 0
+    self.left_dist = 0
+
+    self.slowing_down = False
+    self.slowing_down_sound_alert = False
+
     # TODO: no longer necessary, aside from process replay
     self.sm['liveParameters'].valid = True
 
@@ -268,6 +277,10 @@ class Controls:
     # controlsd is driven by can recv, expected at 100Hz
     self.rk = Ratekeeper(100, print_delay_threshold=None)
     self.prof = Profiler(False)  # off by default
+
+  def reset(self):
+    self.slowing_down = False
+    self.slowing_down_sound_alert = False
 
   def update_events(self, CS):
     """Compute carEvents from carState"""
@@ -500,11 +513,11 @@ class Controls:
 
     # TODO: fix simulator
     if not SIMULATION:
-      if not NOSENSOR:
-        self.gpsWasOK = self.gpsWasOK or self.sm['liveLocationKalman'].gpsOK
-        if self.gpsWasOK and not self.sm['liveLocationKalman'].gpsOK and (self.distance_traveled > 1000):
-          # Not show in first 1 km to allow for driving out of garage. This event shows after 5 minutes
-          self.events.add(EventName.noGps)
+      #if not NOSENSOR:
+      #  self.gpsWasOK = self.gpsWasOK or self.sm['liveLocationKalman'].gpsOK
+      #  if self.gpsWasOK and not self.sm['liveLocationKalman'].gpsOK and (self.distance_traveled > 1000):
+      #    # Not show in first 1 km to allow for driving out of garage. This event shows after 5 minutes
+      #    self.events.add(EventName.noGps)
       if not self.sm.all_alive(self.camera_packets):
         self.events.add(EventName.cameraMalfunction)
       if self.sm['modelV2'].frameDropPerc > 30:
@@ -526,6 +539,11 @@ class Controls:
     if CS.brakePressed and v_future >= STARTING_TARGET_SPEED \
       and self.CP.openpilotLongitudinalControl and CS.vEgo < 0.3:
       self.events.add(EventName.noTarget)
+
+    # events for roadSpeedLimiter
+    if self.slowing_down_sound_alert:
+      self.slowing_down_sound_alert = False
+      self.events.add(EventName.slowingDownSpeedSound)
 
   def data_sample(self):
     """Receive data from sockets and update carState"""
@@ -659,6 +677,30 @@ class Controls:
       self.v_cruise_kph = 0
       
     self.CI.CS.v_cruise_kph = self.v_cruise_kph
+
+    # limit_speed, self.road_limit_speed, self.road_limit_left_dist, first_started, limit_log = road_speed_limiter_get_max_speed(CS, self.v_cruise_kph)
+    road_speed_limiter = get_road_speed_limiter()
+    apply_limit_speed, self.road_limit_speed, self.left_dist, first_started, limit_log = \
+       road_speed_limiter.get_max_speed(CS, self.v_cruise_kph)
+
+    if apply_limit_speed >= 20:
+      self.v_cruise_kph_limit = min(apply_limit_speed, self.v_cruise_kph)
+
+      if CS.vEgo * CV.MS_TO_KPH > apply_limit_speed:
+      #  self.events.add(EventName.slowingDownSpeedSound)
+
+        if not self.slowing_down_alert and not self.slowing_down:
+          self.slowing_down_sound_alert = True
+          self.slowing_down = True
+
+        self.slowing_down_alert = True
+
+      else:
+        self.slowing_down_alert = False
+
+    else:
+      self.reset()
+      self.v_cruise_kph_limit = self.v_cruise_kph
 
     # decrease the soft disable timer at every step, as it's reset on
     # entrance in SOFT_DISABLING state
@@ -820,8 +862,8 @@ class Controls:
         left_deviation = actuators.steer > 0 and lat_plan.dPathPoints[0] < -0.1
         right_deviation = actuators.steer < 0 and lat_plan.dPathPoints[0] > 0.1
 
-        if left_deviation or right_deviation and CS.lkaEnabled:
-          self.events.add(EventName.steerSaturated)
+        #if left_deviation or right_deviation and CS.lkMode:
+        #  self.events.add(EventName.steerSaturated)
 
     # Ensure no NaNs/Infs
     for p in ACTUATOR_FIELDS:
@@ -848,6 +890,9 @@ class Controls:
 
     CC.cruiseControl.override = True
     CC.cruiseControl.cancel = not self.CP.pcmCruise or (not self.enabled and CS.cruiseState.enabled)
+    CC.sccSmoother.roadLimitSpeedActive = road_speed_limiter_get_active()
+    CC.sccSmoother.roadLimitSpeed = self.road_limit_speed
+    CC.sccSmoother.roadLimitSpeedLeftDist = self.left_dist
     if self.joystick_mode and self.sm.rcv_frame['testJoystick'] > 0 and self.sm['testJoystick'].buttons[0]:
       CC.cruiseControl.cancel = True
 
@@ -860,7 +905,7 @@ class Controls:
     CC.cruiseControl.accelOverride = float(self.CI.calc_accel_override(CS.aEgo, self.a_target,
                                                                        CS.vEgo, self.v_target))
     
-    CC.hudControl.setSpeed = float(self.v_cruise_kph) * CV.KPH_TO_MS
+    CC.hudControl.setSpeed = float(self.v_cruise_kph_limit) * CV.KPH_TO_MS
     CC.hudControl.speedVisible = self.enabled
     CC.hudControl.lanesVisible = self.enabled
     CC.hudControl.leadVisible = self.sm['longitudinalPlan'].hasLead
@@ -938,7 +983,7 @@ class Controls:
     controlsState.engageable = not self.events.any(ET.NO_ENTRY)
     controlsState.longControlState = self.LoC.long_control_state
     controlsState.vPid = float(self.LoC.v_pid)
-    controlsState.vCruise = float(self.v_cruise_kph)
+    controlsState.vCruise = float(self.v_cruise_kph_limit)
     controlsState.aTarget = float(self.LoC.a_target)
     controlsState.upAccelCmd = float(self.LoC.pid.p)
     controlsState.uiAccelCmd = float(self.LoC.pid.i)

@@ -18,6 +18,7 @@
 #include "selfdrive/hardware/hw.h"
 #include "selfdrive/ui/paint.h"
 #include "selfdrive/ui/qt/qt_window.h"
+#include "selfdrive/ui/dashcam.h"
 
 #define BACKLIGHT_DT 0.05
 #define BACKLIGHT_TS 10.00
@@ -940,6 +941,12 @@ static void update_vision(UIState *s) {
   } else if (s->scene.started) {
     util::sleep_for(1000. / UI_FREQ);
   }
+  if(s->awake)
+  {
+    int touch_x = -1, touch_y = -1;
+    touch_poll(&(s->touch), &touch_x, &touch_y, 0);
+    dashcam(s, touch_x, touch_y);
+  }
 }
 
 static void update_status(UIState *s) {
@@ -1058,7 +1065,8 @@ static void update_status(UIState *s) {
 QUIState::QUIState(QObject *parent) : QObject(parent) {
   ui_state.sm = std::make_unique<SubMaster, const std::initializer_list<const char *>>({
     "modelV2", "controlsState", "liveCalibration", "deviceState", "roadCameraState", "liveMapData",
-    "pandaState", "carParams", "driverMonitoringState", "sensorEvents", "carState", "radarState", "liveLocationKalman", "ubloxGnss", "gpsLocationExternal", "longitudinalPlan", "lateralPlan", "liveParameters", "liveWeatherData"
+    "pandaState", "carParams", "driverMonitoringState", "sensorEvents", "carState", "radarState", "liveLocationKalman", "ubloxGnss", "gpsLocationExternal", "longitudinalPlan", "lateralPlan", "liveParameters", "liveWeatherData",
+    "carControl", "roadLimitSpeed"
   });
 
   ui_state.fb_w = vwp_w;
@@ -1076,6 +1084,8 @@ QUIState::QUIState(QObject *parent) : QObject(parent) {
   timer = new QTimer(this);
   QObject::connect(timer, &QTimer::timeout, this, &QUIState::update);
   timer->start(0);
+
+  touch_init(&(ui_state.touch));
 }
 
 void QUIState::update() {
