@@ -165,10 +165,10 @@ static int gm_rx_hook(CAN_FIFOMailBox_TypeDef *to_push) {
       gas_pressed_slight = GET_BYTE(to_push, 5) != 0U;
     }
 
-    // exit controls on regen paddle
+    // exit controls on regen paddle if controls allowed
     //TODO: Evaluate impact of this change. Previous method could have caused controls mismatch...
     if (addr == 189) {
-      brake_pressed = GET_BYTE(to_push, 0) & 0x20U;
+      brake_pressed = controls_allowed && GET_BYTE(to_push, 0) & 0x20U;
       // if (regen) {
       //   controls_allowed = 0;
       // }

@@ -4,6 +4,7 @@ import math
 from numbers import Number
 
 from cereal import car, log
+from common.filter_simple import FirstOrderFilter
 from common.numpy_fast import clip, interp, mean
 from common.realtime import sec_since_boot, config_realtime_process, Priority, Ratekeeper, DT_CTRL
 from common.profiler import Profiler
@@ -179,7 +180,8 @@ class Controls:
     self.v_cruise_kph_last = 0
     self.v_cruise_last_changed = 0.
     self.stock_speed_adjust = not params.get_bool("ReverseSpeedAdjust")
-    self.MADS_lead_braking_enabled = params.get_bool("MADSLeadBraking")
+    self.MADS_enabled = Params().get_bool("MADSEnabled")
+    self.MADS_lead_braking_enabled = self.MADS_enabled and params.get_bool("MADSLeadBraking")
     self.accel_modes_enabled = params.get_bool("AccelModeButton")
     self.mismatch_counter = 0
     self.can_error_counter = 0
@@ -194,7 +196,7 @@ class Controls:
     self.a_target = 0.0
     self.pitch = 0.0
     self.pitch_accel_deadzone = 0.01 # [radians] ≈ 1% grade
-    self.k_mean = 0.0
+    self.k_mean = FirstOrderFilter(0., 20, DT_CTRL)
     
     self.slippery_roads_activated = False
     self.slippery_roads = False
@@ -365,7 +367,7 @@ class Controls:
       self.interaction_timer = t - self.interaction_last_t
       self.intervention_timer = t - self.intervention_last_t
       self.distraction_timer = t - self.distraction_last_t
-      self.MADS_lead_braking_enabled = self._params.get_bool("MADSLeadBraking")
+      self.MADS_lead_braking_enabled = self.MADS_enabled and self._params.get_bool("MADSLeadBraking")
       self.enabled_last = self.enabled
       self.params_check_last_t = t
       if t - self.params_write_last_t > self.params_write_freq:
@@ -513,11 +515,11 @@ class Controls:
 
     # TODO: fix simulator
     if not SIMULATION:
-      #if not NOSENSOR:
-      #  self.gpsWasOK = self.gpsWasOK or self.sm['liveLocationKalman'].gpsOK
-      #  if self.gpsWasOK and not self.sm['liveLocationKalman'].gpsOK and (self.distance_traveled > 1000):
-      #    # Not show in first 1 km to allow for driving out of garage. This event shows after 5 minutes
-      #    self.events.add(EventName.noGps)
+      if not NOSENSOR:
+        self.gpsWasOK = self.gpsWasOK or self.sm['liveLocationKalman'].gpsOK
+        if self.gpsWasOK and not self.sm['liveLocationKalman'].gpsOK and (self.distance_traveled > 1000):
+          # Not show in first 1 km to allow for driving out of garage. This event shows after 5 minutes
+          self.events.add(EventName.noGps)
       if not self.sm.all_alive(self.camera_packets):
         self.events.add(EventName.cameraMalfunction)
       if self.sm['modelV2'].frameDropPerc > 30:
@@ -643,12 +645,11 @@ class Controls:
         self.CI.CS.altitude = self.sm['gpsLocationExternal'].altitude
       if self.sm.updated['lateralPlan'] and len(self.sm['lateralPlan'].curvatures) > 0:
         k_mean = mean(self.sm['lateralPlan'].curvatures)
-        if abs(k_mean) > abs(self.k_mean):
-          self.k_mean = k_mean
+        if abs(k_mean) > abs(self.k_mean.x):
+          self.k_mean.x = k_mean
         else:
-          alpha = 0.0005
-          self.k_mean = alpha * k_mean + (1.0 - alpha) * self.k_mean
-        self.CI.CC.params.future_curvature = self.k_mean
+          self.k_mean.update(k_mean)
+        self.CI.CC.params.future_curvature = self.k_mean.x
       
       self.CI.CS.speed_limit_active = (self.sm['longitudinalPlan'].speedLimitControlState == log.LongitudinalPlan.SpeedLimitControlState.active)
       if self.CI.CS.speed_limit_active:
@@ -688,16 +689,9 @@ class Controls:
 
       if CS.vEgo * CV.MS_TO_KPH > apply_limit_speed:
       #  self.events.add(EventName.slowingDownSpeedSound)
-
-        if not self.slowing_down_alert and not self.slowing_down:
+        if not self.slowing_down:
           self.slowing_down_sound_alert = True
           self.slowing_down = True
-
-        self.slowing_down_alert = True
-
-      else:
-        self.slowing_down_alert = False
-
     else:
       self.reset()
       self.v_cruise_kph_limit = self.v_cruise_kph
@@ -766,7 +760,7 @@ class Controls:
     if self.active:
       self.current_alert_types.append(ET.WARNING)
       
-    self.lat_active = self.active or ((self.CI.CS.lkaEnabled and self.CI.CS.cruiseMain and self.CI.MADS_enabled) and self.sm['liveCalibration'].calStatus == Calibration.CALIBRATED)
+    self.lat_active = self.CI.CS.lkaEnabled and (self.active or ((self.CI.CS.cruiseMain and self.MADS_enabled) and self.sm['liveCalibration'].calStatus == Calibration.CALIBRATED))
 
     # Check if openpilot is engaged
     self.enabled = self.active or self.state == State.preEnabled
@@ -813,7 +807,7 @@ class Controls:
       # accel PID loop
       pid_accel_limits = self.CI.get_pid_accel_limits(self.CP, CS.vEgo, self.v_cruise_kph * CV.KPH_TO_MS, self.CI)
       t_since_plan = (self.sm.frame - self.sm.rcv_frame['longitudinalPlan']) * DT_CTRL
-      actuators.accel = self.LoC.update(self.active, CS, self.CP, long_plan, pid_accel_limits, t_since_plan, MADS_lead_braking_enabled=self.CI.CS.MADS_lead_braking_enabled)
+      actuators.accel = self.LoC.update(self.active, CS, self.CP, long_plan, pid_accel_limits, t_since_plan, MADS_lead_braking_enabled=self.MADS_lead_braking_enabled)
       
       # compute pitch-compensated accel
       if self.sm.updated['liveParameters']:
@@ -829,7 +823,8 @@ class Controls:
                                                                              t_since_plan)
       actuators.steer, actuators.steeringAngleDeg, lac_log = self.LaC.update(self.lat_active, 
                                                                              CS, self.CP, self.VM, params, 
-                                                                             desired_curvature, desired_curvature_rate, self.sm['liveLocationKalman'])
+                                                                             desired_curvature, desired_curvature_rate, self.sm['liveLocationKalman'],
+                                                                             mean_curvature=self.k_mean.x)
     else:
       lac_log = log.ControlsState.LateralDebugState.new_message()
       if self.sm.rcv_frame['testJoystick'] > 0 and self.active:
@@ -862,8 +857,8 @@ class Controls:
         left_deviation = actuators.steer > 0 and lat_plan.dPathPoints[0] < -0.1
         right_deviation = actuators.steer < 0 and lat_plan.dPathPoints[0] > 0.1
 
-        #if left_deviation or right_deviation and CS.lkMode:
-        #  self.events.add(EventName.steerSaturated)
+        if left_deviation or right_deviation and CS.lkaEnabled:
+          self.events.add(EventName.steerSaturated)
 
     # Ensure no NaNs/Infs
     for p in ACTUATOR_FIELDS:
@@ -977,7 +972,7 @@ class Controls:
     controlsState.enabled = self.enabled
     controlsState.active = self.active
     controlsState.latActive = self.lat_active
-    controlsState.madsEnabled = self.CI.MADS_enabled and not self.active and self.CI.CS.cruiseMain
+    controlsState.madsEnabled = self.MADS_enabled and not self.active and self.CI.CS.cruiseMain
     controlsState.curvature = curvature
     controlsState.state = self.state
     controlsState.engageable = not self.events.any(ET.NO_ENTRY)
@@ -998,10 +993,11 @@ class Controls:
     controlsState.distractionTimer = int(self.distraction_timer)
     
     controlsState.applyGas = int(self.CI.CC.apply_gas)
-    controlsState.applyBrakeOut = int(self.CI.CC.apply_brake_out)
-    controlsState.applyBrakeIn = int(self.CI.CC.apply_brake_in)
+    controlsState.applyBrakeOut = int(-self.CI.CC.apply_brake_out)
+    controlsState.applyBrakeIn = int(-self.CI.CC.apply_brake_in)
     controlsState.applySteer = int(self.CI.CC.apply_steer)
     controlsState.brakesAllowed = bool(self.CI.CC.brakes_allowed)
+    controlsState.gasBrakeThresholdAccel = float(self.CI.CC.threshold_accel)
     
     controlsState.distanceTraveledSession = float(self.distance_traveled)
     controlsState.distanceTraveledTotal = float(self.distance_traveled_total)
