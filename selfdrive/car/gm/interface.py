@@ -6,7 +6,7 @@ from panda import Panda
 from common.conversions import Conversions as CV
 from selfdrive.car import STD_CARGO_KG, create_button_event, scale_tire_stiffness, is_ecu_disconnected, get_safety_config
 from selfdrive.car.gm.radar_interface import RADAR_HEADER_MSG
-from selfdrive.car.gm.values import CAR, Ecu, ECU_FINGERPRINT, AccState, FINGERPRINTS, CruiseButtons, \
+from selfdrive.car.gm.values import CAR, Ecu, ECU_FINGERPRINT, FINGERPRINTS, CruiseButtons, \
                                     CarControllerParams, EV_CAR, CAMERA_ACC_CAR, CanBus, GMFlags, CC_ONLY_CAR
 from selfdrive.car.interfaces import CarInterfaceBase, TorqueFromLateralAccelCallbackType, FRICTION_THRESHOLD
 from selfdrive.controls.lib.drive_helpers import get_friction
@@ -124,9 +124,7 @@ class CarInterface(CarInterfaceBase):
       # Tuning
       ret.longitudinalTuning.kpV = [2.0]
       ret.longitudinalTuning.kiV = [0.36]
-      if ret.enableGasInterceptor:
-        # Need to set ASCM long limits when using pedal interceptor, instead of camera ACC long limits
-        ret.safetyConfigs[0].safetyParam |= Panda.FLAG_GM_HW_ASCM_LONG
+      ret.safetyConfigs[0].safetyParam |= Panda.FLAG_GM_HW_CAM_LONG
       ret.naviCluster = 0 #현기차용, carstate.py에 False 값을 주기 위한 것뿐임
     # These cars have been put into dashcam only due to both a lack of users and test coverage.
     # These cars likely still work fine. Once a user confirms each car works and a test route is
@@ -146,7 +144,7 @@ class CarInterface(CarInterfaceBase):
     ret.radarTimeStep = 0.0667  # GM radar runs at 15Hz instead of standard 20Hz
 
 
-    if candidate in (CAR.VOLT, CAR.VOLT_CC, CAR.VOLT2018):
+    if candidate == CAR.VOLT2018:
       ret.lateralTuning.init('torque')
       ret.minEnableSpeed = -1 * CV.MPH_TO_MS
       ret.mass = 1607. + STD_CARGO_KG
@@ -164,28 +162,20 @@ class CarInterface(CarInterfaceBase):
       ret.longitudinalTuning.kiV = [0.36]
 
     if ret.enableGasInterceptor:
-      ret.networkLocation = NetworkLocation.fwdCamera
-      ret.safetyConfigs[0].safetyParam |= Panda.FLAG_GM_HW_CAM
-      ret.safetyConfigs[0].safetyParam |= Panda.FLAG_GM_HW_CAM_LONG
+      ret.flags |= GMFlags.PEDAL_LONG.value
       ret.minEnableSpeed = -1
       ret.pcmCruise = False
       ret.openpilotLongitudinalControl = True
+      # Note: Low speed, stop and go not tested. Should be fairly smooth on highway
+      ret.longitudinalTuning.kpV = [0.35, 0.5]
+      ret.longitudinalTuning.kiBP = [0., 35.0]
+      ret.longitudinalTuning.kiV = [0.1, 0.1]
+      ret.longitudinalTuning.kf = 0.15
+      ret.stoppingDecelRate = 0.8  # reach stopping target smoothly, brake_travel/s while trying to stop
+      ret.vEgoStopping = 0.5  # Speed at which the car goes into stopping state, when car starts requesting stopping accel
+      ret.vEgoStarting = 0.5  # Speed at which the car goes into starting state, when car starts requesting starting accel,
+      # vEgoStarting needs to be > or == vEgoStopping to avoid state transition oscillation
       ret.stoppingControl = True
-      ret.autoResumeSng = True
-
-      if candidate in CC_ONLY_CAR:
-        ret.flags |= GMFlags.PEDAL_LONG.value
-        # Note: Low speed, stop and go not tested. Should be fairly smooth on highway
-        ret.longitudinalTuning.kpBP = [5., 35.]
-        ret.longitudinalTuning.kpV = [0.35, 0.5]
-        ret.longitudinalTuning.kiBP = [0., 35.0]
-        ret.longitudinalTuning.kiV = [0.1, 0.1]
-        ret.longitudinalTuning.kf = 0.15
-        ret.stoppingDecelRate = 0.8
-      else:  # Pedal used for SNG, ACC for longitudinal control otherwise
-        ret.startingState = True
-        ret.vEgoStopping = 0.25
-        ret.vEgoStarting = 0.25
 
     elif candidate in CC_ONLY_CAR:
       ret.flags |= GMFlags.CC_LONG.value
@@ -220,27 +210,16 @@ class CarInterface(CarInterfaceBase):
   def _update(self, c):
     ret = self.CS.update(self.cp, self.cp_cam, self.cp_loopback, self.cp_chassis)
 
-    cruiseEnabled = self.CS.pcm_acc_status != AccState.OFF
-    ret.cruiseState.enabled = cruiseEnabled
-
     ret.engineRpm = self.CS.engineRPM
-
-    if self.CS.cruise_buttons != self.CS.prev_cruise_buttons and self.CS.prev_cruise_buttons != CruiseButtons.INIT:
-      buttonEvents = [create_button_event(self.CS.cruise_buttons, self.CS.prev_cruise_buttons, BUTTONS_DICT, CruiseButtons.UNPRESS)]
-      # Handle ACCButtons changing buttons mid-press
-      if self.CS.cruise_buttons != CruiseButtons.UNPRESS and self.CS.prev_cruise_buttons != CruiseButtons.UNPRESS:
-        buttonEvents.append(create_button_event(CruiseButtons.UNPRESS, self.CS.prev_cruise_buttons, BUTTONS_DICT, CruiseButtons.UNPRESS))
-
-      ret.buttonEvents = buttonEvents
-
-
-    if cruiseEnabled and self.CS.lka_button and self.CS.lka_button != self.CS.prev_lka_button:
-      self.CS.lkasEnabled = not self.CS.lkasEnabled
+    # Don't add event if transitioning from INIT, unless it's to an actual button
+    if self.CS.cruise_buttons != CruiseButtons.UNPRESS or self.CS.prev_cruise_buttons != CruiseButtons.INIT:
+      ret.buttonEvents = [create_button_event(self.CS.cruise_buttons, self.CS.prev_cruise_buttons, BUTTONS_DICT,
+                                              unpressed=CruiseButtons.UNPRESS)]
 
     # The ECM allows enabling on falling edge of set, but only rising edge of resume
     events = self.create_common_events(ret, extra_gears=[GearShifter.sport, GearShifter.low,
                                                          GearShifter.eco, GearShifter.manumatic],
-                                       pcm_enable=self.CP.pcmCruise, enable_buttons=(ButtonType.decelCruise, ButtonType.accelCruise,))
+                                       pcm_enable=self.CP.pcmCruise, enable_buttons=(ButtonType.decelCruise, ButtonType.accelCruise))
     if not self.CP.pcmCruise:
       if any(b.type == ButtonType.accelCruise and b.pressed for b in ret.buttonEvents):
         events.add(EventName.buttonEnable)
@@ -251,17 +230,16 @@ class CarInterface(CarInterfaceBase):
     if below_min_enable_speed and not (ret.standstill and ret.brake >= 20 and
                                        self.CP.networkLocation == NetworkLocation.fwdCamera):
       events.add(EventName.belowEngageSpeed)
-    if ret.cruiseState.standstill and not self.CP.autoResumeSng:
+    if ret.cruiseState.standstill:
       events.add(EventName.resumeRequired)
     if 0.05 < ret.vEgo < self.CP.minSteerSpeed:
-      if not ret.standstill and self.CS.out.gearShifter in ['drive','low'] and self.CS.lkasEnabled:
-        events.add(EventName.belowSteerSpeed)
+      events.add(EventName.belowSteerSpeed)
 
     if (self.CP.flags & GMFlags.CC_LONG.value) and ret.vEgo < self.CP.minEnableSpeed:
       events.add(EventName.speedTooLow)
-
-    if (self.CP.flags & GMFlags.PEDAL_LONG.value) and self.CP.transmissionType == TransmissionType.direct and not self.CS.single_pedal_mode:
-      events.add(EventName.pedalInterceptorNoBrake)
+    # 페달롱컨차(BOLT)를 위한 코드이므로 주석처리
+    #if (self.CP.flags & GMFlags.PEDAL_LONG.value) and self.CP.transmissionType == TransmissionType.direct and not self.CS.single_pedal_mode:
+    #  events.add(EventName.pedalInterceptorNoBrake)
 
     ret.events = events.to_msg()
 

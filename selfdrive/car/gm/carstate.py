@@ -28,9 +28,7 @@ class CarState(CarStateBase):
     self.pt_lka_steering_cmd_counter = 0
     self.cam_lka_steering_cmd_counter = 0
 
-    self.prev_lka_button = 0
-    self.lka_button = 0
-    self.lkasEnabled = True
+
     # brakeLights
     self.regenPaddlePressed = False
     self.cruiseMain = False
@@ -68,9 +66,6 @@ class CarState(CarStateBase):
     if self.CP.networkLocation == NetworkLocation.fwdCamera:
       self.pt_lka_steering_cmd_counter = pt_cp.vl["ASCMLKASteeringCmd"]["RollingCounter"]
       self.cam_lka_steering_cmd_counter = cam_cp.vl["ASCMLKASteeringCmd"]["RollingCounter"]
-
-    self.prev_lka_button = self.lka_button
-    self.lka_button = pt_cp.vl["ASCMSteeringButton"]["LKAButton"]
 
     cluSpeed = pt_cp.vl["ECMVehicleSpeed"]["VehicleSpeed"]
     ret.vEgoCluster = cluSpeed * CV.MPH_TO_MS
@@ -262,7 +257,6 @@ class CarState(CarStateBase):
       ("ParkBrake", "VehicleIgnitionAlt"),
       ("CruiseMainOn", "ECMEngineStatus"),
       ("BrakePressed", "ECMEngineStatus"),
-      ("LKAButton", "ASCMSteeringButton"),
       ("DistanceButton", "ASCMSteeringButton"),
       ("RollingCounter", "ASCMLKASteeringCmd"),
       ("VehicleSpeed", "ECMVehicleSpeed"),
