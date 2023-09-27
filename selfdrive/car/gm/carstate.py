@@ -28,6 +28,8 @@ class CarState(CarStateBase):
     self.pt_lka_steering_cmd_counter = 0
     self.cam_lka_steering_cmd_counter = 0
 
+    self.cruise_buttons = 0
+    self.prev_cruise_buttons = 0
 
     # brakeLights
     self.regenPaddlePressed = False
