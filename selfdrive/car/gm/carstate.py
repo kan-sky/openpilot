@@ -53,6 +53,7 @@ class CarState(CarStateBase):
     self.distance_button_pressed = pt_cp.vl["ASCMSteeringButton"]["DistanceButton"] != 0
     self.prev_cruise_buttons = self.cruise_buttons
     self.cruise_buttons = pt_cp.vl["ASCMSteeringButton"]["ACCButtons"]
+    ret.cruiseButtons = self.cruise_buttons
     self.buttons_counter = pt_cp.vl["ASCMSteeringButton"]["RollingCounter"]
     self.pscm_status = copy.copy(pt_cp.vl["PSCMStatus"])
     moving_forward = pt_cp.vl["EBCMWheelSpdRear"]["MovingForward"] != 0
