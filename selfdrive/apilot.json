@@ -95,14 +95,14 @@
     {
       "group": "조향튜닝",
       "name": "SteerActuatorDelay",
-      "title": "SteerActuatorDelay(50)",
+      "title": "SteerActuatorDelay(47)",
       "descr": "값이크면 조향을 좀더 미리함(일반,10msec)",
       "egroup": "LAT",
-      "etitle": "SteerActuatorDelay(50)",
+      "etitle": "SteerActuatorDelay(47)",
       "edescr": "",
       "min": 1,
       "max": 100,
-      "default": 50,
+      "default": 47,
       "unit": 1
     },
     {
@@ -986,7 +986,7 @@
       "edescr": "LaneLine controller delay compensation",
       "min": 0,
       "max": 50,
-      "default": 13,
+      "default": 5,
       "unit": 1
     },
     {

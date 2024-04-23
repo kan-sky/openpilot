@@ -145,7 +145,7 @@ def get_default_params():
     ("UseLaneLineSpeedApply", "0"),    
     ("AdjustLaneOffset", "0"),    
     ("AdjustCurveOffset", "0"),    
-    ("AdjustLaneTime", "13"),    
+    ("AdjustLaneTime", "5"),    
     ("PathOffset", "0"),  
     ("MaxAngleFrames", "89"),       
     ("LateralTorqueCustom", "0"),       
@@ -155,7 +155,7 @@ def get_default_params():
     ("CustomSteerDeltaUp", "0"),       
     ("CustomSteerDeltaDown", "0"),       
     ("SpeedFromPCM", "2"),       
-    ("SteerActuatorDelay", "50"),       
+    ("SteerActuatorDelay", "45"),       
     ("CruiseOnDist", "0"),
     ("MSLCEnabled", "0"),
     ("NoLogging", "0"),
@@ -164,6 +164,8 @@ def get_default_params():
     ("MTSCAggressiveness", "100"),
     ("MTSCCurvatureCheck", "1"),
     ("MTSCEnabled", "0"),
+    ("NNFF", "0"),
+    ("UseLateralJerk", "0"),
   ]
   return default_params
 

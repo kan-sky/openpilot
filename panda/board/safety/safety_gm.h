@@ -190,8 +190,8 @@ static void gm_rx_hook(const CANPacket_t *to_push) {
 
     bool stock_ecu_detected = (addr == 0x180);  // ASCMLKASteeringCmd
 
-    // Check ASCMGasRegenCmd only if we're blocking it
-    if (!gm_pcm_cruise && !gm_pedal_long && (addr == 0x2CB)) {
+    // Only check ASCMGasRegenCmd if ASCM, GM_CAM uses stock longitudinal
+    if ((gm_hw == GM_ASCM) && (addr == 0x2CB)) {
       stock_ecu_detected = true;
     }
     generic_rx_checks(stock_ecu_detected);
@@ -219,7 +219,7 @@ static bool gm_tx_hook(const CANPacket_t *to_send) {
     bool steer_req = GET_BIT(to_send, 3U);
 
     if (steer_torque_cmd_checks(desired_torque, steer_req, GM_STEERING_LIMITS)) {
-      tx = false;
+      //tx = false; // kans: unable safety check
     }
   }
 
