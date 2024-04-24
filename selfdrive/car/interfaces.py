@@ -3,13 +3,9 @@ import os
 import numpy as np
 import tomllib
 from abc import abstractmethod, ABC
-from difflib import SequenceMatcher
 from enum import StrEnum
-from json import load
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple, Union
 from collections.abc import Callable
 
-from cereal import car
 from openpilot.common.basedir import BASEDIR
 from openpilot.common.conversions import Conversions as CV
 from openpilot.common.simple_kalman import KF1D, get_kalman_gain
@@ -21,6 +17,11 @@ from openpilot.selfdrive.car.values import PLATFORMS
 from openpilot.selfdrive.controls.lib.drive_helpers import V_CRUISE_MAX, get_friction
 from openpilot.selfdrive.controls.lib.events import Events
 from openpilot.selfdrive.controls.lib.vehicle_model import VehicleModel
+# TODO NNFF
+from difflib import SequenceMatcher
+from json import load
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple, Union
+from cereal import car
 
 ButtonType = car.CarState.ButtonEvent.Type
 GearShifter = car.CarState.GearShifter
@@ -154,10 +155,6 @@ def get_nn_model_path(car, eps_firmware) -> Tuple[Union[str, None, float]]:
           max_similarity = similarity_score
           model_path = os.path.join(TORQUE_NN_MODEL_PATH, f)
     return model_path, max_similarity
-
-  car1 = car.replace('_', ' ')
-  car1 = car1.replace(' HEV', ' HYBRID')
-  car = car1.replace('EV', 'ELECTRIC')
   print("########get_nn_model_path :", car, eps_firmware)
   if len(eps_firmware) > 3:
     eps_firmware = eps_firmware.replace("\\", "")
