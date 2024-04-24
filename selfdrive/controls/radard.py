@@ -106,10 +106,11 @@ class Track:
     #  self.aLeadTau = aLeadTauInit
     #else:
     #  self.aLeadTau = min(self.aLeadTau * 0.9, aLeadTau_apply)
+    aLeadTauValue = aLeadTauPos if self.aLeadK >= 0 else aLeadTauNeg
     if abs(self.aLeadK) < aLeadTauThreshold:
-      self.aLeadTau = aLeadTauPos if self.aLeadK >= 0 else aLeadTauNeg
+      self.aLeadTau = aLeadTauValue
     else:
-      self.aLeadTau *= 0.9
+      self.aLeadTau = min(self.aLeadTau * 0.9, aLeadTauValue)
 
     self.cnt += 1
 
@@ -322,7 +323,7 @@ def get_lead_side(v_ego, tracks, md, lane_width, model_v_ego):
 
   leadLeft = min((lead for dRel, lead in leads_left.items() if lead['dRel'] > 5.0), key=lambda x: x['dRel'], default=leadLeft)
   leadRight = min((lead for dRel, lead in leads_right.items() if lead['dRel'] > 5.0), key=lambda x: x['dRel'], default=leadRight)
-  leadCenter = min((lead for dRel, lead in leads_center.items() if lead['vLead'] > 0.5 and lead['radar']), key=lambda x: x['dRel'], default=leadCenter)
+  leadCenter = min((lead for dRel, lead in leads_center.items() if lead['vLead'] > 10 / 3.6 and lead['radar']), key=lambda x: x['dRel'], default=leadCenter)
 
   #filtered_leads_left = {dRel: lead for dRel, lead in leads_left.items() if lead['dRel'] > 5.0}
   #if filtered_leads_left:
@@ -437,10 +438,11 @@ class VisionTrack:
     self.aLeadK = float(self.kf.x[LEAD_KALMAN_ACCEL][0])
 
     # Learn if constant acceleration
+    aLeadTauValue = self.aLeadTauPos if self.aLead >= 0 else self.aLeadTauNeg
     if abs(self.aLead) < self.aLeadTauThreshold:
-      self.aLeadTau = self.aLeadTauPos if self.aLeadK >= 0 else self.aLeadTauNeg
+      self.aLeadTau = aLeadTauValue
     else:
-      self.aLeadTau = min(self.aLeadTau * 0.9, _LEAD_ACCEL_TAU)
+      self.aLeadTau = min(self.aLeadTau * 0.9, aLeadTauValue)
 
 class RadarD:
   def __init__(self, radar_ts: float, delay: int = 0):
@@ -546,7 +548,7 @@ class RadarD:
         self.radar_state.leadOne = self.get_lead(self.tracks_empty, 0, leads_v3[0], model_v_ego, low_speed_override=False)
         self.radar_state.leadTwo = self.get_lead(self.tracks_empty, 1, leads_v3[1], model_v_ego, low_speed_override=False)
       elif self.mixRadarInfo in [4]: ## additional radar detector
-        self.radar_state.leadOne = self.get_lead(self.tracks_empty, 0, leads_v3[0], model_v_ego, low_speed_override=False)
+        self.radar_state.leadOne = self.get_lead(self.tracks, 0, leads_v3[0], model_v_ego, low_speed_override=False)
         self.radar_state.leadTwo = leadCenter
       else: ## comma stock.
         self.radar_state.leadOne = self.get_lead(self.tracks, 0, leads_v3[0], model_v_ego, low_speed_override=False)
