@@ -169,7 +169,9 @@ class CarInterface(CarInterfaceBase):
     if candidate in (CAR.CHEVROLET_VOLT, CAR.CHEVROLET_VOLT_CC):
       ret.minEnableSpeed = -1
       ret.tireStiffnessFactor = 0.469  # Stock Michelin Energy Saver A/S, LiveParameters
+      ret.centerToFront = ret.wheelbase * 0.45  # Volt Gen 1, TODO corner weigh
 
+      ret.steerActuatorDelay = 0.18 if useEVTables else 0.2
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
 
       ret.longitudinalTuning.kpBP = [0.]

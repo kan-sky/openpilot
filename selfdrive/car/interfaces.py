@@ -345,7 +345,7 @@ class CarInterfaceBase(ABC):
     return ret
 
   @staticmethod
-  def configure_torque_tune(candidate, tune, steering_angle_deadzone_deg=0.0, use_steering_angle=True):
+  def configure_torque_tune(candidate, tune, steering_angle_deadzone_deg=0.2, use_steering_angle=True):
     params = get_torque_params(candidate)
 
     tune.init('torque')
@@ -442,6 +442,8 @@ class CarInterfaceBase(ABC):
       if b.type == ButtonType.cancel:
         events.add(EventName.buttonCancel)
         print("$$$$$$$$$$$$$$ EventName.buttonCancel")
+      if b.type == ButtonType.gapAdjustCruise:
+        distance_button_pressed = True
 
     # Handle permanent and temporary steering faults
     # tw: steer warning
@@ -458,7 +460,7 @@ class CarInterfaceBase(ABC):
 
         # 핸들손올림이나 일시 스티어오류가 0.5초이상일때 경고하며, 운전자 개입은 안하는 것으로 한다.
         if self.steering_unpressed > int(0.5/DT_CTRL) and self.steer_warning > int(0.5/DT_CTRL):
-          events.add(EventName.steerTempUnavailable)
+          pass # events.add(EventName.steerTempUnavailable)
         else:
           events.add(EventName.steerTempUnavailableSilent)
 
