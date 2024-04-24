@@ -1,11 +1,23 @@
 [
   {
+    "filename": "ALeadTau",
+    "content": "90"
+  },
+  {
+    "filename": "ALeadTauStart",
+    "content": "40"
+  },
+  {
     "filename": "AdjustCurveOffset",
-    "content": "4"
+    "content": "3"
   },
   {
     "filename": "AdjustLaneOffset",
-    "content": "4"
+    "content": "3"
+  },
+  {
+     "filename": "AdjustLaneTime",
+     "content": "10"
   },
   {
     "filename": "AlwaysOnLateralEnabled",
@@ -20,24 +32,32 @@
     "content": "0"
   },
   {
+    "filename": "AutoCurveSpeedAggressiveness",
+    "content": "110"
+  },
+  {
     "filename": "AutoCurveSpeedFactor",
-    "content": "95"
+    "content": "100"
   },
   {
     "filename": "AutoCurveSpeedLowerLimit",
-    "content": "30"
+    "content": "45"
+  },
+  {
+    "filename": "AutoLaneChangeSpeed",
+    "content": "20"
   },
   {
     "filename": "AutoNaviSpeedBumpSpeed",
-    "content": "30"
+    "content": "25"
   },
   {
     "filename": "AutoNaviSpeedBumpTime",
-    "content": "2"
+    "content": "1"
   },
   {
     "filename": "AutoNaviSpeedCtrl",
-    "content": "2"
+    "content": "1"
   },
   {
     "filename": "AutoNaviSpeedCtrlEnd",
@@ -45,7 +65,7 @@
   },
   {
     "filename": "AutoNaviSpeedDecelRate",
-    "content": "80"
+    "content": "100"
   },
   {
     "filename": "AutoNaviSpeedSafetyFactor",
@@ -69,7 +89,7 @@
   },
   {
     "filename": "AutoTurnControlSpeedLaneChange",
-    "content": "60"
+    "content": "54"
   },
   {
     "filename": "AutoTurnControlSpeedTurn",
@@ -97,7 +117,7 @@
   },
   {
     "filename": "CruiseMaxVals1",
-    "content": "190"
+    "content": "180"
   },
   {
     "filename": "CruiseMaxVals2",
@@ -129,11 +149,23 @@
   },
   {
     "filename": "CruiseSpeedMin",
-    "content": "10"
+    "content": "0"
   },
   {
     "filename": "CruiseSpeedUnit",
     "content": "5"
+  },
+  {
+    "filename": "CustomSteerDeltaDown",
+    "content": "7"
+  },
+  {
+    "filename": "CustomSteerDeltaUp",
+    "content": "4"
+  },
+  {
+    "filename": "CustomSteerMax",
+    "content": "300"
   },
   {
     "filename": "DisengageOnAccelerator",
@@ -160,10 +192,6 @@
     "content": "0"
   },
   {
-    "filename": "GasRegenCmd",
-    "content": "0"
-  },
-  {
     "filename": "IsMetric",
     "content": "1"
   },
@@ -173,7 +201,7 @@
   },
   {
     "filename": "LateralTorqueAccelFactor",
-    "content": "2100"
+    "content": "2000"
   },
   {
     "filename": "LateralTorqueCustom",
@@ -181,7 +209,7 @@
   },
   {
     "filename": "LateralTorqueFriction",
-    "content": "40"
+    "content": "100"
   },
   {
     "filename": "LockDoors",
@@ -197,15 +225,15 @@
   },
   {
     "filename": "LongitudinalTuningKf",
-    "content": "100"
+    "content": "101"
   },
   {
     "filename": "LongitudinalTuningKiV",
-    "content": "0"
+    "content": "320"
   },
   {
     "filename": "LongitudinalTuningKpV",
-    "content": "107"
+    "content": "120"
   },
   {
     "filename": "MapboxStyle",
@@ -213,6 +241,10 @@
   },
   {
     "filename": "MaxAngleFrames",
+    "content": "0"
+  },
+  {
+    "filename": "MixRadarInfo",
     "content": "0"
   },
   {
@@ -234,6 +266,10 @@
   {
     "filename": "MySafeModeFactor",
     "content": "80"
+  },
+  {
+    "filename": "NNFF",
+    "content": "1"
   },
   {
     "filename": "OpenpilotEnabledToggle",
@@ -373,7 +409,7 @@
   },
   {
     "filename": "StartAccelApply",
-    "content": "100"
+    "content": "90"
   },
   {
     "filename": "StartRecord",
@@ -381,11 +417,11 @@
   },
   {
     "filename": "SteerActuatorDelay",
-    "content": "38"
+    "content": "47"
   },
   {
     "filename": "SteerRatio",
-    "content": "150"
+    "content": "142"
   },
   {
     "filename": "StopAccelApply",
@@ -420,6 +456,14 @@
     "content": "90"
   },
   {
+    "filename": "TFollowLeadCarAccel",
+    "content": "4"
+  },
+  {
+    "filename": "TFollowLeadCarSpeed",
+    "content": "15"
+  },
+  {
     "filename": "TFollowSpeedAdd",
     "content": "0"
   },
@@ -434,5 +478,13 @@
   {
     "filename": "UseLaneLineSpeed",
     "content": "1"
+  },
+  {
+    "filename": "UseLaneLineSpeedApply",
+    "content": "1"
+  },
+  {
+    "filename": "UseLateralJerk",
+    "content": "0"
   }
 ]
