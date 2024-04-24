@@ -233,6 +233,14 @@ DevicePanel::DevicePanel(SettingsWindow *parent) : ListWidget(parent) {
   addItem(new LabelControl(tr("Dongle ID"), getDongleId().value_or(tr("N/A"))));
   addItem(new LabelControl(tr("Serial"), params.get("HardwareSerial").c_str()));
 
+  auto PowerOffBtn = new ButtonControl(tr("Powwer Off"), tr("SHUTDOWN"), "");
+  connect(PowerOffBtn, &ButtonControl::clicked, [&]() {
+    if (ConfirmationDialog::confirm(tr("Are you sure you want to power off?"), tr("Shutdown"), this)) {
+      params.putBool("DoShutdown", true);
+    }
+  });
+  addItem(PowerOffBtn);
+
   // offroad-only buttons
 
   auto dcamBtn = new ButtonControl(tr("Driver Camera"), tr("PREVIEW"),
@@ -282,7 +290,7 @@ DevicePanel::DevicePanel(SettingsWindow *parent) : ListWidget(parent) {
 
   QObject::connect(uiState(), &UIState::offroadTransition, [=](bool offroad) {
     for (auto btn : findChildren<ButtonControl *>()) {
-      btn->setEnabled(offroad);
+      btn->setEnabled(true);
     }
   });
 
