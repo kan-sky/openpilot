@@ -1749,6 +1749,37 @@ void DrawApilot::drawPathEnd(const UIState* s, int x, int y, int path_x, int pat
             py[3] = py[2];
             NVGcolor color2 = COLOR_BLACK_ALPHA(20);
             ui_draw_line2(s, px, py, 4, &color2, nullptr, 3.0f, isRadarDetected() ? rcolor : COLOR_BLUE);
+
+            auto lead_radar = sm["radarState"].getRadarState().getLeadOne();
+            float h = path_width * 0.8 / 2.;
+            float ax[4], ay[4], vx[4], vy[4];
+            vx[0] = px[0];
+            vx[1] = vx[0] + 20;
+            vx[2] = vx[1];
+            vx[3] = vx[0];
+            vy[0] = py[0] - h;
+            vy[1] = vy[0];
+            float v = lead_radar.getVRel() / 5.0 * h;
+            if (v < -h) v = -h;
+            if (v > h) v = h;
+            vy[2] = vy[1] - v;
+            vy[3] = vy[2];
+            NVGcolor vcolor = isLeadSCC() ? COLOR_RED : COLOR_ORANGE;
+            ui_draw_line2(s, vx, vy, 4, &vcolor, nullptr, 0.0f);
+
+            ax[0] = px[1];
+            ax[1] = px[1] - 20;
+            ax[2] = ax[1];
+            ax[3] = ax[0];
+            ay[0] = py[0] - h;
+            ay[1] = ay[0];
+            float a = lead_radar.getALeadK() / 2.0 * h;
+            if (a < -h) a = -h;
+            if (a > h) a = h;
+            ay[2] = ay[1]  - a;
+            ay[3] = ay[2];
+            NVGcolor acolor = isLeadSCC() ? COLOR_RED : COLOR_ORANGE;
+            ui_draw_line2(s, ax, ay, 4, &acolor, nullptr, 0.0f);
         }
     }
 }
