@@ -1,4 +1,5 @@
 ﻿#include "selfdrive/ui/paint.h"
+
 #include <cassert>
 #include <cmath>
 
@@ -678,11 +679,15 @@ void DrawPlot::makePlotData(const UIState* s, float& data1, float& data2, char *
         sprintf(str, "5.Detected radar(G:aLeadK, Y:vLeadK)");
         break;
     case 6:
-        data1 = a_ego;  //노
+        data1 = accel_out; // 노
         data2 = lead_radar.getALeadK(); // 녹
-        sprintf(str, "6.Detected radar(G:aLeadK, Y:a_ego)");
+        sprintf(str, "6.Detected radar(G:aLeadK, Y:accel)");
         break;
     case 7:
+        data1 = lead_radar.getALeadTau();//  //노
+        data2 = lead_radar.getALeadK(); // 녹
+        sprintf(str, "7.Detected radar(G:aLeadK, Y:aLeadTau)");
+        break;
         data1 = lead_radar.getVLeadK();
         data2 = lead_radar.getVLead(); // getDRel();
         sprintf(str, "7.Detected radar(G:vLead, Y:vLeadK)");
