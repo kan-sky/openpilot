@@ -177,7 +177,8 @@ static void gm_rx_hook(const CANPacket_t *to_push) {
     }
 
     if (addr == 0xBD) {
-      regen_braking = (GET_BYTE(to_push, 0) >> 4) != 0U;
+      //regen_braking = (GET_BYTE(to_push, 0) >> 4) != 0U;
+      brake_pressed = (GET_BYTE(to_push, 0) >> 4) != 0U;
     }
 
     // Pedal Interceptor
