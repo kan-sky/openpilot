@@ -277,6 +277,7 @@ class LongitudinalMpc:
     self.vFilter = StreamingMovingAverage(10)
     self.t_follow_prev = self.get_T_FOLLOW()
     self.stop_distance = STOP_DISTANCE
+    self.trafficStopDistanceAdjust = 0.
     self.fakeCruiseDistance = 0.0
     self.comfort_brake = COMFORT_BRAKE
     self.xState = XState.cruise
@@ -625,6 +626,7 @@ class LongitudinalMpc:
       self.tFollowGap4 = float(Params().get_int("TFollowGap4")) / 100.
     elif self.lo_timer == 120:
       self.stop_distance = float(Params().get_int("StopDistanceCarrot")) / 100.
+      self.trafficStopDistanceAdjust = float(Params().get_int("TrafficStopDistanceAdjust")) / 100.	  
 
   def update_stop_dist(self, stop_x):
     stop_x = self.xStopFilter.process(stop_x, median = True)

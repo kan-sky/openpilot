@@ -570,7 +570,8 @@ def get_all_toggle_values():
     "MTSCEnabled",
     "PreferredSchedule",
     "NNFF",
-    "NNFFLite"
+    "NNFFLite",
+    "TrafficStopDistanceAdjust"
   ]
 
   toggle_values = {}

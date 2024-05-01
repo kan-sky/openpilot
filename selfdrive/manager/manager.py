@@ -166,6 +166,7 @@ def get_default_params():
     ("MTSCEnabled", "0"),
     ("NNFF", "0"),
     ("NNFFLite", "0"),
+    ("TrafficStopDistanceAdjust", "150"),
   ]
   return default_params
 

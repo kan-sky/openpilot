@@ -666,6 +666,7 @@ CarrotPanel::CarrotPanel(QWidget* parent) : QWidget(parent) {
     speedToggles->addItem(new CValueControl("MTSCEnabled", "MTSC Enabled", "Map: Slow down for curves detected by downloaded maps.", "../assets/offroad/icon_road.png", 0, 1, 1));
     speedToggles->addItem(new CValueControl("MTSCCurvatureCheck", "MTSC CurvatureCheck", "Map: Trigger MTSC when the model detectes a curve in the road", "../assets/offroad/icon_road.png", 0, 1, 1));
     speedToggles->addItem(new CValueControl("MTSCAggressiveness", "MTSC MTSCAggressiveness", "Map: MTSC turn speed aggressiveness, Higher value is more faster", "../assets/offroad/icon_road.png", 1, 200, 5));
+    speedToggles->addItem(new CValueControl("TrafficStopDistanceAdjust", "TrafficStop Adjust(200cm)", "높을수록 신호정지선 가까이에 섭니다.", "../assets/offroad/icon_road.png", -1000, 1000, 10));
 
     toggles_layout->addWidget(cruiseToggles);
     toggles_layout->addWidget(latLongToggles);
