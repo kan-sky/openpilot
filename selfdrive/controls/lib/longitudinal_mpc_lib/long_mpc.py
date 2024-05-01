@@ -258,7 +258,7 @@ def gen_long_ocp():
 
 class LongitudinalMpc:
   def __init__(self, mode='acc'):
-    self.trafficStopDistanceAdjust = 1.5
+    self.trafficStopDistanceAdjust = 1.5 # 높을수록 신호정지선 가까이에 섭니다.
     self.aChangeCost = 200
     self.aChangeCostStart = 40
     self.tFollowSpeedAdd = 0.0
