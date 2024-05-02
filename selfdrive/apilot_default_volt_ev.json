@@ -1,19 +1,23 @@
 [
   {
-    "filename": "ALeadTau",
-    "content": "90"
+    "filename": "ALeadTauNeg",
+    "content": "60"
   },
   {
-    "filename": "ALeadTauStart",
-    "content": "40"
+    "filename": "ALeadTauPos",
+    "content": "120"
+  },
+  {
+    "filename": "ALeadTauThreshold",
+    "content": "50"
   },
   {
     "filename": "AdjustCurveOffset",
-    "content": "3"
+    "content": "4"
   },
   {
     "filename": "AdjustLaneOffset",
-    "content": "3"
+    "content": "0"
   },
   {
      "filename": "AdjustLaneTime",
@@ -37,7 +41,7 @@
   },
   {
     "filename": "AutoCurveSpeedFactor",
-    "content": "100"
+    "content": "110"
   },
   {
     "filename": "AutoCurveSpeedLowerLimit",
@@ -61,7 +65,7 @@
   },
   {
     "filename": "AutoNaviSpeedCtrlEnd",
-    "content": "12"
+    "content": "10"
   },
   {
     "filename": "AutoNaviSpeedDecelRate",
@@ -89,7 +93,7 @@
   },
   {
     "filename": "AutoTurnControlSpeedLaneChange",
-    "content": "54"
+    "content": "50"
   },
   {
     "filename": "AutoTurnControlSpeedTurn",
@@ -201,7 +205,7 @@
   },
   {
     "filename": "LateralTorqueAccelFactor",
-    "content": "2000"
+    "content": "2100"
   },
   {
     "filename": "LateralTorqueCustom",
@@ -229,7 +233,7 @@
   },
   {
     "filename": "LongitudinalTuningKiV",
-    "content": "320"
+    "content": "350"
   },
   {
     "filename": "LongitudinalTuningKpV",
@@ -272,12 +276,20 @@
     "content": "1"
   },
   {
+    "filename": "NNFFLite",
+    "content": "0"
+  },
+  {
+    "filename": "NNFFModelName",
+    "content": "CHEVROLET_VOLT"
+  },
+  {
     "filename": "OpenpilotEnabledToggle",
     "content": "1"
   },
   {
     "filename": "PathOffset",
-    "content": "-3"
+    "content": "-4"
   },
   {
     "filename": "RecordFront",
@@ -417,11 +429,11 @@
   },
   {
     "filename": "SteerActuatorDelay",
-    "content": "47"
+    "content": "40"
   },
   {
     "filename": "SteerRatio",
-    "content": "142"
+    "content": "148"
   },
   {
     "filename": "StopAccelApply",
@@ -461,7 +473,7 @@
   },
   {
     "filename": "TFollowLeadCarSpeed",
-    "content": "15"
+    "content": "12"
   },
   {
     "filename": "TFollowSpeedAdd",
@@ -482,9 +494,5 @@
   {
     "filename": "UseLaneLineSpeedApply",
     "content": "1"
-  },
-  {
-    "filename": "UseLateralJerk",
-    "content": "0"
   }
 ]
