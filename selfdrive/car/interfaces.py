@@ -3,9 +3,13 @@ import os
 import numpy as np
 import tomllib
 from abc import abstractmethod, ABC
+from difflib import SequenceMatcher
 from enum import StrEnum
+from json import load
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple, Union
 from collections.abc import Callable
 
+from cereal import car
 from openpilot.common.basedir import BASEDIR
 from openpilot.common.conversions import Conversions as CV
 from openpilot.common.simple_kalman import KF1D, get_kalman_gain
@@ -17,11 +21,6 @@ from openpilot.selfdrive.car.values import PLATFORMS
 from openpilot.selfdrive.controls.lib.drive_helpers import V_CRUISE_MAX, get_friction
 from openpilot.selfdrive.controls.lib.events import Events
 from openpilot.selfdrive.controls.lib.vehicle_model import VehicleModel
-# TODO NNFF
-from difflib import SequenceMatcher
-from json import load
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple, Union
-from cereal import car
 
 ButtonType = car.CarState.ButtonEvent.Type
 GearShifter = car.CarState.GearShifter
