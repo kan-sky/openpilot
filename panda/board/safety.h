@@ -294,7 +294,7 @@ void generic_rx_checks(bool stock_ecu_detected) {
 
   // exit controls on rising edge of regen paddle
   if (regen_braking && (!regen_braking_prev || vehicle_moving)) {
-    controls_allowed = false;
+    //controls_allowed = false;
   }
   regen_braking_prev = regen_braking;
 
