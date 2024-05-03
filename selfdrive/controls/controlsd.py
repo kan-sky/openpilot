@@ -235,10 +235,10 @@ class Controls:
       self.events.add(EventName.resumeBlocked)
 
     # Disable on rising edge of accelerator or brake. Also disable on brake when speed > 0
-    if (CS.gasPressed and not self.CS_prev.gasPressed and self.disengage_on_accelerator) or \
-      (CS.brakePressed and (not self.CS_prev.brakePressed or not CS.standstill)) or \
-      (CS.regenBraking and (not self.CS_prev.regenBraking or not CS.standstill)):
-      self.events.add(EventName.pedalPressed)
+    #if (CS.gasPressed and not self.CS_prev.gasPressed and self.disengage_on_accelerator) or \
+    #  (CS.brakePressed and (not self.CS_prev.brakePressed or not CS.standstill)) or \
+    #  (CS.regenBraking and (not self.CS_prev.regenBraking or not CS.standstill)):
+    #  self.events.add(EventName.pedalPressed)
 
     if CS.brakePressed and CS.standstill:
       self.events.add(EventName.preEnableStandstill)
@@ -419,7 +419,7 @@ class Controls:
 
     if not REPLAY:
       # Check for mismatch between openpilot and car's PCM
-      cruise_mismatch = CS.cruiseState.enabled and (not self.enabled or not self.CP.pcmCruise)
+      cruise_mismatch = CS.cruiseState.enabled and (not self.enabled) # or not self.CP.pcmCruise)
       self.cruise_mismatch_counter = self.cruise_mismatch_counter + 1 if cruise_mismatch else 0
       if self.cruise_mismatch_counter > int(6. / DT_CTRL):
         self.events.add(EventName.cruiseMismatch)
@@ -428,8 +428,8 @@ class Controls:
     stock_long_is_braking = self.enabled and not self.CP.openpilotLongitudinalControl and CS.aEgo < -1.25
     model_fcw = self.sm['modelV2'].meta.hardBrakePredicted and not CS.brakePressed and not stock_long_is_braking
     planner_fcw = self.sm['longitudinalPlan'].fcw and self.enabled
-    if planner_fcw or model_fcw:
-      self.events.add(EventName.fcw)
+    #if planner_fcw or model_fcw:
+    #  self.events.add(EventName.fcw)
 
     for m in messaging.drain_sock(self.log_sock, wait_for_one=False):
       try:

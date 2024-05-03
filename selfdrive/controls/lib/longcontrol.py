@@ -12,7 +12,7 @@ LongCtrlState = car.CarControl.Actuators.LongControlState
 def long_control_state_trans(CP, active, long_control_state, v_ego, v_target,
                              v_target_1sec, brake_pressed, cruise_standstill, a_target_now):
   # Ignore cruise standstill if car has a gas interceptor
-  cruise_standstill = cruise_standstill and not CP.enableGasInterceptor
+  #cruise_standstill = cruise_standstill and not CP.enableGasInterceptor
   accelerating = v_target_1sec > (v_target + 0.01)
   planned_stop = (v_target < CP.vEgoStopping and ## apilot: 내리막, 신호정지시 질질 가는 현상... v_target으로 보면.. 급정지, v_ego를 보면 질질감..
   #planned_stop = (v_ego < CP.vEgoStopping and ## apilot: 내리막, 신호정지시 질질 가는 현상... v_target으로 보면.. 급정지, v_ego를 보면 질질감..
@@ -40,7 +40,7 @@ def long_control_state_trans(CP, active, long_control_state, v_ego, v_target,
           long_control_state = LongCtrlState.stopping
 
     elif long_control_state == LongCtrlState.stopping:
-      if starting_condition and CP.startingState:
+      if starting_condition and CP.startingState and v_ego < 0.01:
         long_control_state = LongCtrlState.starting
       elif starting_condition:
         long_control_state = LongCtrlState.pid
