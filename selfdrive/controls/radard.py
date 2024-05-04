@@ -104,7 +104,6 @@ class Track:
     self.jerk = self.jerk * alpha + (self.aLeadK - self.aLeadK_prev) / self.radar_ts * (1.0 - alpha)
 
     aLeadTauValue = aLeadTauPos if self.aLeadK >= aLeadTauThreshold else aLeadTauNeg
-    self.jerk = 0
 
     if abs(self.aLeadK) < aLeadTauThreshold and self.jerk > -0.1:
       self.aLeadTau = aLeadTauValue
