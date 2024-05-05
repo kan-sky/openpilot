@@ -1,5 +1,5 @@
 const SteeringLimits GM_STEERING_LIMITS = {
-  .max_steer = 300,
+  .max_steer = 320,
   .max_rate_up = 10,
   .max_rate_down = 15,
   .driver_torque_allowance = 65,
@@ -190,8 +190,8 @@ static void gm_rx_hook(const CANPacket_t *to_push) {
 
     bool stock_ecu_detected = (addr == 0x180);  // ASCMLKASteeringCmd
 
-    // Only check ASCMGasRegenCmd if ASCM, GM_CAM uses stock longitudinal
-    if ((gm_hw == GM_ASCM) && (addr == 0x2CB)) {
+    // Check ASCMGasRegenCmd only if we're blocking it
+    if (!gm_pcm_cruise && !gm_pedal_long && (addr == 0x2CB)) {
       stock_ecu_detected = true;
     }
     generic_rx_checks(stock_ecu_detected);
