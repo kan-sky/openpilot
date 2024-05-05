@@ -568,9 +568,9 @@ def get_all_toggle_values():
     "MTSCAggressiveness",
     "MTSCCurvatureCheck",
     "MTSCEnabled",
-    "NNFF",
     "PreferredSchedule",
-    "UseLateralJerk"
+    "NNFF",
+    "NNFFLite"
   ]
 
   toggle_values = {}
