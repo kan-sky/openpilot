@@ -1456,6 +1456,19 @@
       "max": 120,
       "default": 105,
       "unit": 1
+    },
+    {
+      "group": "감속제어",
+      "name": "TrafficStopDistanceAdjust",
+      "title": "신호정지 위치조정(200cm)",
+      "descr": "높을수록 신호정지선 가까이에 섭니다.",
+      "egroup": "SPEED",
+      "etitle": "TrafficStopDistance(200cm)",
+      "edescr": "+Value : forward",
+      "min": -1000,
+      "max": 1000,
+      "default": 150,
+      "unit": 10
     }
   ]
 }

@@ -3,9 +3,13 @@ import os
 import numpy as np
 import tomllib
 from abc import abstractmethod, ABC
+from difflib import SequenceMatcher
 from enum import StrEnum
+from json import load
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple, Union
 from collections.abc import Callable
 
+from cereal import car
 from openpilot.common.basedir import BASEDIR
 from openpilot.common.conversions import Conversions as CV
 from openpilot.common.simple_kalman import KF1D, get_kalman_gain
@@ -17,13 +21,7 @@ from openpilot.selfdrive.car.values import PLATFORMS
 from openpilot.selfdrive.controls.lib.drive_helpers import V_CRUISE_MAX, get_friction
 from openpilot.selfdrive.controls.lib.events import Events
 from openpilot.selfdrive.controls.lib.vehicle_model import VehicleModel
-# TODO NNFF
-from difflib import SequenceMatcher
-from json import load
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple, Union
-from cereal import car
 
-params_memory = Params("/dev/shm/params")
 ButtonType = car.CarState.ButtonEvent.Type
 GearShifter = car.CarState.GearShifter
 EventName = car.CarEvent.EventName
@@ -175,6 +173,7 @@ def get_nn_model_path(car, eps_firmware) -> Tuple[Union[str, None, float]]:
   return model_path, max_similarity
 
 def get_nn_model(car, eps_firmware) -> Tuple[Union[FluxModel, None, float]]:
+  print("###########get_nn_model", car)
   model, similarity_score = get_nn_model_path(car, eps_firmware)
   if model is not None:
     model = FluxModel(model)
@@ -207,12 +206,30 @@ class CarInterfaceBase(ABC):
 
     dbc_name = "" if self.cp is None else self.cp.dbc_name
     self.CC: CarControllerBase = CarController(dbc_name, CP, self.VM)
+    self.params = Params()
+    lateral_tune = True
+    print("$$$$$$$$$$$ NNFF")
+    nnff_supported = self.initialize_lat_torque_nn(CP.carFingerprint, eps_firmware)
+    print("$$$$$$$$$$$ nnff_supported = ", nnff_supported)
+    use_comma_nnff = self.check_comma_nn_ff_support(CP.carFingerprint)
+    print("$$$$$$$$$$$ use_comma_nnff = ", use_comma_nnff)
+    self.use_nnff = not use_comma_nnff and nnff_supported and lateral_tune and self.params.get_bool("NNFF")
+    print("$$$$$$$$$$$ use_nnff = ", self.use_nnff)
+    self.use_nnff_lite = not use_comma_nnff and not nnff_supported and lateral_tune and self.params.get_bool("NNFFLite")
+    print("$$$$$$$$$$$ use_nnff_lite = ", self.use_nnff_lite)
 
-    params = Params()
-    self.has_lateral_torque_nn = self.initialize_lat_torque_nn(CP.carFingerprint, eps_firmware) and params.get_bool("NNFF")
-    self.use_lateral_jerk = params.get_bool("UseLateralJerk")
   def get_ff_nn(self, x):
     return self.lat_torque_nn_model.evaluate(x)
+
+  def check_comma_nn_ff_support(self, car):
+    try:
+      with open("../car/torque_data/neural_ff_weights.json", "r") as file:
+        data = json.load(file)
+      return car in data
+
+    except FileNotFoundError:
+      print("Failed to open neural_ff_weights file.")
+      return False
 
   def initialize_lat_torque_nn(self, car, eps_firmware):
     self.lat_torque_nn_model, _ = get_nn_model(car, eps_firmware)
@@ -247,16 +264,13 @@ class CarInterfaceBase(ABC):
     ret.flags |= int(platform.config.flags)
 
     ret = cls._get_params(ret, candidate, fingerprint, car_fw, experimental_long, docs)
-
-    # Enable torque controller for all cars that do not use angle based steering
-    if ret.steerControlType != car.CarParams.SteerControlType.angle and Params().get_bool("NNFF"):
+    params = Params()
+    if ret.steerControlType != car.CarParams.SteerControlType.angle and params.get_bool("NNFF"):
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
       eps_firmware = str(next((fw.fwVersion for fw in car_fw if fw.ecu == "eps"), ""))
       model, similarity_score = get_nn_model_path(candidate, eps_firmware)
       if model is not None:
-        params_memory.put_bool("NNFFModelFuzzyMatch", similarity_score < 0.99)
-        params_memory.put("NNFFModelName", candidate)
-        print("######### NNFF loaded")
+        params.put("NNFFModelName", candidate)
 
     # Vehicle mass is published curb weight plus assumed payload such as a human driver; notCars have no assumed payload
     if not ret.notCar:
@@ -504,7 +518,7 @@ class CarStateBase(ABC):
     R = 0.3
     A = [[1.0, DT_CTRL], [0.0, 1.0]]
     C = [[1.0, 0.0]]
-    x0 = [[0.0], [0.0]]
+    x0=[[0.0], [0.0]]
     K = get_kalman_gain(DT_CTRL, np.array(A), np.array(C), np.array(Q), R)
     self.v_ego_kf = KF1D(x0=x0, A=A, C=C[0], K=K)
     self.v_ego_clu_kf = KF1D(x0=x0, A=A, C=C[0], K=K)

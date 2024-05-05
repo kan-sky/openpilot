@@ -353,7 +353,7 @@ std::unordered_map<std::string, uint32_t> keys = {
     {"MTSCCurvatureCheck", PERSISTENT},
     {"MTSCEnabled", PERSISTENT},
     {"NNFF", PERSISTENT},
-    {"NNFFModelFuzzyMatch", PERSISTENT},
+    {"NNFFLite", PERSISTENT},
     {"NNFFModelName", PERSISTENT},
     {"OSMDownloadLocations", PERSISTENT},
     {"OSMDownloadProgress", CLEAR_ON_MANAGER_START},
@@ -361,7 +361,7 @@ std::unordered_map<std::string, uint32_t> keys = {
     {"RoadName", PERSISTENT},
     {"RoadNameUI", PERSISTENT},
     {"SchedulePending", PERSISTENT},
-    {"UseLateralJerk", PERSISTENT},
+    {"TrafficStopDistanceAdjust", PERSISTENT},
 };
 
 } // namespace

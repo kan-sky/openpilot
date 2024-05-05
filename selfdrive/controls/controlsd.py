@@ -169,7 +169,6 @@ class Controls:
     self.personality = self.read_personality_param()
     self.v_cruise_helper = VCruiseHelper(self.CP)
     self.recalibrating_seen = False
-    self.nn_alert_shown = False
     self.rx_checks_invalid_count = 0
 
     self.can_log_mono_time = 0
@@ -229,11 +228,6 @@ class Controls:
     # no more events while in dashcam mode
     if self.CP.passive:
       return
-
-    # show alert to indicate whether NNFF is loaded
-    if not self.nn_alert_shown and self.sm.frame % 550 == 0 and self.CP.lateralTuning.which() == 'torque' and self.CI.has_lateral_torque_nn:
-      self.nn_alert_shown = True
-      self.events.add(EventName.torqueNNLoad)
 
     # Block resume if cruise never previously enabled
     resume_pressed = any(be.type in (ButtonType.accelCruise, ButtonType.resumeCruise) for be in CS.buttonEvents)
@@ -451,7 +445,7 @@ class Controls:
     # TODO: fix simulator
     if not SIMULATION or REPLAY:
       # Not show in first 1 km to allow for driving out of garage. This event shows after 5 minutes
-      if not self.sm['liveLocationKalman'].gpsOK and self.sm['liveLocationKalman'].inputsOK and (self.distance_traveled > 1000):
+      if not self.sm['liveLocationKalman'].gpsOK and self.sm['liveLocationKalman'].inputsOK and (self.distance_traveled > 1500):
         self.events.add(EventName.noGps)
       if self.sm['liveLocationKalman'].gpsOK or self.v_cruise_helper.xPosValidCount > 0:
         self.distance_traveled = 0
@@ -460,6 +454,10 @@ class Controls:
       if self.sm['modelV2'].frameDropPerc > 20:
         self.events.add(EventName.modeldLagging)
 
+    if self.sm.frame == 900 and self.CP.lateralTuning.which() == 'torque' and self.CI.use_nnff:
+      self.events.add(EventName.torqueNNLoad)
+      print("NNFF display....")
+      
   def data_sample(self):
     """Receive data from sockets and update carState"""
 
