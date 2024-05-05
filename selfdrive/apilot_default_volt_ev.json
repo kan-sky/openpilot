@@ -5,7 +5,7 @@
   },
   {
     "filename": "ALeadTauPos",
-    "content": "100"
+    "content": "90"
   },
   {
     "filename": "ALeadTauThreshold",
@@ -13,7 +13,7 @@
   },
   {
     "filename": "AdjustCurveOffset",
-    "content": "3"
+    "content": "4"
   },
   {
     "filename": "AdjustLaneOffset",
@@ -53,11 +53,11 @@
   },
   {
     "filename": "AutoNaviSpeedBumpSpeed",
-    "content": "25"
+    "content": "30"
   },
   {
     "filename": "AutoNaviSpeedBumpTime",
-    "content": "1"
+    "content": "2"
   },
   {
     "filename": "AutoNaviSpeedCtrl",
@@ -229,15 +229,15 @@
   },
   {
     "filename": "LongitudinalTuningKf",
-    "content": "101"
+    "content": "100"
   },
   {
     "filename": "LongitudinalTuningKiV",
-    "content": "320"
+    "content": "340"
   },
   {
     "filename": "LongitudinalTuningKpV",
-    "content": "120"
+    "content": "115"
   },
   {
     "filename": "MapboxStyle",
@@ -429,11 +429,11 @@
   },
   {
     "filename": "SteerActuatorDelay",
-    "content": "47"
+    "content": "28"
   },
   {
     "filename": "SteerRatio",
-    "content": "148"
+    "content": "150"
   },
   {
     "filename": "StopAccelApply",
@@ -469,11 +469,11 @@
   },
   {
     "filename": "TFollowLeadCarAccel",
-    "content": "4"
+    "content": "5"
   },
   {
     "filename": "TFollowLeadCarSpeed",
-    "content": "12"
+    "content": "10"
   },
   {
     "filename": "TFollowSpeedAdd",
