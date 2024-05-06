@@ -138,7 +138,7 @@ class CarState(CarStateBase):
       cruiseGap = cp_cruise.vl["SCC11"]["TauGapSet"]
       if cruiseGap != self.pcmCruiseGap:
         self.pcmCruiseGap = cruiseGap
-        Params().put_int_nonblocking("LongitudinalPersonality", min(2, max(self.pcmCruiseGap - 1, 0)))
+        Params().put_int_nonblocking("LongitudinalPersonality", min(3, max(self.pcmCruiseGap - 1, 0)))
 
     # TODO: Find brake pressure
     ret.brake = 0
@@ -305,6 +305,12 @@ class CarState(CarStateBase):
     gear = cp.vl[self.gear_msg_canfd]["GEAR"]
     ret.gearShifter = self.parse_gear_shifter(self.shifter_values.get(gear))
 
+    tpms_unit = cp.vl["TPMS"]["UNIT"] * 0.725 if int(cp.vl["TPMS"]["UNIT"]) > 0 else 1.
+    ret.tpms.fl = tpms_unit * cp.vl["TPMS"]["PRESSURE_FL"]
+    ret.tpms.fr = tpms_unit * cp.vl["TPMS"]["PRESSURE_FR"]
+    ret.tpms.rl = tpms_unit * cp.vl["TPMS"]["PRESSURE_RL"]
+    ret.tpms.rr = tpms_unit * cp.vl["TPMS"]["PRESSURE_RR"]
+
     # TODO: figure out positions
     ret.wheelSpeeds = self.get_wheel_speeds(
       cp.vl["WHEEL_SPEEDS"]["WHEEL_SPEED_1"],
@@ -352,6 +358,7 @@ class CarState(CarStateBase):
     # PFEIFER - AOL {{
     ret.cruiseState.available = self.main_enabled
     # }} PFEIFER - AOL
+    cp_cruise_info = cp_cam if self.CP.flags & HyundaiFlags.CANFD_CAMERA_SCC or self.CP.extFlags & HyundaiExtFlags.SCC_BUS2.value else cp
     if self.CP.openpilotLongitudinalControl:
       # These are not used for engage/disengage since openpilot keeps track of state using the buttons
       ret.cruiseState.enabled = cp.vl["TCS"]["ACC_REQ"] == 1
@@ -359,7 +366,7 @@ class CarState(CarStateBase):
       #if ret.cruiseState.available:
       #  print("cruiseState.available = {},{}".format(ret.cruiseState.available, ret.cruiseState.enabled))
     else:
-      cp_cruise_info = cp_cam if self.CP.flags & HyundaiFlags.CANFD_CAMERA_SCC or self.CP.extFlags & HyundaiExtFlags.SCC_BUS2.value else cp
+      #cp_cruise_info = cp_cam if self.CP.flags & HyundaiFlags.CANFD_CAMERA_SCC or self.CP.extFlags & HyundaiExtFlags.SCC_BUS2.value else cp
       ret.cruiseState.enabled = cp_cruise_info.vl["SCC_CONTROL"]["ACCMode"] in (1, 2)
       if cp_cruise_info.vl["SCC_CONTROL"]["MainMode_ACC"] == 1: # carrot
         ret.cruiseState.available = self.main_enabled = True
@@ -370,6 +377,8 @@ class CarState(CarStateBase):
     if self.CP.extFlags & HyundaiExtFlags.SCC_BUS2.value:
       self.cruise_info = copy.copy(cp_cam.vl["SCC_CONTROL"])
       self.lfa_info = copy.copy(cp_cam.vl["LFA"])
+
+    ret.brakeHoldActive = cp.vl["ESP_STATUS"]["AUTO_HOLD"] == 1 and cp_cruise_info.vl["SCC_CONTROL"]["ACCMode"] not in (1, 2)
     # Manual Speed Limit Assist is a feature that replaces non-adaptive cruise control on EV CAN FD platforms.
     # It limits the vehicle speed, overridable by pressing the accelerator past a certain point.
     # The car will brake, but does not respect positive acceleration commands in this mode
@@ -557,8 +566,11 @@ class CarState(CarStateBase):
       ("WHEEL_SPEEDS", 100),
       ("STEERING_SENSORS", 100),
       ("MDPS", 100),
+      #("BRAKE", 100),
+      ("ESP_STATUS", 100),
       ("TCS", 50),
       ("CRUISE_BUTTONS_ALT", 50),
+      ("TPMS", 5),
       ("BLINKERS", 4),
       ("DOORS_SEATBELTS", 4),
     ]
