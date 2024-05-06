@@ -699,6 +699,8 @@ class Controls:
       actuators.accel, actuators.jerk = self.LoC.update(CC.longActive, CS, long_plan, pid_accel_limits, t_since_plan, CC)
       #self.debugText2 = 'Accel=[{:1.2f}]: {:1.2f},{:1.2f}'.format(actuators.accel, pid_accel_limits[0], pid_accel_limits[1])
       #print(self.debugText2)
+      if len(long_plan.speeds):
+        actuators.speed = long_plan.speeds[-1]
 
       # Steering PID loop and lateral MPC
       self.desired_curvature, self.desired_curvature_rate = get_lag_adjusted_curvature(self.CP, CS.vEgo,
@@ -814,7 +816,7 @@ class Controls:
     #hudControl.rightLaneVisible = True
     #hudControl.leftLaneVisible = True
 
-    hudControl.cruiseGap = int(self.sm['longitudinalPlan'].cruiseGap) #CS.cruiseGap
+    hudControl.cruiseGap = clip(int(self.sm['longitudinalPlan'].cruiseGap), 1, 3) #CS.cruiseGap
     hudControl.objDist = int(self.cruise_helper.dRel)
     hudControl.objRelSpd = self.cruise_helper.vRel
 
