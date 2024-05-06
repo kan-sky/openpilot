@@ -186,7 +186,7 @@ static int gm_tx_hook(CANPacket_t *to_send) {
     desired_torque = to_signed(desired_torque, 11);
 
     if (steer_torque_cmd_checks(desired_torque, -1, GM_STEERING_LIMITS)) {
-      tx = 0;
+      //tx = 0;
     }
   }
 

@@ -115,9 +115,7 @@ class RoadLimitSpeedServer:
         struct.pack('256s', 'wlan0'.encode('utf-8'))
       )[20:24]
 
-      broadcast_address = socket.inet_ntoa(ip)
-      s.close()
-      return broadcast_address
+      return socket.inet_ntoa(ip)
     except:
       return None
 
@@ -174,7 +172,7 @@ class RoadLimitSpeedServer:
       if ret:
         data, self.remote_addr = sock.recvfrom(2048)
         json_obj = json.loads(data.decode())
-        print(json_obj)
+        #print(json_obj)
 
         if 'cmd' in json_obj:
           try:
@@ -375,6 +373,10 @@ def main():
         except:
           value_int = -100
 
+        xCmd = server.get_apilot_val("apilot_cmd")
+        xArg = server.get_apilot_val("apilot_arg")
+        xIndex = value_int
+
         now = sec_since_boot()
         if ret:
           prev_recvTime = now
@@ -443,6 +445,7 @@ def main():
           pass
         elif atype == 'apilotman':
           server.active_apilot = 1
+          xIndex = value_int
         else:
           print("unknown{}={}".format(atype, value))
         #dat.roadLimitSpeed.xRoadName = apilot_val['opkrroadname']['value']
@@ -462,7 +465,7 @@ def main():
           if xSpdDist < 0:
             xSpdLimit = -1
 
-        if xTurnInfo >= 0:
+        if True: #xTurnInfo >= 0:
           xDistToTurn -= delta_dist
           if xDistToTurn < 0:
             xTurnInfo = -1
@@ -494,8 +497,8 @@ def main():
           sdiDebugText += "B-{}/{}/{} ".format(nSdiBlockType, int(nSdiBlockDist), nSdiBlockSpeed)
         if nTBTTurnType >= 0:
           sdiDebugText += "T-{}/{} ".format(nTBTTurnType, int(nTBTDist))
-        if ret:
-          print(sdiDebugText)
+        #if ret:
+        #  print(sdiDebugText)
 
         if nTBTTurnType in [12, 16]:
           xTurnInfo = 1  # turn left
@@ -505,9 +508,11 @@ def main():
           xTurnInfo = 3  # slight left
         elif nTBTTurnType in [6, 43, 73, 74, 101, 104, 111, 114, 123, 124, 117]: # right lanechange
           xTurnInfo = 4  # slight right
+        elif nTBTTurnType in [14, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142]:
+          xTurnInfo = 5 # speed down
         elif nTBTTurnType >= 0:
           xTurnInfo = -1
-        if nTBTDist > 0:
+        if nTBTDist > 0 and xTurnInfo >= 0:
           xDistToTurn = nTBTDist
         sdi_valid = True if nRoadLimitSpeed >= 0 or nTBTTurnType > 0 or nSdiType >= 0 else False
         if nRoadLimitSpeed > 0:
@@ -586,6 +591,10 @@ def main():
         if xRoadLimitSpeed > 0:
           dat.roadLimitSpeed.roadLimitSpeed = int(xRoadLimitSpeed)
         dat.roadLimitSpeed.xRoadName = xRoadName + sdiDebugText
+
+        dat.roadLimitSpeed.xCmd = "" if xCmd is None else xCmd
+        dat.roadLimitSpeed.xArg = "" if xArg is None else xArg
+        dat.roadLimitSpeed.xIndex = xIndex
 
         roadLimitSpeed.send(dat.to_bytes())
         if now - send_time > 1.0:

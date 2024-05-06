@@ -3,6 +3,7 @@ from cereal import car
 
 from common.conversions import Conversions as CV
 from common.numpy_fast import mean
+from openpilot.common.params import Params #kans
 from opendbc.can.can_define import CANDefine
 from opendbc.can.parser import CANParser
 from selfdrive.car.interfaces import CarStateBase
@@ -13,6 +14,7 @@ TransmissionType = car.CarParams.TransmissionType
 NetworkLocation = car.CarParams.NetworkLocation
 GearShifter = car.CarState.GearShifter
 STANDSTILL_THRESHOLD = 10 * 0.0311 * CV.KPH_TO_MS
+LongCtrlState = car.CarControl.Actuators.LongControlState # kans
 
 
 class CarState(CarStateBase):
@@ -27,6 +29,17 @@ class CarState(CarStateBase):
     self.loopback_lka_steering_cmd_ts_nanos = 0
     self.pt_lka_steering_cmd_counter = 0
     self.cam_lka_steering_cmd_counter = 0
+    self.is_metric = False
+
+    # GAP_DIST
+    self.prev_distance_button = False
+    self.distance_button_pressed = False
+
+    # kans: steer이벤트(일시불가) 줄이기 위해
+    self.belowSteerSpeed_shown = False
+    self.disable_belowSteerSpeed = False
+    self.resumeRequired_shown = False
+    self.disable_resumeRequired = False
 
     self.cruise_buttons = 0
     self.prev_cruise_buttons = 0
@@ -58,7 +71,7 @@ class CarState(CarStateBase):
     self.pscm_status = copy.copy(pt_cp.vl["PSCMStatus"])
     moving_forward = pt_cp.vl["EBCMWheelSpdRear"]["MovingForward"] != 0
     self.moving_backward = (pt_cp.vl["EBCMWheelSpdRear"]["MovingBackward"] != 0) and not moving_forward
-
+    # GAP_DIST
     if self.cruise_buttons in [CruiseButtons.UNPRESS, CruiseButtons.INIT] and self.distance_button_pressed:
       self.cruise_buttons = CruiseButtons.GAP_DIST
 
@@ -70,25 +83,14 @@ class CarState(CarStateBase):
       self.pt_lka_steering_cmd_counter = pt_cp.vl["ASCMLKASteeringCmd"]["RollingCounter"]
       self.cam_lka_steering_cmd_counter = cam_cp.vl["ASCMLKASteeringCmd"]["RollingCounter"]
 
-    cluSpeed = pt_cp.vl["ECMVehicleSpeed"]["VehicleSpeed"]
-    ret.vEgoCluster = cluSpeed * CV.MPH_TO_MS
-
     ret.wheelSpeeds = self.get_wheel_speeds(
       pt_cp.vl["EBCMWheelSpdFront"]["FLWheelSpd"],
       pt_cp.vl["EBCMWheelSpdFront"]["FRWheelSpd"],
       pt_cp.vl["EBCMWheelSpdRear"]["RLWheelSpd"],
       pt_cp.vl["EBCMWheelSpdRear"]["RRWheelSpd"],
     )
-    if self.use_cluster_speed:
-      ret.vEgoRaw = cluSpeed * CV.MPH_TO_MS
-      ret.vEgo, ret.aEgo = self.update_clu_speed_kf(ret.vEgoRaw)
-
-    else:
-      ret.vEgoRaw = mean([ret.wheelSpeeds.fl, ret.wheelSpeeds.fr, ret.wheelSpeeds.rl, ret.wheelSpeeds.rr]) * (105./100.)
-      ret.vEgo, ret.aEgo = self.update_speed_kf(ret.vEgoRaw)
-
-    ret.vCluRatio = (ret.vEgoCluster / ret.vEgo) if (ret.vEgo > 3. and ret.vEgoCluster > 3.) else 1.0
-
+    ret.vEgoRaw = mean([ret.wheelSpeeds.fl, ret.wheelSpeeds.fr, ret.wheelSpeeds.rl, ret.wheelSpeeds.rr]) * (105./100.)
+    ret.vEgo, ret.aEgo = self.update_speed_kf(ret.vEgoRaw)
     ret.standstill = ret.wheelSpeeds.rl <= STANDSTILL_THRESHOLD and ret.wheelSpeeds.rr <= STANDSTILL_THRESHOLD
 
     if pt_cp.vl["ECMPRDNL2"]["ManualMode"] == 1:
@@ -150,7 +152,7 @@ class CarState(CarStateBase):
     ret.espDisabled = pt_cp.vl["ESPStatus"]["TractionControlOn"] != 1
     accFaulted = (pt_cp.vl["AcceleratorPedal2"]["CruiseState"] == AccState.FAULTED or
                       pt_cp.vl["EBCMFrictionBrakeStatus"]["FrictionBrakeUnavailable"] == 1)
-
+    startingState = LongCtrlState.starting
     self.accFaultedCount = self.accFaultedCount + 1 if accFaulted else 0
     ret.accFaulted = True if self.accFaultedCount > 50 else False
     if self.CP.carFingerprint in CC_ONLY_CAR:
@@ -163,7 +165,8 @@ class CarState(CarStateBase):
 
     ret.cruiseState.enabled = pt_cp.vl["AcceleratorPedal2"]["CruiseState"] != AccState.OFF
     ret.cruiseState.standstill = pt_cp.vl["AcceleratorPedal2"]["CruiseState"] == AccState.STANDSTILL
-    ret.cruiseState.standstill = False
+    if startingState:
+      ret.cruiseState.standstill = False
     self.cruiseMain = ret.cruiseState.available
     ret.cruiseMain = self.cruiseMain
 
@@ -174,16 +177,22 @@ class CarState(CarStateBase):
       if self.CP.pcmCruise:
         ret.cruiseState.nonAdaptive = cam_cp.vl["ASCMActiveCruiseControlStatus"]["ACCCruiseState"] not in (2, 3)
 
+    # kans: use cluster speed & vCluRatio(longitudialPlanner)
+    self.is_metric = Params().get_bool("IsMetric")
+    speed_conv = CV.KPH_TO_MS * 1.609344 if self.is_metric else CV.MPH_TO_MS
+    cluSpeed = pt_cp.vl["ECMVehicleSpeed"]["VehicleSpeed"]
+    ret.vEgoCluster = cluSpeed * speed_conv
+    vEgoClu, aEgoClu = self.update_clu_speed_kf(ret.vEgoCluster)
+    ret.vCluRatio = (ret.vEgo / vEgoClu) if (vEgoClu > 3. and ret.vEgo > 3.) else 1.0
+
     # TODO: APILOT
     #Engine Rpm
     self.engineRPM = pt_cp.vl["ECMEngineStatus"]["EngineRPM"]
-    #ret.accFaulted = False # 벌트는 accFault를 체크하지 않는 걸로...
 
     # brakeLight
     ret.brakeLights = chassis_cp.vl["EBCMFrictionBrakeStatus"]["FrictionBrakePressure"] != 0 or ret.brakePressed
 
     ret.cruiseGap = 1
-    #ret.tpms = 벌트에 해당되는 tpms 캔 주소를 찾아야 됨
 
     self.totalDistance += ret.vEgo * DT_CTRL
     ret.totalDistance = self.totalDistance

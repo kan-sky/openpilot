@@ -142,12 +142,6 @@ class CarController:
           interceptor_gas_cmd = self.params.SNG_INTERCEPTOR_GAS
           self.apply_brake = 0
 
-        if actuators.longControlState in [LongCtrlState.starting]:
-          if (self.frame - self.last_button_frame) * DT_CTRL > 0.04:
-            self.last_button_frame = self.frame
-            can_sends.append(gmcan.create_buttons(self.packer_pt, CanBus.POWERTRAIN, CS.buttons_counter, CruiseButtons.RES_ACCEL))
-            print("Btns={}".format(CS.cruise_buttons))
-
         idx = (self.frame // 4) % 4
 
         at_full_stop = CC.longActive and CS.out.standstill

@@ -211,15 +211,20 @@ class CarInterface(CarInterfaceBase):
     ret = self.CS.update(self.cp, self.cp_cam, self.cp_loopback, self.cp_chassis)
 
     ret.engineRpm = self.CS.engineRPM
+    buttonEvents = [] # kans
     # Don't add event if transitioning from INIT, unless it's to an actual button
     if self.CS.cruise_buttons != CruiseButtons.UNPRESS or self.CS.prev_cruise_buttons != CruiseButtons.INIT:
-      ret.buttonEvents = [create_button_event(self.CS.cruise_buttons, self.CS.prev_cruise_buttons, BUTTONS_DICT,
-                                              unpressed=CruiseButtons.UNPRESS)]
+      buttonEvents.extend(create_button_event(self.CS.cruise_buttons, self.CS.prev_cruise_buttons, BUTTONS_DICT,
+                                              unpressed=CruiseButtons.UNPRESS))
+    # kans : long_button GAP for cruise Mode(safety, ecco, high-speed..)
+    if self.CS.distance_button_pressed:
+      buttonEvents.append(car.CarState.ButtonEvent(pressed=True, type=ButtonType.gapAdjustCruise))
+    ret.buttonEvents = buttonEvents # kans
 
     # The ECM allows enabling on falling edge of set, but only rising edge of resume
     events = self.create_common_events(ret, extra_gears=[GearShifter.sport, GearShifter.low,
                                                          GearShifter.eco, GearShifter.manumatic],
-                                       pcm_enable=self.CP.pcmCruise, enable_buttons=(ButtonType.decelCruise, ButtonType.accelCruise))
+                                       pcm_enable=self.CP.pcmCruise, enable_buttons=(ButtonType.decelCruise,))
     if not self.CP.pcmCruise:
       if any(b.type == ButtonType.accelCruise and b.pressed for b in ret.buttonEvents):
         events.add(EventName.buttonEnable)
@@ -230,11 +235,28 @@ class CarInterface(CarInterfaceBase):
     if below_min_enable_speed and not (ret.standstill and ret.brake >= 20 and
                                        self.CP.networkLocation == NetworkLocation.fwdCamera):
       events.add(EventName.belowEngageSpeed)
-    if ret.cruiseState.standstill:
-      events.add(EventName.resumeRequired)
-    if 0.05 < ret.vEgo < self.CP.minSteerSpeed:
-      events.add(EventName.belowSteerSpeed)
 
+    # kans: 정지 상태이면서, 자동재개 신호(self.CP.autoResumeSng)가 비활성화되어 있고, 
+    # resumeRequired 이벤트가 비활성화되어 있지 않으면, resumeRequired 이벤트를 활성화하고, 
+    # resumeRequired 이벤트를 한번 보여주게 한다.
+    if ret.cruiseState.standstill and not self.CP.autoResumeSng and not self.CS.disable_resumeRequired:
+      events.add(EventName.resumeRequired)
+      self.CS.resumeRequired_shown = True
+
+    # kans: resumeRequired 이벤트가 표시된 후에는, 자동으로 재개될 때까지 resumeRequired 이벤트를 비활성화한다.
+    if self.CS.resumeRequired_shown and not ret.cruiseState.standstill:
+      self.CS.disable_resumeRequired = True
+
+    # kans: 속도가 최소조향속도 미만이고, belowSteerSpeed 이벤트가 비활성화되어 있지 않으면, 
+    # belowSteerSpeed 이벤트를 활성화하고,
+    # belowSteerSpeed이벤트를 한번 보여주게 한다.
+    if ret.vEgo < self.CP.minSteerSpeed and not self.CS.disable_belowSteerSpeed:
+      events.add(EventName.belowSteerSpeed)
+      self.CS.belowSteerSpeed_shown = True
+
+    # kans: belowSteerSpeed 이벤트가 한번 표시된 후에는, 속도가 최소조향속도보다 높아질 때까지 belowSteerSpeed 이벤트를 비활성화한다.
+    if self.CS.belowSteerSpeed_shown and ret.vEgo > self.CP.minSteerSpeed:
+      self.CS.disable_belowSteerSpeed = True # kans
     if (self.CP.flags & GMFlags.CC_LONG.value) and ret.vEgo < self.CP.minEnableSpeed:
       events.add(EventName.speedTooLow)
     # 페달롱컨차(BOLT)를 위한 코드이므로 주석처리

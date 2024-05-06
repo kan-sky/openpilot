@@ -967,6 +967,7 @@ struct LongitudinalPlan @0xe00b5b3eba12876c {
   cruiseGap @43 : Float32;
   xObstacle @44 : Float32;
   mpcEvent @45 : Int32;
+  mpcMode @46 : Int32;
 
   enum XState {
     lead @0;
@@ -2015,6 +2016,9 @@ struct RoadLimitSpeed {
     xRoadSignType @17 : Int16;
     xRoadLimitSpeed @18 : Int16;
     xRoadName @19 : Text;
+    xCmd @20 : Text;
+    xArg @21 : Text;
+    xIndex @22 : Int16;
 }
 
 struct Event {

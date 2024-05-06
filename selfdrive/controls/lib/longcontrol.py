@@ -9,8 +9,11 @@ from common.params import Params
 LongCtrlState = car.CarControl.Actuators.LongControlState
 
 
+### apilot
+# planned_stop조건인데..... accel은 이미 stoppingAccel보다 낮은상태... 이상태로 stopping으로 진입하면.. 너무 많은 -accel로 정지하게 됨.
+# accel이 -값에서 0에 가까와질때까지 기다릴 필요가 있음.... 20230911
 def long_control_state_trans(CP, active, long_control_state, v_ego, v_target,
-                             v_target_1sec, brake_pressed, cruise_standstill, softHold):
+                             v_target_1sec, brake_pressed, cruise_standstill, softHold, a_target_now):
   # Ignore cruise standstill if car has a gas interceptor
   cruise_standstill = cruise_standstill and not CP.enableGasInterceptor
   accelerating = v_target_1sec > (v_target + 0.01)
@@ -33,7 +36,7 @@ def long_control_state_trans(CP, active, long_control_state, v_ego, v_target,
   else:
     if long_control_state in (LongCtrlState.off, LongCtrlState.pid):
       long_control_state = LongCtrlState.pid
-      if stopping_condition:
+      if stopping_condition and a_target_now > -1.0:  ### pid출력이 급정지(-accel) 상태에서 stopping으로 들어가면... 차량이 너무 급하게 섬.. 기다려보자.... 시험 230911
         long_control_state = LongCtrlState.stopping
 
     elif long_control_state == LongCtrlState.stopping:
@@ -50,7 +53,7 @@ def long_control_state_trans(CP, active, long_control_state, v_ego, v_target,
 
     if softHold:
       long_control_state = LongCtrlState.stopping
-  return long_control_state
+  return long_control_state, planned_stop
 
 
 class LongControl:
@@ -104,6 +107,7 @@ class LongControl:
     """Update longitudinal control. This updates the state machine and runs a PID loop"""
     # Interp control trajectory
     speeds = long_plan.speeds
+    a_target_now = 0.0
     if len(speeds) == CONTROL_N:
       v_target_now = interp(t_since_plan, T_IDXS[:CONTROL_N], speeds)
       a_target_now = interp(t_since_plan, T_IDXS[:CONTROL_N], long_plan.accels)
@@ -134,6 +138,7 @@ class LongControl:
       v_target_1sec = 0.0
       a_target = 0.0
       j_target = 0.0
+      a_target_lower = a_target_upper = 0.0
 
     self.pid.neg_limit = accel_limits[0]
     self.pid.pos_limit = accel_limits[1]
@@ -144,9 +149,9 @@ class LongControl:
 
     output_accel = self.last_output_accel
 
-    self.long_control_state = long_control_state_trans(self.CP, active, self.long_control_state, CS.vEgo,
+    self.long_control_state, planned_stop = long_control_state_trans(self.CP, active, self.long_control_state, CS.vEgo,
                                                        v_target, v_target_1sec, CS.brakePressed,
-                                                       CS.cruiseState.standstill, CC.hudControl.softHold)
+                                                       CS.cruiseState.standstill, CC.hudControl.softHold, a_target_now)
 
     if self.long_control_state == LongCtrlState.off:
       self.reset(CS.vEgo)
@@ -185,4 +190,4 @@ class LongControl:
     #self.debugLoCText = "T:{:.2f} V:{:.2f}={:.1f}-{:.1f} Aout:{:.2f}<{:.2f}".format(t_since_plan, (self.v_pid - CS.vEgo)*3.6, self.v_pid*3.6, CS.vEgo*3.3, self.last_output_accel, output_accel)
     self.debugLoCText = "pid={},vego={:.2f},vt={:.2f},{:.2f},vStop={:.2f}".format(self.long_control_state, CS.vEgo, v_target, v_target_1sec, self.CP.vEgoStopping)
 
-    return self.last_output_accel, j_target
+    return self.last_output_accel, -0.5 if planned_stop else j_target
