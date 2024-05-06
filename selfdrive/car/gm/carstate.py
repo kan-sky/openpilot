@@ -3,7 +3,7 @@ from cereal import car
 
 from common.conversions import Conversions as CV
 from common.numpy_fast import mean
-from openpilot.common.params import Params #kans
+from common.params import Params #kans
 from opendbc.can.can_define import CANDefine
 from opendbc.can.parser import CANParser
 from selfdrive.car.interfaces import CarStateBase
