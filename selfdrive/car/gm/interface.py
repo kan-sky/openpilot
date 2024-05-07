@@ -182,7 +182,7 @@ class CarInterface(CarInterfaceBase):
       ret.startAccel = 0.8
       ret.vEgoStarting = 0.25
       ret.vEgoStopping = 0.25
-      ret.enableBsm = 0x142 in fingerprint[CanBus.POWERTRAIN]
+      ret.enableBsm = True #0x142 in fingerprint[CanBus.POWERTRAIN]
 
       # softer long tune for ev table
       if useEVTables: 

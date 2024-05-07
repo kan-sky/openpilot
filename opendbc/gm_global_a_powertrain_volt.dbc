@@ -188,6 +188,10 @@ BO_ 497 BCMGeneralPlatformStatus: 8 K9_BCM
  SG_ SystemBackUpPowerMode : 5|2@0+ (1,0) [0|3] "" XXX
  SG_ ParkBrakeSwActive : 36|1@0+ (1,0) [0|3] "" XXX
 
+BO_ 493 VoltBlindSpot: 8 XXX
+ SG_ LeftBSM : 6|1@0+ (1,0) [0|1] "" XXX
+ SG_ RightBSM : 7|1@0+ (1,0) [0|1] "" XXX
+
 BO_ 500 SportMode: 6 XXX
  SG_ SportMode : 15|1@0+ (1,0) [0|1] "" XXX
 
@@ -299,10 +303,10 @@ BO_ 1300 VIN_Part1: 8 K20_ECM
  SG_ VINPart1 : 7|64@0+ (1,0) [0|0] ""  NEO
 
 BO_ 1323 TPMS: 4 K9_BCM
- SG_ PRESSURE_FR : 7|8@0+ (1,0) [0|255] "" XXX
- SG_ PRESSURE_RR : 15|8@0+ (1,0) [0|255] "" XXX
- SG_ PRESSURE_FL : 23|8@0+ (1,0) [0|255] "" XXX
- SG_ PRESSURE_RL : 31|8@0+ (1,0) [0|255] "" XXX
+ SG_ PRESSURE_RR : 7|8@0+ (1,0) [0|255] "" XXX
+ SG_ PRESSURE_FR : 15|8@0+ (1,0) [0|255] "" XXX
+ SG_ PRESSURE_RL : 23|8@0+ (1,0) [0|255] "" XXX
+ SG_ PRESSURE_FL : 31|8@0+ (1,0) [0|255] "" XXX
 
 BO_ 1912 PSCM_778: 8 K43_PSCM
 
