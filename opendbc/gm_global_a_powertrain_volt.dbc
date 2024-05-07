@@ -188,7 +188,7 @@ BO_ 497 BCMGeneralPlatformStatus: 8 K9_BCM
  SG_ SystemBackUpPowerMode : 5|2@0+ (1,0) [0|3] "" XXX
  SG_ ParkBrakeSwActive : 36|1@0+ (1,0) [0|3] "" XXX
 
-BO_ 493 VoltBlindSpot: 8 XXX
+BO_ 1924 VoltBlindSpot: 8 XXX
  SG_ LeftBSM : 6|1@0+ (1,0) [0|1] "" XXX
  SG_ RightBSM : 7|1@0+ (1,0) [0|1] "" XXX
 
