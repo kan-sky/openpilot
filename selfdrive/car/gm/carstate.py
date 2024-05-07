@@ -118,6 +118,12 @@ class CarState(CarStateBase):
       # https://static.nhtsa.gov/odi/tsbs/2017/MC-10137629-9999.pdf
       ret.brakePressed = (ret.brake >= 8 or self.regenPaddlePressed)
 
+
+    ret.tpms.fl = pt_cp.vl["TPMS"]["PRESSURE_FL"]
+    ret.tpms.fr = pt_cp.vl["TPMS"]["PRESSURE_FR"]
+    ret.tpms.rl = pt_cp.vl["TPMS"]["PRESSURE_RL"]
+    ret.tpms.rr = pt_cp.vl["TPMS"]["PRESSURE_RR"]
+
     if self.CP.enableGasInterceptor:
       ret.gas = (pt_cp.vl["GAS_SENSOR"]["INTERCEPTOR_GAS"] + pt_cp.vl["GAS_SENSOR"]["INTERCEPTOR_GAS2"]) / 2.
       ret.gasPressed = ret.gas > 15
@@ -273,6 +279,11 @@ class CarState(CarStateBase):
       ("RollingCounter", "ASCMLKASteeringCmd"),
       ("VehicleSpeed", "ECMVehicleSpeed"),
       ("EngineRPM", "ECMEngineStatus"),
+      ("PRESSURE_FL", "TPMS"),
+      ("PRESSURE_FR", "TPMS"),
+      ("PRESSURE_RL", "TPMS"),
+      ("PRESSURE_RR", "TPMS"),
+      
     ]
 
     checks = [
@@ -291,6 +302,7 @@ class CarState(CarStateBase):
       ("PSCMSteeringAngle", 100),
       ("ECMAcceleratorPos", 80),
       ("ECMVehicleSpeed", 20),
+      ("TPMS", 0),
     ]
 
     # Used to read back last counter sent to PT by camera
