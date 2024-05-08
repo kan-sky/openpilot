@@ -245,14 +245,14 @@ class CarState(CarStateBase):
       ("EBCMFrictionBrakeStatus", 20),
       ("PSCMSteeringAngle", 100),
       ("ECMAcceleratorPos", 80),
-      ("TPMS", 10),      
+      ("TPMS", 0),      
     ]
     if CP.flags & GMFlags.SPEED_RELATED_MSG.value:
       messages.append(("SPEED_RELATED", 20))
 
     if CP.enableBsm:
-      messages.append(("LeftBlindSpot", 20))
-      messages.append(("RightBlindSpot", 20))
+      messages.append(("LeftBlindSpot", 0))
+      messages.append(("RightBlindSpot", 0))
 
     if CP.carFingerprint in SDGM_CAR:
       messages += [
