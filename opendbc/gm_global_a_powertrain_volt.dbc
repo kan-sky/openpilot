@@ -290,14 +290,12 @@ BO_ 1034 ASCM_40A: 7 K124_ASCM
 BO_ 1217 ECMEngineCoolantTemp: 8 K20_ECM
  SG_ EngineCoolantTemp : 23|8@0+ (1,-40) [0|0] "C"  NEO
 
-BO_ 1225 LeftBlindSpot: 8 XXX
+BO_ 2017 BlindSpot: 8 XXX
  SG_ Left_BSM : 6|1@0+ (1,0) [0|1] "" XXX
+ SG_ Right_BSM : 7|1@0+ (1,0) [0|1] "" XXX
 
 BO_ 1249 VIN_Part2: 8 K20_ECM
  SG_ VINPart2 : 7|64@0+ (1,0) [0|0] ""  NEO
-
-BO_ 1265 RightBlindSpot: 8 XXX
- SG_ Right_BSM : 6|1@0+ (1,0) [0|1] "" XXX
 
 BO_ 1296 ASCM_510: 4 K124_ASCM
 
@@ -305,10 +303,10 @@ BO_ 1300 VIN_Part1: 8 K20_ECM
  SG_ VINPart1 : 7|64@0+ (1,0) [0|0] ""  NEO
 
 BO_ 1323 TPMS: 4 K9_BCM
- SG_ PRESSURE_FR : 7|8@0+ (1,0) [0|255] "" XXX
- SG_ PRESSURE_RR : 15|8@0+ (1,0) [0|255] "" XXX
- SG_ PRESSURE_FL : 23|8@0+ (1,0) [0|255] "" XXX
- SG_ PRESSURE_RL : 31|8@0+ (1,0) [0|255] "" XXX
+ SG_ PRESSURE_FR : 7|8@0+ (1,0) [0|255] ""  NEO
+ SG_ PRESSURE_RR : 15|8@0+ (1,0) [0|255] ""  NEO
+ SG_ PRESSURE_FL : 23|8@0+ (1,0) [0|255] ""  NEO
+ SG_ PRESSURE_RL : 31|8@0+ (1,0) [0|255] ""  NEO
 
 BO_ 1912 PSCM_778: 8 K43_PSCM
 
