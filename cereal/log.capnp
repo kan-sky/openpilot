@@ -21,6 +21,7 @@ enum LongitudinalPersonality {
   aggressive @0;
   standard @1;
   relaxed @2;
+  moreRelaxed @3;
 }
 
 struct InitData {
@@ -1086,6 +1087,7 @@ struct LongitudinalPlan @0xe00b5b3eba12876c {
   carrotEvent @46: Int32;
   vCruiseTarget @47: Float32;
   vCruiseTargetSource @48: Text;
+  tFollow @49: Float32;
 
   enum LongitudinalPlanSource {
     cruise @0;
@@ -2276,7 +2278,7 @@ struct RoadLimitSpeed {
 
     xTurnInfo @12 : Int32;
     xDistToTurn @13 : Int32;
-    xSpdDist @14 : Int16;
+    xSpdDist @14 : Int32;
     xSpdLimit @15 : Int16;
     xSignType @16 : Int16;
     xRoadSignType @17 : Int16;

@@ -72,8 +72,8 @@ class CarState(CarStateBase):
         ret.leftBlindspot = cam_cp.vl["BCMBlindSpotMonitor"]["LeftBSM"] == 1
         ret.rightBlindspot = cam_cp.vl["BCMBlindSpotMonitor"]["RightBSM"] == 1
       else:
-        ret.leftBlindspot = pt_cp.vl["BCMBlindSpotMonitor"]["LeftBSM"] == 1
-        ret.rightBlindspot = pt_cp.vl["BCMBlindSpotMonitor"]["RightBSM"] == 1
+        ret.leftBlindspot = pt_cp.vl["BlindSpot"]["Left_BSM"] == 1
+        ret.rightBlindspot = pt_cp.vl["BlindSpot"]["Right_BSM"] == 1
 
     # Variables used for avoiding LKAS faults
     self.loopback_lka_steering_cmd_updated = len(loopback_cp.vl_all["ASCMLKASteeringCmd"]["RollingCounter"]) > 0
@@ -115,6 +115,11 @@ class CarState(CarStateBase):
     if self.CP.transmissionType == TransmissionType.direct:
       ret.regenBraking = pt_cp.vl["EBCMRegenPaddle"]["RegenPaddle"] != 0
       self.single_pedal_mode = ret.gearShifter == GearShifter.low or pt_cp.vl["EVDriveMode"]["SinglePedalModeActive"] == 1
+
+    ret.tpms.fl = pt_cp.vl["TPMS"]["PRESSURE_FL"]
+    ret.tpms.fr = pt_cp.vl["TPMS"]["PRESSURE_FR"]
+    ret.tpms.rl = pt_cp.vl["TPMS"]["PRESSURE_RL"]
+    ret.tpms.rr = pt_cp.vl["TPMS"]["PRESSURE_RR"]
 
     if self.CP.enableGasInterceptor:
       ret.gas = (pt_cp.vl["GAS_SENSOR"]["INTERCEPTOR_GAS"] + pt_cp.vl["GAS_SENSOR"]["INTERCEPTOR_GAS2"]) / 2.
@@ -239,13 +244,15 @@ class CarState(CarStateBase):
       ("EBCMWheelSpdRear", 20),
       ("EBCMFrictionBrakeStatus", 20),
       ("PSCMSteeringAngle", 100),
-      ("ECMAcceleratorPos", 80),      
+      ("ECMAcceleratorPos", 80),
+      ("TPMS", 0),      
     ]
     if CP.flags & GMFlags.SPEED_RELATED_MSG.value:
       messages.append(("SPEED_RELATED", 20))
 
     if CP.enableBsm:
-      messages.append(("BCMBlindSpotMonitor", 10))
+      messages.append(("BlindSpot", 0))
+      #messages.append(("RightBlindSpot", 0))
 
     if CP.carFingerprint in SDGM_CAR:
       messages += [
