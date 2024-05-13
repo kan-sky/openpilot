@@ -83,6 +83,7 @@ def read_thermal(thermal_config):
   dat.deviceState.gpuTempC = [read_tz(z) / thermal_config.gpu[1] for z in thermal_config.gpu[0]]
   dat.deviceState.memoryTempC = read_tz(thermal_config.mem[0]) / thermal_config.mem[1]
   dat.deviceState.pmicTempC = [read_tz(z) / thermal_config.pmic[1] for z in thermal_config.pmic[0]]
+  dat.deviceState.ambientTempC = [read_tz(z) / thermal_config.ambient[1] for z in thermal_config.ambient[0]]
   return dat
 
 
@@ -414,6 +415,8 @@ def thermald_thread(end_event, hw_queue) -> None:
     statlog.gauge("memory_temperature", msg.deviceState.memoryTempC)
     for i, temp in enumerate(msg.deviceState.pmicTempC):
       statlog.gauge(f"pmic{i}_temperature", temp)
+    for i, temp in enumerate(msg.deviceState.ambientTempC):
+      statlog.gauge(f"ambient{i}_temperature", temp)
     for i, temp in enumerate(last_hw_state.nvme_temps):
       statlog.gauge(f"nvme_temperature{i}", temp)
     for i, temp in enumerate(last_hw_state.modem_temps):
