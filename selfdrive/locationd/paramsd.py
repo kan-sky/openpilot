@@ -9,7 +9,9 @@ from cereal import car
 from cereal import log
 from openpilot.common.params import Params
 from openpilot.common.realtime import config_realtime_process, DT_MDL
-from openpilot.common.numpy_fast import clip
+from openpilot.common.numpy_fast import clip, interp
+from selfdrive.controls.lib.lateral_planner import TRAJECTORY_SIZE
+from openpilot.selfdrive.modeld.constants import ModelConstants
 from openpilot.selfdrive.locationd.models.car_kf import CarKalman, ObservationKind, States
 from openpilot.selfdrive.locationd.models.constants import GENERATED_DIR
 from openpilot.common.swaglog import cloudlog
@@ -26,6 +28,8 @@ OFFSET_MAX = 10.0
 OFFSET_LOWERED_MAX = 8.0
 MIN_ACTIVE_SPEED = 1.0
 LOW_ACTIVE_SPEED = 10.0
+PITCH_MAX_DELTA = math.radians(10.0) * DT_MDL  # 10¡Æ/s
+PITCH_MIN, PITCH_MAX = math.radians(-19), math.radians(19) # steepest roads in US are ~18¡Æ
 
 
 class ParamsLearner:
@@ -45,8 +49,13 @@ class ParamsLearner:
     self.yaw_rate = 0.0
     self.yaw_rate_std = 0.0
     self.roll = 0.0
+    self.pitch = 0.0
     self.steering_angle = 0.0
     self.roll_valid = False
+
+    self.future_pitch_delay = 0.4 + (CP.longitudinalActuatorDelayUpperBound + CP.longitudinalActuatorDelayLowerBound) / 2
+    self.future_pitch_ema_k = 1/10
+    self.future_pitch_ema = 0.0
 
   def handle_log(self, t, which, msg):
     if which == 'liveLocationKalman':
@@ -66,6 +75,19 @@ class ParamsLearner:
         roll_std = np.radians(10.0)
       self.roll = clip(roll, self.roll - ROLL_MAX_DELTA, self.roll + ROLL_MAX_DELTA)
 
+      localizer_pitch = msg.orientationNED.value[1]
+      localizer_pitch_std = np.radians(1) if np.isnan(msg.orientationNED.std[1]) else msg.orientationNED.std[1]
+      pitch_valid = msg.orientationNED.valid and PITCH_MIN < localizer_pitch < PITCH_MAX
+      if pitch_valid:
+        pitch = localizer_pitch
+        # Experimentally found multiplier of 2 to be best trade-off between stability and accuracy or similar?
+        pitch_std = 2 * localizer_pitch_std
+      else:
+        # This is done to bound the road pitch estimate when localizer values are invalid
+        pitch = 0.0
+        pitch_std = np.radians(10.0)
+      self.pitch = clip(pitch, self.pitch - PITCH_MAX_DELTA, self.pitch + PITCH_MAX_DELTA)
+
       yaw_rate_valid = msg.angularVelocityCalibrated.valid
       yaw_rate_valid = yaw_rate_valid and 0 < self.yaw_rate_std < 10  # rad/s
       yaw_rate_valid = yaw_rate_valid and abs(self.yaw_rate) < 1  # rad/s
@@ -83,6 +105,12 @@ class ParamsLearner:
                                       ObservationKind.ROAD_ROLL,
                                       np.array([[self.roll]]),
                                       np.array([np.atleast_2d(roll_std**2)]))
+
+          self.kf.predict_and_observe(t,
+                                      ObservationKind.ROAD_PITCH,
+                                      np.array([[self.pitch]]),
+                                      np.array([np.atleast_2d(pitch_std**2)]))
+
         self.kf.predict_and_observe(t, ObservationKind.ANGLE_OFFSET_FAST, np.array([[0]]))
 
         # We observe the current stiffness and steer ratio (with a high observation noise) to bound
@@ -103,6 +131,12 @@ class ParamsLearner:
       if self.active:
         self.kf.predict_and_observe(t, ObservationKind.STEER_ANGLE, np.array([[math.radians(msg.steeringAngleDeg)]]))
         self.kf.predict_and_observe(t, ObservationKind.ROAD_FRAME_X_SPEED, np.array([[self.speed]]))
+    elif which == 'modelV2' and self.active and len(msg.orientation.y) == TRAJECTORY_SIZE:
+      future_pitch_diff = interp(self.future_pitch_delay, ModelConstants.T_IDXS, msg.orientation.y)
+      future_pitch = float(self.kf.x[States.ROAD_PITCH]) + future_pitch_diff
+      future_pitch = clip(future_pitch, self.future_pitch_ema - PITCH_MAX_DELTA, self.future_pitch_ema + PITCH_MAX_DELTA)
+      self.future_pitch_ema = self.future_pitch_ema_k * future_pitch \
+                            + (1 - self.future_pitch_ema_k) * self.future_pitch_ema
 
     if not self.active:
       # Reset time when stopped so uncertainty doesn't grow
@@ -125,7 +159,7 @@ def main():
   REPLAY = bool(int(os.getenv("REPLAY", "0")))
 
   pm = messaging.PubMaster(['liveParameters'])
-  sm = messaging.SubMaster(['liveLocationKalman', 'carState'], poll='liveLocationKalman')
+  sm = messaging.SubMaster(['liveLocationKalman', 'carState', 'modelV2'], poll='liveLocationKalman')
 
   params_reader = Params()
   # wait for stats about the car to come in from controls
@@ -229,6 +263,8 @@ def main():
       liveParameters.steerRatio = float(x[States.STEER_RATIO].item())
       liveParameters.stiffnessFactor = float(x[States.STIFFNESS].item())
       liveParameters.roll = roll
+      liveParameters.pitch = float(x[States.ROAD_PITCH])
+      liveParameters.pitchFutureLong = float(learner.future_pitch_ema)
       liveParameters.angleOffsetAverageDeg = angle_offset_average
       liveParameters.angleOffsetDeg = angle_offset
       liveParameters.valid = all((

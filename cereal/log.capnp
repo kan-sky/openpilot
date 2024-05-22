@@ -2069,6 +2069,8 @@ struct LiveParametersData {
   steerRatioStd @13 :Float32;
   roll @14 :Float32;
   filterState @15 :LiveLocationKalman.Measurement;
+  pitch @16 :Float32;
+  pitchFutureLong @17 :Float32;
 
   yawRateDEPRECATED @7 :Float32;
 }

@@ -45,6 +45,11 @@ class CarState(CarStateBase):
     # for delay Accfault event
     self.accFaultedCount = 0
 
+    self.pitch = 0. # radians
+    self.pitch_raw = 0. # radians
+    self.pitch_ema = 1/100
+    self.pitch_future_time = 0.5 # seconds
+
   def update(self, pt_cp, cam_cp, loopback_cp):
     ret = car.CarState.new_message()
 
@@ -89,7 +94,7 @@ class CarState(CarStateBase):
       pt_cp.vl["EBCMWheelSpdRear"]["RLWheelSpd"],
       pt_cp.vl["EBCMWheelSpdRear"]["RRWheelSpd"],
     )
-    ret.vEgoRaw = mean([ret.wheelSpeeds.fl, ret.wheelSpeeds.fr, ret.wheelSpeeds.rl, ret.wheelSpeeds.rr]) * (105./100.)
+    ret.vEgoRaw = mean([ret.wheelSpeeds.fl, ret.wheelSpeeds.fr, ret.wheelSpeeds.rl, ret.wheelSpeeds.rr])
     ret.vEgo, ret.aEgo = self.update_speed_kf(ret.vEgoRaw)
     ret.standstill = ret.wheelSpeeds.rl <= STANDSTILL_THRESHOLD and ret.wheelSpeeds.rr <= STANDSTILL_THRESHOLD
 
@@ -206,6 +211,9 @@ class CarState(CarStateBase):
       ret.vEgoCluster = cluSpeed * speed_conv
       vEgoClu, aEgoClu = self.update_clu_speed_kf(ret.vEgoCluster)
       ret.vCluRatio = (ret.vEgo / vEgoClu) if (vEgoClu > 3. and ret.vEgo > 3.) else 1.0
+
+    self.pitch = self.pitch_ema * self.pitch_raw + (1 - self.pitch_ema) * self.pitch 
+    ret.pitch = self.pitch
 
     return ret
 

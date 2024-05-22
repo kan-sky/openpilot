@@ -218,6 +218,7 @@ struct CarState {
   espDisabled @32 :Bool;
   accFaulted @42 :Bool;
   carFaultedNonCritical @47 :Bool;  # some ECU is faulted, but car remains controllable
+  pitch @56 :Float32; # vehicle pitch in radians
 
   # cruise state
   cruiseState @10 :CruiseState;
@@ -395,6 +396,7 @@ struct CarControl {
 
     speed @6: Float32; # m/s
     accel @4: Float32; # m/s^2
+    accelPitchCompensated @10: Float32; #m/s^2
     longControlState @5: LongControlState;
     jerk @9: Float32; # apilot
 
