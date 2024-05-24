@@ -8,6 +8,7 @@ from openpilot.common.realtime import DT_MDL, DT_CTRL
 from openpilot.selfdrive.modeld.constants import ModelConstants
 from openpilot.common.params import Params
 import numpy as np
+import collections
 
 EventName = car.CarEvent.EventName
 
@@ -92,6 +93,9 @@ class VCruiseHelper:
     self.xPosValidCount = 0
     self.button_long_time = 40
     self.accel_output = 0.0
+    self.traffic_light_q = collections.deque(maxlen=int(1.0/DT_CTRL))
+    self.traffic_light_count = -1
+    self.traffic_state = 0
     
     #ajouatom: params
     self.params_count = 0
@@ -404,7 +408,50 @@ class VCruiseHelper:
 
       elif msg.xCmd == "DETECT":
         self.debugText2 = "DETECT[{}]={}".format(msg.xIndex, msg.xArg)
+        elements = [element.strip() for element in msg.xArg.split(',')]
+        self.traffic_light(float(elements[1]), float(elements[2]), elements[0])
+        self.traffic_light_count = 0.5 / DT_CTRL
+    self.traffic_light_q.append((-1, -1, "none"))
+    self.traffic_light_count -= 1
+    if self.traffic_light_count < 0:
+      self.traffic_light_count = -1
+      self.traffic_state = 0
     return v_cruise_kph
+
+  def traffic_light(self, x, y, color):
+    self.traffic_light_q.append((x,y,color))
+    traffic_state1 = 0
+    traffic_state2 = 0
+    traffic_state11 = 0
+    traffic_state22 = 0
+    for pdata in self.traffic_light_q:
+      px, py, pcolor = pdata
+      if abs(x - px) < 0.3 and abs(y - py) < 0.3:
+        if pcolor in ["Green", "LeftTurn", "GREEN", "GREEN_LEFT"]:
+          if color in ["Red", "RED_LEFT", "RED_YELLOW", "YELLOW"]:
+            traffic_state11 += 1
+          elif color in ["Green", "LeftTurn", "GREEN", "GREEN_LEFT"]:
+            traffic_state2 += 1
+        elif pcolor in ["Red", "RED_LEFT", "RED_YELLOW", "YELLOW"]:
+          if color in ["Green", "LeftTurn", "GREEN", "GREEN_LEFT"]:
+            traffic_state22 += 1
+          elif color in ["Red", "RED_LEFT", "RED_YELLOW", "YELLOW"]:
+            traffic_state1 += 1
+
+    if traffic_state11 > 0:
+      self.traffic_state = 11
+      self._add_log("Red light triggered")
+    elif traffic_state22 > 0:
+      self.traffic_state = 22
+      self._add_log("Green light triggered")
+    elif traffic_state1 > 0:
+      self.traffic_state = 1
+      self._add_log("Red light continued")
+    elif traffic_state2 > 0:
+      self.traffic_state = 2
+      self._add_log("Green light continued")
+    else:
+      self.traffic_state = 0
 
   def _add_log_auto_cruise(self, log):
     if self.autoCruiseControl > 0:
@@ -528,7 +575,7 @@ class VCruiseHelper:
             v_cruise_kph = button_kph
             self._add_log("Button long pressed..{:.0f}".format(v_cruise_kph))
         elif button_type == ButtonType.gapAdjustCruise:          
-          if self.CP.pcmCruise:
+          if False: #self.CP.pcmCruise:
             self._add_log("Button long gap pressed ..pcmCruise can't adjust")
           else:
             self._add_log("Button long gap pressed ..")
@@ -563,11 +610,12 @@ class VCruiseHelper:
         elif button_type == ButtonType.cancel:
           print("************* cancel button pressed..")
         elif button_type == ButtonType.gapAdjustCruise:
-          if self.CP.pcmCruise:
+          if False: #self.CP.pcmCruise:
             self._add_log("Button long gap pressed ..pcmCruise can't adjust")
           else:
             self._add_log("Button gap pressed ..")
-            controls.personality = (controls.personality - 1) % 3
+            longitudinalPersonalityMax = self.params.get_int("LongitudinalPersonalityMax")
+            controls.personality = (controls.personality - 1) % longitudinalPersonalityMax
             self.params.put_nonblocking('LongitudinalPersonality', str(controls.personality))
             personality_events = [EventName.personalityAggressive, EventName.personalityStandard, EventName.personalityRelaxed, EventName.personalityMoreRelaxed]
             controls.events.add(personality_events[controls.personality])
