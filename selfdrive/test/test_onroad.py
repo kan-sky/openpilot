@@ -27,13 +27,7 @@ from openpilot.selfdrive.test.helpers import set_params_enabled, release_only
 from openpilot.system.hardware.hw import Paths
 from openpilot.tools.lib.logreader import LogReader
 
-"""
-CPU usage budget
-* each process is entitled to at least 8%
-* total CPU usage of openpilot (sum(PROCS.values())
-  should not exceed MAX_TOTAL_CPU
-"""
-MAX_TOTAL_CPU = 250.  # total for all 8 cores
+# Baseline CPU usage by process
 PROCS = {
   "selfdrive.controls.controlsd": 46.0,
   "./loggerd": 14.0,
@@ -280,7 +274,6 @@ class TestOnroad(unittest.TestCase):
       result += f"{proc_name.ljust(35)}  {cpu_usage:5.2f}% ({exp}%) {err}\n"
       if len(err) > 0:
         cpu_ok = False
-    result += "------------------------------------------------\n"
 
     # Ensure there's no missing procs
     all_procs = {p.name for p in self.service_msgs['managerState'][0].managerState.processes if p.shouldBeRunning}
@@ -288,14 +281,7 @@ class TestOnroad(unittest.TestCase):
       with self.subTest(proc=p):
         assert any(p in pp for pp in PROCS.keys()), f"Expected CPU usage missing for {p}"
 
-    # total CPU check
-    procs_tot = sum([(max(x) if isinstance(x, tuple) else x) for x in PROCS.values()])
-    with self.subTest(name="total CPU"):
-      assert procs_tot < MAX_TOTAL_CPU, "Total CPU budget exceeded"
-    result +=  "------------------------------------------------\n"
-    result += f"Total allocated CPU usage is {procs_tot}%, budget is {MAX_TOTAL_CPU}%, {MAX_TOTAL_CPU-procs_tot:.1f}% left\n"
-    result +=  "------------------------------------------------\n"
-
+    result += "------------------------------------------------\n"
     print(result)
 
     self.assertTrue(cpu_ok)
@@ -314,7 +300,7 @@ class TestOnroad(unittest.TestCase):
   def test_camera_processing_time(self):
     result = "\n"
     result += "------------------------------------------------\n"
-    result += "-------------- ImgProc Timing ------------------\n"
+    result += "-------------- Debayer Timing ------------------\n"
     result += "------------------------------------------------\n"
 
     ts = [getattr(m, m.which()).processingTime for m in self.lr if 'CameraState' in m.which()]

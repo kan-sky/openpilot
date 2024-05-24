@@ -112,6 +112,8 @@ procs = [
   
   PythonProcess("road_speed_limiter", "selfdrive.carrot.road_speed_limiter", always_run),
   PythonProcess("carrot_man", "selfdrive.carrot.carrot_man", always_run),
+  
+  PythonProcess("navi_route", "selfdrive.controls.neokii.navi_route", only_onroad, enabled=Params().get_bool('UseExternalNaviRoutes')),
 ]
 
 managed_processes = {p.name: p for p in procs}

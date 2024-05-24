@@ -77,7 +77,7 @@ bool Route::loadFromServer(int retries) {
       return false;
     }
     rWarning("Retrying %d/%d", i, retries);
-    util::sleep_for(3000);
+    util::sleep_for(500);
   }
   return false;
 }
@@ -131,8 +131,7 @@ void Route::addFileToSegment(int n, const QString &file) {
 
 // class Segment
 
-Segment::Segment(int n, const SegmentFile &files, uint32_t flags, const std::vector<bool> &filters)
-    : seg_num(n), flags(flags), filters_(filters) {
+Segment::Segment(int n, const SegmentFile &files, uint32_t flags) : seg_num(n), flags(flags) {
   // [RoadCam, DriverCam, WideRoadCam, log]. fallback to qcamera/qlog
   const std::array file_list = {
       (flags & REPLAY_FLAG_QCAMERA) || files.road_cam.isEmpty() ? files.qcamera : files.road_cam,
@@ -160,9 +159,9 @@ void Segment::loadFile(int id, const std::string file) {
   bool success = false;
   if (id < MAX_CAMERAS) {
     frames[id] = std::make_unique<FrameReader>();
-    success = frames[id]->load((CameraType)id, file, flags & REPLAY_FLAG_NO_HW_DECODER, &abort_, local_cache, 20 * 1024 * 1024, 3);
+    success = frames[id]->load(file, flags & REPLAY_FLAG_NO_HW_DECODER, &abort_, local_cache, 20 * 1024 * 1024, 3);
   } else {
-    log = std::make_unique<LogReader>(filters_);
+    log = std::make_unique<LogReader>();
     success = log->load(file, &abort_, local_cache, 0, 3);
   }
 
