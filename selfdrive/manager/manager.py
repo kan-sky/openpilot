@@ -295,10 +295,10 @@ def manager_thread() -> None:
     ignore.append("pandad")
   ignore += [x for x in os.getenv("BLOCK", "").split(",") if len(x) > 0]
 
-  if params.get_bool("UseExternalNaviRoutes"):
-    ignore += ["navd"]
-  elif not params.get_bool("UseExternalNaviRoutes"):
-    ignore += ["navi_route"]
+  #if params.get_bool("UseExternalNaviRoutes"):
+  #  ignore += ["navd"]
+  #elif not params.get_bool("UseExternalNaviRoutes"):
+  #  ignore += ["navi_route"]
   sm = messaging.SubMaster(['deviceState', 'carParams'], poll='deviceState')
   pm = messaging.PubMaster(['managerState'])
 

@@ -114,7 +114,8 @@ procs = [
   PythonProcess("carrot_man", "selfdrive.carrot.carrot_man", always_run),
   
   PythonProcess("navi_controller", "selfdrive.controls.neokii.navi_controller", always_run),
-  PythonProcess("navi_route", "selfdrive.controls.neokii.navi_route", only_onroad, enabled=Params().get_bool('UseExternalNaviRoutes')),
+  #PythonProcess("navi_route", "selfdrive.controls.neokii.navi_route", only_onroad, enabled=Params().get_bool('UseExternalNaviRoutes')),
+  PythonProcess("navi_route", "selfdrive.controls.neokii.navi_route", always_run),
   
 ]
 

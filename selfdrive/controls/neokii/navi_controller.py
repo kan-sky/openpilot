@@ -277,7 +277,7 @@ def navi_gps_thread():
         dat.naviGps.longitude = floats[1]
         dat.naviGps.heading = floats[2]
         dat.naviGps.speed = floats[3]
-        print(dat.naviGps)
+        #print(dat.naviGps)
         naviGps.send(dat.to_bytes())
       except:
         pass
@@ -354,9 +354,10 @@ def publish_thread(server):
           'redLightRemainTime': server.get_ts_val("redLightRemainTime", 0),
           'distance': server.get_ts_val("distance", 0)}
     dat.naviData.ts = ts
-
-    if dat.naviData.active:
-      print(dat.naviData)
+        
+    #if dat.naviData.active:
+      #print(dat.naviData.active)
+      #print(dat.naviData)
 
     naviData.send(dat.to_bytes())
 

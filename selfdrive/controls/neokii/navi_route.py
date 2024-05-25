@@ -8,6 +8,7 @@ from threading import Thread
 from cereal import messaging
 from openpilot.common.realtime import Ratekeeper
 from openpilot.selfdrive.navd.helpers import Coordinate
+from openpilot.common.params import Params
 
 ROUTE_RECEIVE_PORT = 2845
 
@@ -51,6 +52,7 @@ class NaviRoute():
     self.send_route()
 
   def dispatch_instruction(self, json):
+    print("dispatch_instruction", json)
     msg = messaging.new_message('navInstruction', valid=True)
     instruction = msg.navInstruction
 
@@ -100,6 +102,7 @@ class NaviRoute():
       self.navi_route = navi_route
       socketserver.TCPServer.allow_reuse_address = True
       super().__init__(server_address, RequestHandlerClass)
+      self.params = Params()
 
   class RouteTCPHandler(socketserver.BaseRequestHandler):
     def recv(self, length):
@@ -110,6 +113,16 @@ class NaviRoute():
           break
         data += chunk
       return data
+
+    def setup(self):
+      if not self.params.get_bool("UseExternalNaviRoutes"):
+        self.params.put_bool("UseExternalNaviRoutes", True)
+      #print("######### ExternalNaviRoute Connected")
+
+    def finish(self):
+      #Params().put_bool("UseExternalNaviRoutes", False)
+      #print("######### ExternalNaviRoute Closed")
+      pass
 
     def handle(self):
       try:

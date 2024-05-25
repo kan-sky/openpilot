@@ -100,6 +100,8 @@ class RouteEngine:
 
     self.update_location()
 
+    if self.params.get_bool("UseExternalNaviRoutes"):
+      return
     if self.carrot_route_active:
       #return
       msg = messaging.new_message('navInstruction', valid=True)
@@ -241,7 +243,7 @@ class RouteEngine:
 
   def send_instruction(self):
     msg = messaging.new_message('navInstruction', valid=True)
-
+    print("navd_navInstruction")
     if self.step_idx is None:
       msg.valid = False
       self.pm.send('navInstruction', msg)
