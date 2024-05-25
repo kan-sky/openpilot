@@ -125,7 +125,7 @@ BO_ 320 BCMTurnSignals: 3 K9_BCM
  SG_ HighBeamsActive : 7|1@0+ (1,0) [0|1] "" XXX
  SG_ HighBeamsTemporary : 5|1@0+ (1,0) [0|1] "" XXX
 
-BO_ 322 BCMBlindSpotMonitor: 7 K9_BCM
+BO_ 322 BCMBlindSpotMonitor: 7 XXX
  SG_ LeftBSM : 6|1@0+ (1,0) [0|1] "" XXX
  SG_ RightBSM : 7|1@0+ (1,0) [0|1] "" XXX
 
@@ -289,10 +289,6 @@ BO_ 1034 ASCM_40A: 7 K124_ASCM
 
 BO_ 1217 ECMEngineCoolantTemp: 8 K20_ECM
  SG_ EngineCoolantTemp : 23|8@0+ (1,-40) [0|0] "C"  NEO
-
-BO_ 554 BlindSpot: 3 XXX
- SG_ Left_BSM : 6|1@0+ (1,0) [0|1] "" XXX
- SG_ Right_BSM : 7|1@0+ (1,0) [0|1] "" XXX
 
 BO_ 1249 VIN_Part2: 8 K20_ECM
  SG_ VINPart2 : 7|64@0+ (1,0) [0|0] ""  NEO

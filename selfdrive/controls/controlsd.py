@@ -13,7 +13,7 @@ from cereal.visionipc import VisionIpcClient, VisionStreamType
 
 from openpilot.common.conversions import Conversions as CV
 from openpilot.common.git import get_short_branch
-from openpilot.common.numpy_fast import clip
+from openpilot.common.numpy_fast import clip, interp
 from openpilot.common.params import Params
 from openpilot.common.realtime import config_realtime_process, Priority, Ratekeeper, DT_CTRL
 from openpilot.common.swaglog import cloudlog
@@ -29,6 +29,10 @@ from openpilot.selfdrive.controls.lib.latcontrol_angle import LatControlAngle, S
 from openpilot.selfdrive.controls.lib.latcontrol_torque import LatControlTorque
 from openpilot.selfdrive.controls.lib.longcontrol import LongControl
 from openpilot.selfdrive.controls.lib.vehicle_model import VehicleModel
+from openpilot.selfdrive.controls.lib.drive_helpers import apply_deadzone
+from selfdrive.controls.lib.lateral_planner import TRAJECTORY_SIZE
+from openpilot.selfdrive.controls.lib.vehicle_model import ACCELERATION_DUE_TO_GRAVITY
+from openpilot.selfdrive.modeld.constants import ModelConstants
 
 from openpilot.system.hardware import HARDWARE
 
@@ -58,6 +62,8 @@ ACTUATOR_FIELDS = tuple(car.CarControl.Actuators.schema.fields.keys())
 ACTIVE_STATES = (State.enabled, State.softDisabling, State.overriding)
 ENABLED_STATES = (State.preEnabled, *ACTIVE_STATES)
 
+MAX_ABS_PITCH = 0.314 # 20% grade = 18 degrees = pi/10 radians
+MAX_ABS_PRED_PITCH_DELTA = MAX_ABS_PITCH * 0.5
 
 class Controls:
   def __init__(self, CI=None):
@@ -194,6 +200,9 @@ class Controls:
     self._panda_controls_not_allowed = False #carrot
     self.enable_avail = False
     self.carrot_tmux_sent = 0
+
+    self.pitch = 0.0
+    self.pitch_accel_deadzone = 0.01 # [radians] ≈ 1% grade 
 
   def set_initial_state(self):
     if REPLAY:
@@ -670,6 +679,10 @@ class Controls:
     long_plan = self.sm['longitudinalPlan']
     model_v2 = self.sm['modelV2']
 
+    if self.sm.updated['liveParameters'] and len(model_v2.orientation.y) == TRAJECTORY_SIZE:
+      future_pitch_diff = clip(interp(self.CS.pitch_future_time, ModelConstants.T_IDXS, model_v2.orientation.y), -MAX_ABS_PRED_PITCH_DELTA, MAX_ABS_PRED_PITCH_DELTA)
+      self.CS.pitch_raw = self.sm['liveParameters'].pitch + future_pitch_diff
+
     CC = car.CarControl.new_message()
     CC.enabled = self.enabled
 
@@ -688,6 +701,9 @@ class Controls:
     CC.latActive = (self.active or lateral_enabled) and not CS.steerFaultTemporary and not CS.steerFaultPermanent and \
                    (not standstill or self.joystick_mode)
     CC.longActive = self.enabled and not self.events.contains(ET.OVERRIDE_LONGITUDINAL) and self.CP.openpilotLongitudinalControl
+
+    if self.sm.updated['liveParameters'] and len(model_v2.orientation.y) == TRAJECTORY_SIZE:
+      self.CS.pitch_raw = self.sm['liveParameters'].pitch + future_pitch_diff
 
     actuators = CC.actuators
     actuators.longControlState = self.LoC.long_control_state
@@ -713,6 +729,13 @@ class Controls:
       t_since_plan = (self.sm.frame - self.sm.recv_frame['longitudinalPlan']) * DT_CTRL
       actuators.accel, actuators.jerk = self.LoC.update(CC.longActive, CS, long_plan, pid_accel_limits, t_since_plan, self.v_cruise_helper.softHoldActive)
       self.v_cruise_helper.accel_output = actuators.accel # carrot: for gas pedal
+
+
+      # compute pitch-compensated accel
+      if self.sm.updated['liveParameters']:
+        self.pitch = apply_deadzone(self.sm['liveParameters'].pitchFutureLong, self.pitch_accel_deadzone)
+      actuators.accelPitchCompensated = actuators.accel + ACCELERATION_DUE_TO_GRAVITY * math.sin(self.pitch)
+
 
       if len(long_plan.speeds):
         actuators.speed = long_plan.speeds[-1]
