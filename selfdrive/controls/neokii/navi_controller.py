@@ -20,6 +20,7 @@ import time
 
 CAMERA_SPEED_FACTOR = 1.05
 
+_V_EGO = 0.0
 
 class Port:
   BROADCAST_PORT = 2899
@@ -142,12 +143,18 @@ class NaviServer:
         pass
 
   def speed_thread(self):
+    global _V_EGO
+    while True:
+      time.sleep(0.5)
+      v_ego = _V_EGO
+      with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+        data_in_bytes = struct.pack('!f', v_ego)
+        sock.sendto(data_in_bytes, ('127.0.0.1', 2847))
+
     sm = messaging.SubMaster(['carState'], poll='carState')
     while True:
-      time.sleep(0.1)
-      #sm.update()
-      #sm.update(100)
-      if False: #sm.updated['carState']:
+      sm.update(100)
+      if sm.updated['carState']:
         v_ego = sm['carState'].vEgo
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
           data_in_bytes = struct.pack('!f', v_ego)
@@ -167,7 +174,6 @@ class NaviServer:
       if ret:
         data, self.remote_addr = sock.recvfrom(2048)
         json_obj = json.loads(data.decode())
-
         if 'cmd' in json_obj:
           try:
             os.system(json_obj['cmd'])
@@ -279,7 +285,7 @@ def navi_gps_thread():
         dat.naviGps.longitude = floats[1]
         dat.naviGps.heading = floats[2]
         dat.naviGps.speed = floats[3]
-        #print(dat.naviGps)
+        #print('navi_gps_thread=', dat.naviGps)
         naviGps.send(dat.to_bytes())
       except:
         pass
@@ -296,7 +302,7 @@ def navi_obstacles_thread():
           floats = struct.unpack('13f', data[1:])
           obstacle = {'valid': True, 'type': 0, 'obstacle': list(floats)}
           dat.naviObstacles.obstacles = [obstacle]
-          print('navObstacles=', obstacle)
+          #print('navObstacles=', obstacle)
         else:
           dat.naviObstacles.obstacles = []
         naviObstacles.send(dat.to_bytes())
@@ -309,6 +315,7 @@ def send_obstacle(cam_type, distance, speed, v_ego, s):
     sock.sendto(data_in_bytes, ('127.0.0.1', 2946))
 
 def publish_thread(server):
+  global _V_EGO
   sm = messaging.SubMaster(['carState'])
   naviData = messaging.pub_sock('naviData')
 
@@ -319,6 +326,7 @@ def publish_thread(server):
 
   while True:
     sm.update(0)
+    _V_EGO = sm['carState'].vEgo
 
     dat = messaging.new_message('naviData', valid=True)
     dat.naviData.active = server.active
@@ -335,7 +343,6 @@ def publish_thread(server):
     dat.naviData.camSpeedFactor = server.get_limit_val("cam_speed_factor", CAMERA_SPEED_FACTOR)
     dat.naviData.currentRoadName = server.get_limit_val("current_road_name", "")
     dat.naviData.isNda2 = server.get_limit_val("is_nda2", False)
-
     v_ego_q.append(sm['carState'].vEgo)
     #a_ego_q.append(sm['carState'].aEgo)
     v_ego = mean(v_ego_q)

@@ -1009,7 +1009,7 @@ void DrawApilot::drawConnInfo(const UIState* s) {
 
     static int activeOSM = 0;
     //auto navInstruction = sm["navInstruction"].getNavInstruction();
-    //if (navInstruction.getSpeedLimit() > 0 && activeNDA < 200) activeOSM = 100;
+    //if (navInstruction.getSpeedLimit() > 0 && activeAPM < 200) activeOSM = 100;
     if (false) { //sm.updated("liveMapData")) {
         activeOSM = 100;
     }

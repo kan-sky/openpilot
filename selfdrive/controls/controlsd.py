@@ -373,6 +373,8 @@ class Controls:
       self.rk.reset_time()
     if len(self.sm['radarState'].radarErrors) or (not self.rk.lagging and not self.sm.all_checks(['radarState'])):
       self.events.add(EventName.radarFault)
+      #print("sm.all_check = ", self.sm.all_alive(['radarState']), self.sm.all_freq_ok(['radarState']), self.sm.all_valid(['radarState']))
+
     if not self.sm.valid['pandaStates']:
       self.events.add(EventName.usbError)
     if CS.canTimeout:
