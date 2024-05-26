@@ -125,7 +125,7 @@ class NaviServer:
               broadcast_address = self.get_broadcast_address()
 
             if broadcast_address is not None and self.remote_addr is None:
-              #print('broadcast', broadcast_address)
+              print('broadcast-', broadcast_address)
 
               msg = 'EON:ROAD_LIMIT_SERVICE:v1'.encode()
               for i in range(1, 255):
@@ -144,8 +144,10 @@ class NaviServer:
   def speed_thread(self):
     sm = messaging.SubMaster(['carState'], poll='carState')
     while True:
-      sm.update(100)
-      if sm.updated['carState']:
+      time.sleep(0.1)
+      #sm.update()
+      #sm.update(100)
+      if False: #sm.updated['carState']:
         v_ego = sm['carState'].vEgo
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
           data_in_bytes = struct.pack('!f', v_ego)
@@ -294,7 +296,7 @@ def navi_obstacles_thread():
           floats = struct.unpack('13f', data[1:])
           obstacle = {'valid': True, 'type': 0, 'obstacle': list(floats)}
           dat.naviObstacles.obstacles = [obstacle]
-          print(naviObstacles)
+          print('navObstacles=', obstacle)
         else:
           dat.naviObstacles.obstacles = []
         naviObstacles.send(dat.to_bytes())
@@ -355,9 +357,11 @@ def publish_thread(server):
           'distance': server.get_ts_val("distance", 0)}
     dat.naviData.ts = ts
         
-    #if dat.naviData.active:
+    if dat.naviData.active:
       #print(dat.naviData.active)
+      #print('naviData.road_limit_speed=', dat.naviData.roadLimitSpeed)
       #print(dat.naviData)
+      pass
 
     naviData.send(dat.to_bytes())
 

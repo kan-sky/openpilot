@@ -15,7 +15,7 @@ ROUTE_RECEIVE_PORT = 2845
 class NaviRoute():
   def __init__(self):
     self.sm = messaging.SubMaster(['managerState'])
-    self.pm = messaging.PubMaster(['navInstruction', 'navRoute'])
+    self.pm = messaging.PubMaster(['navInstructionNda', 'navRoute'])
     self.last_routes = None
     self.ui_pid = None
     self.last_client_address = None
@@ -53,8 +53,8 @@ class NaviRoute():
 
   def dispatch_instruction(self, json):
     print("dispatch_instruction", json)
-    msg = messaging.new_message('navInstruction', valid=True)
-    instruction = msg.navInstruction
+    msg = messaging.new_message('navInstructionNda', valid=True)
+    instruction = msg.navInstructionNda
 
     if json is not None:
       if 'maneuverDistance' in json:
@@ -93,7 +93,7 @@ class NaviRoute():
       # speedLimit, speedLimitSign
       instruction.allManeuvers = maneuvers
 
-    self.pm.send('navInstruction', msg)
+    self.pm.send('navInstructionNda', msg)
 
 
 
@@ -101,8 +101,7 @@ class NaviRoute():
     def __init__(self, server_address, RequestHandlerClass, navi_route):
       self.navi_route = navi_route
       socketserver.TCPServer.allow_reuse_address = True
-      super().__init__(server_address, RequestHandlerClass)
-      self.params = Params()
+      super().__init__(server_address, RequestHandlerClass)      
 
   class RouteTCPHandler(socketserver.BaseRequestHandler):
     def recv(self, length):
@@ -115,8 +114,8 @@ class NaviRoute():
       return data
 
     def setup(self):
-      if not self.params.get_bool("UseExternalNaviRoutes"):
-        self.params.put_bool("UseExternalNaviRoutes", True)
+      if not Params().get_bool("UseExternalNaviRoutes"):
+        Params().put_bool("UseExternalNaviRoutes", True)
       #print("######### ExternalNaviRoute Connected")
 
     def finish(self):
@@ -142,6 +141,7 @@ class NaviRoute():
             if type == 0:  # route
               routes = []
               count = int(len(data) / 8)
+              print("navi_route_receive", count)
 
               if count > 0:
                 for i in range(count):

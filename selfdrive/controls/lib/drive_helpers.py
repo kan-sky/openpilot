@@ -333,7 +333,11 @@ class VCruiseHelper:
 
   def update_apilot_cmd(self, controls, v_cruise_kph):
     msg = controls.sm['roadLimitSpeed']
-    self.roadSpeed = clip(0, msg.roadLimitSpeed, 150.0)
+    nda = controls.sm['naviData']
+    if nda.active:
+      self.roadSpeed = nda.roadLimitSpeed
+    else:
+      self.roadSpeed = clip(0, msg.roadLimitSpeed, 150.0)
     self.xPosValidCount = msg.xPosValidCount
 
     if msg.xIndex > 0 and msg.xIndex != self.xIndex:      

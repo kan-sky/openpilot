@@ -100,7 +100,11 @@ class RouteEngine:
 
     self.update_location()
 
-    if self.params.get_bool("UseExternalNaviRoutes"):
+    if self.sm.updated['navInstructionNda']:
+      msg = messaging.new_message('navInstruction', valid=True)
+      msg.navInstruction = self.sm['navInstructionNda']
+      print("navInstructionNda", msg.navInstruction)
+      self.pm.send('navInstruction', msg)
       return
     if self.carrot_route_active:
       #return
@@ -480,7 +484,7 @@ class RouteEngine:
 
 def main():
   pm = messaging.PubMaster(['navInstruction', 'navRoute'])
-  sm = messaging.SubMaster(['liveLocationKalman', 'managerState', 'roadLimitSpeed'])
+  sm = messaging.SubMaster(['liveLocationKalman', 'managerState', 'roadLimitSpeed', 'naviData', 'navInstructionNda'])
 
   rk = Ratekeeper(1.0)
   route_engine = RouteEngine(sm, pm)

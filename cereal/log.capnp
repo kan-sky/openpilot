@@ -2394,6 +2394,7 @@ struct Event {
     userFlag @93 :UserFlag;
     uiDebug @102 :UIDebug;
     roadLimitSpeed @128 :RoadLimitSpeed;
+    navInstructionNda @129 :NavInstruction;
 
     # *********** debug ***********
     testJoystick @52 :Joystick;

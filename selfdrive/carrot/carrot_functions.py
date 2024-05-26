@@ -12,6 +12,7 @@ from openpilot.selfdrive.modeld.constants import ModelConstants
 from abc import abstractmethod, ABC
 from openpilot.selfdrive.frogpilot.functions.map_turn_speed_controller import MapTurnSpeedController
 from openpilot.selfdrive.navd.helpers import Coordinate
+from openpilot.selfdrive.controls.neokii.navi_controller import SpeedLimiter
 EventName = car.CarEvent.EventName
 
 MIN_TARGET_V = 5    # m/s
@@ -478,6 +479,8 @@ class CarrotPlannerHelper:
     self.frame = 0
 
     self.v_cruise_kph = 255
+
+    self.is_metric = self.params.get_bool("IsMetric")
     
     self.vision_turn = CarrotVisionTurn(self.params)
     self.turnSpeed = 300
@@ -537,6 +540,10 @@ class CarrotPlannerHelper:
     if self.navi_speed_manager.event >= 0:
       self.event = self.navi_speed_manager.event    
 
+    apply_limit_speed, road_limit_speed, left_dist, first_started, cam_type, max_speed_log = \
+      SpeedLimiter.instance().get_max_speed(v_cruise_kph, self.is_metric)
+    nda_speed_kph = apply_limit_speed  if apply_limit_speed > 0 else 255
+
     self.log = self.vision_turn.log
     if len(self.log):
       self.log += "|"
@@ -556,6 +563,7 @@ class CarrotPlannerHelper:
         (map_turn_kph, "mTurn"),
         (navi_helper_kph, "noo"),
         (navi_speed_manager_kph, "navi"),
+        (nda_speed_kph, "nda"),
     ]
 
     # min 함수를 사용하여 가장 작은 값을 가진 튜플 찾기
@@ -564,10 +572,10 @@ class CarrotPlannerHelper:
       self.source = "none"
       self.gas_override_speed = 0
     else:
-      if sm['carState'].gasPressed and self.source != "navi":
+      if sm['carState'].gasPressed and self.source not in ["navi", "nda"]:
         self.gas_override_speed = sm['carState'].vEgoCluster * 3.6
       elif sm['carState'].brakePressed:
         self.gas_override_speed = 0
-      self.log = self.log + "v{:.0f}:m{:.0f},n{:.0f},s{:.0f},g{:.0f}".format(vision_turn_kph, map_turn_kph, navi_helper_kph, navi_speed_manager_kph, self.gas_override_speed)
+      self.log = self.log + "v{:.0f}:m{:.0f},n{:.0f},s{:.0f},a{:.0f},g{:.0f}".format(vision_turn_kph, map_turn_kph, navi_helper_kph, navi_speed_manager_kph, nda_speed_kph, self.gas_override_speed)
       self.v_cruise_kph = max(self.v_cruise_kph, self.gas_override_speed)
     return self.v_cruise_kph
