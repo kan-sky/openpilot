@@ -436,6 +436,7 @@ class LongitudinalMpc:
     t_follow = self.get_T_FOLLOW(personality)
     #self.debugLongText = "v_cruise ={:.1f}".format(v_cruise)
     carstate = sm['carState']
+    controlsState = sm['controlsState']
     model = sm['modelV2']
 
     self.update_params()
@@ -450,7 +451,6 @@ class LongitudinalMpc:
     if Params().get_int("CarrotTest3") in [1,2]:
       if radarstate.leadOne.dPath * radarstate.leadOne.vLat > 0:
         t_follow *= interp(abs(radarstate.leadOne.dPath + radarstate.leadOne.vLat), [0.5, 1.0, 2.0], [1.0, 0.5, 0.2])
-
     self.t_follow = t_follow
     
     self.status = radarstate.leadOne.status or radarstate.leadTwo.status
@@ -470,7 +470,7 @@ class LongitudinalMpc:
       self.mode == 'blended'
       stop_x = 1000.0
     else:
-      v_cruise, stop_x, self.mode = self.update_apilot(carstate, radarstate, model, v_cruise, carrot_planner)
+      v_cruise, stop_x, self.mode = self.update_apilot(carstate, controlsState, radarstate, model, v_cruise, carrot_planner)
     #self.debugLongText = "{},{},{:.1f},tf={:.2f},{:.1f},stop={:.1f},{:.1f},xv={:.0f},{:.0f}".format(
     #  str(self.xState), str(self.trafficState), v_cruise*3.6, t_follow, t_follow*v_ego+6.0, stop_x, self.stopDist,x[-1],v[-1])
     xe, ve = x[-1], v[-1]
@@ -669,7 +669,7 @@ class LongitudinalMpc:
       self.trafficState = TrafficState.off
 
 
-  def update_apilot(self, carstate, radarstate, model, v_cruise, carrot_planner):
+  def update_apilot(self, carstate, controlsState, radarstate, model, v_cruise, carrot_planner):
     v_ego = carstate.vEgo
     v_ego_kph = v_ego * CV.MS_TO_KPH
     x = model.position.x
@@ -687,7 +687,10 @@ class LongitudinalMpc:
     self.check_model_stopping(v, v_ego, x[-1], y)
 
     if (carstate.rightBlinker and not carstate.leftBlinker) or self.myDrivingMode == 4 or (carrot_planner.rightBlinkerExt % 10000) > 0:
-      self.trafficState = TrafficState.off    
+      self.trafficState = TrafficState.off
+    elif controlsState.trafficLight in [22, 2]:
+      self.trafficState = TrafficState.green
+      self.xState = XState.e2eCruise
 
     if self.xState == XState.e2eStopped:
       if carstate.gasPressed:

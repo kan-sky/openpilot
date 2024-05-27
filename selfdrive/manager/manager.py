@@ -30,6 +30,7 @@ def get_default_params():
     ("LanguageSetting", "main_en"),
     ("OpenpilotEnabledToggle", "1"),
     ("LongitudinalPersonality", str(log.LongitudinalPersonality.standard)),
+    ("LongitudinalPersonalityMax", "3"),
     ("AlwaysOnLateralEnabled", "1"),
     ("SearchInput", "0"),
     ("GMapKey", "0"),
@@ -83,6 +84,8 @@ def get_default_params():
 
     ("AutoLaneChangeSpeed", "20"),
     ("LaneChangeNeedTorque", "0"),
+    ("ManualSteeringOverride", "0"),
+    ("LaneChangeLaneCheck", "1"),
 
     ("AutoTurnControlSpeedLaneChange", "60"),
     ("AutoTurnControlSpeedTurn", "20"),
@@ -155,6 +158,7 @@ def get_default_params():
     ("CustomSteerDeltaUp", "0"),       
     ("CustomSteerDeltaDown", "0"),       
     ("SpeedFromPCM", "2"),       
+    ("MaxTimeOffroadMin", "60"),       
     ("SteerActuatorDelay", "50"),       
     ("CruiseOnDist", "0"),
     ("MSLCEnabled", "0"),
@@ -291,6 +295,10 @@ def manager_thread() -> None:
     ignore.append("pandad")
   ignore += [x for x in os.getenv("BLOCK", "").split(",") if len(x) > 0]
 
+  #if params.get_bool("UseExternalNaviRoutes"):
+  #  ignore += ["navd"]
+  #elif not params.get_bool("UseExternalNaviRoutes"):
+  #  ignore += ["navi_route"]
   sm = messaging.SubMaster(['deviceState', 'carParams'], poll='deviceState')
   pm = messaging.PubMaster(['managerState'])
 

@@ -737,6 +737,7 @@ struct ControlsState @0x97ff69c53601abf1 {
   leftBlinkerExt @68 : Int32;
   rightBlinkerExt @69 : Int32;
   debugText1 @70 : Text;
+  trafficLight @71 : Int32;
 
   enum OpenpilotState @0xdbe58b96d2d1ac61 {
     disabled @0;
@@ -2181,6 +2182,9 @@ struct NavInstruction {
   speedLimitSign @11 :SpeedLimitSign;
 
   allManeuvers @12 :List(Maneuver);
+  
+  imageUrl @13 :Text;
+  
 
   struct Lane {
     directions @0 :List(Direction);
@@ -2390,6 +2394,7 @@ struct Event {
     userFlag @93 :UserFlag;
     uiDebug @102 :UIDebug;
     roadLimitSpeed @128 :RoadLimitSpeed;
+    navInstructionNda @129 :NavInstruction;
 
     # *********** debug ***********
     testJoystick @52 :Joystick;
@@ -2407,9 +2412,10 @@ struct Event {
     customReservedRawData2 @126 :Data;
 
     # *********** Custom: reserved for forks ***********
-    customReserved0 @107 :Custom.CustomReserved0;
-    customReserved1 @108 :Custom.CustomReserved1;
-    customReserved2 @109 :Custom.CustomReserved2;
+    naviData @107 :Custom.NaviData;
+    naviGps @108 :Custom.NaviGps;
+    naviObstacles @109 :Custom.NaviObstacles;
+
     customReserved3 @110 :Custom.CustomReserved3;
     customReserved4 @111 :Custom.CustomReserved4;
     customReserved5 @112 :Custom.CustomReserved5;
