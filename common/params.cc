@@ -159,6 +159,7 @@ std::unordered_map<std::string, uint32_t> keys = {
     {"LiveParameters", PERSISTENT},
     {"LiveTorqueParameters", PERSISTENT | DONT_LOG},
     {"LongitudinalPersonality", PERSISTENT},
+    {"LongitudinalPersonalityMax", PERSISTENT},
     {"NavDestination", CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION},
     {"NavDestinationWaypoints", CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION},
     {"NavPastDestinations", PERSISTENT},
@@ -250,7 +251,9 @@ std::unordered_map<std::string, uint32_t> keys = {
     { "AutoTurnControlSpeedTurn", PERSISTENT },
     { "AutoTurnControlTurnEnd", PERSISTENT },
     { "AutoTurnMapChange", PERSISTENT }, 
-    { "LaneChangeNeedTorque", PERSISTENT }, 
+    { "LaneChangeNeedTorque", PERSISTENT },
+    { "ManualSteeringOverride", PERSISTENT },
+    { "LaneChangeLaneCheck", PERSISTENT },
     { "AutoNaviSpeedCtrl", PERSISTENT },
     { "AutoNaviSpeedCtrlEnd", PERSISTENT },
     { "AutoNaviSpeedBumpTime", PERSISTENT },
@@ -321,6 +324,7 @@ std::unordered_map<std::string, uint32_t> keys = {
     { "CustomSteerDeltaUp", PERSISTENT },
     { "CustomSteerDeltaDown", PERSISTENT },
     { "SpeedFromPCM", PERSISTENT },
+    { "MaxTimeOffroadMin", PERSISTENT },
     { "CarrotRecord", PERSISTENT },
     { "CarrotDisplay", PERSISTENT },
     { "MSLCEnabled", PERSISTENT },
@@ -362,6 +366,9 @@ std::unordered_map<std::string, uint32_t> keys = {
     {"RoadNameUI", PERSISTENT},
     {"SchedulePending", PERSISTENT},
     {"TrafficStopDistanceAdjust", PERSISTENT},
+
+    {"UseExternalNaviRoutes", CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION },
+
 };
 
 } // namespace

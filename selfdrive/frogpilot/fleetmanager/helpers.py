@@ -485,6 +485,8 @@ def get_all_toggle_values():
     "AutoTurnControlTurnEnd",
     "AutoTurnMapChange", 
     "LaneChangeNeedTorque", 
+    "ManualSteeringOverride", 
+    "LaneChangeLaneCheck", 
     "AutoNaviSpeedCtrl",
     "AutoNaviSpeedCtrlEnd",
     "AutoNaviSpeedBumpTime",
@@ -554,6 +556,7 @@ def get_all_toggle_values():
     "CustomSteerDeltaUp",
     "CustomSteerDeltaDown",
     "SpeedFromPCM",
+    "MaxTimeOffroadMin"
     "CarrotRecord",
     "CarrotDisplay",
     "MSLCEnabled",
