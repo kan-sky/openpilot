@@ -262,7 +262,7 @@ def gen_long_ocp():
 
 class LongitudinalMpc:
   def __init__(self, mode='acc'):
-    self.trafficStopDistanceAdjust = 1.5
+    self.trafficStopDistanceAdjust = 1.5 # 높을수록 신호정지선 가까이에 섭니다.
     self.aChangeCost = 200
     self.aChangeCostStart = 40
     self.tFollowSpeedAdd = 0.0
@@ -281,6 +281,7 @@ class LongitudinalMpc:
     self.vFilter = StreamingMovingAverage(10)
     self.t_follow_prev = self.get_T_FOLLOW()
     self.stop_distance = STOP_DISTANCE
+    self.trafficStopDistanceAdjust = 0.
     self.fakeCruiseDistance = 0.0
     self.comfort_brake = COMFORT_BRAKE
     self.xState = XState.cruise
@@ -435,6 +436,7 @@ class LongitudinalMpc:
     t_follow = self.get_T_FOLLOW(personality)
     #self.debugLongText = "v_cruise ={:.1f}".format(v_cruise)
     carstate = sm['carState']
+    controlsState = sm['controlsState']
     model = sm['modelV2']
 
     self.update_params()
@@ -468,7 +470,7 @@ class LongitudinalMpc:
       self.mode == 'blended'
       stop_x = 1000.0
     else:
-      v_cruise, stop_x, self.mode = self.update_apilot(carstate, radarstate, model, v_cruise, carrot_planner)
+      v_cruise, stop_x, self.mode = self.update_apilot(carstate, controlsState, radarstate, model, v_cruise, carrot_planner)
     #self.debugLongText = "{},{},{:.1f},tf={:.2f},{:.1f},stop={:.1f},{:.1f},xv={:.0f},{:.0f}".format(
     #  str(self.xState), str(self.trafficState), v_cruise*3.6, t_follow, t_follow*v_ego+6.0, stop_x, self.stopDist,x[-1],v[-1])
     xe, ve = x[-1], v[-1]
@@ -635,6 +637,7 @@ class LongitudinalMpc:
       self.tFollowGap4 = params.get_float("TFollowGap4") / 100.
     elif self.lo_timer == 120:
       self.stop_distance = params.get_float("StopDistanceCarrot") / 100.
+      self.trafficStopDistanceAdjust = params.get_float("TrafficStopDistanceAdjust") / 100.	  
 
   def update_stop_dist(self, stop_x):
     stop_x = self.xStopFilter.process(stop_x, median = True)
@@ -666,7 +669,7 @@ class LongitudinalMpc:
       self.trafficState = TrafficState.off
 
 
-  def update_apilot(self, carstate, radarstate, model, v_cruise, carrot_planner):
+  def update_apilot(self, carstate, controlsState, radarstate, model, v_cruise, carrot_planner):
     v_ego = carstate.vEgo
     v_ego_kph = v_ego * CV.MS_TO_KPH
     x = model.position.x
@@ -684,7 +687,10 @@ class LongitudinalMpc:
     self.check_model_stopping(v, v_ego, x[-1], y)
 
     if (carstate.rightBlinker and not carstate.leftBlinker) or self.myDrivingMode == 4 or (carrot_planner.rightBlinkerExt % 10000) > 0:
-      self.trafficState = TrafficState.off    
+      self.trafficState = TrafficState.off
+    elif controlsState.trafficLight in [22, 2]:
+      self.trafficState = TrafficState.green
+      self.xState = XState.e2eCruise
 
     if self.xState == XState.e2eStopped:
       if carstate.gasPressed:

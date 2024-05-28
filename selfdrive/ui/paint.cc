@@ -1003,11 +1003,13 @@ void DrawApilot::drawConnInfo(const UIState* s) {
     const auto road_limit_speed = sm["roadLimitSpeed"].getRoadLimitSpeed();
     int radar_tracks = params.getBool("EnableRadarTracks");
     int sccBus = params.getInt("SccConnectedBus2");
-    int activeNDA = road_limit_speed.getActive();
+    int activeAPM = road_limit_speed.getActive();
+    const auto naviData = sm["naviData"].getNaviData();
+    int activeNDA = naviData.getActive();
 
     static int activeOSM = 0;
     //auto navInstruction = sm["navInstruction"].getNavInstruction();
-    //if (navInstruction.getSpeedLimit() > 0 && activeNDA < 200) activeOSM = 100;
+    //if (navInstruction.getSpeedLimit() > 0 && activeAPM < 200) activeOSM = 100;
     if (false) { //sm.updated("liveMapData")) {
         activeOSM = 100;
     }
@@ -1019,14 +1021,39 @@ void DrawApilot::drawConnInfo(const UIState* s) {
         int hda_speedLimitDistance = car_state.getSpeedLimitDistance();
         int naviCluster = 0;// HW: (int)car_params.getNaviCluster();
         int y = 10;
-        if (sccBus) ui_draw_image(s, { 30, y, 120, 54 }, "ic_scc2", 1.0f);
-        if (activeNDA >= 200) ui_draw_image(s, { 30 + 135, y, 120, 54 }, "ic_apn", 1.0f);
-        else if (hda_speedLimit > 0 && hda_speedLimitDistance > 0) ui_draw_image(s, { 30 + 135, y, 120, 54 }, "ic_hda", 1.0f);
-        else if (activeNDA >= 100) ui_draw_image(s, { 30 + 135, y, 120, 54 }, "ic_apm", 1.0f);
-        else if (activeNDA % 100 > 0) ui_draw_image(s, { 30 + 135, y, 120, 54 }, "ic_nda", 1.0f);
-        else if (naviCluster > 0) ui_draw_image(s, { 30 + 135, y, 120, 54 }, "ic_hda", 1.0f);
-        if (radar_tracks) ui_draw_image(s, { 30 + 135 * 2, y, 240, 54 }, "ic_radartracks", 1.0f);
-        if (activeOSM > 0) ui_draw_image(s, { 30 + 120 + 135 * 3, y, 120, 54 }, "ic_osm", 1.0f);
+        int x = 30;
+        if (sccBus) {
+            ui_draw_image(s, { x, y, 120, 54 }, "ic_scc2", 1.0f);
+            x += 135;
+        }
+        if (activeAPM >= 200) {
+            ui_draw_image(s, { x, y, 120, 54 }, "ic_apn", 1.0f);
+            x += 135;
+        }
+        else if (hda_speedLimit > 0 && hda_speedLimitDistance > 0) {
+            ui_draw_image(s, { x, y, 120, 54 }, "ic_hda", 1.0f);
+            x += 135;
+        }
+        else if (activeAPM >= 100) {
+            ui_draw_image(s, { x, y, 120, 54 }, "ic_apm", 1.0f);
+            x += 135;
+        }
+        else if (naviCluster > 0) {
+            ui_draw_image(s, { x, y, 120, 54 }, "ic_hda", 1.0f);
+            x += 135;
+        }
+        if (radar_tracks) {
+            ui_draw_image(s, { x, y, 240, 54 }, "ic_radartracks", 1.0f);
+            x += (120 + 135);
+        }
+        if (activeOSM > 0) {
+            ui_draw_image(s, { x, y, 120, 54 }, "ic_osm", 1.0f);
+            x += 135;
+        }
+        if (activeNDA > 0) {
+            ui_draw_image(s, { x, y, 120, 54 }, "ic_nda", 1.0f);
+            x += 135;
+        }
     }
 }
 void DrawApilot::drawGapInfo(const UIState* s, int x, int y) {
@@ -1920,7 +1947,7 @@ void DrawApilot::drawDeviceState(UIState* s, bool show) {
 
     const auto cpuTempC = deviceState.getCpuTempC();
     //const auto gpuTempC = deviceState.getGpuTempC();
-    //float ambientTemp = deviceState.getAmbientTempC();
+    float ambientTemp = deviceState.getAmbientTempC();
     float cpuTemp = 0.f;
     //float gpuTemp = 0.f;
 
@@ -1940,16 +1967,16 @@ void DrawApilot::drawDeviceState(UIState* s, bool show) {
     }
     auto car_state = sm["carState"].getCarState();
     //const cereal::ModelDataV2::Reader& model = sm["modelV2"].getModelV2();
-    sprintf(str, "MEM: %d%% STORAGE: %.0f%% CPU: %.0f°C", memoryUsagePercent, freeSpacePercent, cpuTemp);
+    sprintf(str, "MEM: %d%% STORAGE: %.0f%% CPU: %.0f°C AMBIENT: %.0f°C", memoryUsagePercent, freeSpacePercent, cpuTemp, ambientTemp);
     int r = interp<float>(cpuTemp, { 50.f, 90.f }, { 200.f, 255.f }, false);
     int g = interp<float>(cpuTemp, { 50.f, 90.f }, { 255.f, 200.f }, false);
     NVGcolor textColor = nvgRGBA(r, g, 200, 255);
     float engineRpm = car_state.getEngineRpm();
     float motorRpm = car_state.getMotorRpm();
-    if (false && s->fb_w > 1200 && show) {
-        ui_draw_text(s, s->fb_w - 20, 85, str, 35, textColor, BOLD);
+    if (s->fb_w > 1200 && show) {
+        ui_draw_text(s, s->fb_w - 20, 40, str, 35, textColor, BOLD);
         sprintf(str, "FPS: %d, %s: %.0f CHARGE: %.0f%%                           ", g_fps, (motorRpm > 0.0) ? "MOTOR" : "RPM", (motorRpm > 0.0) ? motorRpm : engineRpm, car_state.getChargeMeter());
-        ui_draw_text(s, s->fb_w - 20, 120, str, 35, textColor, BOLD);
+        ui_draw_text(s, s->fb_w - 20, 85, str, 35, textColor, BOLD);
     }
     //nvgTextAlign(s->vg, NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM);
     //ui_draw_text(s, s->fb_w - 20, s->fb_h - 15, (read_ip_count < 30) ? ip_address : gitBranch.toStdString().c_str(), 30, COLOR_WHITE, BOLD);

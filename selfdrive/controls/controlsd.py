@@ -13,7 +13,7 @@ from cereal.visionipc import VisionIpcClient, VisionStreamType
 
 from openpilot.common.conversions import Conversions as CV
 from openpilot.common.git import get_short_branch
-from openpilot.common.numpy_fast import clip
+from openpilot.common.numpy_fast import clip, interp
 from openpilot.common.params import Params
 from openpilot.common.realtime import config_realtime_process, Priority, Ratekeeper, DT_CTRL
 from openpilot.common.swaglog import cloudlog
@@ -29,6 +29,10 @@ from openpilot.selfdrive.controls.lib.latcontrol_angle import LatControlAngle, S
 from openpilot.selfdrive.controls.lib.latcontrol_torque import LatControlTorque
 from openpilot.selfdrive.controls.lib.longcontrol import LongControl
 from openpilot.selfdrive.controls.lib.vehicle_model import VehicleModel
+from openpilot.selfdrive.controls.lib.drive_helpers import apply_deadzone
+from selfdrive.controls.lib.lateral_planner import TRAJECTORY_SIZE
+from openpilot.selfdrive.controls.lib.vehicle_model import ACCELERATION_DUE_TO_GRAVITY
+from openpilot.selfdrive.modeld.constants import ModelConstants
 
 from openpilot.system.hardware import HARDWARE
 
@@ -58,6 +62,8 @@ ACTUATOR_FIELDS = tuple(car.CarControl.Actuators.schema.fields.keys())
 ACTIVE_STATES = (State.enabled, State.softDisabling, State.overriding)
 ENABLED_STATES = (State.preEnabled, *ACTIVE_STATES)
 
+MAX_ABS_PITCH = 0.314 # 20% grade = 18 degrees = pi/10 radians
+MAX_ABS_PRED_PITCH_DELTA = MAX_ABS_PITCH * 0.5
 
 class Controls:
   def __init__(self, CI=None):
@@ -99,8 +105,8 @@ class Controls:
     self.sm = messaging.SubMaster(['deviceState', 'pandaStates', 'peripheralState', 'modelV2', 'liveCalibration',
                                    'carOutput', 'driverMonitoringState', 'longitudinalPlan', 'liveLocationKalman',
                                    'managerState', 'liveParameters', 'radarState', 'liveTorqueParameters',
-                                   'testJoystick', 'lateralPlan', 'roadLimitSpeed'] + self.camera_packets + self.sensor_packets,
-                                  ignore_alive=ignore, ignore_avg_freq=ignore+['radarState', 'testJoystick'], ignore_valid=['testJoystick', 'roadLimitSpeed'],
+                                   'testJoystick', 'lateralPlan', 'roadLimitSpeed', 'naviData'] + self.camera_packets + self.sensor_packets,
+                                  ignore_alive=ignore, ignore_avg_freq=ignore+['radarState', 'testJoystick'], ignore_valid=['testJoystick', 'roadLimitSpeed', 'naviData'],
                                   frequency=int(1/DT_CTRL))
 
     self.joystick_mode = self.params.get_bool("JoystickDebugMode")
@@ -194,6 +200,10 @@ class Controls:
     self._panda_controls_not_allowed = False #carrot
     self.enable_avail = False
     self.carrot_tmux_sent = 0
+    self.steerDisabledTemporary = False
+    self.seering_pressed_count = 0
+    self.pitch = 0.0
+    self.pitch_accel_deadzone = 0.01 # [radians] ≈ 1% grade 
 
   def set_initial_state(self):
     if REPLAY:
@@ -363,6 +373,8 @@ class Controls:
       self.rk.reset_time()
     if len(self.sm['radarState'].radarErrors) or (not self.rk.lagging and not self.sm.all_checks(['radarState'])):
       self.events.add(EventName.radarFault)
+      #print("sm.all_check = ", self.sm.all_alive(['radarState']), self.sm.all_freq_ok(['radarState']), self.sm.all_valid(['radarState']))
+
     if not self.sm.valid['pandaStates']:
       self.events.add(EventName.usbError)
     if CS.canTimeout:
@@ -445,7 +457,7 @@ class Controls:
     # TODO: fix simulator
     if not SIMULATION or REPLAY:
       # Not show in first 1 km to allow for driving out of garage. This event shows after 5 minutes
-      if not self.sm['liveLocationKalman'].gpsOK and self.sm['liveLocationKalman'].inputsOK and (self.distance_traveled > 1000):
+      if not self.sm['liveLocationKalman'].gpsOK and self.sm['liveLocationKalman'].inputsOK and (self.distance_traveled > 1500):
         self.events.add(EventName.noGps)
       if self.sm['liveLocationKalman'].gpsOK or self.v_cruise_helper.xPosValidCount > 0:
         self.distance_traveled = 0
@@ -670,6 +682,10 @@ class Controls:
     long_plan = self.sm['longitudinalPlan']
     model_v2 = self.sm['modelV2']
 
+    if self.sm.updated['liveParameters'] and len(model_v2.orientation.y) == TRAJECTORY_SIZE:
+      future_pitch_diff = clip(interp(self.CS.pitch_future_time, ModelConstants.T_IDXS, model_v2.orientation.y), -MAX_ABS_PRED_PITCH_DELTA, MAX_ABS_PRED_PITCH_DELTA)
+      self.CS.pitch_raw = self.sm['liveParameters'].pitch + future_pitch_diff
+
     CC = car.CarControl.new_message()
     CC.enabled = self.enabled
 
@@ -683,11 +699,31 @@ class Controls:
       self.lateral_allowed = lateral_allowed
       
       lateral_enabled = self.lateral_allowed and driving_gear
+
+    manualSteeringOverride = self.params.get_int("ManualSteeringOverride")
+    if CS.steeringPressed:
+      self.seering_pressed_count += 1
+      if self.sm['modelV2'].meta.laneChangeState in (LaneChangeState.laneChangeStarting,
+                                                    LaneChangeState.laneChangeFinishing):
+        lane_change_direction = self.sm['modelV2'].meta.laneChangeDirection
+        steering_pressed = ((CS.steeringTorque < 0 and lane_change_direction == LaneChangeDirection.left) or
+                          (CS.steeringTorque > 0 and lane_change_direction == LaneChangeDirection.right))
+        if steering_pressed and manualSteeringOverride > 0:
+          self.steerDisabledTemporary = True
+      elif manualSteeringOverride == 2 and self.steering_pressed_count > 1.5 / DT_CTRL:
+        self.steerDisabledTemporary = True
+    else:
+      self.steering_pressed_count = 0
+    if self.steerDisabledTemporary and self.sm['modelV2'].meta.desireState[0] > 0.9:
+      self.steerDisabledTemporary = False
     # Check which actuators can be enabled
     standstill = CS.vEgo <= max(self.CP.minSteerSpeed, MIN_LATERAL_CONTROL_SPEED) or CS.standstill
     CC.latActive = (self.active or lateral_enabled) and not CS.steerFaultTemporary and not CS.steerFaultPermanent and \
-                   (not standstill or self.joystick_mode)
+                   (not standstill or self.joystick_mode) and not self.steerDisabledTemporary
     CC.longActive = self.enabled and not self.events.contains(ET.OVERRIDE_LONGITUDINAL) and self.CP.openpilotLongitudinalControl
+
+    if self.sm.updated['liveParameters'] and len(model_v2.orientation.y) == TRAJECTORY_SIZE:
+      self.CS.pitch_raw = self.sm['liveParameters'].pitch + future_pitch_diff
 
     actuators = CC.actuators
     actuators.longControlState = self.LoC.long_control_state
@@ -714,11 +750,18 @@ class Controls:
       actuators.accel, actuators.jerk = self.LoC.update(CC.longActive, CS, long_plan, pid_accel_limits, t_since_plan, self.v_cruise_helper.softHoldActive)
       self.v_cruise_helper.accel_output = actuators.accel # carrot: for gas pedal
 
+
+      # compute pitch-compensated accel
+      if self.sm.updated['liveParameters']:
+        self.pitch = apply_deadzone(self.sm['liveParameters'].pitchFutureLong, self.pitch_accel_deadzone)
+      actuators.accelPitchCompensated = actuators.accel + ACCELERATION_DUE_TO_GRAVITY * math.sin(self.pitch)
+
+
       if len(long_plan.speeds):
         actuators.speed = long_plan.speeds[-1]
 
       # Steering PID loop and lateral MPC
-      if Params().get_int("UseLaneLineSpeedApply") == 0:
+      if self.params.get_int("UseLaneLineSpeedApply") == 0:
         self.desired_curvature = clip_curvature(CS.vEgo, self.desired_curvature, model_v2.action.desiredCurvature)
         actuators.curvature = self.desired_curvature
       else:
@@ -762,11 +805,11 @@ class Controls:
         undershooting = abs(lac_log.desiredLateralAccel) / abs(1e-3 + lac_log.actualLateralAccel) > 1.2
         turning = abs(lac_log.desiredLateralAccel) > 1.0
         good_speed = CS.vEgo > 5
-        max_torque = abs(self.last_actuators.steer) > 0.99
+        max_torque = abs(self.sm['carOutput'].actuatorsOutput.steer) > 0.99
         if undershooting and turning and good_speed and max_torque:
           lac_log.active and self.events.add(EventName.steerSaturated)
       elif lac_log.saturated:
-        if Params().get_int("UseLaneLineSpeedApply") == 0:
+        if self.params.get_int("UseLaneLineSpeedApply") == 0:
           dpath_points = model_v2.position.y
         else:
           dpath_points = lat_plan.dPathPoints
@@ -965,6 +1008,7 @@ class Controls:
     #if self.v_cruise_helper.nooHelperActivated:
     #  controlsState.debugText1 += (" " + self.v_cruise_helper.debugTextNoo)
     controlsState.debugText2 = self.v_cruise_helper.debugText2
+    controlsState.trafficLight = self.v_cruise_helper.traffic_state
 
     controlsState.leftBlinkerExt = self.v_cruise_helper.leftBlinkerExtCount + self.v_cruise_helper.blinkerExtMode
     controlsState.rightBlinkerExt = self.v_cruise_helper.rightBlinkerExtCount  + self.v_cruise_helper.blinkerExtMode

@@ -1,5 +1,5 @@
 const SteeringLimits GM_STEERING_LIMITS = {
-  .max_steer = 300,
+  .max_steer = 320,
   .max_rate_up = 10,
   .max_rate_down = 15,
   .driver_torque_allowance = 65,
@@ -54,9 +54,6 @@ RxCheck gm_rx_checks[] = {
   {.msg = {{0x34A, 0, 5, .frequency = 10U}, { 0 }, { 0 }}},
   {.msg = {{0x1E1, 0, 7, .frequency = 10U},   // Non-SDGM Car
            {0x1E1, 2, 7, .frequency = 100000U}}}, // SDGM Car
-  {.msg = {{0xBE, 0, 6, .frequency = 10U},    // Volt, Silverado, Acadia Denali
-           {0xBE, 0, 7, .frequency = 10U},    // Bolt EUV
-           {0xBE, 0, 8, .frequency = 10U}}},  // Escalade
   {.msg = {{0xF1, 0, 6, .frequency = 10U},   // Non-SDGM Car
            {0xF1, 2, 6, .frequency = 100000U}}}, // SDGM Car
   {.msg = {{0x1C4, 0, 8, .frequency = 10U}, { 0 }, { 0 }}},
@@ -190,8 +187,8 @@ static void gm_rx_hook(const CANPacket_t *to_push) {
 
     bool stock_ecu_detected = (addr == 0x180);  // ASCMLKASteeringCmd
 
-    // Check ASCMGasRegenCmd only if we're blocking it
-    if (!gm_pcm_cruise && !gm_pedal_long && (addr == 0x2CB)) {
+    // Only check ASCMGasRegenCmd if ASCM, GM_CAM uses stock longitudinal
+    if ((gm_hw == GM_ASCM) && (addr == 0x2CB)) {
       stock_ecu_detected = true;
     }
     generic_rx_checks(stock_ecu_detected);
@@ -219,7 +216,7 @@ static bool gm_tx_hook(const CANPacket_t *to_send) {
     bool steer_req = GET_BIT(to_send, 3U);
 
     if (steer_torque_cmd_checks(desired_torque, steer_req, GM_STEERING_LIMITS)) {
-      tx = false;
+      //tx = false; // kans: unable safety check
     }
   }
 

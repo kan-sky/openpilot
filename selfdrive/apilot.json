@@ -432,6 +432,32 @@
     },
     {
       "group": "조향일반",
+      "name": "ManualSteeringOverride",
+      "title": "운전자조향개입해제",
+      "descr": "1:차선변경시, 2: 1초간 운전자가 개입하면 조향해제, 직선시 자동복귀",
+      "egroup": "LATSET",
+      "etitle": "Manual Steering Override",
+      "edescr": "1: Lanechange, 2: 1sec override",
+      "min": 0,
+      "max": 2,
+      "default": 0,
+      "unit": 1
+    },
+    {
+      "group": "조향일반",
+      "name": "LaneChangeLaneCheck",
+      "title": "차선변경 차선검사",
+      "descr": "0:안함,1:검사,2:도로경계차선변경(NOO)",
+      "egroup": "LATSET",
+      "etitle": "LaneChangeLaneCheck",
+      "edescr": "",
+      "min": 0,
+      "max": 2,
+      "default": 1,
+      "unit": 1
+    },
+    {
+      "group": "조향일반",
       "name": "AutoTurnControlSpeedLaneChange",
       "title": "NOO Helper 차선변경속도(60)",
       "descr": "0:사용안함, 차선변경시 적용속도",
@@ -1058,7 +1084,7 @@
       "group": "시험",
       "name": "CarrotTest3",
       "title": "당근시험3",
-      "descr": "1:차로변경시 동적TF적용, 2:끼어들기시 동적TF적용",
+      "descr": "1,2:차로변경및 끼어들기시 동적TF적용",
       "egroup": "TEST",
       "etitle": "Carrot test",
       "edescr": "",
@@ -1469,6 +1495,19 @@
       "max": 120,
       "default": 105,
       "unit": 1
+    },
+    {
+      "group": "감속제어",
+      "name": "TrafficStopDistanceAdjust",
+      "title": "신호정지 위치조정(200cm)",
+      "descr": "높을수록 신호정지선 가까이에 섭니다.",
+      "egroup": "SPEED",
+      "etitle": "TrafficStopDistance(200cm)",
+      "edescr": "+Value : forward",
+      "min": -1000,
+      "max": 1000,
+      "default": 150,
+      "unit": 10
     }
   ]
 }

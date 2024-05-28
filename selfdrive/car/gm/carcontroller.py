@@ -26,6 +26,10 @@ PITCH_DEADZONE = 0.01 # [radians] 0.01 ? 1% grade
 BRAKE_PITCH_FACTOR_BP = [5., 10.] # [m/s] smoothly revert to planned accel at low speeds
 BRAKE_PITCH_FACTOR_V = [0., 1.] # [unitless in [0,1]]; don't touch
 
+# only use pitch-compensated acceleration at 10m/s+
+ACCEL_PITCH_FACTOR_BP = [5., 10.] # [m/s]
+ACCEL_PITCH_FACTOR_V = [0., 1.] # [unitless in [0-1]]
+
 class CarController(CarControllerBase):
   def __init__(self, dbc_name, CP, VM):
     self.CP = CP
@@ -146,10 +150,12 @@ class CarController(CarControllerBase):
           self.apply_brake = int(min(-100 * self.CP.stopAccel, self.params.MAX_BRAKE))
         else:
           # Normal operation
-          brake_accel = actuators.accel + self.accel_g * interp(CS.out.vEgo, BRAKE_PITCH_FACTOR_BP, BRAKE_PITCH_FACTOR_V)
+          #brake_accel = actuators.accel + self.accel_g * interp(CS.out.vEgo, BRAKE_PITCH_FACTOR_BP, BRAKE_PITCH_FACTOR_V)
           if self.CP.carFingerprint in EV_CAR and self.use_ev_tables:
+            k = interp(CS.out.vEgo, ACCEL_PITCH_FACTOR_BP, ACCEL_PITCH_FACTOR_V)
+            brake_accel = k * actuators.accelPitchCompensated + (1. - k) * actuators.accel
             self.params.update_ev_gas_brake_threshold(CS.out.vEgo)
-            self.apply_gas = int(round(interp(accel if self.long_pitch else actuators.accel, self.params.EV_GAS_LOOKUP_BP, self.params.GAS_LOOKUP_V)))
+            self.apply_gas = int(round(interp(actuators.accelPitchCompensated if self.long_pitch else actuators.accel, self.params.EV_GAS_LOOKUP_BP, self.params.GAS_LOOKUP_V)))
             self.apply_brake = int(round(interp(brake_accel if self.long_pitch else actuators.accel, self.params.EV_BRAKE_LOOKUP_BP, self.params.BRAKE_LOOKUP_V)))
           else:
             self.apply_gas = int(round(interp(accel if self.long_pitch else actuators.accel, self.params.GAS_LOOKUP_BP, self.params.GAS_LOOKUP_V)))
@@ -188,11 +194,6 @@ class CarController(CarControllerBase):
             resume = (actuators.longControlState not in [LongCtrlState.starting]) or CC.cruiseControl.resume
             at_full_stop = at_full_stop and not resume
 
-          if actuators.longControlState in [LongCtrlState.stopping, LongCtrlState.starting]:
-            if (self.frame - self.last_button_frame) * DT_CTRL > 0.2:
-              self.last_button_frame = self.frame
-              for i in range(1, 10):
-                can_sends.append(gmcan.create_buttons(self.packer_pt, CanBus.POWERTRAIN, CS.buttons_counter, CruiseButtons.RES_ACCEL))
           # GasRegenCmdActive needs to be 1 to avoid cruise faults. It describes the ACC state, not actuation
           can_sends.append(gmcan.create_gas_regen_command(self.packer_pt, CanBus.POWERTRAIN, self.apply_gas, idx, CC.enabled, at_full_stop))
           can_sends.append(gmcan.create_friction_brake_command(self.packer_ch, friction_brake_bus, self.apply_brake,

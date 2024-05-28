@@ -45,6 +45,11 @@ class CarState(CarStateBase):
     # for delay Accfault event
     self.accFaultedCount = 0
 
+    self.pitch = 0. # radians
+    self.pitch_raw = 0. # radians
+    self.pitch_ema = 1/100
+    self.pitch_future_time = 0.5 # seconds
+
   def update(self, pt_cp, cam_cp, loopback_cp):
     ret = car.CarState.new_message()
 
@@ -89,7 +94,7 @@ class CarState(CarStateBase):
       pt_cp.vl["EBCMWheelSpdRear"]["RLWheelSpd"],
       pt_cp.vl["EBCMWheelSpdRear"]["RRWheelSpd"],
     )
-    ret.vEgoRaw = mean([ret.wheelSpeeds.fl, ret.wheelSpeeds.fr, ret.wheelSpeeds.rl, ret.wheelSpeeds.rr]) * (105./100.)
+    ret.vEgoRaw = mean([ret.wheelSpeeds.fl, ret.wheelSpeeds.fr, ret.wheelSpeeds.rl, ret.wheelSpeeds.rr])
     ret.vEgo, ret.aEgo = self.update_speed_kf(ret.vEgoRaw)
     ret.standstill = ret.wheelSpeeds.rl <= STANDSTILL_THRESHOLD and ret.wheelSpeeds.rr <= STANDSTILL_THRESHOLD
 
@@ -115,6 +120,12 @@ class CarState(CarStateBase):
     if self.CP.transmissionType == TransmissionType.direct:
       ret.regenBraking = pt_cp.vl["EBCMRegenPaddle"]["RegenPaddle"] != 0
       self.single_pedal_mode = ret.gearShifter == GearShifter.low or pt_cp.vl["EVDriveMode"]["SinglePedalModeActive"] == 1
+
+    cv_unit = 0.86
+    ret.tpms.fl = cv_unit * pt_cp.vl["TPMS"]["PRESSURE_FL"]
+    ret.tpms.fr = cv_unit * pt_cp.vl["TPMS"]["PRESSURE_FR"]
+    ret.tpms.rl = cv_unit * pt_cp.vl["TPMS"]["PRESSURE_RL"]
+    ret.tpms.rr = cv_unit * pt_cp.vl["TPMS"]["PRESSURE_RR"]
 
     if self.CP.enableGasInterceptor:
       ret.gas = (pt_cp.vl["GAS_SENSOR"]["INTERCEPTOR_GAS"] + pt_cp.vl["GAS_SENSOR"]["INTERCEPTOR_GAS2"]) / 2.
@@ -201,6 +212,9 @@ class CarState(CarStateBase):
       vEgoClu, aEgoClu = self.update_clu_speed_kf(ret.vEgoCluster)
       ret.vCluRatio = (ret.vEgo / vEgoClu) if (vEgoClu > 3. and ret.vEgo > 3.) else 1.0
 
+    self.pitch = self.pitch_ema * self.pitch_raw + (1 - self.pitch_ema) * self.pitch 
+    ret.pitch = self.pitch
+
     return ret
 
   @staticmethod
@@ -239,13 +253,14 @@ class CarState(CarStateBase):
       ("EBCMWheelSpdRear", 20),
       ("EBCMFrictionBrakeStatus", 20),
       ("PSCMSteeringAngle", 100),
-      ("ECMAcceleratorPos", 80),      
+      ("ECMAcceleratorPos", 80),
+      ("TPMS", 0),
     ]
     if CP.flags & GMFlags.SPEED_RELATED_MSG.value:
       messages.append(("SPEED_RELATED", 20))
 
     if CP.enableBsm:
-      messages.append(("BCMBlindSpotMonitor", 10))
+      messages.append(("BCMBlindSpotMonitor", 0))
 
     if CP.carFingerprint in SDGM_CAR:
       messages += [

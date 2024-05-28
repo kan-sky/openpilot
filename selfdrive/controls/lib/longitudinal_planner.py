@@ -192,8 +192,8 @@ class LongitudinalPlanner:
 
     # Interpolate 0.05 seconds and save as starting point for next iteration
     a_prev = self.a_desired
-    self.a_desired = float(interp(self.dt, ModelConstants.T_IDXS[:CONTROL_N], self.a_desired_trajectory))
-    self.v_desired_filter.x = self.v_desired_filter.x + self.dt * (self.a_desired + a_prev) / 2.0
+    self.a_desired = float(interp(self.CP.radarTimeStep, ModelConstants.T_IDXS[:CONTROL_N], self.a_desired_trajectory))
+    self.v_desired_filter.x = self.v_desired_filter.x + self.CP.radarTimeStep * (self.a_desired + a_prev) / 2.0
 
   def publish(self, sm, pm, carrot_planner):
     plan_send = messaging.new_message('longitudinalPlan')

@@ -107,8 +107,6 @@ class Track:
 
     if abs(self.aLeadK) < aLeadTauThreshold and self.jerk > -0.1:
       self.aLeadTau = aLeadTauValue
-#    elif self.jerk <= -0.1 and self.params.get_int("CarrotTest2") == 2:
-#      self.aLeadTau = 0
     else:
       self.aLeadTau = min(self.aLeadTau * 0.9, aLeadTauValue)
 
@@ -491,6 +489,8 @@ class RadarD:
 
     # *** publish radarState ***
     self.radar_state_valid = sm.all_checks() and len(radar_errors) == 0
+    if not self.radar_state_valid:
+      print("radard_valid", sm.valid)
     self.radar_state = log.RadarState.new_message()
     model_updated = False if self.radar_state.mdMonoTime == sm.logMonoTime['modelV2'] else True
     self.radar_state.mdMonoTime = sm.logMonoTime['modelV2']

@@ -94,7 +94,7 @@ class CarInterface(CarInterfaceBase):
     ret.carName = "gm"
     ret.safetyConfigs = [get_safety_config(car.CarParams.SafetyModel.gm)]
     ret.autoResumeSng = False
-    ret.enableBsm = 0x142 in fingerprint[CanBus.POWERTRAIN]
+    ret.enableBsm = True # 0x142 in fingerprint[CanBus.POWERTRAIN]
     if PEDAL_MSG in fingerprint[0]:
       ret.enableGasInterceptor = True
       ret.safetyConfigs[0].safetyParam |= Panda.FLAG_GM_GAS_INTERCEPTOR
@@ -169,7 +169,8 @@ class CarInterface(CarInterfaceBase):
     if candidate in (CAR.CHEVROLET_VOLT, CAR.CHEVROLET_VOLT_CC):
       ret.minEnableSpeed = -1
       ret.tireStiffnessFactor = 0.469  # Stock Michelin Energy Saver A/S, LiveParameters
-
+      ret.centerToFront = ret.wheelbase * 0.45  # Volt Gen 1, TODO corner weigh
+      ret.steerActuatorDelay = 0.38 if useEVTables else 0.4
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
 
       ret.longitudinalTuning.kpBP = [0.]
@@ -181,7 +182,7 @@ class CarInterface(CarInterfaceBase):
       ret.startAccel = 0.8
       ret.vEgoStarting = 0.25
       ret.vEgoStopping = 0.25
-      ret.enableBsm = 0x142 in fingerprint[CanBus.POWERTRAIN]
+      ret.enableBsm = True #0x142 in fingerprint[CanBus.POWERTRAIN]
 
       # softer long tune for ev table
       if useEVTables: 

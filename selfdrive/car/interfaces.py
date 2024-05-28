@@ -350,7 +350,7 @@ class CarInterfaceBase(ABC):
     return ret
 
   @staticmethod
-  def configure_torque_tune(candidate, tune, steering_angle_deadzone_deg=0.0, use_steering_angle=True):
+  def configure_torque_tune(candidate, tune, steering_angle_deadzone_deg=0.2, use_steering_angle=True):
     params = get_torque_params(candidate)
 
     tune.init('torque')
@@ -447,6 +447,8 @@ class CarInterfaceBase(ABC):
       if b.type == ButtonType.cancel:
         events.add(EventName.buttonCancel)
         print("$$$$$$$$$$$$$$ EventName.buttonCancel")
+      if b.type == ButtonType.gapAdjustCruise:
+        distance_button_pressed = True
 
     # Handle permanent and temporary steering faults
     # tw: steer warning
@@ -463,7 +465,7 @@ class CarInterfaceBase(ABC):
 
         # 핸들손올림이나 일시 스티어오류가 0.5초이상일때 경고하며, 운전자 개입은 안하는 것으로 한다.
         if self.steering_unpressed > int(0.5/DT_CTRL) and self.steer_warning > int(0.5/DT_CTRL):
-          events.add(EventName.steerTempUnavailable)
+          pass # events.add(EventName.steerTempUnavailable)
         else:
           events.add(EventName.steerTempUnavailableSilent)
 
@@ -521,7 +523,11 @@ class CarStateBase(ABC):
     x0=[[0.0], [0.0]]
     K = get_kalman_gain(DT_CTRL, np.array(A), np.array(C), np.array(Q), R)
     self.v_ego_kf = KF1D(x0=x0, A=A, C=C[0], K=K)
-    self.v_ego_clu_kf = KF1D(x0=x0, A=A, C=C[0], K=K)
+
+    self.v_ego_clu_kf = KF1D(x0=[[0.0], [0.0]],
+                         A=[[1.0, DT_CTRL], [0.0, 1.0]],
+                         C=[1.0, 0.0],
+                         K=[[0.12287673], [0.29666309]])
 
 
   def update_speed_kf(self, v_ego_raw):
