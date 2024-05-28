@@ -420,10 +420,6 @@ class CarrotNaviSpeedManager(CarrotBase):
     safeDist = 0
   
     
-    if camType == 22 or xSignType == 22:
-      safeSpeed = self.autoNaviSpeedBumpSpeed
-      isSpeedBump = True
-
     if msg.xSpdLimit > 0 and msg.xSpdDist > 0:
       safeSpeed = msg.xSpdLimit if safeSpeed <= 0 else safeSpeed
       leftDist = msg.xSpdDist
@@ -440,6 +436,10 @@ class CarrotNaviSpeedManager(CarrotBase):
       safeSpeed = CS.speedLimit
       leftDist = CS.speedLimitDistance
       speedLimitType = 2 if leftDist > 1 else 3
+
+    if camType == 22 or xSignType == 22:
+      safeSpeed = self.autoNaviSpeedBumpSpeed
+      isSpeedBump = True
 
     if isSpeedBump:
       speedLimitType = 1 
@@ -540,12 +540,12 @@ class CarrotPlannerHelper:
     if self.navi_speed_manager.event >= 0:
       self.event = self.navi_speed_manager.event
 
-    apply_limit_speed, road_limit_speed, left_dist, first_started, cam_type, max_speed_log = \
-      SpeedLimiter.instance().get_max_speed(v_cruise_kph, self.is_metric)
-    nda_log = "nda_type={} | ".format(cam_type) if apply_limit_speed > 0 else ""
-    nda_speed_kph = apply_limit_speed  if apply_limit_speed > 0 else 255
+    #apply_limit_speed, road_limit_speed, left_dist, first_started, cam_type, max_speed_log = \
+    #  SpeedLimiter.instance().get_max_speed(v_cruise_kph, self.is_metric)
+    #nda_log = "nda_type={} | ".format(cam_type) if apply_limit_speed > 0 else ""
+    #nda_speed_kph = apply_limit_speed  if apply_limit_speed > 0 else 255
 
-    self.log = nda_log + self.vision_turn.log
+    self.log = self.vision_turn.log
     if len(self.log):
       self.log += "|"
     self.log += self.map_turn.log
@@ -564,7 +564,7 @@ class CarrotPlannerHelper:
         (map_turn_kph, "mTurn"),
         (navi_helper_kph, "noo"),
         (navi_speed_manager_kph, "navi"),
-        (nda_speed_kph, "nda"),
+        #(nda_speed_kph, "nda"),
     ]
 
     # min 함수를 사용하여 가장 작은 값을 가진 튜플 찾기
@@ -577,6 +577,6 @@ class CarrotPlannerHelper:
         self.gas_override_speed = sm['carState'].vEgoCluster * 3.6
       elif sm['carState'].brakePressed:
         self.gas_override_speed = 0
-      self.log = self.log + "v{:.0f}:m{:.0f},n{:.0f},s{:.0f},a{:.0f},g{:.0f}".format(vision_turn_kph, map_turn_kph, navi_helper_kph, navi_speed_manager_kph, nda_speed_kph, self.gas_override_speed)
+      self.log = self.log + "v{:.0f}:m{:.0f},n{:.0f},s{:.0f},g{:.0f}".format(vision_turn_kph, map_turn_kph, navi_helper_kph, navi_speed_manager_kph, self.gas_override_speed)
       self.v_cruise_kph = max(self.v_cruise_kph, self.gas_override_speed)
     return self.v_cruise_kph
