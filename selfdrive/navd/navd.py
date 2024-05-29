@@ -102,6 +102,13 @@ class RouteEngine:
       self.nda_active_counter = 5
       return
 
+    if self.sm.updated['navRouteNda']:
+      msg = messaging.new_message('navRoute', valid=True)
+      msg.navRoute = self.sm['navRouteNda']
+      self.pm.send('navRoute', msg)
+      self.nda_active_counter = 20
+
+    print("nda_active_counter=", self.nda_active_counter)
     self.nda_active_counter -= 1
     if self.nda_active_counter > 0:
       return
@@ -497,7 +504,7 @@ class RouteEngine:
 
 def main():
   pm = messaging.PubMaster(['navInstruction', 'navRoute'])
-  sm = messaging.SubMaster(['liveLocationKalman', 'managerState', 'roadLimitSpeed', 'naviData', 'navInstructionNda'])
+  sm = messaging.SubMaster(['liveLocationKalman', 'managerState', 'roadLimitSpeed', 'naviData', 'navInstructionNda', 'navRouteNda'])
 
   rk = Ratekeeper(1.0)
   route_engine = RouteEngine(sm, pm)
