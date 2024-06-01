@@ -442,6 +442,7 @@ def transform_lng(lng, lat):
 
 def get_all_toggle_values():
   all_keys = [
+    "AlwaysOnDM",
     "IsMetric",
     "LanguageSetting",
     "LongitudinalPersonality",
@@ -543,6 +544,7 @@ def get_all_toggle_values():
     "TFollowGap4",
     "HapticFeedbackWhenSpeedCamera",
     "UseLaneLineSpeed",
+    "UseLaneLineCurveSpeed",
     "AdjustLaneOffset",
     "AdjustCurveOffset",
     "AdjustLaneTime",

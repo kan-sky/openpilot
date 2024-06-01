@@ -199,6 +199,13 @@ struct Thumbnail {
   frameId @0 :UInt32;
   timestampEof @1 :UInt64;
   thumbnail @2 :Data;
+  encoding @3 :Encoding;
+
+  enum Encoding {
+    unknown @0;
+    jpeg @1;
+    keyframe @2;
+  }
 }
 
 struct GPSNMEAData {
@@ -738,6 +745,7 @@ struct ControlsState @0x97ff69c53601abf1 {
   rightBlinkerExt @69 : Int32;
   debugText1 @70 : Text;
   trafficLight @71 : Int32;
+  useLaneLines @72 : Bool;
 
   enum OpenpilotState @0xdbe58b96d2d1ac61 {
     disabled @0;
@@ -2395,6 +2403,8 @@ struct Event {
     uiDebug @102 :UIDebug;
     roadLimitSpeed @128 :RoadLimitSpeed;
     navInstructionNda @129 :NavInstruction;
+    navRouteNda @130 :NavRoute;
+
 
     # *********** debug ***********
     testJoystick @52 :Joystick;
