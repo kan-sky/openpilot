@@ -28,7 +28,7 @@ const LongitudinalLimits SUBARU_LONG_LIMITS = {
   .max_brake = 600,     // approx -3.5 m/s^2
 
   .min_transmission_rpm = 0,
-  .max_transmission_rpm = 2400,
+  .max_transmission_rpm = 3600,
 };
 
 #define MSG_SUBARU_Brake_Status          0x13c
@@ -152,9 +152,6 @@ static void subaru_rx_hook(const CANPacket_t *to_push) {
 
   // enter controls on rising edge of ACC, exit controls on ACC off
   if ((addr == MSG_SUBARU_CruiseControl) && (bus == alt_main_bus)) {
-    // PFEIFER - AOL {{
-    acc_main_on = GET_BIT(to_push, 40U) != 0U;
-    // }} PFEIFER - AOL
     bool cruise_engaged = GET_BIT(to_push, 41U);
     pcm_cruise_check(cruise_engaged);
   }
