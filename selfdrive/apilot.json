@@ -316,8 +316,8 @@
     {
       "group": "주행튜닝",
       "name": "TrafficStopDistanceAdjust",
-      "title": "TrafficStopDistance adjust (150)cm",
-      "descr": "늘리면 정지선을 지나감?????",
+      "title": "신호정지 위치조정(150)cm",
+      "descr": "높을수록 신호정지선 가까이에 서거나 정지선을 지나감.",
       "egroup": "LONG",
       "etitle": "TrafficStopDistance adjust (150)cm",
       "edescr": "",
