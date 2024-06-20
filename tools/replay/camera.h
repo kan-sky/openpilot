@@ -1,5 +1,7 @@
 #pragma once
 
+#include <unistd.h>
+
 #include <memory>
 #include <tuple>
 #include <utility>
@@ -15,7 +17,7 @@ class CameraServer {
 public:
   CameraServer(std::pair<int, int> camera_size[MAX_CAMERAS] = nullptr);
   ~CameraServer();
-  void pushFrame(CameraType type, FrameReader* fr, const Event *event);
+  void pushFrame(CameraType type, FrameReader* fr, const cereal::EncodeIndex::Reader& eidx);
   void waitForSent();
 
 protected:
@@ -25,7 +27,7 @@ protected:
     int width;
     int height;
     std::thread thread;
-    SafeQueue<std::pair<FrameReader*, const Event *>> queue;
+    SafeQueue<std::pair<FrameReader*, const cereal::EncodeIndex::Reader>> queue;
     int cached_id = -1;
     int cached_seg = -1;
     VisionBuf * cached_buf;

@@ -49,6 +49,7 @@ def get_default_params():
     ("ShowTpms", "1"),
     ("ShowSteerMode", "2"),
     ("ShowDeviceState", "1"),
+    ("ShowCustomBrightness", "100"),
     ("ShowConnInfo", "1"),
     ("ShowLaneInfo", "1"),
     ("ShowBlindSpot", "1"),
@@ -57,6 +58,7 @@ def get_default_params():
     ("ShowRadarInfo", "1"),
     ("MixRadarInfo", "0"),
     ("CarrotTest3", "0"),
+    ("CarrotRadarTest2", "10"),
     ("ShowPathMode", "9"),
     ("ShowPathColor", "13"),
     ("ShowPathModeCruiseOff", "0"),
@@ -104,6 +106,8 @@ def get_default_params():
     ("StoppingAccel", "-40"),
 
     ("StopDistanceCarrot", "550"), 
+    ("ComfortBrake", "250"), 
+    ("TrafficStopDistanceAdjust", "150"), 
     ("ALeadTauPos", "120"), 
     ("ALeadTauNeg", "60"), 
     ("ALeadTauThreshold", "40"), 
@@ -122,6 +126,7 @@ def get_default_params():
     ("CruiseMaxVals5", "95"),
     ("CruiseMaxVals6", "80"),
     ("CruiseMinVals", "140"),
+    ("MyHighModeFactor", "100"),
     ("CruiseSpeedMin", "10"),
     ("LongitudinalTuningKpV", "100"),     
     ("LongitudinalTuningKiV", "0"),     
@@ -171,7 +176,6 @@ def get_default_params():
     ("MTSCEnabled", "0"),
     ("NNFF", "0"),
     ("NNFFLite", "0"),
-    ("TrafficStopDistanceAdjust", "150"),
   ]
   return default_params
 

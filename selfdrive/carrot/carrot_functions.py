@@ -273,7 +273,8 @@ class CarrotNaviHelper(CarrotBase):
       if nav_type in ['turn', 'fork', 'off ramp'] and roadLimitSpeed.xDistToTurn <= 0 and roadLimitSpeed.xTurnInfo < 0:
         if sm.updated['navInstruction']:
           self.nav_distance = navInstruction.maneuverDistance;
-        nav_turn = True if nav_type == 'turn' and nav_modifier in ['left', 'right', 'sharp left', 'sharp right'] else False
+        #nav_turn = True if nav_type == 'turn' and nav_modifier in ['left', 'right', 'sharp left', 'sharp right'] else False
+        nav_turn = True if nav_type == 'turn' and nav_modifier in ['left', 'right'] else False
         direction = 1 if nav_modifier in ['slight left', 'left'] else 2 if nav_modifier in ['slight right', 'right'] else 0
       else:
         if sm.updated['roadLimitSpeed']:
@@ -465,7 +466,7 @@ class CarrotNaviSpeedManager(CarrotBase):
                     msg.xSpdLimit, msg.xSpdDist,
                     msg.camLimitSpeed, msg.camLimitSpeedLeftDist,
                     CS.speedLimit, CS.speedLimitDistance)
-      self._add_log(log, EventName.speedDown if applySpeed < v_ego * CV.MS_TO_KPH else -1)
+      self._add_log(log) #, EventName.speedDown if applySpeed < v_cruise_kph else -1)
     #self.debugText2 = log
     if speedLimitType == 2:
       self.activeAPM += 1000

@@ -93,8 +93,20 @@ def drain_sock_raw(sock: SubSocket, wait_for_one: bool = False) -> List[bytes]:
 
 def drain_sock(sock: SubSocket, wait_for_one: bool = False) -> List[capnp.lib.capnp._DynamicStructReader]:
   """Receive all message currently available on the queue"""
-  msgs = drain_sock_raw(sock, wait_for_one=wait_for_one)
-  return [log_from_bytes(m) for m in msgs]
+  ret: List[capnp.lib.capnp._DynamicStructReader] = []
+  while 1:
+    if wait_for_one and len(ret) == 0:
+      dat = sock.receive()
+    else:
+      dat = sock.receive(non_blocking=True)
+
+    if dat is None:  # Timeout hit
+      break
+
+    dat = log_from_bytes(dat)
+    ret.append(dat)
+
+  return ret
 
 
 # TODO: print when we drop packets?
@@ -160,6 +172,8 @@ class SubMaster:
 
     self.max_freq = {}
     self.min_freq = {}
+
+    self.avg_freq = {}
 
     self.poller = Poller()
     polled_services = set([poll, ] if poll is not None else services)
@@ -255,6 +269,8 @@ class SubMaster:
         except ZeroDivisionError:
           avg_freq = 0
           avg_freq_recent = 0
+
+        self.avg_freq[s] = avg_freq
 
         avg_freq_ok = self.min_freq[s] <= avg_freq <= self.max_freq[s]
         recent_freq_ok = self.min_freq[s] <= avg_freq_recent <= self.max_freq[s]

@@ -442,7 +442,6 @@ def transform_lng(lng, lat):
 
 def get_all_toggle_values():
   all_keys = [
-    "AlwaysOnDM",
     "IsMetric",
     "LanguageSetting",
     "LongitudinalPersonality",
@@ -457,6 +456,7 @@ def get_all_toggle_values():
     "ShowTpms",
     "ShowSteerMode",
     "ShowDeviceState",
+    "ShowCustomBrightness",
     "ShowConnInfo",
     "ShowLaneInfo",
     "ShowBlindSpot",
@@ -464,6 +464,7 @@ def get_all_toggle_values():
     "ShowDmInfo",
     "ShowRadarInfo",
     "CarrotTest3",
+    "CarrotRadarTest2",
     "ShowPathMode",
     "ShowPathColor",
     "ShowPathModeCruiseOff",
@@ -500,6 +501,8 @@ def get_all_toggle_values():
     "StartAccelApply",
     "AutoSpeedUptoRoadSpeedLimit",
     "StopDistanceCarrot",
+    "ComfortBrake",
+    "TrafficStopDistanceAdjust",
     "ALeadTauPos",
     "ALeadTauNeg",
     "ALeadTauThreshold",
@@ -558,9 +561,7 @@ def get_all_toggle_values():
     "CustomSteerDeltaUp",
     "CustomSteerDeltaDown",
     "SpeedFromPCM",
-    "MaxTimeOffroadMin"
-    "CarrotRecord",
-    "CarrotDisplay",
+    "MaxTimeOffroadMin",
     "MSLCEnabled",
     "NoLogging",
 
@@ -576,8 +577,7 @@ def get_all_toggle_values():
     "MTSCEnabled",
     "PreferredSchedule",
     "NNFF",
-    "NNFFLite",
-    "TrafficStopDistanceAdjust"
+    "NNFFLite"
   ]
 
   toggle_values = {}
