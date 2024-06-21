@@ -144,6 +144,9 @@ class LatControlTorque(LatControl):
       if self.lateralTorqueCustom > 0:
         self.torque_params.latAccelFactor = self.lateralTorqueAccelFactor
         self.torque_params.friction = self.lateralTorqueFriction
+        self.pid._k_p = float(Params().get_int("LateralTorqueKpV"))*0.01
+        self.pid._k_i = float(Params().get_int("LateralTorqueKiV"))*0.01
+        self.pid.k_f = float(Params().get_int("LateralTorqueKf"))*0.01
 
   def update(self, active, CS, VM, params, steer_limited, desired_curvature, llk, model_data=None):
     self.update_params()
@@ -153,6 +156,7 @@ class LatControlTorque(LatControl):
     if not active:
       output_torque = 0.0
       pid_log.active = False
+      self.pid.reset()
     else:
       actual_curvature_vm = -VM.calc_curvature(math.radians(CS.steeringAngleDeg - params.angleOffsetDeg), CS.vEgo, params.roll)
       roll_compensation = params.roll * ACCELERATION_DUE_TO_GRAVITY
