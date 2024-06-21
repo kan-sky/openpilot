@@ -18,7 +18,7 @@ class Service:
     self.decimation = decimation
 
 
-_services: dict[str, tuple] = {
+services: dict[str, tuple] = {
   # service: (should_log, frequency, qlog decimation (optional))
   # note: the "EncodeIdx" packets will still be in the log
   "gyroscope": (True, 104., 104),
@@ -76,7 +76,6 @@ _services: dict[str, tuple] = {
   "navInstruction": (True, 1., 10),
   "navRoute": (True, 0.),
   "navThumbnail": (True, 0.),
-  "uiPlan": (True, 20., 40.),
   "qRoadEncodeIdx": (False, 20.),
   "userFlag": (True, 0., 1),
   "microphone": (True, 10., 10),
@@ -87,6 +86,7 @@ _services: dict[str, tuple] = {
   "naviObstacles": (False, 0.),
   "navInstructionNda": (False, 0.),
   "navRouteNda": (False, 0.),
+  "carrotModel": (False, 0.),
 
   # debug
   "uiDebug": (True, 0., 1),
@@ -106,7 +106,7 @@ _services: dict[str, tuple] = {
   "customReservedRawData2": (True, 0.),
 }
 SERVICE_LIST = {name: Service(new_port(idx), *vals) for
-                idx, (name, vals) in enumerate(_services.items())}
+                idx, (name, vals) in enumerate(services.items())}
 
 
 def build_header():

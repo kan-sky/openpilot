@@ -55,6 +55,45 @@
     },
     {
       "group": "조향튜닝",
+      "name": "LateralTorqueKpV",
+      "title": "_LateralTorqueKpV*0.01(100)",
+      "descr": "",
+      "egroup": "LAT",
+      "etitle": "_LateralTorqueKpV*0.01(100)",
+      "edescr": "",
+      "min": 0,
+      "max": 200,
+      "default": 100,
+      "unit": 1
+    },
+    {
+      "group": "조향튜닝",
+      "name": "LateralTorqueKiV",
+      "title": "_LateralTorqueKiV*0.01(15)",
+      "descr": "",
+      "egroup": "LAT",
+      "etitle": "_LateralTorqueKiV*0.01(15)",
+      "edescr": "",
+      "min": 0,
+      "max": 200,
+      "default": 15,
+      "unit": 1
+    },
+    {
+      "group": "조향튜닝",
+      "name": "LateralTorqueKf",
+      "title": "_LateralTorqueKf*0.01(100)",
+      "descr": "",
+      "egroup": "LAT",
+      "etitle": "_LateralTorqueKf*0.001(100)",
+      "edescr": "",
+      "min": 0,
+      "max": 200,
+      "default": 100,
+      "unit": 1
+    },
+    {
+      "group": "조향튜닝",
       "name": "CustomSteerMax",
       "title": "_CustomSteerMax(0)",
       "descr": "",
@@ -263,6 +302,19 @@
     },
     {
       "group": "가속설정",
+      "name": "MyHighModeFactor",
+      "title": "고속모드설정:(100)%",
+      "descr": "고속모드 가속율",
+      "egroup": "ACCEL",
+      "etitle": "HighMode Setting(100)",
+      "edescr": "HighMode accel ratio",
+      "min": 100,
+      "max": 300,
+      "default": 100,
+      "unit": 5
+    },
+    {
+      "group": "가속설정",
       "name": "MySafeModeFactor",
       "title": "안전비율(80%)",
       "descr": "가속도, 정지거리, 감속율, 차간거리를 평소보다 안전하게 유지합니다.",
@@ -285,6 +337,32 @@
       "min": 400,
       "max": 1000,
       "default": 600,
+      "unit": 10
+    },
+    {
+      "group": "주행튜닝",
+      "name": "ComfortBrake",
+      "title": "Comfort Brake(250)",
+      "descr": "x0.01, 값이 크면 급하게 브레이킹",
+      "egroup": "LONG",
+      "etitle": "Comfort Brake(250)",
+      "edescr": "",
+      "min": 200,
+      "max": 300,
+      "default": 250,
+      "unit": 10
+    },
+    {
+      "group": "주행튜닝",
+      "name": "TrafficStopDistanceAdjust",
+      "title": "신호정지 위치조정(150)cm",
+      "descr": "높을수록 신호정지선 가까이에 서거나 정지선을 지나감.",
+      "egroup": "LONG",
+      "etitle": "TrafficStopDistance adjust (150)cm",
+      "edescr": "",
+      "min": -1000,
+      "max": 1000,
+      "default": 150,
       "unit": 10
     },
     {
@@ -796,6 +874,19 @@
     },
     {
       "group": "화면",
+      "name": "ShowCustomBrightness",
+      "title": "화면밝기비율",
+      "descr": "",
+      "egroup": "DISP",
+      "etitle": "ScreenBrightness ratio",
+      "edescr": "",
+      "min": 0,
+      "max": 100,
+      "default": 100,
+      "unit": 1
+    },
+    {
+      "group": "화면",
       "name": "ShowConnInfo",
       "title": "부가정보",
       "descr": "APM,SCC2,RadarTracks정보표시",
@@ -1104,6 +1195,19 @@
       "min": 0,
       "max": 2,
       "default": 0,
+      "unit": 1
+    },
+    {
+      "group": "시험",
+      "name": "CarrotRadarTest2",
+      "title": "당근레이더시험Alpha (10)",
+      "descr": "alpha * 0.01",
+      "egroup": "TEST",
+      "etitle": "Carrot Radar test alpha",
+      "edescr": "",
+      "min": 1,
+      "max": 100,
+      "default": 10,
       "unit": 1
     },
     {
@@ -1508,19 +1612,6 @@
       "max": 120,
       "default": 105,
       "unit": 1
-    },
-    {
-      "group": "감속제어",
-      "name": "TrafficStopDistanceAdjust",
-      "title": "신호정지 위치조정(200cm)",
-      "descr": "높을수록 신호정지선 가까이에 섭니다.",
-      "egroup": "SPEED",
-      "etitle": "TrafficStopDistance(200cm)",
-      "edescr": "+Value : forward",
-      "min": -1000,
-      "max": 1000,
-      "default": 150,
-      "unit": 10
     }
   ]
 }

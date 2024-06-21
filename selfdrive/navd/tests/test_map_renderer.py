@@ -3,6 +3,7 @@ import time
 import numpy as np
 import os
 import pytest
+import unittest
 import requests
 import threading
 import http.server
@@ -64,12 +65,11 @@ class MapBoxInternetDisabledServer(threading.Thread):
     MapBoxInternetDisabledRequestHandler.INTERNET_ACTIVE = True
 
 
-@pytest.mark.skip(reason="not used")
-class TestMapRenderer:
+class TestMapRenderer(unittest.TestCase):
   server: MapBoxInternetDisabledServer
 
   @classmethod
-  def setup_class(cls):
+  def setUpClass(cls):
     assert "MAPBOX_TOKEN" in os.environ
     cls.original_token = os.environ["MAPBOX_TOKEN"]
     cls.server = MapBoxInternetDisabledServer()
@@ -77,10 +77,10 @@ class TestMapRenderer:
     time.sleep(0.5) # wait for server to startup
 
   @classmethod
-  def teardown_class(cls) -> None:
+  def tearDownClass(cls) -> None:
     cls.server.stop()
 
-  def setup_method(self):
+  def setUp(self):
     self.server.enable_internet()
     os.environ['MAPS_HOST'] = f'http://localhost:{self.server.port}'
 
@@ -135,7 +135,7 @@ class TestMapRenderer:
       invalid_and_not_previously_valid = (expect_valid and not self.sm.valid['mapRenderState'] and not prev_valid)
       valid_and_not_previously_invalid = (not expect_valid and self.sm.valid['mapRenderState'] and prev_valid)
 
-      if (invalid_and_not_previously_valid or valid_and_not_previously_invalid) and frames_since_test_start < 20:
+      if (invalid_and_not_previously_valid or valid_and_not_previously_invalid) and frames_since_test_start < 5:
         continue
 
       # check output
@@ -202,12 +202,15 @@ class TestMapRenderer:
 
     def assert_stat(stat, nominal, tol=0.3):
       tol = (nominal / (1+tol)), (nominal * (1+tol))
-      assert tol[0] < stat < tol[1], f"{stat} not in tolerance {tol}"
+      self.assertTrue(tol[0] < stat < tol[1], f"{stat} not in tolerance {tol}")
 
     assert_stat(_mean,   0.030)
     assert_stat(_median, 0.027)
     assert_stat(_stddev, 0.0078)
 
-    assert _max < 0.065
-    assert _min > 0.015
+    self.assertLess(_max, 0.065)
+    self.assertGreater(_min, 0.015)
 
+
+if __name__ == "__main__":
+  unittest.main()

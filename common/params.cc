@@ -89,7 +89,6 @@ private:
 
 std::unordered_map<std::string, uint32_t> keys = {
     {"AccessToken", CLEAR_ON_MANAGER_START | DONT_LOG},
-    {"AlwaysOnDM", PERSISTENT},
     {"ApiCache_Device", PERSISTENT},
     {"ApiCache_NavDestinations", PERSISTENT},
     {"AssistNowToken", PERSISTENT},
@@ -173,6 +172,7 @@ std::unordered_map<std::string, uint32_t> keys = {
     {"Offroad_CarUnrecognized", CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION},
     {"Offroad_ConnectivityNeeded", CLEAR_ON_MANAGER_START},
     {"Offroad_ConnectivityNeededPrompt", CLEAR_ON_MANAGER_START},
+    {"Offroad_InvalidTime", CLEAR_ON_MANAGER_START},
     {"Offroad_IsTakingSnapshot", CLEAR_ON_MANAGER_START},
     {"Offroad_NeosUpdate", CLEAR_ON_MANAGER_START},
     {"Offroad_NoFirmware", CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION},
@@ -222,6 +222,7 @@ std::unordered_map<std::string, uint32_t> keys = {
     { "ShowTpms", PERSISTENT },
     { "ShowSteerMode", PERSISTENT },
     { "ShowDeviceState", PERSISTENT },
+    { "ShowCustomBrightness", PERSISTENT },
     { "ShowConnInfo", PERSISTENT },
     { "ShowLaneInfo", PERSISTENT },
     { "ShowBlindSpot", PERSISTENT },
@@ -230,6 +231,7 @@ std::unordered_map<std::string, uint32_t> keys = {
     { "ShowRadarInfo", PERSISTENT },
     { "MixRadarInfo", PERSISTENT },
     { "CarrotTest3", PERSISTENT },
+    { "CarrotRadarTest2", PERSISTENT },
     { "ShowPathMode", PERSISTENT },
     { "ShowPathColor", PERSISTENT },
     { "ShowPathModeCruiseOff", PERSISTENT },
@@ -266,6 +268,8 @@ std::unordered_map<std::string, uint32_t> keys = {
     { "StartAccelApply", PERSISTENT },
     { "AutoSpeedUptoRoadSpeedLimit", PERSISTENT },
     { "StopDistanceCarrot", PERSISTENT },
+    { "ComfortBrake", PERSISTENT },
+    { "TrafficStopDistanceAdjust", PERSISTENT },
     { "ALeadTauPos", PERSISTENT },
     { "ALeadTauNeg", PERSISTENT },
     { "ALeadTauThreshold", PERSISTENT },
@@ -288,6 +292,7 @@ std::unordered_map<std::string, uint32_t> keys = {
     { "CruiseMaxVals5", PERSISTENT },
     { "CruiseMaxVals6", PERSISTENT },
     { "CruiseMinVals", PERSISTENT },
+    { "MyHighModeFactor", PERSISTENT },
     { "LongitudinalTuningKpV", PERSISTENT },
     { "LongitudinalTuningKiV", PERSISTENT },
     { "LongitudinalTuningKf", PERSISTENT },
@@ -321,6 +326,9 @@ std::unordered_map<std::string, uint32_t> keys = {
     { "LateralTorqueCustom", PERSISTENT },
     { "LateralTorqueAccelFactor", PERSISTENT },
     { "LateralTorqueFriction", PERSISTENT },
+    { "LateralTorqueKpV", PERSISTENT },
+    { "LateralTorqueKiV", PERSISTENT },
+    { "LateralTorqueKf", PERSISTENT },
     { "CustomSteerMax", PERSISTENT },
     { "CustomSteerDeltaUp", PERSISTENT },
     { "CustomSteerDeltaDown", PERSISTENT },
@@ -366,10 +374,9 @@ std::unordered_map<std::string, uint32_t> keys = {
     {"RoadName", PERSISTENT},
     {"RoadNameUI", PERSISTENT},
     {"SchedulePending", PERSISTENT},
-    {"TrafficStopDistanceAdjust", PERSISTENT},
-
+    
     {"UseExternalNaviRoutes", CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION },
-
+    
 };
 
 } // namespace

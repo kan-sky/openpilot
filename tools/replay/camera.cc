@@ -1,12 +1,10 @@
 #include "tools/replay/camera.h"
 
-#include <capnp/dynamic.h>
 #include <cassert>
+#include <tuple>
 
 #include "third_party/linux/include/msm_media_info.h"
 #include "tools/replay/util.h"
-
-const int BUFFER_COUNT = 40;
 
 std::tuple<size_t, size_t, size_t> get_nv12_info(int width, int height) {
   int nv12_width = VENUS_Y_STRIDE(COLOR_FMT_NV12, width);
@@ -37,12 +35,10 @@ CameraServer::~CameraServer() {
 void CameraServer::startVipcServer() {
   vipc_server_.reset(new VisionIpcServer("camerad"));
   for (auto &cam : cameras_) {
-    cam.cached_buf.clear();
-
     if (cam.width > 0 && cam.height > 0) {
       rInfo("camera[%d] frame size %dx%d", cam.type, cam.width, cam.height);
       auto [nv12_width, nv12_height, nv12_buffer_size] = get_nv12_info(cam.width, cam.height);
-      vipc_server_->create_buffers_with_sizes(cam.stream_type, BUFFER_COUNT, false, cam.width, cam.height,
+      vipc_server_->create_buffers_with_sizes(cam.stream_type, YUV_BUFFER_COUNT, false, cam.width, cam.height,
                                               nv12_buffer_size, nv12_width, nv12_width * nv12_height);
       if (!cam.thread.joinable()) {
         cam.thread = std::thread(&CameraServer::cameraThread, this, std::ref(cam));
@@ -53,14 +49,16 @@ void CameraServer::startVipcServer() {
 }
 
 void CameraServer::cameraThread(Camera &cam) {
-  while (true) {
-    const auto [fr, event] = cam.queue.pop();
-    if (!fr) break;
+  auto read_frame = [&](FrameReader *fr, int frame_id) {
+    VisionBuf *yuv_buf = vipc_server_->get_buffer(cam.stream_type);
+    assert(yuv_buf);
+    bool ret = fr->get(frame_id, yuv_buf);
+    return ret ? yuv_buf : nullptr;
+  };
 
-    capnp::FlatArrayMessageReader reader(event->data);
-    auto evt = reader.getRoot<cereal::Event>();
-    auto eidx = capnp::AnyStruct::Reader(evt).getPointerSection()[0].getAs<cereal::EncodeIndex>();
-    if (eidx.getType() != cereal::EncodeIndex::Type::FULL_H_E_V_C) continue;
+  while (true) {
+    const auto [fr, eidx] = cam.queue.pop();
+    if (!fr) break;
 
     const int id = eidx.getSegmentId();
     bool prefetched = (id == cam.cached_id && eidx.getSegmentNum() == cam.cached_seg);
@@ -85,7 +83,7 @@ void CameraServer::cameraThread(Camera &cam) {
   }
 }
 
-void CameraServer::pushFrame(CameraType type, FrameReader *fr, const Event *event) {
+void CameraServer::pushFrame(CameraType type, FrameReader *fr, const cereal::EncodeIndex::Reader &eidx) {
   auto &cam = cameras_[type];
   if (cam.width != fr->width || cam.height != fr->height) {
     cam.width = fr->width;
@@ -95,7 +93,7 @@ void CameraServer::pushFrame(CameraType type, FrameReader *fr, const Event *even
   }
 
   ++publishing_;
-  cam.queue.push({fr, event});
+  cam.queue.push({fr, eidx});
 }
 
 void CameraServer::waitForSent() {

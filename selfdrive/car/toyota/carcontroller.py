@@ -7,6 +7,7 @@ from openpilot.selfdrive.car.toyota.values import CAR, STATIC_DSU_MSGS, NO_STOP_
                                         CarControllerParams, ToyotaFlags, \
                                         UNSUPPORTED_DSU_CAR
 from opendbc.can.packer import CANPacker
+from openpilot.common.params import Params
 
 SteerControlType = car.CarParams.SteerControlType
 VisualAlert = car.CarControl.HUDControl.VisualAlert
@@ -50,6 +51,14 @@ class CarController(CarControllerBase):
 
     # *** control msgs ***
     can_sends = []
+
+    params = Params()
+    steerMax = params.get_int("CustomSteerMax")
+    steerDeltaUp = params.get_int("CustomSteerDeltaUp")
+    steerDeltaDown = params.get_int("CustomSteerDeltaDown")
+    self.params.STEER_MAX = self.params.STEER_MAX if steerMax <= 0 else steerMax
+    self.params.STEER_DELTA_UP = self.params.STEER_DELTA_UP if steerDeltaUp <= 0 else steerDeltaUp
+    self.params.STEER_DELTA_DOWN = self.params.STEER_DELTA_DOWN if steerDeltaDown <= 0 else steerDeltaDown
 
     # *** steer torque ***
     new_steer = int(round(actuators.steer * self.params.STEER_MAX))
@@ -101,6 +110,11 @@ class CarController(CarControllerBase):
 
     # *** gas and brake ***
     pcm_accel_cmd = clip(actuators.accel, self.params.ACCEL_MIN, self.params.ACCEL_MAX)
+
+    # TODO: probably can delete this. CS.pcm_acc_status uses a different signal
+    # than CS.cruiseState.enabled. confirm they're not meaningfully different
+    if not CC.enabled and CS.pcm_acc_status:
+      pcm_cancel_cmd = 1
 
     # on entering standstill, send standstill request
     if CS.out.standstill and not self.last_standstill and (self.CP.carFingerprint not in NO_STOP_TIMER_CAR):

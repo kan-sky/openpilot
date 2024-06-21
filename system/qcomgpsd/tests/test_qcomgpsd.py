@@ -4,6 +4,7 @@ import pytest
 import json
 import time
 import datetime
+import unittest
 import subprocess
 
 import cereal.messaging as messaging
@@ -14,24 +15,24 @@ GOOD_SIGNAL = bool(int(os.getenv("GOOD_SIGNAL", '0')))
 
 
 @pytest.mark.tici
-class TestRawgpsd:
+class TestRawgpsd(unittest.TestCase):
   @classmethod
-  def setup_class(cls):
+  def setUpClass(cls):
     os.system("sudo systemctl start systemd-resolved")
     os.system("sudo systemctl restart ModemManager lte")
     wait_for_modem()
 
   @classmethod
-  def teardown_class(cls):
+  def tearDownClass(cls):
     managed_processes['qcomgpsd'].stop()
     os.system("sudo systemctl restart systemd-resolved")
     os.system("sudo systemctl restart ModemManager lte")
 
-  def setup_method(self):
+  def setUp(self):
     at_cmd("AT+QGPSDEL=0")
     self.sm = messaging.SubMaster(['qcomGnss', 'gpsLocation', 'gnssMeasurements'])
 
-  def teardown_method(self):
+  def tearDown(self):
     managed_processes['qcomgpsd'].stop()
     os.system("sudo systemctl restart systemd-resolved")
 
@@ -56,18 +57,18 @@ class TestRawgpsd:
     os.system("sudo systemctl restart ModemManager")
     assert self._wait_for_output(30)
 
-  def test_startup_time(self, subtests):
+  def test_startup_time(self):
     for internet in (True, False):
       if not internet:
         os.system("sudo systemctl stop systemd-resolved")
-      with subtests.test(internet=internet):
+      with self.subTest(internet=internet):
         managed_processes['qcomgpsd'].start()
         assert self._wait_for_output(7)
         managed_processes['qcomgpsd'].stop()
 
-  def test_turns_off_gnss(self, subtests):
+  def test_turns_off_gnss(self):
     for s in (0.1, 1, 5):
-      with subtests.test(runtime=s):
+      with self.subTest(runtime=s):
         managed_processes['qcomgpsd'].start()
         time.sleep(s)
         managed_processes['qcomgpsd'].stop()
@@ -86,7 +87,7 @@ class TestRawgpsd:
     if should_be_loaded:
       assert valid_duration == "10080"  # should be max time
       injected_time = datetime.datetime.strptime(injected_time_str.replace("\"", ""), "%Y/%m/%d,%H:%M:%S")
-      assert abs((datetime.datetime.utcnow() - injected_time).total_seconds()) < 60*60*12
+      self.assertLess(abs((datetime.datetime.utcnow() - injected_time).total_seconds()), 60*60*12)
     else:
       valid_duration, injected_time_str = out.split(",", 1)
       injected_time_str = injected_time_str.replace('\"', '').replace('\'', '')
@@ -118,3 +119,6 @@ class TestRawgpsd:
     time.sleep(15)
     managed_processes['qcomgpsd'].stop()
     self.check_assistance(True)
+
+if __name__ == "__main__":
+  unittest.main(failfast=True)

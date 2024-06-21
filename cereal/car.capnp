@@ -116,9 +116,10 @@ struct CarEvent @0x9b1657f34caf3ad3 {
     locationdPermanentError @118;
     paramsdTemporaryError @50;
     paramsdPermanentError @119;
+    actuatorsApiUnavailable @120;
    
     # ajouatom events
-    cruisePaused @120;
+    cruisePaused @142;
     cruiseResume @121;
     autoHold @122;
     trafficStopping @123;
@@ -142,7 +143,6 @@ struct CarEvent @0x9b1657f34caf3ad3 {
     personalityAggressive @139;
     personalityMoreRelaxed @140;
     torqueNNLoad @141;
-    actuatorsApiUnavailable @142;
 
     radarCanErrorDEPRECATED @15;
     communityFeatureDisallowedDEPRECATED @62;
@@ -181,8 +181,6 @@ struct CarState {
   # CAN health
   canValid @26 :Bool;       # invalid counter/checksums
   canTimeout @40 :Bool;     # CAN bus dropped out
-  canErrorCounter @57 :UInt32;
-  canRcvTimeout @58 :Bool;
 
   # car speed
   vEgo @1 :Float32;          # best estimate of speed
@@ -258,9 +256,6 @@ struct CarState {
   totalDistance @53 : Float32;
   speedLimit @54 : Int32;
   speedLimitDistance @55 : Float32;
-
-  # process meta
-  cumLagMs @59 :Float32;
 
   struct Tpms {
     fl @0 :Float32;

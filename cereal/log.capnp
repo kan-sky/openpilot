@@ -371,7 +371,6 @@ struct DeviceState @0xa4d8b5af2aa492eb {
   cpuTempC @26 :List(Float32);
   gpuTempC @27 :List(Float32);
   memoryTempC @28 :Float32;
-  ambientTempC @30 :Float32;
   nvmeTempC @35 :List(Float32);
   modemTempC @36 :List(Float32);
   pmicTempC @39 :List(Float32);
@@ -444,6 +443,7 @@ struct DeviceState @0xa4d8b5af2aa492eb {
   chargingErrorDEPRECATED @17 :Bool;
   chargingDisabledDEPRECATED @18 :Bool;
   usbOnlineDEPRECATED @12 :Bool;
+  ambientTempCDEPRECATED @30 :Float32;
 }
 
 struct PandaState @0xa7649e2575e4591e {
@@ -635,6 +635,7 @@ struct RadarState @0x9a185389d6fdd05f {
     modelProb @13 :Float32;
     radar @14 :Bool;
     radarTrackId @15 :Int32 = -1;
+    aLead @16 :Float32;
 
     aLeadDEPRECATED @5 :Float32;
   }
@@ -2348,7 +2349,6 @@ struct Event {
     carControl @23 :Car.CarControl;
     carOutput @127 :Car.CarOutput;
     longitudinalPlan @24 :LongitudinalPlan;
-    uiPlan @106 :UiPlan;
     ubloxGnss @34 :UbloxGnss;
     ubloxRaw @39 :Data;
     qcomGnss @31 :QcomGnss;
@@ -2425,8 +2425,7 @@ struct Event {
     naviData @107 :Custom.NaviData;
     naviGps @108 :Custom.NaviGps;
     naviObstacles @109 :Custom.NaviObstacles;
-
-    customReserved3 @110 :Custom.CustomReserved3;
+    carrotModel @110 :Custom.CarrotModel;
     customReserved4 @111 :Custom.CustomReserved4;
     customReserved5 @112 :Custom.CustomReserved5;
     customReserved6 @113 :Custom.CustomReserved6;
@@ -2474,5 +2473,6 @@ struct Event {
     sensorEventsDEPRECATED @11 :List(SensorEventData);
     lateralPlan @64 :LateralPlan;
     navModelDEPRECATED @104 :NavModelData;
+    uiPlanDEPRECATED @106 :UiPlan;
   }
 }

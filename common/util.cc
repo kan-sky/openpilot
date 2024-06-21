@@ -39,6 +39,7 @@ int set_realtime_priority(int level) {
   struct sched_param sa;
   memset(&sa, 0, sizeof(sa));
   sa.sched_priority = level;
+  if(level == 0) return sched_setscheduler(tid, SCHED_IDLE, &sa);
   return sched_setscheduler(tid, SCHED_FIFO, &sa);
 #else
   return -1;
@@ -246,6 +247,12 @@ std::string random_string(std::string::size_type length) {
   return s;
 }
 
+std::string dir_name(std::string const &path) {
+  size_t pos = path.find_last_of("/");
+  if (pos == std::string::npos) return "";
+  return path.substr(0, pos);
+}
+
 bool starts_with(const std::string &s1, const std::string &s2) {
   return strncmp(s1.c_str(), s2.c_str(), s2.size()) == 0;
 }
@@ -269,6 +276,22 @@ std::string check_output(const std::string& command) {
   }
 
   return result;
+}
+
+struct tm get_time() {
+  time_t rawtime;
+  time(&rawtime);
+
+  struct tm sys_time;
+  gmtime_r(&rawtime, &sys_time);
+
+  return sys_time;
+}
+
+bool time_valid(struct tm sys_time) {
+  int year = 1900 + sys_time.tm_year;
+  int month = 1 + sys_time.tm_mon;
+  return (year > 2023) || (year == 2023 && month >= 6);
 }
 
 }  // namespace util

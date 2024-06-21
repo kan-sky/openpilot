@@ -295,7 +295,6 @@ FW_VERSIONS = {
       b'37805-5BB-L540\x00\x00',
       b'37805-5BB-L630\x00\x00',
       b'37805-5BB-L640\x00\x00',
-      b'37805-5BF-J130\x00\x00',
     ],
     (Ecu.transmission, 0x18da1ef1, None): [
       b'28101-5CG-A920\x00\x00',
@@ -329,7 +328,6 @@ FW_VERSIONS = {
       b'57114-TGG-G320\x00\x00',
       b'57114-TGG-L320\x00\x00',
       b'57114-TGG-L330\x00\x00',
-      b'57114-TGH-L130\x00\x00',
       b'57114-TGK-T320\x00\x00',
       b'57114-TGL-G330\x00\x00',
     ],
@@ -343,7 +341,6 @@ FW_VERSIONS = {
       b'39990-TGG-A020\x00\x00',
       b'39990-TGG-A120\x00\x00',
       b'39990-TGG-J510\x00\x00',
-      b'39990-TGH-J530\x00\x00',
       b'39990-TGL-E130\x00\x00',
       b'39990-TGN-E120\x00\x00',
     ],
@@ -358,7 +355,6 @@ FW_VERSIONS = {
       b'77959-TGG-G110\x00\x00',
       b'77959-TGG-J320\x00\x00',
       b'77959-TGG-Z820\x00\x00',
-      b'77959-TGH-J110\x00\x00',
     ],
     (Ecu.fwdRadar, 0x18dab0f1, None): [
       b'36802-TBA-A150\x00\x00',
@@ -370,7 +366,6 @@ FW_VERSIONS = {
       b'36802-TGG-A130\x00\x00',
       b'36802-TGG-G040\x00\x00',
       b'36802-TGG-G130\x00\x00',
-      b'36802-TGH-A140\x00\x00',
       b'36802-TGK-Q120\x00\x00',
       b'36802-TGL-G040\x00\x00',
     ],
@@ -385,7 +380,6 @@ FW_VERSIONS = {
       b'36161-TGG-G070\x00\x00',
       b'36161-TGG-G130\x00\x00',
       b'36161-TGG-G140\x00\x00',
-      b'36161-TGH-A140\x00\x00',
       b'36161-TGK-Q120\x00\x00',
       b'36161-TGL-G050\x00\x00',
       b'36161-TGL-G070\x00\x00',
@@ -393,7 +387,6 @@ FW_VERSIONS = {
     (Ecu.gateway, 0x18daeff1, None): [
       b'38897-TBA-A020\x00\x00',
       b'38897-TBA-A110\x00\x00',
-      b'38897-TGH-A010\x00\x00',
     ],
     (Ecu.electricBrakeBooster, 0x18da2bf1, None): [
       b'39494-TGL-G030\x00\x00',
@@ -665,7 +658,6 @@ FW_VERSIONS = {
     ],
     (Ecu.programmedFuelInjection, 0x18da10f1, None): [
       b'37805-5MR-3050\x00\x00',
-      b'37805-5MR-3150\x00\x00',
       b'37805-5MR-3250\x00\x00',
       b'37805-5MR-4070\x00\x00',
       b'37805-5MR-4080\x00\x00',
@@ -882,9 +874,7 @@ FW_VERSIONS = {
       b'37805-5YF-A430\x00\x00',
       b'37805-5YF-A750\x00\x00',
       b'37805-5YF-A760\x00\x00',
-      b'37805-5YF-A770\x00\x00',
       b'37805-5YF-A850\x00\x00',
-      b'37805-5YF-A860\x00\x00',
       b'37805-5YF-A870\x00\x00',
       b'37805-5YF-AD20\x00\x00',
       b'37805-5YF-C210\x00\x00',
@@ -1023,33 +1013,22 @@ FW_VERSIONS = {
   },
   CAR.HONDA_HRV_3G: {
     (Ecu.eps, 0x18da30f1, None): [
-      b'39990-3M0-G110\x00\x00',
       b'39990-3W0-A030\x00\x00',
     ],
     (Ecu.gateway, 0x18daeff1, None): [
-      b'38897-3M0-M110\x00\x00',
       b'38897-3W1-A010\x00\x00',
     ],
     (Ecu.srs, 0x18da53f1, None): [
-      b'77959-3M0-K840\x00\x00',
       b'77959-3V0-A820\x00\x00',
     ],
-    (Ecu.fwdRadar, 0x18dab0f1, None): [
-      b'8S102-3M6-P030\x00\x00',
-      b'8S102-3W0-A060\x00\x00',
-      b'8S102-3W0-AB10\x00\x00',
-    ],
     (Ecu.vsa, 0x18da28f1, None): [
-      b'57114-3M6-M010\x00\x00',
       b'57114-3W0-A040\x00\x00',
     ],
     (Ecu.transmission, 0x18da1ef1, None): [
       b'28101-6EH-A010\x00\x00',
-      b'28101-6JC-M310\x00\x00',
     ],
     (Ecu.programmedFuelInjection, 0x18da10f1, None): [
       b'37805-6CT-A710\x00\x00',
-      b'37805-6HZ-M630\x00\x00',
     ],
     (Ecu.electricBrakeBooster, 0x18da2bf1, None): [
       b'46114-3W0-A020\x00\x00',
