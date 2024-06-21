@@ -62,7 +62,7 @@
       "etitle": "_LateralTorqueKpV*0.01(100)",
       "edescr": "",
       "min": 0,
-      "max": 100,
+      "max": 200,
       "default": 100,
       "unit": 1
     },
@@ -75,7 +75,7 @@
       "etitle": "_LateralTorqueKiV*0.01(15)",
       "edescr": "",
       "min": 0,
-      "max": 100,
+      "max": 200,
       "default": 15,
       "unit": 1
     },
@@ -88,7 +88,7 @@
       "etitle": "_LateralTorqueKf*0.001(100)",
       "edescr": "",
       "min": 0,
-      "max": 100,
+      "max": 200,
       "default": 100,
       "unit": 1
     },
