@@ -26,7 +26,7 @@ PITCH_DEADZONE = 0.01 # [radians] 0.01 ? 1% grade
 BRAKE_PITCH_FACTOR_BP = [5., 10.] # [m/s] smoothly revert to planned accel at low speeds
 BRAKE_PITCH_FACTOR_V = [0., 1.] # [unitless in [0,1]]; don't touch
 
-# only use pitch-compensated acceleration at 10m/s+
+#GM, only use pitch-compensated acceleration at 10m/s+
 ACCEL_PITCH_FACTOR_BP = [5., 10.] # [m/s]
 ACCEL_PITCH_FACTOR_V = [0., 1.] # [unitless in [0-1]]
 
@@ -150,7 +150,7 @@ class CarController(CarControllerBase):
           self.apply_brake = int(min(-100 * self.CP.stopAccel, self.params.MAX_BRAKE))
         else:
           # Normal operation
-          #brake_accel = actuators.accel + self.accel_g * interp(CS.out.vEgo, BRAKE_PITCH_FACTOR_BP, BRAKE_PITCH_FACTOR_V)
+          #GM, brake_accel = actuators.accel + self.accel_g * interp(CS.out.vEgo, BRAKE_PITCH_FACTOR_BP, BRAKE_PITCH_FACTOR_V)
           if self.CP.carFingerprint in EV_CAR and self.use_ev_tables:
             k = interp(CS.out.vEgo, ACCEL_PITCH_FACTOR_BP, ACCEL_PITCH_FACTOR_V)
             brake_accel = k * actuators.accelPitchCompensated + (1. - k) * actuators.accel

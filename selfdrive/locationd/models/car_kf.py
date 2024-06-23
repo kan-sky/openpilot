@@ -39,7 +39,7 @@ class States():
   YAW_RATE = _slice(1)  # [rad/s]
   STEER_ANGLE = _slice(1)  # [rad]
   ROAD_ROLL = _slice(1)  # [rad]
-  ROAD_PITCH = _slice(1)  # [rad]
+  ROAD_PITCH = _slice(1)  # [rad] #GM
 
 
 class CarKalman(KalmanFilter):
@@ -52,7 +52,7 @@ class CarKalman(KalmanFilter):
     0.0,
 
     10.0, 0.0,
-    0.0,
+    0.0, #GM
     0.0,
     0.0,
     0.0
@@ -69,7 +69,7 @@ class CarKalman(KalmanFilter):
     math.radians(0.1)**2,
     math.radians(0.1)**2,
     math.radians(1)**2,
-    math.radians(1)**2,
+    math.radians(1)**2, #GM
   ])
   P_initial = Q.copy()
 
@@ -77,7 +77,7 @@ class CarKalman(KalmanFilter):
     ObservationKind.STEER_ANGLE: np.atleast_2d(math.radians(0.05)**2),
     ObservationKind.ANGLE_OFFSET_FAST: np.atleast_2d(math.radians(10.0)**2),
     ObservationKind.ROAD_ROLL: np.atleast_2d(math.radians(1.0)**2),
-    ObservationKind.ROAD_PITCH: np.atleast_2d(math.radians(1.0)**2),
+    ObservationKind.ROAD_PITCH: np.atleast_2d(math.radians(1.0)**2), #GM
     ObservationKind.STEER_RATIO: np.atleast_2d(5.0**2),
     ObservationKind.STIFFNESS: np.atleast_2d(0.5**2),
     ObservationKind.ROAD_FRAME_X_SPEED: np.atleast_2d(0.1**2),
@@ -116,7 +116,7 @@ class CarKalman(KalmanFilter):
     angle_offset = state[States.ANGLE_OFFSET, :][0, 0]
     angle_offset_fast = state[States.ANGLE_OFFSET_FAST, :][0, 0]
     theta = state[States.ROAD_ROLL, :][0, 0]
-    phi = state[States.ROAD_PITCH, :][0, 0]
+    phi = state[States.ROAD_PITCH, :][0, 0] #GM
     sa = state[States.STEER_ANGLE, :][0, 0]
 
     sR = state[States.STEER_RATIO, :][0, 0]
@@ -161,7 +161,7 @@ class CarKalman(KalmanFilter):
       [sp.Matrix([sR]), ObservationKind.STEER_RATIO, None],
       [sp.Matrix([sf]), ObservationKind.STIFFNESS, None],
       [sp.Matrix([theta]), ObservationKind.ROAD_ROLL, None],
-      [sp.Matrix([phi]), ObservationKind.ROAD_PITCH, None],
+      [sp.Matrix([phi]), ObservationKind.ROAD_PITCH, None], #GM
     ]
 
     gen_code(generated_dir, name, f_sym, dt, state_sym, obs_eqs, dim_state, dim_state, global_vars=global_vars)

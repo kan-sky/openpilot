@@ -367,13 +367,13 @@ void update_leads(UIState *s, const cereal::RadarState::Reader &radar_state, con
 }
 
 void update_line_data(const UIState *s, const cereal::XYZTData::Reader &line,
-                      float y_off, float z_off_left, float z_off_right, QPolygonF* pvd, int max_idx, bool allow_invert=true, float y_shift = 0.0) {
+                      float y_off, float z_off_left, float z_off_right, QPolygonF* pvd, int max_idx, bool allow_invert=true, float y_shift = 0.0, int start_idx=0) {
   const auto line_x = line.getX(), line_y = line.getY(), line_z = line.getZ();
   QPolygonF left_points, right_points;
   left_points.reserve(max_idx + 1);
   right_points.reserve(max_idx + 1);
 
-  for (int i = 0; i <= max_idx; i++) {
+  for (int i = start_idx; i <= max_idx; i++) {
     // highly negative x positions  are drawn above the frame and cause flickering, clip to zy plane of camera
     if (line_x[i] < 0) continue;
     QPointF left, right;
@@ -389,6 +389,34 @@ void update_line_data(const UIState *s, const cereal::XYZTData::Reader &line,
     }
   }
   *pvd = left_points + right_points;
+}
+void update_navi_instruction(UIState* s) {
+    SubMaster& sm = *(s->sm);
+    const auto road_limit_speed = sm["roadLimitSpeed"].getRoadLimitSpeed();
+    int xTurnInfo = road_limit_speed.getXTurnInfo();
+    int xDistToTurn = road_limit_speed.getXDistToTurn();
+
+    auto navInstruction = sm["navInstruction"].getNavInstruction();
+    float navDistance = navInstruction.getManeuverDistance();
+    //float distance_remaining = navInstruction.getDistanceRemaining();
+    QString navType = QString::fromStdString(navInstruction.getManeuverType());
+    QString navModifier = QString::fromStdString(navInstruction.getManeuverModifier());
+    if (xTurnInfo < 0 && xDistToTurn <= 0) {
+        //navText = QString::fromStdString(navInstruction.getManeuverSecondaryText());
+        if (navType == "turn") {
+            if (navModifier == "sharp left" || navModifier == "slight left" || navModifier == "left") xTurnInfo = 1; // left turn
+            else if (navModifier == "sharp right" || navModifier == "slight right" || navModifier == "right") xTurnInfo = 2;
+            else if (navModifier == "uturn") xTurnInfo = 5;
+            xDistToTurn = navDistance;
+        }
+        else if (navType == "fork" || navType == "off ramp") {
+            if (navModifier == "slight left" || navModifier == "left") xTurnInfo = 3; // left turn
+            else if (navModifier == "slight right" || navModifier == "right") xTurnInfo = 4;
+            xDistToTurn = navDistance;
+        }
+    }
+    s->xDistToTurn = (float)xDistToTurn;
+    s->xTurnInfo = xTurnInfo;
 }
 
 void update_model(UIState *s,
@@ -458,6 +486,36 @@ void update_model(UIState *s,
   else
     update_line_data_dist3(s, model_position, s->show_path_width, 1.22, 1.22, &scene.track_vertices, max_distance, false);
 
+  update_navi_instruction(s);
+  int lane_index = 0;
+  switch (s->xTurnInfo) {
+  case 1: case 3: case 5:
+      lane_index = 1;
+      break;
+  case 2: case 4:
+      lane_index = 2;
+      break;
+  }
+  if (s->xTurnInfo >= 0 && s->xDistToTurn < 180 && lane_index > 0) {
+
+      float xDistToTurn = (s->xDistToTurn) < 10 ? 0 : s->xDistToTurn - 10;
+      int idx = get_path_length_idx(lane_lines[0], xDistToTurn);
+      for (int i = 0; i < 2; i++) {
+          calib_frame_to_full_frame(s, lane_lines[i+1].getX()[idx], lane_lines[i+1].getY()[idx], lane_lines[i+1].getZ()[idx], &s->navi_turn_point[i]);
+      }
+      //printf("%d, %d\n", (int)s->navi_turn_point[0].x(), (int)s->navi_turn_point[0].y());
+
+        int start_idx = get_path_length_idx(lane_lines[0], (s->xDistToTurn) < 10 ? 0 : s->xDistToTurn - 10);
+        max_idx = get_path_length_idx(lane_lines[0], s->xDistToTurn + 30);
+        if (lane_index == 1) {
+            update_line_data(s, lane_lines[lane_index], 2.5, 0, 0, &s->xTurnInfo_vertices, max_idx, false, -2.5, start_idx);
+        }
+        else {
+            update_line_data(s, lane_lines[lane_index], 2.5, 0, 0, &s->xTurnInfo_vertices, max_idx, false, 2.5, start_idx);
+        }
+        //update_line_data(s, lane_lines[1], 0.2, 0, 0, &s->xTurnInfo_vertices, max_idx);
+  }
+  else s->xTurnInfo_vertices.clear();
 }
 
 void update_dmonitoring(UIState *s, const cereal::DriverStateV2::Reader &driverstate, float dm_fade_state, bool is_rhd) {
