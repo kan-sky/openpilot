@@ -118,11 +118,11 @@ class CarInterface(CarInterfaceBase):
       ret.radarUnavailable = False # RADAR_HEADER_MSG not in fingerprint[CanBus.OBSTACLE] and not use_off_car_defaults
       ret.pcmCruise = False  # stock non-adaptive cruise control is kept off
       # supports stop and go, initial engage could (conservatively) be above -1mph
-      ret.minEnableSpeed = -1
-      ret.minSteerSpeed = 7 * CV.MPH_TO_MS
+      ret.minEnableSpeed = -1 * CV.MPH_TO_MS
+      ret.minSteerSpeed = 6.7 * CV.MPH_TO_MS
 
       # Tuning
-      ret.longitudinalTuning.kpV = [2.0]
+      ret.longitudinalTuning.kpV = [1.75]
       ret.longitudinalTuning.kiV = [0.36]
       ret.safetyConfigs[0].safetyParam |= Panda.FLAG_GM_HW_CAM_LONG
       ret.naviCluster = 0 #현기차용, carstate.py에 False 값을 주기 위한 것뿐임
@@ -138,12 +138,11 @@ class CarInterface(CarInterfaceBase):
     # ret.openpilotLongitudinalControl = True
     # Start with a baseline tuning for all GM vehicles. Override tuning as needed in each model section below.
     ret.steerActuatorDelay = 0.2  # Default delay, not measured yet
-    tire_stiffness_factor = 0.444  # not optimized yet
 
-    ret.steerLimitTimer = 0.6
+    ret.steerLimitTimer = 0.4
     ret.radarTimeStep = 0.0667  # GM radar runs at 15Hz instead of standard 20Hz
-
-
+    ret.longitudinalActuatorDelayLowerBound = 0.42
+    ret.longitudinalActuatorDelayUpperBound = 0.5  # large delay to initially start braking
     if candidate == CAR.VOLT2018:
       ret.lateralTuning.init('torque')
       ret.minEnableSpeed = -1 * CV.MPH_TO_MS
@@ -152,14 +151,18 @@ class CarInterface(CarInterfaceBase):
       ret.steerRatio = 17.7  # Stock 15.7, LiveParameters
       tire_stiffness_factor = 0.469  # Stock Michelin Energy Saver A/S, LiveParameters
       ret.centerToFront = ret.wheelbase * 0.45  # Volt Gen 1, TODO corner weigh
-
+      ret.steerActuatorDelay = 0.38
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
-      ret.steerActuatorDelay = 0.2
-      
+
       ret.longitudinalTuning.kpBP = [0.]
-      ret.longitudinalTuning.kpV = [2.0]
+      ret.longitudinalTuning.kpV = [1.75]
       ret.longitudinalTuning.kiBP = [0.]
       ret.longitudinalTuning.kiV = [0.36]
+      ret.stoppingDecelRate = 0.2 # brake_travel/s while trying to stop
+      ret.stopAccel = -0.5
+      ret.startAccel = 0.8
+      ret.vEgoStarting = 0.25
+      ret.vEgoStopping = 0.25
 
     if ret.enableGasInterceptor:
       ret.flags |= GMFlags.PEDAL_LONG.value
@@ -183,8 +186,6 @@ class CarInterface(CarInterfaceBase):
       ret.experimentalLongitudinalAvailable = False
       ret.minEnableSpeed = 24 * CV.MPH_TO_MS
       ret.openpilotLongitudinalControl = True
-      # FIXME
-      # ret.safetyConfigs[0].safetyParam |= Panda.FLAG_GM_CC_LONG
       ret.pcmCruise = False
 
     # TODO: start from empirically derived lateral slip stiffness for the civic and scale by
@@ -196,8 +197,6 @@ class CarInterface(CarInterfaceBase):
     ret.stoppingControl = True
     ret.startingState = True
 
-    ret.longitudinalActuatorDelayLowerBound = 0.5
-    ret.longitudinalActuatorDelayUpperBound = 0.5
     ret.longitudinalTuning.kf = 1.0
     ret.stoppingDecelRate = 3.0  # reach stopping target smoothly, brake_travel/s while trying to stop
     ret.stopAccel = -2.0  # Required acceleration to keep vehicle stationary

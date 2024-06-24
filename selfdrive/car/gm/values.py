@@ -12,14 +12,16 @@ Ecu = car.CarParams.Ecu
 
 class CarControllerParams:
   STEER_MAX = 300  # GM limit is 3Nm. Used by carcontroller to generate LKA output
-  STEER_STEP = 2  # Active control frames per command (~33hz)
+  STEER_STEP = 3  # Active control frames per command (~33hz)
   INACTIVE_STEER_STEP = 10  # Inactive control frames per command (10hz)
-  STEER_DELTA_UP = 6  # Delta rates require review due to observed EPS weakness
-  STEER_DELTA_DOWN = 14
-  STEER_DRIVER_ALLOWANCE = 50
+  STEER_DELTA_UP = 10  # Delta rates require review due to observed EPS weakness
+  STEER_DELTA_DOWN = 15
+  STEER_DRIVER_ALLOWANCE = 65
   STEER_DRIVER_MULTIPLIER = 4
   STEER_DRIVER_FACTOR = 100
-  NEAR_STOP_BRAKE_PHASE = 0.5  # m/s
+  NEAR_STOP_BRAKE_PHASE = 0.25  # m/s
+  SNG_INTERCEPTOR_GAS = 18. / 255.
+  SNG_TIME = 30  # frames until the above is reached
 
   # Heartbeat for dash "Service Adaptive Cruise" and "Service Front Camera"
   ADAS_KEEPALIVE_STEP = 100
@@ -30,7 +32,7 @@ class CarControllerParams:
   # to apply some more braking if we're on a downhill slope.
   # Our controller should still keep the 2 second average above
   # -3.5 m/s^2 as per planner limits
-  ACCEL_MAX = 2.5  # m/s^2
+  ACCEL_MAX = 2.  # m/s^2
   ACCEL_MIN = -4.  # m/s^2
 
   def __init__(self, CP):
@@ -38,7 +40,7 @@ class CarControllerParams:
     self.ZERO_GAS = 2048  # Coasting
     self.MAX_BRAKE = 400  # ~ -4.0 m/s^2 with regen
 
-    if CP.carFingerprint in CAMERA_ACC_CAR:
+    if CP.carFingerprint in CAMERA_ACC_CAR and CP.carFingerprint not in CC_ONLY_CAR:
       self.MAX_GAS = 3400
       self.MAX_ACC_REGEN = 1514
       self.INACTIVE_REGEN = 1554
@@ -52,7 +54,7 @@ class CarControllerParams:
       self.INACTIVE_REGEN = 1404
       # ICE has much less engine braking force compared to regen in EVs,
       # lower threshold removes some braking deadzone
-      max_regen_acceleration = -1.1 if CP.carFingerprint in EV_CAR else -0.1
+      max_regen_acceleration = -1. if CP.carFingerprint in EV_CAR else -0.1
 
     self.GAS_LOOKUP_BP = [max_regen_acceleration, 0., self.ACCEL_MAX]
     self.GAS_LOOKUP_V = [self.MAX_ACC_REGEN, self.ZERO_GAS, self.MAX_GAS]
@@ -154,10 +156,8 @@ class CanBus:
   OBSTACLE = 1
   CAMERA = 2
   CHASSIS = 2
-  SW_GMLAN = 3
   LOOPBACK = 128
   DROPPED = 192
-
 
 class GMFlags(IntFlag):
   PEDAL_LONG = 1
