@@ -2,6 +2,7 @@ import math
 
 from cereal import car
 from common.conversions import Conversions as CV
+from common.params import Params
 from common.filter_simple import FirstOrderFilter
 from common.numpy_fast import interp, clip
 from common.realtime import DT_CTRL
@@ -81,9 +82,9 @@ class CarController:
     if hud_v_cruise > 70:
       hud_v_cruise = 0
 
-    steerMax = params.get_int("CustomSteerMax")
-    steerDeltaUp = params.get_int("CustomSteerDeltaUp")
-    steerDeltaDown = params.get_int("CustomSteerDeltaDown")
+    steerMax = int(Params().get("CustomSteerMax", encoding="utf8"))
+    steerDeltaUp = int(Params().get("SteerDeltaUp", encoding="utf8"))
+    steerDeltaDown = int(Params().get("CustomSteerDeltaDown", encoding="utf8"))
     self.params.STEER_MAX = self.params.STEER_MAX if steerMax <= 0 else steerMax
     self.params.STEER_DELTA_UP = self.params.STEER_DELTA_UP if steerDeltaUp <= 0 else steerDeltaUp
     self.params.STEER_DELTA_DOWN = self.params.STEER_DELTA_DOWN if steerDeltaDown <= 0 else steerDeltaDown
