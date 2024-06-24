@@ -1846,6 +1846,8 @@ struct LiveParametersData {
   stiffnessFactorStd @12 :Float32;
   steerRatioStd @13 :Float32;
   roll @14 :Float32;
+  pitch @15 :Float32;
+  pitchFutureLong @16 :Float32;
 }
 
 struct LiveTorqueParametersData {

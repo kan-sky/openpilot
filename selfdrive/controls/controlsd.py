@@ -30,6 +30,11 @@ from selfdrive.locationd.calibrationd import Calibration
 from selfdrive.hardware import HARDWARE, TICI, EON
 from selfdrive.manager.process_config import managed_processes
 from selfdrive.controls.lib.cruise_helper import CruiseHelper
+#GM <<<
+from selfdrive.controls.lib.drive_helpers import apply_deadzone
+from selfdrive.controls.lib.lateral_planner import TRAJECTORY_SIZE
+from selfdrive.controls.lib.vehicle_model import ACCELERATION_DUE_TO_GRAVITY
+from selfdrive.modeld.constants import T_IDXS #GM >>>
 
 GearShifter = car.CarState.GearShifter
 
@@ -60,7 +65,9 @@ CSID_MAP = {"1": EventName.roadCameraError, "2": EventName.wideRoadCameraError, 
 ACTUATOR_FIELDS = tuple(car.CarControl.Actuators.schema.fields.keys())
 ACTIVE_STATES = (State.enabled, State.softDisabling, State.overriding)
 ENABLED_STATES = (State.preEnabled, *ACTIVE_STATES)
-
+#GM <<<
+MAX_ABS_PITCH = 0.314 # 20% grade = 18 degrees = pi/10 radians
+MAX_ABS_PRED_PITCH_DELTA = MAX_ABS_PITCH * 0.5 #GM >>>
 
 class Controls:
   def __init__(self, sm=None, pm=None, can_sock=None, CI=None):
@@ -232,6 +239,9 @@ class Controls:
     self.rk = Ratekeeper(100, print_delay_threshold=None)
     self.prof = Profiler(False)  # off by default
 
+    #GM <<<<
+    self.pitch = 0.0
+    self.pitch_accel_deadzone = 0.01 # [radians] ≈ 1% grade #GM >>>
 
   def set_initial_state(self):
     if REPLAY:
@@ -648,6 +658,11 @@ class Controls:
 
     lat_plan = self.sm['lateralPlan']
     long_plan = self.sm['longitudinalPlan']
+    #GM <<<<
+    model_v2 = self.sm['modelV2']
+    if self.sm.updated['liveParameters'] and len(model_v2.orientation.y) == TRAJECTORY_SIZE:
+      future_pitch_diff = clip(interp(self.CS.pitch_future_time, T_IDXS, model_v2.orientation.y), -MAX_ABS_PRED_PITCH_DELTA, MAX_ABS_PRED_PITCH_DELTA)
+      self.CS.pitch_raw = self.sm['liveParameters'].pitch + future_pitch_diff #GM >>>
 
     CC = car.CarControl.new_message()
     CC.enabled = self.enabled
@@ -659,6 +674,10 @@ class Controls:
     CC.latActive = self.active and not CS.steerFaultTemporary and not CS.steerFaultPermanent and \
                    (not standstill or self.joystick_mode) and CC.latEnabled
     #CC.longActive = self.active and not self.events.any(ET.OVERRIDE_LONGITUDINAL) and self.CP.openpilotLongitudinalControl
+    #GM <<<<
+    if self.sm.updated['liveParameters'] and len(model_v2.orientation.y) == TRAJECTORY_SIZE:
+      self.CS.pitch_raw = self.sm['liveParameters'].pitch + future_pitch_diff #GM >>>
+
     CC.latOverride = CC.latActive and self.events.any(ET.OVERRIDE_LATERAL)
     longOverrideFlag = self.events.any(ET.OVERRIDE_LONGITUDINAL) or CS.brakeHoldActive
     longActiveUser = self.cruise_helper.longActiveUser
@@ -697,8 +716,12 @@ class Controls:
       pid_accel_limits = self.CI.get_pid_accel_limits(self.CP, CS.vEgo, self.v_cruise_helper.v_cruise_kph * CV.KPH_TO_MS)
       t_since_plan = (self.sm.frame - self.sm.rcv_frame['longitudinalPlan']) * DT_CTRL
       actuators.accel, actuators.jerk = self.LoC.update(CC.longActive, CS, long_plan, pid_accel_limits, t_since_plan, CC)
-      #self.debugText2 = 'Accel=[{:1.2f}]: {:1.2f},{:1.2f}'.format(actuators.accel, pid_accel_limits[0], pid_accel_limits[1])
-      #print(self.debugText2)
+      #GM <<<< # compute pitch-compensated accel
+      if self.sm.updated['liveParameters']:
+        self.pitch = apply_deadzone(self.sm['liveParameters'].pitchFutureLong, self.pitch_accel_deadzone)
+      actuators.accelPitchCompensated = actuators.accel + ACCELERATION_DUE_TO_GRAVITY * math.sin(self.pitch) #GM >>>>
+
+
       if len(long_plan.speeds):
         actuators.speed = long_plan.speeds[-1]
 

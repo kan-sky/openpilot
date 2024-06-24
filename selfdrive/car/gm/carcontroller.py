@@ -21,12 +21,14 @@ CAMERA_CANCEL_DELAY_FRAMES = 10
 # Enforce a minimum interval between steering messages to avoid a fault
 MIN_STEER_MSG_INTERVAL_MS = 15
 
+#GM <<<< constants for pitch compensation
+PITCH_DEADZONE = 0.01 # [radians] 0.01 ? 1% grade
 BRAKE_PITCH_FACTOR_BP = [5., 10.] # [m/s] smoothly revert to planned accel at low speeds
-BRAKE_PITCH_FACTOR_V = [0., 1.] # [unitless in [0,1]; don't touch]
-PITCH_DEADZONE = 0.01 # [radians] 0.01 ≈ 1% grade
-PITCH_MAX_DELTA = math.radians(10.0) * DT_CTRL * 4  # 10°/s, checked at 25Hz
-PITCH_MIN, PITCH_MAX = math.radians(-19), math.radians(19) # steepest roads in US are ~18°
+BRAKE_PITCH_FACTOR_V = [0., 1.] # [unitless in [0,1]]; don't touch   #GM >>>>
 
+#GM, only use pitch-compensated acceleration at 10m/s+
+ACCEL_PITCH_FACTOR_BP = [5., 10.] # [m/s]
+ACCEL_PITCH_FACTOR_V = [0., 1.] # [unitless in [0-1]]
 
 class CarController:
   def __init__(self, dbc_name, CP, VM):
@@ -46,12 +48,14 @@ class CarController:
     self.lka_icon_status_last = (False, False)
 
     self.params = CarControllerParams(self.CP)
-    self.pitch = FirstOrderFilter(0., 0.09 * 4, DT_CTRL * 4) # runs at 25 Hz
 
     self.packer_pt = CANPacker(DBC[self.CP.carFingerprint]['pt'])
     self.packer_obj = CANPacker(DBC[self.CP.carFingerprint]['radar'])
     self.packer_ch = CANPacker(DBC[self.CP.carFingerprint]['chassis'])
 
+    #GM <<<
+    self.pitch = FirstOrderFilter(0., 0.09 * 4, DT_CTRL * 4)  # runs at 25 Hz
+    self.accel_g = 0.0 #GM >>>>>
   def update(self, CC, CS, now_nanos):
     actuators = CC.actuators
     accel = actuators.accel
@@ -100,20 +104,16 @@ class CarController:
     if self.CP.openpilotLongitudinalControl:
       # Gas/regen, brakes, and UI commands - all at 25Hz
       if self.frame % 4 == 0:
-        # Pitch compensated acceleration;
-        # TODO: include future pitch (sm['modelDataV2'].orientation.y) to account for long actuator delay
-        try: pitch = CC.orientationNED[1]  # FIXME
-        except IndexError: pitch = 0.
-        pitch = clip(pitch, self.pitch.x - PITCH_MAX_DELTA, self.pitch.x + PITCH_MAX_DELTA)
-        pitch = clip(pitch, PITCH_MIN, PITCH_MAX)
-        self.pitch.update(pitch)
-        accel_g = ACCELERATION_DUE_TO_GRAVITY * apply_deadzone(self.pitch.x, PITCH_DEADZONE) # driving uphill is positive pitch
-        accel += accel_g
-
-        # ajouatom
         stopping = actuators.longControlState == LongCtrlState.stopping
         at_full_stop = CC.longActive and CS.out.standstill
         near_stop = CC.longActive and (CS.out.vEgo < self.params.NEAR_STOP_BRAKE_PHASE)
+        interceptor_gas_cmd = 0
+        # GM <<<<
+        # Pitch compensated acceleration;
+        # TODO: include future pitch (sm['modelDataV2'].orientation.y) to account for long actuator delay
+        self.pitch.update(CC.orientationNED[1])
+        self.accel_g = ACCELERATION_DUE_TO_GRAVITY * apply_deadzone(self.pitch.x, PITCH_DEADZONE) # driving uphill is positive pitch
+        accel += self.accel_g #GM >>>>
         if not CC.longActive:
           # ASCM sends max regen when not enabled
           self.apply_gas = self.params.INACTIVE_REGEN
@@ -122,11 +122,14 @@ class CarController:
           self.apply_gas = self.params.INACTIVE_REGEN
           self.apply_brake = int(min(-100 * self.CP.stopAccel, self.params.MAX_BRAKE))
         else:
-          brake_accel = actuators.accel + accel_g * interp(CS.out.vEgo, BRAKE_PITCH_FACTOR_BP, BRAKE_PITCH_FACTOR_V)
+          # Normal operation
+          #GM, brake_accel = actuators.accel + self.accel_g * interp(CS.out.vEgo, BRAKE_PITCH_FACTOR_BP, BRAKE_PITCH_FACTOR_V)
           if self.CP.carFingerprint in EV_CAR:
+            k = interp(CS.out.vEgo, ACCEL_PITCH_FACTOR_BP, ACCEL_PITCH_FACTOR_V)
+            brake_accel = k * actuators.accelPitchCompensated + (1. - k) * actuators.accel
             self.params.update_ev_gas_brake_threshold(CS.out.vEgo)
-            self.apply_gas = int(round(interp(accel, self.params.EV_GAS_LOOKUP_BP, self.params.GAS_LOOKUP_V)))
-            self.apply_brake = int(round(interp(brake_accel, self.params.EV_BRAKE_LOOKUP_BP, self.params.BRAKE_LOOKUP_V)))
+            self.apply_gas = int(round(interp(actuators.accelPitchCompensated, self.params.EV_GAS_LOOKUP_BP, self.params.GAS_LOOKUP_V))) #GM
+            self.apply_brake = int(round(interp(brake_accel, self.params.EV_BRAKE_LOOKUP_BP, self.params.BRAKE_LOOKUP_V))) #GM
           else:
             self.apply_gas = int(round(interp(accel, self.params.GAS_LOOKUP_BP, self.params.GAS_LOOKUP_V)))
             self.apply_brake = int(round(interp(brake_accel, self.params.BRAKE_LOOKUP_BP, self.params.BRAKE_LOOKUP_V)))
@@ -170,8 +173,8 @@ class CarController:
         can_sends.append(gmcan.create_acc_dashboard_command(self.packer_pt, CanBus.POWERTRAIN, CC.enabled, hud_control.cruiseGap,
                                                             hud_v_cruise * CV.MS_TO_KPH, hud_control.leadVisible, send_fcw))
       else:
-        accel_g = ACCELERATION_DUE_TO_GRAVITY * apply_deadzone(self.pitch.x, PITCH_DEADZONE) # driving uphill is positive pitch
-        accel += accel_g
+        # to keep accel steady for logs when not sending gas
+        accel += self.accel_g
 
       # Radar needs to know current speed and yaw rate (50hz),
       # and that ADAS is alive (10hz)

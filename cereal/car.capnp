@@ -399,6 +399,7 @@ struct CarControl {
 
     speed @6: Float32; # m/s
     accel @4: Float32; # m/s^2
+    accelPitchCompensated @10: Float32; #m/s^2
     longControlState @5: LongControlState;
     jerk @9: Float32; # apilot
 
