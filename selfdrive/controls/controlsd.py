@@ -661,8 +661,8 @@ class Controls:
     #GM <<<<
     model_v2 = self.sm['modelV2']
     if self.sm.updated['liveParameters'] and len(model_v2.orientation.y) == TRAJECTORY_SIZE:
-      future_pitch_diff = clip(interp(self.CS.pitch_future_time, T_IDXS, model_v2.orientation.y), -MAX_ABS_PRED_PITCH_DELTA, MAX_ABS_PRED_PITCH_DELTA)
-      self.CS.pitch_raw = self.sm['liveParameters'].pitch + future_pitch_diff #GM >>>
+      future_pitch_diff = clip(interp(self.CI.CS.pitch_future_time, T_IDXS, model_v2.orientation.y), -MAX_ABS_PRED_PITCH_DELTA, MAX_ABS_PRED_PITCH_DELTA)
+      self.CI.CS.pitch_raw = self.sm['liveParameters'].pitch + future_pitch_diff #GM >>>
 
     CC = car.CarControl.new_message()
     CC.enabled = self.enabled
@@ -676,7 +676,7 @@ class Controls:
     #CC.longActive = self.active and not self.events.any(ET.OVERRIDE_LONGITUDINAL) and self.CP.openpilotLongitudinalControl
     #GM <<<<
     if self.sm.updated['liveParameters'] and len(model_v2.orientation.y) == TRAJECTORY_SIZE:
-      self.CS.pitch_raw = self.sm['liveParameters'].pitch + future_pitch_diff #GM >>>
+      self.CI.CS.pitch_raw = self.sm['liveParameters'].pitch + future_pitch_diff #GM >>>
 
     CC.latOverride = CC.latActive and self.events.any(ET.OVERRIDE_LATERAL)
     longOverrideFlag = self.events.any(ET.OVERRIDE_LONGITUDINAL) or CS.brakeHoldActive

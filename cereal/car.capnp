@@ -203,6 +203,8 @@ struct CarState {
   stockFcw @31 :Bool;
   espDisabled @32 :Bool;
   accFaulted @42 :Bool;
+  # GM
+  pitch @61 :Float32; # vehicle pitch in radians
 
   # cruise state
   cruiseState @10 :CruiseState;
