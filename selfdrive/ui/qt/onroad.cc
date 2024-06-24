@@ -223,8 +223,8 @@ ExperimentalButton::ExperimentalButton(QWidget *parent) : QPushButton(parent) {
   setCheckable(true);
 
   params = Params();
-  //engage_img = loadPixmap("../assets/img_chffr_wheel.png", { img_size, img_size });
-  engage_img = loadPixmap("../assets/img_apilot.png", { img_size, img_size });
+  engage_img = loadPixmap("../assets/img_chffr_wheel.png", { img_size, img_size });
+  //engage_img = loadPixmap("../assets/img_apilot.png", { img_size, img_size });
   experimental_img = loadPixmap("../assets/img_experimental.svg", {img_size, img_size});
 
   QObject::connect(this, &QPushButton::toggled, [=](bool checked) {
