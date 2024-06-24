@@ -368,7 +368,7 @@ class Controls:
       else:
         safety_mismatch = pandaState.safetyModel not in IGNORED_SAFETY_MODES
 
-      if safety_mismatch or pandaState.safetyRxChecksInvalid or self.mismatch_counter >= 200:
+      if safety_mismatch or self.mismatch_counter >= 200:
         self.events.add(EventName.controlsMismatch)
 
       if log.PandaState.FaultType.relayMalfunction in pandaState.faults:
@@ -626,7 +626,7 @@ class Controls:
             self.state = State.enabled
           self.current_alert_types.append(ET.ENABLE)
           self.v_cruise_helper.initialize_v_cruise(CS)
-          self.cruise_helper.longActiveUser = 1 if self.enableAutoEngage in [0,2] else 0           
+          self.cruise_helper.longActiveUser = 1 if self.enableAutoEngage == 2 else 0           
 
     # Check if openpilot is engaged and actuators are enabled
     self.enabled = self.state in ENABLED_STATES
@@ -839,7 +839,7 @@ class Controls:
     #hudControl.rightLaneVisible = True
     #hudControl.leftLaneVisible = True
 
-    hudControl.cruiseGap = clip(int(self.sm['longitudinalPlan'].cruiseGap), 1, 3) #CS.cruiseGap
+    hudControl.cruiseGap = clip(int(self.sm['longitudinalPlan'].cruiseGap), 1, 4) #CS.cruiseGap
     hudControl.objDist = int(self.cruise_helper.dRel)
     hudControl.objRelSpd = self.cruise_helper.vRel
 

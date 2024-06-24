@@ -625,14 +625,15 @@ static void make_plot_data(const UIState* s, float& data1, float& data2) {
     auto    car_state = sm["carState"].getCarState();
     float   a_ego = car_state.getAEgo();
     float   v_ego = car_state.getVEgo();
-    auto    car_control = sm["carControl"].getCarControl();
-    float   accel = car_control.getActuators().getAccel();
+    //auto    car_control = sm["carControl"].getCarControl();
+    //float   accel = car_control.getActuators().getAccel();
     auto    live_parameters = sm["liveParameters"].getLiveParameters();
     float   roll = live_parameters.getRoll();
     auto    controls_state = sm["controlsState"].getControlsState();
     float   curvature = controls_state.getCurvature();
     //float   desired_curvature = controls_state.getDesiredCurvature();
     const auto lp = sm["longitudinalPlan"].getLongitudinalPlan();
+    float   accel = lp.getAccels()[0];
     float   speeds_0 = lp.getSpeeds()[0];
     const auto lat_plan = sm["lateralPlan"].getLateralPlan();
     float   curvatures_0 = lat_plan.getCurvatures()[0];
@@ -640,6 +641,8 @@ static void make_plot_data(const UIState* s, float& data1, float& data2) {
     const cereal::ModelDataV2::Reader& model = sm["modelV2"].getModelV2();
     const auto position = model.getPosition();
     const auto velocity = model.getVelocity();
+
+    auto lead_radar = sm["radarState"].getRadarState().getLeadOne();
 
     switch (s->show_plot_mode) {
     case 0:
@@ -660,6 +663,10 @@ static void make_plot_data(const UIState* s, float& data1, float& data2) {
     case 4:
         data1 = position.getX()[32];
         data2 = velocity.getX()[32];
+        break;
+    case 5:
+        data1 = lead_radar.getVLeadK();
+        data2 = lead_radar.getALeadK();
         break;
     default:
         data1 = data2 = 0;
@@ -1126,7 +1133,7 @@ void DrawApilot::drawLeadApilot(const UIState* s) {
         NVGcolor borderColor = COLOR_BLACK;
 
         if (radar_detected) {
-            sprintf(str, "%.1f km/h", cur_speed + radar_rel_speed * 3.6);
+            sprintf(str, "%.1f %s", (cur_speed + radar_rel_speed * 3.6) * (s->scene.is_metric?1.0:KM_TO_MILE), s->scene.is_metric?"km/h" : "mile");
             if (radar_rel_speed < -0.1) {
                 textColor = COLOR_RED; 
                 borderColor = COLOR_BLACK;
@@ -1185,12 +1192,12 @@ void DrawApilot::drawLeadApilot(const UIState* s) {
         px[6] = path_x - path_width / 2;
         py[0] = path_y;
         py[1] = path_y;
-        py[2] = path_y - 5;
-        py[3] = path_y - 10;
+        py[2] = path_y - 7;
+        py[3] = path_y - 17;
         py[4] = path_y - 0;
-        py[5] = path_y - 10;
-        py[6] = path_y - 5;
-        NVGcolor  pcolor = no_radar ? COLOR_ORANGE : radar_detected ? COLOR_RED : COLOR_BLUE;
+        py[5] = path_y - 17;
+        py[6] = path_y - 7;
+        NVGcolor  pcolor = no_radar ? ((trafficMode == 1)?COLOR_RED:COLOR_GREEN) : radar_detected ? COLOR_RED : COLOR_BLUE;
         ui_draw_line2(s, px, py, 7, &pcolor, nullptr, 3.0f);
         if (s->show_path_end > 0 && disp_dist > 0.0) {
             px[0] = path_x - path_width / 2 - 10;
@@ -1213,7 +1220,7 @@ void DrawApilot::drawLeadApilot(const UIState* s) {
     int active = controls_state.getActive();
     //const auto lp = sm["longitudinalPlan"].getLongitudinalPlan();
     float gap = lp.getCruiseGap();
-    //float tFollow = lp.getTFollow();
+    float tFollow = lp.getTFollow();
     int gap1 = controls_state.getLongCruiseGap(); // car_state.getCruiseGap();
 #ifdef __TEST
     myDrivingMode = 3;
@@ -1229,7 +1236,14 @@ void DrawApilot::drawLeadApilot(const UIState* s) {
     }
 
     int dxGap = -128 - 10 - 40;
-    if(s->show_gap_info >= 0) ui_draw_text(s, x + dxGap + 15, y + 120.0, strDrivingMode, 30, COLOR_WHITE, BOLD);
+    if (s->show_gap_info >= 0) {
+        sprintf(str, "%.2f", tFollow);
+        ui_draw_text(s, x + dxGap + 15 - 60, y + 120.0, str, 30, COLOR_WHITE, BOLD);
+        sprintf(str, "%.0fM", tFollow * v_ego + 6.0);
+        ui_draw_text(s, x + dxGap + 15 - 60, y + 155.0, str, 30, COLOR_WHITE, BOLD);
+
+        ui_draw_text(s, x + dxGap + 15, y + 120.0, strDrivingMode, 30, COLOR_WHITE, BOLD);
+    }
     static int _myDrivingMode = 0;
     if (_myDrivingMode != myDrivingMode) ui_draw_text_a(s, x + dxGap + 15, y + 120, strDrivingMode, 30, COLOR_WHITE, BOLD);
     _myDrivingMode = myDrivingMode;
@@ -1455,15 +1469,15 @@ void DrawApilot::drawLeadApilot(const UIState* s) {
         }
         if (s->show_conn_info) {
             //ui_draw_text(s, strlen(str) / 2 * 35 / 2 + 50,40, str, 35, COLOR_WHITE, BOLD);
-            //int hda_speedLimit = car_state.getSpeedLimit(); 
-            //int hda_speedLimitDistance = car_state.getSpeedLimitDistance();
-            //int naviCluster = (int)car_params.getNaviCluster();
+            int hda_speedLimit = car_state.getSpeedLimit(); 
+            int hda_speedLimitDistance = car_state.getSpeedLimitDistance();
+            int naviCluster = (int)car_params.getNaviCluster();
             if (sccBus) ui_draw_image(s, { 30, 20, 120, 54 }, "ic_scc2", 1.0f);
             if (activeNDA >= 200) ui_draw_image(s, { 30 + 135, 20, 120, 54 }, "ic_apn", 1.0f);
-            //else if (hda_speedLimit > 0 && hda_speedLimitDistance > 0) ui_draw_image(s, { 30 + 135, 20, 120, 54 }, "ic_hda", 1.0f);
+            else if (hda_speedLimit > 0 && hda_speedLimitDistance > 0) ui_draw_image(s, { 30 + 135, 20, 120, 54 }, "ic_hda", 1.0f);
             else if (activeNDA >= 100) ui_draw_image(s, { 30 + 135, 20, 120, 54 }, "ic_apm", 1.0f);
             else if (activeNDA % 100 > 0) ui_draw_image(s, { 30 + 135, 20, 120, 54 }, "ic_nda", 1.0f);
-            //else if (naviCluster > 0) ui_draw_image(s, { 30 + 135, 20, 120, 54 }, "ic_hda", 1.0f);
+            else if (naviCluster > 0) ui_draw_image(s, { 30 + 135, 20, 120, 54 }, "ic_hda", 1.0f);
             if (radar_tracks) ui_draw_image(s, { 30 + 135 * 2, 20, 240, 54 }, "ic_radartracks", 1.0f);
         }
 
@@ -1490,19 +1504,19 @@ void DrawApilot::drawLeadApilot(const UIState* s) {
 #endif
         static char _speed_str[128] = "";
         if (enabled && (longActiveUser > 0 || (longOverride && blinkerOn))) {
-            sprintf(str, "%d", (int)(cruiseMaxSpeed + 0.5));
+            sprintf(str, "%d", (int)(cruiseMaxSpeed * (s->scene.is_metric?1.0:KM_TO_MILE) + 0.5));
             if (strcmp(_speed_str, str)) ui_draw_text_a(s, bx + 170, by + 15, str, 60, COLOR_GREEN, BOLD);
             strcpy(_speed_str, str);
         }
         else strcpy(str,"--");
         ui_draw_text(s, bx + 170, by + 15, str, 60, COLOR_GREEN, BOLD, 1.0, 5.0, COLOR_BLACK, COLOR_BLACK);
-        sprintf(str, "%d", (int)(applyMaxSpeed + 0.5));
+        sprintf(str, "%d", (int)(applyMaxSpeed * (s->scene.is_metric ? 1.0 : KM_TO_MILE) + 0.5));
         if (enabled && longActiveUser > 0 && applyMaxSpeed > 0 && applyMaxSpeed != cruiseMaxSpeed) {
             ui_draw_text(s, bx + 250, by - 50, str, 50, COLOR_GREEN, BOLD, 1.0, 5.0, COLOR_BLACK, COLOR_BLACK);
         }
         if (true) {
             if (enabled && curveSpeed > 0 && curveSpeed < 150) {
-                sprintf(str, "%d", (int)(curveSpeed + 0.5));
+                sprintf(str, "%d", (int)(curveSpeed* (s->scene.is_metric ? 1.0 : KM_TO_MILE) + 0.5));
                 ui_draw_text(s, bx + 140, by + 110, str, 50, (speedCtrlActive)?COLOR_RED:COLOR_YELLOW, BOLD, 1.0, 5.0, COLOR_BLACK, COLOR_BLACK);
             }
         }
@@ -1647,7 +1661,7 @@ void DrawApilot::drawLeadApilot(const UIState* s) {
     brake_valid = brake_valid;
     longActiveUserReady = longActiveUserReady;
 }
-void DrawApilot::drawDeviceState(UIState* s) {
+void DrawApilot::drawDeviceState(UIState* s, bool show) {
     const SubMaster& sm = *(s->sm);
     auto deviceState = sm["deviceState"].getDeviceState();
     char  str[128];
@@ -1670,21 +1684,26 @@ void DrawApilot::drawDeviceState(UIState* s) {
         cpuTemp = cpuTemp / (float)std::size(cpuTempC);
     }
     auto car_state = sm["carState"].getCarState();
+    //const cereal::ModelDataV2::Reader& model = sm["modelV2"].getModelV2();
     sprintf(str, "MEM: %d%% STORAGE: %.0f%% CPU: %.0f°C AMBIENT: %.0f°C", memoryUsagePercent, freeSpacePercent, cpuTemp, ambientTemp);
     int r = interp<float>(cpuTemp, { 50.f, 90.f }, { 200.f, 255.f }, false);
     int g = interp<float>(cpuTemp, { 50.f, 90.f }, { 255.f, 200.f }, false);
     NVGcolor textColor = nvgRGBA(r, g, 200, 255);
-    if (s->fb_w > 1200) {
+    if (s->fb_w > 1200 && show) {
         ui_draw_text(s, s->fb_w - 20, 35, str, 35, textColor, BOLD);
         float engineRpm = car_state.getEngineRpm();
         float motorRpm = car_state.getMotorRpm();
         sprintf(str, "FPS: %d, %s: %.0f CHARGE: %.0f%%                      ", g_fps, (motorRpm > 0.0) ? "MOTOR" : "RPM", (motorRpm > 0.0) ? motorRpm : engineRpm, car_state.getChargeMeter());
         ui_draw_text(s, s->fb_w - 20, 90, str, 35, textColor, BOLD);
     }
+    qstr = QString::fromStdString(deviceState.getWifiIpAddress().cStr());
+    nvgTextAlign(s->vg, NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM);
+    ui_draw_text(s, s->fb_w - 20, s->fb_h - 15, qstr.toStdString().c_str(), 30, COLOR_WHITE, BOLD, 0.0f, 0.0f);
 
 }
-void DrawApilot::drawDebugText(UIState* s) {
+void DrawApilot::drawDebugText(UIState* s, bool show) {
     if (s->fb_w < 1200) return;
+    if (show == false) return;
     const SubMaster& sm = *(s->sm);
     char  str[128];
     QString qstr;
@@ -1693,9 +1712,9 @@ void DrawApilot::drawDebugText(UIState* s) {
 
     int y = 350, dy = 40;
 
-    const int text_x = 1880;
+    const int text_x = s->fb_w - 20;
     const auto live_torque_params = sm["liveTorqueParameters"].getLiveTorqueParameters();
-    const auto controls_state = sm["controlsState"].getControlsState();
+    
     sprintf(str, "LT[%.0f]:%s (%.4f/%.4f)", live_torque_params.getTotalBucketPoints(), live_torque_params.getLiveValid() ? "ON" : "OFF", live_torque_params.getLatAccelFactorFiltered(), live_torque_params.getFrictionCoefficientFiltered());
     ui_draw_text(s, text_x, y, str, 35, COLOR_WHITE, BOLD, 0.0f, 0.0f);
 
@@ -1708,19 +1727,16 @@ void DrawApilot::drawDebugText(UIState* s) {
     y += dy;
     ui_draw_text(s, text_x, y, qstr.toStdString().c_str(), 35, COLOR_WHITE, BOLD, 0.0f, 0.0f);
     const auto live_params = sm["liveParameters"].getLiveParameters();
-    float liveSteerRatio = live_params.getSteerRatio();
-    float fixedSteerRatio = controls_state.getSteerRatio();
-    sprintf(str, "Live SR/Fixed SR = %.2f/%.2f", liveSteerRatio, fixedSteerRatio);
+    float   liveSteerRatio = live_params.getSteerRatio();
+    sprintf(str, "LiveSR = %.2f", liveSteerRatio);
     y += dy;
     ui_draw_text(s, text_x, y, str, 35, COLOR_WHITE, BOLD, 0.0f, 0.0f);
 
+    auto controls_state = sm["controlsState"].getControlsState();
     qstr = QString::fromStdString(controls_state.getDebugText1().cStr());
     y += dy;
     ui_draw_text(s, text_x, y, qstr.toStdString().c_str(), 35, COLOR_WHITE, BOLD, 0.0f, 0.0f);
     qstr = QString::fromStdString(controls_state.getDebugText2().cStr());
-    y += dy;
-    ui_draw_text(s, text_x, y, qstr.toStdString().c_str(), 35, COLOR_WHITE, BOLD, 0.0f, 0.0f);
-    qstr = QString::fromStdString(controls_state.getDebugText3().cStr());
     y += dy;
     ui_draw_text(s, text_x, y, qstr.toStdString().c_str(), 35, COLOR_WHITE, BOLD, 0.0f, 0.0f);
     const auto road_limit_speed = sm["roadLimitSpeed"].getRoadLimitSpeed();
@@ -1747,6 +1763,12 @@ void DrawApilot::drawDebugText(UIState* s) {
 
     //p.drawText(text_x, y + 160, QString::fromStdString(controls_state.getDebugText2().cStr()));
     //p.drawText(text_x, y + 240, QString::fromStdString(controls_state.getDebugText1().cStr()));
+
+    auto car_control = sm["carControl"].getCarControl();
+    qstr = QString::fromStdString(car_control.getDebugTextCC().cStr());
+    y += dy;
+    ui_draw_text(s, text_x, y, qstr.toStdString().c_str(), 35, COLOR_WHITE, BOLD, 0.0f, 0.0f);
+
 }
 DrawApilot::DrawApilot() {
 
@@ -1767,8 +1789,8 @@ void ui_draw(UIState *s, int w, int h) {
   nvgScissor(s->vg, 0, 0, s->fb_w, s->fb_h);
   drawApilot->drawLaneLines(s);
   drawApilot->drawLeadApilot(s);
-  if (s->show_debug) drawApilot->drawDebugText(s);
-  if (s->show_device_stat) drawApilot->drawDeviceState(s);
+  drawApilot->drawDebugText(s, s->show_debug);
+  drawApilot->drawDeviceState(s, s->show_device_stat);
 
   ui_draw_text_a2(s);
 

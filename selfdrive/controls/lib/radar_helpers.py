@@ -23,8 +23,14 @@ class Track():
     self.K_C = kalman_params.C
     self.K_K = kalman_params.K
     self.kf = KF1D([[v_lead], [0.0]], self.K_A, self.K_C, self.K_K)
+    self.vLead = v_lead
 
   def update(self, d_rel, y_rel, v_rel, v_lead, measured):
+    #apilot: changed radar target
+    if abs(self.vLead - v_lead) > 0.5:
+      self.cnt = 0
+      self.kf = KF1D([[v_lead], [0.0]], self.K_A, self.K_C, self.K_K)
+
     # relative values, copy
     self.dRel = d_rel   # LONG_DIST
     self.yRel = y_rel   # -LAT_DIST
@@ -140,7 +146,7 @@ class Cluster():
     aLeadK = self.aLeadKFilter.process(float(lead_msg.a[0]) if useVisionMix else float(self.aLeadK))
     return {
       "dRel": float(self.dRel),
-      "yRel": float(self.yRel),
+      "yRel": float(self.yRel) if mixRadarInfo == 0 or self.yRel != 0 else float(-lead_msg.y[0]),
       "vRel": float(self.vRel),
       "vLead": float(self.vLead),
       "vLeadK": float(self.vLeadK),

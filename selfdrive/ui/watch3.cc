@@ -20,13 +20,13 @@ int main(int argc, char *argv[]) {
     QHBoxLayout *hlayout = new QHBoxLayout();
     layout->addLayout(hlayout);
     hlayout->addWidget(new CameraWidget("navd", VISION_STREAM_RGB_MAP, false));
-    hlayout->addWidget(new CameraWidget("camerad", VISION_STREAM_RGB_BACK, false));
+    hlayout->addWidget(new CameraWidget("camerad", VISION_STREAM_RGB_ROAD, false));
   }
 
   {
     QHBoxLayout *hlayout = new QHBoxLayout();
     layout->addLayout(hlayout);
-    hlayout->addWidget(new CameraWidget("camerad", VISION_STREAM_RGB_FRONT, false));
+    hlayout->addWidget(new CameraWidget("camerad", VISION_STREAM_RGB_DRIVER, false));
     hlayout->addWidget(new CameraWidget("camerad", VISION_STREAM_RGB_WIDE_ROAD, false));
   }
 

@@ -4,7 +4,7 @@ import numpy as np
 from common.numpy_fast import clip
 from common.realtime import DT_CTRL
 from cereal import log
-from selfdrive.controls.lib.latcontrol import LatControl, MIN_LATERAL_CONTROL_SPEED
+from selfdrive.controls.lib.latcontrol import LatControl, MIN_STEER_SPEED
 
 
 class LatControlLQR(LatControl):
@@ -50,7 +50,7 @@ class LatControlLQR(LatControl):
     e = steering_angle_no_offset - angle_steers_k
     self.x_hat = self.A.dot(self.x_hat) + self.B.dot(CS.steeringTorqueEps / torque_scale) + self.L.dot(e)
 
-    if CS.vEgo < MIN_LATERAL_CONTROL_SPEED or not active:
+    if CS.vEgo < MIN_STEER_SPEED or not active:
       lqr_log.active = False
       lqr_output = 0.
       output_steer = 0.
