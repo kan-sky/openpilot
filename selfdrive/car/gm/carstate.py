@@ -7,7 +7,7 @@ from common.params import Params #kans
 from opendbc.can.can_define import CANDefine
 from opendbc.can.parser import CANParser
 from selfdrive.car.interfaces import CarStateBase
-from selfdrive.car.gm.values import DBC, AccState, CanBus, STEER_THRESHOLD, CC_ONLY_CAR, CruiseButtons
+from selfdrive.car.gm.values import CAR, DBC, AccState, CanBus, STEER_THRESHOLD, CC_ONLY_CAR, CAMERA_ACC_CAR, CruiseButtons
 from common.realtime import DT_CTRL
 
 TransmissionType = car.CarParams.TransmissionType
@@ -108,12 +108,6 @@ class CarState(CarStateBase):
         ret.brake = pt_cp.vl["EBCMBrakePedalPosition"]["BrakePedalPosition"] / 0xd0
     else:
       ret.brake = pt_cp.vl["ECMAcceleratorPos"]["BrakePedalPos"]
-
-    # Regen braking is braking
-    if self.CP.transmissionType == TransmissionType.direct:
-      ret.regenBraking = pt_cp.vl["EBCMRegenPaddle"]["RegenPaddle"] != 0
-      self.regenPaddlePressed = ret.regenBraking
-      self.single_pedal_mode = ret.gearShifter == GearShifter.low or pt_cp.vl["EVDriveMode"]["SinglePedalModeActive"] == 1
     if self.CP.networkLocation == NetworkLocation.fwdCamera:
       ret.brakePressed = pt_cp.vl["ECMEngineStatus"]["BrakePressed"] != 0
     else:
@@ -121,17 +115,26 @@ class CarState(CarStateBase):
       # that the brake is being intermittently pressed without user interaction.
       # To avoid a cruise fault we need to use a conservative brake position threshold
       # https://static.nhtsa.gov/odi/tsbs/2017/MC-10137629-9999.pdf
-      ret.brakePressed = (ret.brake >= 8 or self.regenPaddlePressed)
+      ret.brakePressed = ret.brake >= 8
 
+    # Regen braking is braking
+    if self.CP.transmissionType == TransmissionType.direct:
+      ret.regenBraking = pt_cp.vl["EBCMRegenPaddle"]["RegenPaddle"] != 0
+      self.single_pedal_mode = ret.gearShifter == GearShifter.low or pt_cp.vl["EVDriveMode"]["SinglePedalModeActive"] == 1
 
-    ret.tpms.fl = pt_cp.vl["TPMS"]["PRESSURE_FL"]
-    ret.tpms.fr = pt_cp.vl["TPMS"]["PRESSURE_FR"]
-    ret.tpms.rl = pt_cp.vl["TPMS"]["PRESSURE_RL"]
-    ret.tpms.rr = pt_cp.vl["TPMS"]["PRESSURE_RR"]
+    cv_unit = 0.7256
+    ret.tpms.fl = cv_unit * pt_cp.vl["TPMS"]["PRESSURE_FL"]
+    ret.tpms.fr = cv_unit * pt_cp.vl["TPMS"]["PRESSURE_FR"]
+    ret.tpms.rl = cv_unit * pt_cp.vl["TPMS"]["PRESSURE_RL"]
+    ret.tpms.rr = cv_unit * pt_cp.vl["TPMS"]["PRESSURE_RR"]
 
     if self.CP.enableGasInterceptor:
       ret.gas = (pt_cp.vl["GAS_SENSOR"]["INTERCEPTOR_GAS"] + pt_cp.vl["GAS_SENSOR"]["INTERCEPTOR_GAS2"]) / 2.
-      ret.gasPressed = ret.gas > 15
+      if self.CP.carFingerprint in (CAR.BOLT_EUV, CAR.BOLT_CC):
+        ret.gasPressed = ret.gas > 20
+      else:
+        threshold = 20 if self.CP.carFingerprint in CAMERA_ACC_CAR else 4
+        ret.gasPressed = ret.gas > threshold
     else:
       ret.gas = pt_cp.vl["AcceleratorPedal2"]["AcceleratorPedal2"] / 254.
       ret.gasPressed = ret.gas > 1e-5
@@ -161,7 +164,8 @@ class CarState(CarStateBase):
     ret.parkingBrake = pt_cp.vl["VehicleIgnitionAlt"]["ParkBrake"] == 1
     ret.cruiseState.available = pt_cp.vl["ECMEngineStatus"]["CruiseMainOn"] != 0
     ret.espDisabled = pt_cp.vl["ESPStatus"]["TractionControlOn"] != 1
-    accFaulted = (pt_cp.vl["AcceleratorPedal2"]["CruiseState"] == AccState.FAULTED or
+    # for delay Accfault event
+    accFaulted = (pt_cp.vl["AcceleratorPedal2"]["CruiseState"] == AccState.FAULTED or \
                       pt_cp.vl["EBCMFrictionBrakeStatus"]["FrictionBrakeUnavailable"] == 1)
     startingState = LongCtrlState.starting
     self.accFaultedCount = self.accFaultedCount + 1 if accFaulted else 0

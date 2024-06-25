@@ -70,7 +70,6 @@ bool gm_cam_long = false;
 bool gm_pcm_cruise = false;
 bool gm_skip_relay_check = false;
 bool gm_force_ascm = false;
-bool brake_pressed_x = false;
 
 static int gm_rx_hook(CANPacket_t *to_push) {
 
@@ -116,11 +115,11 @@ static int gm_rx_hook(CANPacket_t *to_push) {
     // Reference for brake pressed signals:
     // https://github.com/commaai/openpilot/blob/master/selfdrive/car/gm/carstate.py
     if ((addr == 190) && (gm_hw == GM_ASCM)) {
-      brake_pressed_x = GET_BYTE(to_push, 1) >= 8U;
+      brake_pressed = GET_BYTE(to_push, 1) >= 8U;
     }
 
     if ((addr == 201) && (gm_hw == GM_CAM)) {
-      brake_pressed_x = GET_BIT(to_push, 40U) != 0U;
+      brake_pressed = GET_BIT(to_push, 40U) != 0U;
     }
 
     if (addr == 452) {
@@ -135,8 +134,7 @@ static int gm_rx_hook(CANPacket_t *to_push) {
 
     // exit controls on regen paddle
     if (addr == 189) {
-      //regen_braking = (GET_BYTE(to_push, 0) >> 4) != 0U;
-      controls_allowed = 1;
+      regen_braking = (GET_BYTE(to_push, 0) >> 4) != 0U;
     }
 
     bool stock_ecu_detected = (addr == 384);  // ASCMLKASteeringCmd
@@ -185,7 +183,8 @@ static int gm_tx_hook(CANPacket_t *to_send) {
     int desired_torque = ((GET_BYTE(to_send, 0) & 0x7U) << 8) + GET_BYTE(to_send, 1);
     desired_torque = to_signed(desired_torque, 11);
 
-    if (steer_torque_cmd_checks(desired_torque, -1, GM_STEERING_LIMITS)) {
+    bool steer_req = GET_BIT(to_send, 3U);
+    if (steer_torque_cmd_checks(desired_torque, steer_req, GM_STEERING_LIMITS)) {
       //tx = 0;
     }
   }
@@ -206,16 +205,7 @@ static int gm_tx_hook(CANPacket_t *to_send) {
   }
 
   // BUTTONS: used for resume spamming and cruise cancellation with stock longitudinal
-  if ((addr == 481) && gm_force_ascm) {  // ajouatom: add gm_force_ascm, ¨Ïoo¡§¢®¢®¨¡ Au¡§uU¢®¨¡¡Ë¢ç¡Ë¡ÍECI¡Íi¡Íi¢®¢´I...
-    int button = (GET_BYTE(to_send, 5) >> 4) & 0x7U;
-
-    bool allowed_btn = (button == GM_BTN_CANCEL);
-    allowed_btn |= (button == GM_BTN_SET || button == GM_BTN_RESUME || button == GM_BTN_UNPRESS);
-    if (!allowed_btn) {
-      tx = 0;
-    }
-  }
-  else if ((addr == 481) && (gm_pcm_cruise)) {
+  if ((addr == 481) && (gm_pcm_cruise)) {
     int button = (GET_BYTE(to_send, 5) >> 4) & 0x7U;
     bool allowed_btn = (button == GM_BTN_CANCEL) && cruise_engaged_prev;
     // For standard CC, allow spamming of SET / RESUME
@@ -224,7 +214,6 @@ static int gm_tx_hook(CANPacket_t *to_send) {
     }
   }
 
-  // 1 allows the message through
   return tx;
 }
 
@@ -245,7 +234,7 @@ static int gm_fwd_hook(int bus_num, int addr) {
       // block lkas message and acc messages if gm_cam_long, forward all others
       bool is_lkas_msg = (addr == 384);
       bool is_acc_msg = (addr == 789) || (addr == 715) || (addr == 880);
-      int block_msg = is_lkas_msg || (is_acc_msg && gm_cam_long);
+      bool block_msg = is_lkas_msg || (is_acc_msg && gm_cam_long);
       if (!block_msg) {
         bus_fwd = 0;
       }
@@ -267,9 +256,7 @@ static const addr_checks* gm_init(uint16_t param) {
   } else {
   }
 
-#ifdef ALLOW_DEBUG
   gm_cam_long = GET_FLAG(param, GM_PARAM_HW_CAM_LONG);
-#endif
   gm_pcm_cruise = (gm_hw == GM_CAM) && !gm_cam_long && !gm_force_ascm;
   gm_skip_relay_check = GET_FLAG(param, GM_PARAM_NO_CAMERA);
   return &gm_rx_checks;
