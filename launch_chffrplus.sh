@@ -1,7 +1,7 @@
 #!/usr/bin/bash
 
 if [ ! -f "./installer/boot_finish" ]; then
-  echo "Installing fonts..."
+
   mount -o rw,remount /system
   cp -f ./installer/fonts/NanumGothic* /system/fonts/
   cp -f ./installer/fonts/opensans_* ./selfdrive/assets/fonts/

@@ -55,7 +55,6 @@ class CarState(CarStateBase):
 
     self.buttons_counter = 0
     self.single_pedal_mode = False
-    self.distance_button_pressed = False
 
     self.totalDistance = 0.0
     self.accFaultedCount = 0
@@ -68,9 +67,10 @@ class CarState(CarStateBase):
   def update(self, pt_cp, cam_cp, loopback_cp, chassis_cp):
     ret = car.CarState.new_message()
 
-    self.distance_button_pressed = pt_cp.vl["ASCMSteeringButton"]["DistanceButton"] != 0
     self.prev_cruise_buttons = self.cruise_buttons
+    self.prev_distance_button = self.distance_button_pressed
     self.cruise_buttons = pt_cp.vl["ASCMSteeringButton"]["ACCButtons"]
+    self.distance_button_pressed = pt_cp.vl["ASCMSteeringButton"]["DistanceButton"] != 0
     ret.cruiseButtons = self.cruise_buttons
     self.buttons_counter = pt_cp.vl["ASCMSteeringButton"]["RollingCounter"]
     self.pscm_status = copy.copy(pt_cp.vl["PSCMStatus"])
@@ -195,7 +195,7 @@ class CarState(CarStateBase):
     # kans: use cluster speed & vCluRatio(longitudialPlanner)
     self.is_metric = Params().get_bool("IsMetric")
     speed_conv = CV.KPH_TO_MS * 1.609344 if self.is_metric else CV.MPH_TO_MS
-    cluSpeed = pt_cp.vl["ECMVehicleSpeed"]["VehicleSpeed"]
+    cluSpeed = pt_cp.vl["SPEED_RELATED"]["ClusterSpeed"]
     ret.vEgoCluster = cluSpeed * speed_conv
     vEgoClu, aEgoClu = self.update_clu_speed_kf(ret.vEgoCluster)
     ret.vCluRatio = (ret.vEgo / vEgoClu) if (vEgoClu > 3. and ret.vEgo > 3.) else 1.0
@@ -288,7 +288,7 @@ class CarState(CarStateBase):
       ("BrakePressed", "ECMEngineStatus"),
       ("DistanceButton", "ASCMSteeringButton"),
       ("RollingCounter", "ASCMLKASteeringCmd"),
-      ("VehicleSpeed", "ECMVehicleSpeed"),
+      ("ClusterSpeed", "SPEED_RELATED"),
       ("EngineRPM", "ECMEngineStatus"),
       ("PRESSURE_FL", "TPMS"),
       ("PRESSURE_FR", "TPMS"),
@@ -312,7 +312,7 @@ class CarState(CarStateBase):
       ("ECMEngineStatus", 100),
       ("PSCMSteeringAngle", 100),
       ("ECMAcceleratorPos", 80),
-      ("ECMVehicleSpeed", 20),
+      ("SPEED_RELATED", 20),
       ("TPMS", 0),
     ]
 
