@@ -170,6 +170,19 @@ def manager_init() -> None:
     ("SteerDeltaUp", "4"),       
     ("SteerDeltaDown", "5"),       
   ]
+
+def set_default_params():
+  params = Params()
+  default_params = get_default_params()
+  try:
+    defulat_params.remove(("CompletedTrainingVersion", "0"))
+    default_params.remove(("LanguageSetting", "main_en"))
+  except ValueError:
+    pass
+  for k, v in default_params:
+    params.put(k, v)
+    print(f"SetToDefault[{k}]={v}")
+
   if not PC:
     default_params.append(("LastUpdateTime", datetime.datetime.utcnow().isoformat().encode('utf8')))
 

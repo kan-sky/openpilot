@@ -327,6 +327,34 @@ DevicePanel::DevicePanel(SettingsWindow *parent) : ListWidget(parent) {
     #poweroff_btn:pressed { background-color: #FF2424; }
   )");
   addItem(power_layout);
+
+  struct DefaultSetting {
+      QString name;
+      QString descr;
+      QString jsonFile;
+  };
+
+  const QVector<DefaultSetting> settings = {
+      //{"TM_HEV_SCC2", "TM_HEV_2022, scc2, radarTracks, radar Long", "apilot_default_tm_hev_scc2.json"},
+      //{"DH_SCC2", "DH, scc2, radar Long", "apilot_default_dh_scc2.json"},
+      //{"EV6_VLONG", "EV6 vision Long", "apilot_default_ev6_vlong.json"},
+      //{"IONIQ5_VLONG", "IONIQ5 vision Long", "apilot_default_ioniq5_vlong.json"},
+      {"GM_VOLT", "GM VOLT radar Long", "apilot_default_volt_ev.json"}
+  };
+
+  for (const auto& setting : settings) {
+      auto button = new ButtonControl(tr("Set to default(%1)").arg(setting.name), tr("DEFAULT"), tr("%1").arg(setting.descr));
+      connect(button, &ButtonControl::clicked, [this, setting]() {
+          if (!ConfirmationDialog::confirm(tr("Are you sure you want to set to default?"), tr("Execute"), this)) return;
+          QProcess process;
+          process.setWorkingDirectory("/data/openpilot/selfdrive");
+          process.start("/bin/sh", QStringList{ "-c", QString("python ./apilot_default.py ./%1").arg(setting.jsonFile) });
+          process.waitForFinished();
+          //Hardware::reboot();
+          });
+      addItem(button);
+  }
+
 }
 
 void DevicePanel::updateCalibDescription() {
