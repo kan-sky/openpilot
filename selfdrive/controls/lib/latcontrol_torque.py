@@ -137,6 +137,12 @@ class LatControlTorque(LatControl):
     self.paramsCount += 1
     if self.paramsCount > 30:
       self.paramsCount = 0
+      lateralTorqueKp = float(Params().get_int("LateralTorqueKpV", encoding="utf8"))*0.01
+      lateralTorqueKi = float(Params().get_int("LateralTorqueKiV", encoding="utf8"))*0.01
+      lateralTorqueKf = float(Params().get_int("LateralTorqueKf", encoding="utf8"))*0.01
+      self.pid._k_p = [[0], [lateralTorqueKp]]
+      self.pid._k_i = [[0], [lateralTorqueKi]]
+      self.pid.k_f = lateralTorqueKf
     elif self.paramsCount == 10:
       self.lateralTorqueCustom = Params().get_int("LateralTorqueCustom")
       self.lateralTorqueAccelFactor = float(Params().get_int("LateralTorqueAccelFactor"))*0.001
@@ -144,9 +150,6 @@ class LatControlTorque(LatControl):
       if self.lateralTorqueCustom > 0:
         self.torque_params.latAccelFactor = self.lateralTorqueAccelFactor
         self.torque_params.friction = self.lateralTorqueFriction
-        self.pid._k_p =  [[0], [float(Params().get_int("LateralTorqueKpV"))*0.01]]
-        self.pid._k_i = [[0], [float(Params().get_int("LateralTorqueKiV"))*0.01]]
-        self.pid.k_f = float(Params().get_int("LateralTorqueKf"))*0.01
 
   def update(self, active, CS, VM, params, steer_limited, desired_curvature, llk, model_data=None):
     self.update_params()
