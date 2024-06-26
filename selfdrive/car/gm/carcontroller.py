@@ -3,7 +3,7 @@ import math
 from cereal import car
 from common.conversions import Conversions as CV
 from common.params import Params
-from common.filter_simple import FirstOrderFilter
+#from common.filter_simple import FirstOrderFilter
 from common.numpy_fast import interp, clip
 from common.realtime import DT_CTRL
 from opendbc.can.packer import CANPacker
@@ -11,7 +11,7 @@ from selfdrive.car import apply_driver_steer_torque_limits, create_gas_intercept
 from selfdrive.car.gm import gmcan
 from selfdrive.car.gm.values import AccState, DBC, CanBus, CarControllerParams, CruiseButtons, EV_CAR, CC_ONLY_CAR, GMFlags
 from selfdrive.controls.lib.drive_helpers import apply_deadzone
-from selfdrive.controls.lib.vehicle_model import ACCELERATION_DUE_TO_GRAVITY
+#from selfdrive.controls.lib.vehicle_model import ACCELERATION_DUE_TO_GRAVITY
 
 VisualAlert = car.CarControl.HUDControl.VisualAlert
 NetworkLocation = car.CarParams.NetworkLocation
@@ -23,9 +23,9 @@ CAMERA_CANCEL_DELAY_FRAMES = 10
 MIN_STEER_MSG_INTERVAL_MS = 15
 
 #GM <<<< constants for pitch compensation
-PITCH_DEADZONE = 0.01 # [radians] 0.01 ? 1% grade
-BRAKE_PITCH_FACTOR_BP = [5., 10.] # [m/s] smoothly revert to planned accel at low speeds
-BRAKE_PITCH_FACTOR_V = [0., 1.] # [unitless in [0,1]]; don't touch   #GM >>>>
+#PITCH_DEADZONE = 0.01 # [radians] 0.01 ? 1% grade
+#BRAKE_PITCH_FACTOR_BP = [5., 10.] # [m/s] smoothly revert to planned accel at low speeds
+#BRAKE_PITCH_FACTOR_V = [0., 1.] # [unitless in [0,1]]; don't touch   #GM >>>>
 
 #GM, only use pitch-compensated acceleration at 10m/s+
 ACCEL_PITCH_FACTOR_BP = [5., 10.] # [m/s]
@@ -55,8 +55,8 @@ class CarController:
     self.packer_ch = CANPacker(DBC[self.CP.carFingerprint]['chassis'])
 
     #GM <<<
-    self.pitch = FirstOrderFilter(0., 0.09 * 4, DT_CTRL * 4)  # runs at 25 Hz
-    self.accel_g = 0.0 #GM >>>>>
+    #self.pitch = FirstOrderFilter(0., 0.09 * 4, DT_CTRL * 4)  # runs at 25 Hz
+    #self.accel_g = 0.0 #GM >>>>>
 	
   @staticmethod
   def calc_pedal_command(accel: float, long_active: bool) -> float:
@@ -135,9 +135,9 @@ class CarController:
         # GM <<<<
         # Pitch compensated acceleration;
         # TODO: include future pitch (sm['modelDataV2'].orientation.y) to account for long actuator delay
-        self.pitch.update(CC.orientationNED[1])
-        self.accel_g = ACCELERATION_DUE_TO_GRAVITY * apply_deadzone(self.pitch.x, PITCH_DEADZONE) # driving uphill is positive pitch
-        accel += self.accel_g #GM >>>>
+        #self.pitch.update(CC.orientationNED[1])
+        #self.accel_g = ACCELERATION_DUE_TO_GRAVITY * apply_deadzone(self.pitch.x, PITCH_DEADZONE) # driving uphill is positive pitch
+        #accel += self.accel_g #GM >>>>
         if not CC.longActive:
           # ASCM sends max regen when not enabled
           self.apply_gas = self.params.INACTIVE_REGEN
@@ -190,14 +190,10 @@ class CarController:
           can_sends.append(gmcan.create_friction_brake_command(self.packer_ch, friction_brake_bus, self.apply_brake,
                                                                idx, CC.enabled, near_stop, at_full_stop, self.CP))
 
-          # Send dashboard UI commands (ACC status)
-          send_fcw = hud_alert == VisualAlert.fcw
-          can_sends.append(gmcan.create_acc_dashboard_command(self.packer_pt, CanBus.POWERTRAIN, CC.enabled, hud_control.cruiseGap,
+        # Send dashboard UI commands (ACC status)
+        send_fcw = hud_alert == VisualAlert.fcw
+        can_sends.append(gmcan.create_acc_dashboard_command(self.packer_pt, CanBus.POWERTRAIN, CC.enabled, hud_control.cruiseGap,
                                                               hud_v_cruise * CV.MS_TO_KPH, hud_control.leadVisible, send_fcw))
-      else:
-        # to keep accel steady for logs when not sending gas
-        accel += self.accel_g
-
       # Radar needs to know current speed and yaw rate (50hz),
       # and that ADAS is alive (10hz)
       if not self.CP.radarUnavailable:
