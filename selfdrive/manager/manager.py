@@ -27,16 +27,7 @@ from selfdrive.hardware.eon.apk import system
 sys.path.append(os.path.join(BASEDIR, "pyextra"))
 
 
-def manager_init() -> None:
-  # update system time from panda
-  set_time(cloudlog)
-
-  # save boot log
-  #subprocess.call("./bootlog", cwd=os.path.join(BASEDIR, "selfdrive/loggerd"))
-
-  params = Params()
-  params.clear_all(ParamKeyType.CLEAR_ON_MANAGER_START)
-
+def get_default_params():
   default_params: List[Tuple[str, Union[str, bytes]]] = [
     ("CompletedTrainingVersion", "0"),
     ("DisengageOnAccelerator", "0"),
@@ -170,6 +161,7 @@ def manager_init() -> None:
     ("SteerDeltaUp", "4"),       
     ("SteerDeltaDown", "5"),       
   ]
+  return default_params
 
 def set_default_params():
   params = Params()
@@ -177,12 +169,23 @@ def set_default_params():
   try:
     defulat_params.remove(("CompletedTrainingVersion", "0"))
     default_params.remove(("LanguageSetting", "main_en"))
+    default_params.remove(("GsmMetered", "1"))
   except ValueError:
     pass
   for k, v in default_params:
     params.put(k, v)
     print(f"SetToDefault[{k}]={v}")
 
+def manager_init() -> None:
+  # update system time from panda
+  set_time(cloudlog)
+
+  # save boot log
+  #subprocess.call("./bootlog", cwd=os.path.join(BASEDIR, "selfdrive/loggerd"))
+
+  params = Params()
+  params.clear_all(ParamKeyType.CLEAR_ON_MANAGER_START)
+  default_params = get_default_params()
   if not PC:
     default_params.append(("LastUpdateTime", datetime.datetime.utcnow().isoformat().encode('utf8')))
 
