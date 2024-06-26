@@ -156,7 +156,8 @@ class Controls:
 
     # cleanup old params
     if not self.CP.experimentalLongitudinalAvailable:
-      self.params.delete("ExperimentalLongitudinalEnabled")
+      #self.params.remove("ExperimentalLongitudinalEnabled")
+      pass
     if not self.CP.openpilotLongitudinalControl:
       self.params.delete("ExperimentalMode")
 
