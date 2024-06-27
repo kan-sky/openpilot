@@ -322,6 +322,7 @@ class CarState(CarStateBase):
       ("SPEED_RELATED", 20),
       ("TPMS", 0),
       ("BCMBlindSpotMonitor", 0),
+      ("ASCMLKASteeringCmd", 10),
     ]
 
     # Used to read back last counter sent to PT by camera
@@ -330,7 +331,7 @@ class CarState(CarStateBase):
         ("RollingCounter", "ASCMLKASteeringCmd"),
        ]
       checks += [
-        ("ASCMLKASteeringCmd", 0),
+        ("ASCMLKASteeringCmd", 10),
       ]
 
     if CP.transmissionType == TransmissionType.direct:
@@ -363,7 +364,7 @@ class CarState(CarStateBase):
     ]
 
     checks = [
-      ("ASCMLKASteeringCmd", 0),
+      ("ASCMLKASteeringCmd", 10),
     ]
 
     return CANParser(DBC[CP.carFingerprint]["pt"], signals, checks, CanBus.LOOPBACK)
