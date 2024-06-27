@@ -84,8 +84,7 @@ class FluxModel:
       self.layers.append((W, b, activation))
 
     self.validate_layers()
-    self.check_for_friction_override()
-
+    
   # Begin activation functions.
   # These are called by name using the keys in the model json file
   def sigmoid(self, x):
