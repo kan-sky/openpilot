@@ -330,14 +330,14 @@ std::unordered_map<std::string, uint32_t> keys = {
     { "LateralTorqueKi", PERSISTENT },
     { "LateralTorqueKd", PERSISTENT },
     { "LateralTorqueKf", PERSISTENT },
-    { "CustomSteerMax", PERSISTENT },
-    { "CustomSteerDeltaUp", PERSISTENT },
-    { "CustomSteerDeltaDown", PERSISTENT },
     { "LateralTorqueCustom", PERSISTENT },
     { "LateralTorqueAccelFactor", PERSISTENT },
     { "LateralTorqueFriction", PERSISTENT },
+    { "CustomSteerMax", PERSISTENT },
     { "SteerDeltaUp", PERSISTENT },
     { "SteerDeltaDown", PERSISTENT },
+    {"NNFF", PERSISTENT},
+    {"NNFFLite", PERSISTENT},
 };
 
 } // namespace

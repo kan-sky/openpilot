@@ -160,6 +160,8 @@ def get_default_params():
     ("SteerRatioApply", "157"),
     ("SteerDeltaUp", "4"),       
     ("SteerDeltaDown", "5"),       
+    ("NNFF", "1"),
+    ("NNFFLite", "1"),
   ]
   return default_params
 

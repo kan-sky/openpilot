@@ -33,6 +33,7 @@ const std::tuple<AudibleAlert, QString, int> sound_list[] = {
   {AudibleAlert::SPEED_DOWN, "audio_speed_down.wav", 0},
   {AudibleAlert::AUDIO_TURN, "audio_turn.wav", 0},
   {AudibleAlert::REVERSE_GEAR, "reverse_gear.wav", 0},
+  {AudibleAlert::NNFF, "nnff.wav", 0},
 };
 
 class Sound : public QObject {

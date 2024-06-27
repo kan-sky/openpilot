@@ -215,6 +215,7 @@ class Controls:
     self.autoEngageCounter = 200
     self.right_lane_visible = False
     self.left_lane_visible = False
+    self.nnff_alert_shown = False
 
     # TODO: no longer necessary, aside from process replay
     self.sm['liveParameters'].valid = True
@@ -272,6 +273,11 @@ class Controls:
     # no more events while in dashcam mode
     if self.read_only:
       return
+    
+    # show alert to indicate whether NNFF is loaded
+    if not self.nnff_alert_shown and self.sm.frame % 1000 == 0 and self.CP.lateralTuning.which() == 'torque':
+      self.nnff_alert_shown = True
+      self.events.add(EventName.torqueNNFFLoadSuccess)
 
     # Block resume if cruise never previously enabled
     resume_pressed = any(be.type in (ButtonType.accelCruise, ButtonType.resumeCruise) for be in CS.buttonEvents)
@@ -733,7 +739,8 @@ class Controls:
                                                                                        lat_plan.curvatureRates, self.cruise_helper.steerActuatorDelay)
       actuators.steer, actuators.steeringAngleDeg, lac_log = self.LaC.update(CC.latActive, CS, self.VM, lp,
                                                                              self.last_actuators, self.steer_limited, self.desired_curvature,
-                                                                             self.desired_curvature_rate, self.sm['liveLocationKalman'])
+                                                                             self.desired_curvature_rate, self.sm['liveLocationKalman'],
+                                                                             lat_plan=lat_plan, model_data=self.sm['modelV2'])
       actuators.curvature = self.desired_curvature
     else:
       lac_log = log.ControlsState.LateralDebugState.new_message()

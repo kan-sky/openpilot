@@ -701,8 +701,9 @@ CommunityPanel::CommunityPanel(QWidget* parent) : QWidget(parent) {
   //toggleLayout->addWidget(new ParamControl("SccConnectedBus2", "SCC배선이 BUS2에 연결됨", "SCC배선을 개조하여 BUS2에 연결된경우 켭니다.", "../assets/offroad/icon_road.png", this));
   toggleLayout->addWidget(new ParamControl("OpkrHotspotOnBoot", "Hotspot enable on boot", "", "../assets/offroad/icon_shell.png", this));
   toggleLayout->addWidget(new CValueControl("EnableAutoEngage", "EnableAutoEngage", "0:Not used,1:Auto Engage/Cruise OFF,2:Auto Engage/Cruise ON", "../assets/offroad/icon_shell.png", 0, 2, 1));
+  toggleLayout->addWidget(new CValueControl("NNFF", "NNFF", "Twilsonco's NNFF(Reboot required)", "../assets/offroad/icon_road.png", 0, 1, 1));
+  toggleLayout->addWidget(new CValueControl("NNFFLite", "NNFFLite", "Twilsonco's NNFFLite(Reboot required)", "../assets/offroad/icon_road.png", 0, 1, 1));
   toggleLayout->addWidget(new CValueControl("MixRadarInfo", "MixRadarInfo for SCC Rardar", "0:Not used,1:Use", "../assets/offroad/icon_shell.png", 0, 1, 1));
-
   toggleLayout->addWidget(horizontal_line());
   toggleLayout->addWidget(new CValueControl("AutoNaviSpeedCtrl", tr("SpeedCameraControl(2)"), "0:사용안함, 1:APM, 2:APM + 순정네비게이션, 3:NDA", "../assets/offroad/icon_road.png", 0, 3, 1));
   toggleLayout->addWidget(new CValueControl("AutoNaviSpeedCtrlMode", "SpeedCameraDecelMode(1)", "0:기존방식, 1:APILOT방식", ".. / assets / offroad / icon_road.png", 0, 1, 1));
@@ -786,12 +787,10 @@ TuningPanel::TuningPanel(QWidget* parent) : QWidget(parent) {
     toggleLayout->addWidget(new CValueControl("LateralTorqueKf", "LAT: TorqueKf(100)", "", "../assets/offroad/icon_road.png", 0, 200, 1));
     toggleLayout->addWidget(new CValueControl("LateralTorqueKpV", "LAT: TorqueKpV(100)", "", "../assets/offroad/icon_road.png", 0, 200, 1));
     toggleLayout->addWidget(new CValueControl("LateralTorqueKiV", "LAT: TorqueKiV(15)", "", "../assets/offroad/icon_road.png", 0, 200, 1));
-    toggleLayout->addWidget(new CValueControl("CustomSteerMax", "LAT: CustomSteerMax(300)", "", "../assets/offroad/icon_road.png", 0, 200, 1));
-    toggleLayout->addWidget(new CValueControl("CustomSteerDeltaUp", "LAT: CustomSteerDeltaUp(5)", "", "../assets/offroad/icon_road.png", 0, 200, 1));
-    toggleLayout->addWidget(new CValueControl("CustomSteerDeltaDown", "LAT: CustomSteerDeltaDown(5)", "", "../assets/offroad/icon_road.png", 0, 200, 1));
     toggleLayout->addWidget(horizontal_line());
     toggleLayout->addWidget(new CValueControl("SteerActuatorDelay", "LAT:SteerActuatorDelay(30)", "표준", "../assets/offroad/icon_road.png", 0, 100, 1));
-    toggleLayout->addWidget(new CValueControl("SteerDeltaUp", "LAT: SteerDeltaUp(3)", "", "../assets/offroad/icon_road.png", 1, 20, 1));
+    toggleLayout->addWidget(new CValueControl("CustomSteerMax", "LAT: CustomSteerMax(300)", "", "../assets/offroad/icon_road.png", 0, 350, 1));
+    toggleLayout->addWidget(new CValueControl("SteerDeltaUp", "LAT: SteerDeltaUp(5)", "", "../assets/offroad/icon_road.png", 1, 20, 1));
     toggleLayout->addWidget(new CValueControl("SteerDeltaDown", "LAT: SteerDeltaDown(7)", "", "../assets/offroad/icon_road.png", 1, 20, 1));
     toggleLayout->addWidget(new CValueControl("SteerRatioApply", "LAT: SteerRatio적용(0x0.1)", "0:사용안함", "../assets/offroad/icon_road.png", 0, 300, 2));
     toggleLayout->addWidget(horizontal_line());

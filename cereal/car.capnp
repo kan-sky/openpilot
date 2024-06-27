@@ -133,6 +133,8 @@ struct CarEvent @0x9b1657f34caf3ad3 {
     autoHoldActivated @130;
     # pedal
     pedalInterceptorNoBrake @131;
+    torqueNNFFLoadSuccess @132;
+    torqueNNFFNotLoaded @133;
     radarCanErrorDEPRECATED @15;
     communityFeatureDisallowedDEPRECATED @62;
     radarCommIssueDEPRECATED @67;
@@ -484,6 +486,7 @@ struct CarControl {
       stopStop @21;
       audioTurn @22;
       reverseGear @23;
+      nnff @24;
     }
   }
 
@@ -608,6 +611,7 @@ struct CarParams {
     steeringAngleDeadzoneDeg @5 :Float32;
     latAccelFactor @6 :Float32;
     latAccelOffset @7 :Float32;
+    nnModelName @9 :Text;
   }
 
   struct LongitudinalPIDTuning {
