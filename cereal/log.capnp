@@ -2191,9 +2191,9 @@ struct NavInstruction {
   speedLimitSign @11 :SpeedLimitSign;
 
   allManeuvers @12 :List(Maneuver);
-  
+
   imageUrl @13 :Text;
-  
+
 
   struct Lane {
     directions @0 :List(Direction);

@@ -947,7 +947,7 @@ void DrawApilot::drawDateTime(const UIState* s) {
             nav_y += 70;
         }
         nvgTextAlign(s->vg, NVG_ALIGN_LEFT | NVG_ALIGN_BOTTOM);
-        ui_draw_text(s, 50, nav_y, m_navText.toStdString().c_str(), 35, COLOR_WHITE, BOLD, 3.0f, 8.0f);
+        ui_draw_text(s, 50, nav_y, s->m_navText.toStdString().c_str(), 35, COLOR_WHITE, BOLD, 3.0f, 8.0f);
         nvgTextAlign(s->vg, NVG_ALIGN_CENTER | NVG_ALIGN_BOTTOM);
     }
 }
@@ -1198,7 +1198,7 @@ void DrawApilot::drawSpeed(const UIState* s, int x, int y) {
     if (cur_speed < 0.0) cur_speed = 0.0;
     auto controls_state = sm["controlsState"].getControlsState();
     //auto carstate = sm["carState"].getCarState();
-    const auto road_limit_speed = sm["roadLimitSpeed"].getRoadLimitSpeed();
+    //const auto road_limit_speed = sm["roadLimitSpeed"].getRoadLimitSpeed();
     //const auto car_params = sm["carParams"].getCarParams();
     if (s->show_mode == 3) {
         y = -100;
@@ -1244,82 +1244,9 @@ void DrawApilot::drawSpeed(const UIState* s, int x, int y) {
         auto cruise_control = car_control.getCruiseControl();
         int longOverride = cruise_control.getOverride();// HW: car_control.getLongOverride();
 
-
-        //int activeNDA = road_limit_speed.getActive();
-        int roadLimitSpeed = road_limit_speed.getRoadLimitSpeed();
-        int roadLimitSpeed_OSM = lp.getLimitSpeed();
-        if (roadLimitSpeed < roadLimitSpeed_OSM) roadLimitSpeed = roadLimitSpeed_OSM;
-
-        int camLimitSpeed = road_limit_speed.getCamLimitSpeed();
-        int camLimitSpeedLeftDist = road_limit_speed.getCamLimitSpeedLeftDist();
-        int sectionLimitSpeed = road_limit_speed.getSectionLimitSpeed();
-        int sectionLeftDist = road_limit_speed.getSectionLeftDist();
-        int camType = road_limit_speed.getCamType();
-
-        int limit_speed = 0;
-        int left_dist = 0;
-
-        if (camLimitSpeed > 0 && camLimitSpeedLeftDist > 0) {
-            limit_speed = camLimitSpeed;
-            left_dist = camLimitSpeedLeftDist;
-        }
-        else if (sectionLimitSpeed > 0 && sectionLeftDist > 0) {
-            limit_speed = sectionLimitSpeed;
-            left_dist = sectionLeftDist;
-        }
-        //const auto road_limit_speed = sm["roadLimitSpeed"].getRoadLimitSpeed();
-        int xSpdLimit = road_limit_speed.getXSpdLimit();
-        int xSignType = road_limit_speed.getXSignType();
-        int xSpdDist = road_limit_speed.getXSpdDist();
-        m_navText = QString::fromStdString(road_limit_speed.getXRoadName());
-        /*
-        int xTurnInfo = road_limit_speed.getXTurnInfo();
-        int xDistToTurn = road_limit_speed.getXDistToTurn();
-
-        auto navInstruction = sm["navInstruction"].getNavInstruction();
-        float navDistance = navInstruction.getManeuverDistance();
-        //float distance_remaining = navInstruction.getDistanceRemaining();
-        QString navType = QString::fromStdString(navInstruction.getManeuverType());
-        QString navModifier = QString::fromStdString(navInstruction.getManeuverModifier());
-        if (xTurnInfo < 0 && xDistToTurn <= 0) {
-            //navText = QString::fromStdString(navInstruction.getManeuverSecondaryText());
-            if (navType == "turn") {
-                if (navModifier == "sharp left" || navModifier == "slight left" || navModifier == "left") xTurnInfo = 1; // left turn
-                else if (navModifier == "sharp right" || navModifier == "slight right" || navModifier == "right") xTurnInfo = 2;
-                else if (navModifier == "uturn") xTurnInfo = 5;
-                xDistToTurn = navDistance;
-            }
-            else if (navType == "fork" || navType == "off ramp") {
-                if (navModifier == "slight left" || navModifier == "left") xTurnInfo = 3; // left turn
-                else if (navModifier == "slight right" || navModifier == "right") xTurnInfo = 4;
-                xDistToTurn = navDistance;
-            }
-        }
-        */
-        if (limit_speed > 0);
-        else if (xSpdLimit > 0 && xSpdDist > 0) {
-            limit_speed = xSpdLimit;
-            left_dist = xSpdDist;
-        }
-        else if (s->xTurnInfo >= 0) {
-            left_dist = s->xDistToTurn;
-        }
-
         //sprintf(str, "%.1f/%.1f %s(%s)", distance, distance_remaining, type.length() ? type.toStdString().c_str() : "", modifier.length() ? modifier.toStdString().c_str() : "");
 
         //float accel = car_state.getAEgo();
-#ifdef __TEST
-        static int _ff = 0;
-        if (_ff++ > 100) _ff = 0;
-        if (_ff > 50) {
-            limit_speed = 110;
-            left_dist = _ff * 100;
-        }
-        else {
-            roadLimitSpeed = 110;
-        }
-        cur_speed = 123;
-#endif
 
         int bx = x;
         int by = y + 270;
@@ -1394,14 +1321,19 @@ void DrawApilot::drawSpeed(const UIState* s, int x, int y) {
             bx = 100;
             by = 650;
         }
-        if (left_dist > 0) {
-            if (left_dist < 1000) sprintf(str, "%d m", left_dist);
-            else  sprintf(str, "%.1f km", left_dist / 1000.f);
+        if (s->left_dist > 0) {
+            if (s->left_dist < 1000) sprintf(str, "%d m", s->left_dist);
+            else  sprintf(str, "%.1f km", s->left_dist / 1000.f);
             ui_draw_text(s, bx, by + 120, str, 40, COLOR_WHITE, BOLD);
         }
 
-        if (limit_speed > 0) {
-            if (xSignType == 124 || camType == 22) {
+        static float left_dist_x = 0.0;
+        static float left_dist_y = 0.0;
+        static bool left_dist_flag = true;
+        if (s->limit_speed <= 0) left_dist_flag = true;
+
+        if (s->limit_speed > 0) {
+            if (s->xSignType == 124 || s->camType == 22) {
                 ui_draw_image(s, { bx - 60, by - 50, 120, 150 }, "ic_speed_bump", 1.0f);
             }
             else {
@@ -1417,13 +1349,46 @@ void DrawApilot::drawSpeed(const UIState* s, int x, int y) {
                 nvgCircle(s->vg, bx, by, 110 / 2);
                 nvgFillColor(s->vg, COLOR_WHITE);
                 nvgFill(s->vg);
-                sprintf(str, "%d", limit_speed);
+                sprintf(str, "%d", s->limit_speed);
                 ui_draw_text(s, bx, by + 25, str, 60, COLOR_BLACK, BOLD, 0.0f, 0.0f);
             }
-            if (false && left_dist > 0) {
-                if (left_dist < 1000) sprintf(str, "%d m", left_dist);
-                else  sprintf(str, "%.1f km", left_dist / 1000.f);
-                ui_draw_text(s, bx, by + 120, str, 40, COLOR_WHITE, BOLD);
+            if(true) {
+                float scale = 0.5;
+                if (s->left_dist < 100) scale = 1.0 - (0.5 * s->left_dist / 100.);
+                bx = s->left_dist_point.x() + 140 * scale;
+                by = s->left_dist_point.y();
+                if (left_dist_flag) {
+                    left_dist_x = bx;
+                    left_dist_y = by;
+                }
+                else {
+                    left_dist_x = left_dist_x * 0.9 + bx * 0.1;
+                    left_dist_y = left_dist_y * 0.9 + by * 0.1;
+                }
+
+                bx = left_dist_x;
+                by = left_dist_y;             
+                left_dist_flag = false;
+
+                if (s->xSignType == 124 || s->camType == 22) {
+                    ui_draw_image(s, { bx - 60, by - 50, (int)(120*scale), (int)(150*scale) }, "ic_speed_bump", 1.0f);
+                }
+                else {
+                    nvgBeginPath(s->vg);
+                    nvgCircle(s->vg, bx, by, 140 / 2 * scale);
+                    nvgFillColor(s->vg, COLOR_WHITE);
+                    nvgFill(s->vg);
+                    nvgBeginPath(s->vg);
+                    nvgCircle(s->vg, bx, by, 130 / 2 * scale);
+                    nvgFillColor(s->vg, COLOR_RED);
+                    nvgFill(s->vg);
+                    nvgBeginPath(s->vg);
+                    nvgCircle(s->vg, bx, by, 110 / 2 * scale);
+                    nvgFillColor(s->vg, COLOR_WHITE);
+                    nvgFill(s->vg);
+                    sprintf(str, "%d", s->limit_speed);
+                    ui_draw_text(s, bx, by + 25 * scale, str, 60 * scale, COLOR_BLACK, BOLD, 0.0f, 0.0f);
+                }
             }
         }
         else if (s->xTurnInfo >= 0) {
@@ -1449,9 +1414,9 @@ void DrawApilot::drawSpeed(const UIState* s, int x, int y) {
                 break;
             }
         }
-        else if (roadLimitSpeed >= 30 && roadLimitSpeed < 200) {
+        else if (s->roadLimitSpeed >= 30 && s->roadLimitSpeed < 200) {
             ui_draw_image(s, { bx - 60, by - 50, 120, 150 }, "ic_road_speed", 1.0f);
-            sprintf(str, "%d", roadLimitSpeed);
+            sprintf(str, "%d", s->roadLimitSpeed);
             ui_draw_text(s, bx, by + 75, str, 50, COLOR_BLACK, BOLD, 0.0f, 0.0f);
         }        
     }
@@ -1523,7 +1488,10 @@ void DrawApilot::drawTurnInfo(const UIState* s, int x, int y) {
         if (bsd_r) ui_draw_image(s, { x - icon_size / 2, y - icon_size / 2, icon_size, icon_size }, "ic_bsd_r", 1.0f);
     }   
 
-    if (s->xDistToTurn < 800 && s->xDistToTurn > 0) {
+    static float navi_turn_point_x[2] = { 0.0, };
+    static float navi_turn_point_y[2] = { 0.0, };
+    static bool navi_turn_point_flag = true;
+    if (s->xDistToTurn < 1500 && s->xDistToTurn > 0) {
         float scale = 1.0;
         if (s->xDistToTurn >= 200) scale = 0.5;
         else if (s->xDistToTurn <= 0) scale = 1.0;
@@ -1533,19 +1501,28 @@ void DrawApilot::drawTurnInfo(const UIState* s, int x, int y) {
         int size_y = 540 * scale;
         int img_x = 0;
         int img_y = 0;
+        float alpha = (navi_turn_point_flag)?1.0:0.1;
+
+        for (int i = 0; i < 2; i++) {
+            navi_turn_point_x[i] = navi_turn_point_x[i] * (1.0 - alpha) + s->navi_turn_point[i].x() * alpha;
+            navi_turn_point_y[i] = navi_turn_point_y[i] * (1.0 - alpha) + s->navi_turn_point[i].y() * alpha;
+        }
+        navi_turn_point_flag = false;
+
         switch (s->xTurnInfo) {
         case 1: case 3: case 5:
-            img_x = (int)s->navi_turn_point[0].x() - size_x / 2;
-            img_y = (int)s->navi_turn_point[0].y() - size_y;
+            img_x = (int)navi_turn_point_x[0] - size_x / 2;
+            img_y = (int)navi_turn_point_y[0] - size_y;
             ui_draw_image(s, { img_x, img_y, size_x, size_y }, "ic_navi_point", 1.0f);
             break;
         case 2: case 4:
-            img_x = (int)s->navi_turn_point[1].x() - size_x / 2;
-            img_y = (int)s->navi_turn_point[1].y() - size_y;
+            img_x = (int)navi_turn_point_x[1] - size_x / 2;
+            img_y = (int)navi_turn_point_y[1] - size_y;
             ui_draw_image(s, { img_x, img_y, size_x, size_y }, "ic_navi_point", 1.0f);
             break;
         }
     }
+    else navi_turn_point_flag = true;
 
 }
 void DrawApilot::drawSteer(const UIState* s, int x, int y) {
@@ -1930,6 +1907,15 @@ void DrawApilot::drawLeadApilot(const UIState* s) {
 
     drawSteer(s, x, y);
     drawTurnInfo(s, x, y);
+
+    static float tf_distance_x = 0.0, tf_distance_y = 0.0;
+    nvgBeginPath(s->vg);
+    tf_distance_x = tf_distance_x * 0.9 + s->tf_distance_point.x() * 0.1;
+    tf_distance_y = tf_distance_y * 0.9 + s->tf_distance_point.y() * 0.1;
+    nvgCircle(s->vg, tf_distance_x, tf_distance_y, 20 / 2);
+    nvgFillColor(s->vg, COLOR_RED);
+    nvgFill(s->vg);
+
     drawPathEnd(s, x, y, path_x, path_y, path_width);
     drawGapInfo(s, x, y);
     drawAccel(s, x, y);
