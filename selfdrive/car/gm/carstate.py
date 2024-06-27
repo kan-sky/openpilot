@@ -55,6 +55,7 @@ class CarState(CarStateBase):
 
     self.buttons_counter = 0
     self.single_pedal_mode = False
+    self.pedal_steady = 0.
 
     self.totalDistance = 0.0
     self.accFaultedCount = 0
@@ -74,8 +75,9 @@ class CarState(CarStateBase):
     ret.cruiseButtons = self.cruise_buttons
     self.buttons_counter = pt_cp.vl["ASCMSteeringButton"]["RollingCounter"]
     self.pscm_status = copy.copy(pt_cp.vl["PSCMStatus"])
-    moving_forward = pt_cp.vl["EBCMWheelSpdRear"]["MovingForward"] != 0
-    self.moving_backward = (pt_cp.vl["EBCMWheelSpdRear"]["MovingBackward"] != 0) and not moving_forward
+    # This is to avoid a fault where you engage while still moving backwards after shifting to D.
+    # An Equinox has been seen with an unsupported status (3), so only check if either wheel is in reverse (2)
+    self.moving_backward = (pt_cp.vl["EBCMWheelSpdRear"]["RLWheelDir"] == 2) or (pt_cp.vl["EBCMWheelSpdRear"]["RRWheelDir"] == 2)
     # GAP_DIST
     if self.cruise_buttons in [CruiseButtons.UNPRESS, CruiseButtons.INIT] and self.distance_button_pressed:
       self.cruise_buttons = CruiseButtons.GAP_DIST
@@ -161,7 +163,7 @@ class CarState(CarStateBase):
     ret.leftBlinker = pt_cp.vl["BCMTurnSignals"]["TurnSignals"] == 1
     ret.rightBlinker = pt_cp.vl["BCMTurnSignals"]["TurnSignals"] == 2
 
-    ret.parkingBrake = pt_cp.vl["VehicleIgnitionAlt"]["ParkBrake"] == 1
+    ret.parkingBrake = pt_cp.vl["BCMGeneralPlatformStatus"]["ParkBrakeSwActive"] == 1
     ret.cruiseState.available = pt_cp.vl["ECMEngineStatus"]["CruiseMainOn"] != 0
     ret.espDisabled = pt_cp.vl["ESPStatus"]["TractionControlOn"] != 1
     # for delay Accfault event
@@ -209,6 +211,10 @@ class CarState(CarStateBase):
     # brakeLight
     ret.brakeLights = chassis_cp.vl["EBCMFrictionBrakeStatus"]["FrictionBrakePressure"] != 0 or ret.brakePressed
 
+    if self.CP.enableBsm:
+      ret.leftBlindspot = pt_cp.vl["BCMBlindSpotMonitor"]["LeftBSM"] == 1
+      ret.rightBlindspot = pt_cp.vl["BCMBlindSpotMonitor"]["RightBSM"] == 1
+
     ret.cruiseGap = 1
 
     self.totalDistance += ret.vEgo * DT_CTRL
@@ -245,7 +251,7 @@ class CarState(CarStateBase):
           ("ASCMActiveCruiseControlStatus", 25),
         ]
 
-    return CANParser(DBC[CP.carFingerprint]["pt"], signals, checks, CanBus.CAMERA, enforce_checks=False)
+    return CANParser(DBC[CP.carFingerprint]["pt"], signals, checks, CanBus.CAMERA)
 
   @staticmethod
   def get_can_parser(CP):
@@ -283,7 +289,7 @@ class CarState(CarStateBase):
       ("PSCMStatusChecksum", "PSCMStatus"),
       ("RollingCounter", "PSCMStatus"),
       ("TractionControlOn", "ESPStatus"),
-      ("ParkBrake", "VehicleIgnitionAlt"),
+      ("ParkBrakeSwActive", "BCMGeneralPlatformStatus"),
       ("CruiseMainOn", "ECMEngineStatus"),
       ("BrakePressed", "ECMEngineStatus"),
       ("DistanceButton", "ASCMSteeringButton"),
@@ -294,7 +300,8 @@ class CarState(CarStateBase):
       ("PRESSURE_FR", "TPMS"),
       ("PRESSURE_RL", "TPMS"),
       ("PRESSURE_RR", "TPMS"),
-      
+      ("RightBSM," "BCMBlindSpotMonitor"),
+      ("LeftBSM," "BCMBlindSpotMonitor"),
     ]
 
     checks = [
@@ -303,7 +310,7 @@ class CarState(CarStateBase):
       ("PSCMStatus", 10),
       ("ESPStatus", 10),
       ("BCMDoorBeltStatus", 10),
-      ("VehicleIgnitionAlt", 10),
+      ("BCMGeneralPlatformStatus", 10),
       ("EBCMWheelSpdFront", 20),
       ("EBCMWheelSpdRear", 20),
       ("EBCMFrictionBrakeStatus", 20),
@@ -314,6 +321,7 @@ class CarState(CarStateBase):
       ("ECMAcceleratorPos", 80),
       ("SPEED_RELATED", 20),
       ("TPMS", 0),
+      ("BCMBlindSpotMonitor", 0),
     ]
 
     # Used to read back last counter sent to PT by camera
@@ -346,7 +354,7 @@ class CarState(CarStateBase):
       signals.append(("INTERCEPTOR_GAS", "GAS_SENSOR"))
       signals.append(("INTERCEPTOR_GAS2", "GAS_SENSOR"))
       checks.append(("GAS_SENSOR", 50))
-    return CANParser(DBC[CP.carFingerprint]["pt"], signals, checks, CanBus.POWERTRAIN, enforce_checks=False)
+    return CANParser(DBC[CP.carFingerprint]["pt"], signals, checks, CanBus.POWERTRAIN)
 
   @staticmethod
   def get_loopback_can_parser(CP):
@@ -358,7 +366,7 @@ class CarState(CarStateBase):
       ("ASCMLKASteeringCmd", 0),
     ]
 
-    return CANParser(DBC[CP.carFingerprint]["pt"], signals, checks, CanBus.LOOPBACK, enforce_checks=False)
+    return CANParser(DBC[CP.carFingerprint]["pt"], signals, checks, CanBus.LOOPBACK)
 
   # for brakeLight
   @staticmethod
@@ -366,5 +374,7 @@ class CarState(CarStateBase):
     signals = [
       ("FrictionBrakePressure", "EBCMFrictionBrakeStatus"),
     ]
-    checks = []
-    return CANParser(DBC[CP.carFingerprint]["chassis"], signals, checks, CanBus.CHASSIS, enforce_checks=False)
+    checks = [
+      ("EBCMFrictionBrakeStatus", 20),
+    ]
+    return CANParser(DBC[CP.carFingerprint]["chassis"], signals, checks, CanBus.CHASSIS)
