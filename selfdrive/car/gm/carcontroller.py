@@ -1,7 +1,7 @@
 from cereal import car
 from openpilot.common.conversions import Conversions as CV
 from openpilot.common.params import Params
-from openpilot.common.filter_simple import FirstOrderFilter
+#from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.numpy_fast import interp, clip
 from openpilot.common.realtime import DT_CTRL
 from opendbc.can.packer import CANPacker
@@ -22,9 +22,9 @@ CAMERA_CANCEL_DELAY_FRAMES = 10
 MIN_STEER_MSG_INTERVAL_MS = 15
 
 # constants for pitch compensation
-PITCH_DEADZONE = 0.01 # [radians] 0.01 ? 1% grade
-BRAKE_PITCH_FACTOR_BP = [5., 10.] # [m/s] smoothly revert to planned accel at low speeds
-BRAKE_PITCH_FACTOR_V = [0., 1.] # [unitless in [0,1]]; don't touch
+#PITCH_DEADZONE = 0.01 # [radians] 0.01 ? 1% grade
+#BRAKE_PITCH_FACTOR_BP = [5., 10.] # [m/s] smoothly revert to planned accel at low speeds
+#BRAKE_PITCH_FACTOR_V = [0., 1.] # [unitless in [0,1]]; don't touch
 
 #GM, only use pitch-compensated acceleration at 10m/s+
 ACCEL_PITCH_FACTOR_BP = [5., 10.] # [m/s]
@@ -42,6 +42,7 @@ class CarController(CarControllerBase):
     self.last_steer_frame = 0
     self.last_button_frame = 0
     self.cancel_counter = 0
+    self.pedal_steady = 0.
 
     self.lka_steering_cmd_counter = 0
     self.lka_icon_status_last = (False, False)
@@ -55,8 +56,8 @@ class CarController(CarControllerBase):
     self.long_pitch = False
     self.use_ev_tables = False
 
-    self.pitch = FirstOrderFilter(0., 0.09 * 4, DT_CTRL * 4)  # runs at 25 Hz
-    self.accel_g = 0.0
+    #self.pitch = FirstOrderFilter(0., 0.09 * 4, DT_CTRL * 4)  # runs at 25 Hz
+    #self.accel_g = 0.0
 	
   @staticmethod
   def calc_pedal_command(accel: float, long_active: bool) -> float:
@@ -86,9 +87,9 @@ class CarController(CarControllerBase):
     if hud_v_cruise > 70:
       hud_v_cruise = 0
 
-    steerMax = params.get_int("CustomSteerMax")
-    steerDeltaUp = params.get_int("CustomSteerDeltaUp")
-    steerDeltaDown = params.get_int("CustomSteerDeltaDown")
+    steerMax = params.get_int("CustomSteerMax", encoding="utf8")
+    steerDeltaUp = params.get_int("CustomSteerDeltaUp", encoding="utf8")
+    steerDeltaDown = params.get_int("CustomSteerDeltaDown", encoding="utf8")
     self.params.STEER_MAX = self.params.STEER_MAX if steerMax <= 0 else steerMax
     self.params.STEER_DELTA_UP = self.params.STEER_DELTA_UP if steerDeltaUp <= 0 else steerDeltaUp
     self.params.STEER_DELTA_DOWN = self.params.STEER_DELTA_DOWN if steerDeltaDown <= 0 else steerDeltaDown
@@ -138,9 +139,9 @@ class CarController(CarControllerBase):
         interceptor_gas_cmd = 0
         # Pitch compensated acceleration;
         # TODO: include future pitch (sm['modelDataV2'].orientation.y) to account for long actuator delay
-        self.pitch.update(CC.orientationNED[1])
-        self.accel_g = ACCELERATION_DUE_TO_GRAVITY * apply_deadzone(self.pitch.x, PITCH_DEADZONE) # driving uphill is positive pitch
-        accel += self.accel_g
+        #self.pitch.update(CC.orientationNED[1])
+        #self.accel_g = ACCELERATION_DUE_TO_GRAVITY * apply_deadzone(self.pitch.x, PITCH_DEADZONE) # driving uphill is positive pitch
+        #accel += self.accel_g
         if not CC.longActive:
           # ASCM sends max regen when not enabled
           self.apply_gas = self.params.INACTIVE_REGEN
@@ -199,13 +200,10 @@ class CarController(CarControllerBase):
           can_sends.append(gmcan.create_friction_brake_command(self.packer_ch, friction_brake_bus, self.apply_brake,
                                                                idx, CC.enabled, near_stop, at_full_stop, self.CP))
 
-          # Send dashboard UI commands (ACC status)
-          send_fcw = hud_alert == VisualAlert.fcw
-          can_sends.append(gmcan.create_acc_dashboard_command(self.packer_pt, CanBus.POWERTRAIN, CC.enabled,
-                                                              hud_v_cruise * CV.MS_TO_KPH, hud_control, send_fcw))
-      else:
-        # to keep accel steady for logs when not sending gas
-        accel += self.accel_g
+        # Send dashboard UI commands (ACC status)
+        send_fcw = hud_alert == VisualAlert.fcw
+        can_sends.append(gmcan.create_acc_dashboard_command(self.packer_pt, CanBus.POWERTRAIN, CC.enabled,
+                                                            hud_v_cruise * CV.MS_TO_KPH, hud_control, send_fcw))
 
       # Radar needs to know current speed and yaw rate (50hz),
       # and that ADAS is alive (10hz)
