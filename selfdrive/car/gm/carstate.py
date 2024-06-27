@@ -251,7 +251,7 @@ class CarState(CarStateBase):
           ("ASCMActiveCruiseControlStatus", 25),
         ]
 
-    return CANParser(DBC[CP.carFingerprint]["pt"], signals, checks, CanBus.CAMERA)
+    return CANParser(DBC[CP.carFingerprint]["pt"], signals, checks, CanBus.CAMERA, enforce_checks=False)
 
   @staticmethod
   def get_can_parser(CP):
@@ -355,7 +355,7 @@ class CarState(CarStateBase):
       signals.append(("INTERCEPTOR_GAS", "GAS_SENSOR"))
       signals.append(("INTERCEPTOR_GAS2", "GAS_SENSOR"))
       checks.append(("GAS_SENSOR", 50))
-    return CANParser(DBC[CP.carFingerprint]["pt"], signals, checks, CanBus.POWERTRAIN)
+    return CANParser(DBC[CP.carFingerprint]["pt"], signals, checks, CanBus.POWERTRAIN, enforce_checks=False)
 
   @staticmethod
   def get_loopback_can_parser(CP):
@@ -367,7 +367,7 @@ class CarState(CarStateBase):
       ("ASCMLKASteeringCmd", 10),
     ]
 
-    return CANParser(DBC[CP.carFingerprint]["pt"], signals, checks, CanBus.LOOPBACK)
+    return CANParser(DBC[CP.carFingerprint]["pt"], signals, checks, CanBus.LOOPBACK, enforce_checks=False)
 
   # for brakeLight
   @staticmethod
@@ -378,4 +378,4 @@ class CarState(CarStateBase):
     checks = [
       ("EBCMFrictionBrakeStatus", 20),
     ]
-    return CANParser(DBC[CP.carFingerprint]["chassis"], signals, checks, CanBus.CHASSIS)
+    return CANParser(DBC[CP.carFingerprint]["chassis"], signals, checks, CanBus.CHASSIS, enforce_checks=False)
