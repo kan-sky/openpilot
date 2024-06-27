@@ -84,7 +84,7 @@ class CarController:
 
     steerMax = int(Params().get("CustomSteerMax", encoding="utf8"))
     steerDeltaUp = int(Params().get("SteerDeltaUp", encoding="utf8"))
-    steerDeltaDown = int(Params().get("CustomSteerDeltaDown", encoding="utf8"))
+    steerDeltaDown = int(Params().get("SteerDeltaDown", encoding="utf8"))
     self.params.STEER_MAX = self.params.STEER_MAX if steerMax <= 0 else steerMax
     self.params.STEER_DELTA_UP = self.params.STEER_DELTA_UP if steerDeltaUp <= 0 else steerDeltaUp
     self.params.STEER_DELTA_DOWN = self.params.STEER_DELTA_DOWN if steerDeltaDown <= 0 else steerDeltaDown
