@@ -1330,6 +1330,19 @@
     },
     {
       "group": "정지",
+      "name": "StoppingAccel",
+      "title": "정지시작가속도x0.01(-60)",
+      "descr": "정지시작 가속도를 조정하여 급한정지 방지",
+      "egroup": "STOP",
+      "etitle": "StoppingStartAccelx0.01(-60)",
+      "edescr": "",
+      "min": -100,
+      "max": 0,
+      "default": -60,
+      "unit": 10
+    },
+    {
+      "group": "정지",
       "name": "StartAccelApply",
       "title": "초기가속도2.0x(0%)",
       "descr": "정지->출발시 가속도: 사용할필요없음.",
