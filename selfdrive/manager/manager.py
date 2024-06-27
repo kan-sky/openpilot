@@ -158,8 +158,6 @@ def get_default_params():
     ("CustomSteerMax", "300"),
     ("SteerDeltaUp", "4"),       
     ("SteerDeltaDown", "5"),       
-    ("NNFF", "1"),
-    ("NNFFLite", "1"),
   ]
   return default_params
 
