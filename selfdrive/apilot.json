@@ -239,27 +239,27 @@
     {
       "group": "Á¶ÇâÆ©´×",
       "name": "SteerDeltaUp",
-      "title": "SteerDeltaUp(4)",
+      "title": "SteerDeltaUp(5)",
       "descr": "",
       "egroup": "LAT",
-      "etitle": "SteerDeltaUp(4)",
+      "etitle": "SteerDeltaUp(5)",
       "edescr": "",
       "min": 1,
       "max": 20,
-      "default": 4,
+      "default": 5,
       "unit": 1
     },
     {
       "group": "Á¶ÇâÆ©´×",
       "name": "SteerDeltaDown",
-      "title": "SteerDeltaDown(5)",
+      "title": "SteerDeltaDown(7)",
       "descr": "",
       "egroup": "LAT",
-      "etitle": "SteerDeltaDown(5)",
+      "etitle": "SteerDeltaDown(7)",
       "edescr": "",
       "min": 1,
       "max": 20,
-      "default": 5,
+      "default": 7,
       "unit": 1
     },
     {
@@ -493,7 +493,7 @@
       "edescr": "Lower value, slow",
       "min": 1,
       "max": 32,
-      "default": 32,
+      "default": 31,
       "unit": 1
     },
     {

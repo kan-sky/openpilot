@@ -327,6 +327,34 @@ DevicePanel::DevicePanel(SettingsWindow *parent) : ListWidget(parent) {
     #poweroff_btn:pressed { background-color: #FF2424; }
   )");
   addItem(power_layout);
+
+  struct DefaultSetting {
+      QString name;
+      QString descr;
+      QString jsonFile;
+  };
+
+  const QVector<DefaultSetting> settings = {
+      //{"TM_HEV_SCC2", "TM_HEV_2022, scc2, radarTracks, radar Long", "apilot_default_tm_hev_scc2.json"},
+      //{"DH_SCC2", "DH, scc2, radar Long", "apilot_default_dh_scc2.json"},
+      //{"EV6_VLONG", "EV6 vision Long", "apilot_default_ev6_vlong.json"},
+      //{"IONIQ5_VLONG", "IONIQ5 vision Long", "apilot_default_ioniq5_vlong.json"},
+      {"GM_VOLT", "GM VOLT radar Long", "apilot_default_volt_ev.json"}
+  };
+
+  for (const auto& setting : settings) {
+      auto button = new ButtonControl(tr("Set to default(%1)").arg(setting.name), tr("DEFAULT"), tr("%1").arg(setting.descr));
+      connect(button, &ButtonControl::clicked, [this, setting]() {
+          if (!ConfirmationDialog::confirm(tr("Are you sure you want to set to default?"), tr("Execute"), this)) return;
+          QProcess process;
+          process.setWorkingDirectory("/data/openpilot/selfdrive");
+          process.start("/bin/sh", QStringList{ "-c", QString("python ./apilot_default.py ./%1").arg(setting.jsonFile) });
+          process.waitForFinished();
+          //Hardware::reboot();
+          });
+      addItem(button);
+  }
+
 }
 
 void DevicePanel::updateCalibDescription() {
@@ -758,12 +786,10 @@ TuningPanel::TuningPanel(QWidget* parent) : QWidget(parent) {
     toggleLayout->addWidget(new CValueControl("LateralTorqueKf", "LAT: TorqueKf(100)", "", "../assets/offroad/icon_road.png", 0, 200, 1));
     toggleLayout->addWidget(new CValueControl("LateralTorqueKpV", "LAT: TorqueKpV(100)", "", "../assets/offroad/icon_road.png", 0, 200, 1));
     toggleLayout->addWidget(new CValueControl("LateralTorqueKiV", "LAT: TorqueKiV(15)", "", "../assets/offroad/icon_road.png", 0, 200, 1));
-    toggleLayout->addWidget(new CValueControl("CustomSteerMax", "LAT: CustomSteerMax(300)", "", "../assets/offroad/icon_road.png", 0, 200, 1));
-    toggleLayout->addWidget(new CValueControl("CustomSteerDeltaUp", "LAT: CustomSteerDeltaUp(5)", "", "../assets/offroad/icon_road.png", 0, 200, 1));
-    toggleLayout->addWidget(new CValueControl("CustomSteerDeltaDown", "LAT: CustomSteerDeltaDown(5)", "", "../assets/offroad/icon_road.png", 0, 200, 1));
     toggleLayout->addWidget(horizontal_line());
     toggleLayout->addWidget(new CValueControl("SteerActuatorDelay", "LAT:SteerActuatorDelay(30)", "표준", "../assets/offroad/icon_road.png", 0, 100, 1));
-    toggleLayout->addWidget(new CValueControl("SteerDeltaUp", "LAT: SteerDeltaUp(3)", "", "../assets/offroad/icon_road.png", 1, 20, 1));
+    toggleLayout->addWidget(new CValueControl("CustomSteerMax", "LAT: CustomSteerMax(300)", "", "../assets/offroad/icon_road.png", 0, 350, 1));
+    toggleLayout->addWidget(new CValueControl("SteerDeltaUp", "LAT: SteerDeltaUp(5)", "", "../assets/offroad/icon_road.png", 1, 20, 1));
     toggleLayout->addWidget(new CValueControl("SteerDeltaDown", "LAT: SteerDeltaDown(7)", "", "../assets/offroad/icon_road.png", 1, 20, 1));
     toggleLayout->addWidget(new CValueControl("SteerRatioApply", "LAT: SteerRatio적용(0x0.1)", "0:사용안함", "../assets/offroad/icon_road.png", 0, 300, 2));
     toggleLayout->addWidget(horizontal_line());
@@ -772,7 +798,7 @@ TuningPanel::TuningPanel(QWidget* parent) : QWidget(parent) {
     toggleLayout->addWidget(new CValueControl("LongitudinalTuningKiV", "LONG: I Gain(200)", "(시험용) ", "../assets/offroad/icon_road.png", 0, 2000, 5));
     toggleLayout->addWidget(new CValueControl("LongitudinalTuningKf", "LONG: FF Gain(200)", "(시험용) ", "../assets/offroad/icon_road.png", 0, 200, 1));
     toggleLayout->addWidget(new CValueControl("StartAccelApply", "LONG: StartingAccel 2.0x(0%)", "정지->출발시 가속도의 가속율을 지정합니다 0: 사용안함.", "../assets/offroad/icon_road.png", 0, 100, 10));
-    toggleLayout->addWidget(new CValueControl("StopAccelApply", "LONG: StoppingAccel -2.0x(30%)", "정지유지시 브레이크압을 조정합니다. 0: 사용안함. ", "../assets/offroad/icon_road.png", 0, 100, 10));
+    toggleLayout->addWidget(new CValueControl("StopAccelApply", "LONG: StopAccelApply -2.0x(30%)", "정지유지시 브레이크압을 조정합니다. 0: 사용안함. ", "../assets/offroad/icon_road.png", 0, 100, 10));
     toggleLayout->addWidget(horizontal_line());
     toggleLayout->addWidget(new ParamControl("ApplyLongDynamicCost", "GAP: Dynamic Control(0)", "전방차량의 간격을 최대한 유지하도록 응답속도가 빨라집니다.", "../assets/offroad/icon_road.png", this));
     toggleLayout->addWidget(new CValueControl("TFollowSpeedRatio", "GAP: Dynamic Gap adjust (110%)", "Dynamic Gap adjust based on speed", "../assets/offroad/icon_road.png", 100, 300, 5));

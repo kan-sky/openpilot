@@ -16,7 +16,7 @@ for filename in os.listdir(folder_path):
                 "filename": filename,
                 "content": content
             })
-
+sorted_data = sorted(result, key=lambda x: x['filename'])
 #print(json.dumps(result, indent=4))
 with open(output_file, "w") as f:
-    json.dump(result, f)
+    json.dump(sorted_data, f, indent=2, ensure_ascii=False)
