@@ -1,8 +1,10 @@
 import yaml
+import numpy as np
 import os
 import time
 from abc import abstractmethod, ABC
-from typing import Any, Dict, Optional, Tuple, List, Callable
+from json import load
+from typing import Any, Dict, Optional, Tuple, List, Callable, Union
 
 from cereal import car
 from common.basedir import BASEDIR
@@ -10,7 +12,7 @@ from common.conversions import Conversions as CV
 from common.kalman.simple_kalman import KF1D
 from common.numpy_fast import clip, interp
 from common.realtime import DT_CTRL
-from selfdrive.car import apply_hysteresis, gen_empty_fingerprint, scale_rot_inertia, scale_tire_stiffness
+from selfdrive.car import apply_hysteresis, gen_empty_fingerprint, scale_rot_inertia, scale_tire_stiffness, STD_CARGO_KG
 from selfdrive.controls.lib.drive_helpers import V_CRUISE_MAX, get_friction
 from selfdrive.controls.lib.events import Events
 from selfdrive.controls.lib.vehicle_model import VehicleModel
@@ -56,12 +58,93 @@ def get_torque_params(candidate):
   return {key: out[i] for i, key in enumerate(params['legend'])}
 
 
+# lateral neural network feedforward
+class FluxModel:
+  # dict used to rename activation functions whose names aren't valid python identifiers
+  activation_function_names = {'σ': 'sigmoid'}
+  def __init__(self, params_file, zero_bias=False):
+    with open(params_file, "r") as f:
+      params = load(f)
+
+    self.input_size = params["input_size"]
+    self.output_size = params["output_size"]
+    self.input_mean = np.array(params["input_mean"], dtype=np.float32).T
+    self.input_std = np.array(params["input_std"], dtype=np.float32).T
+    self.layers = []
+
+    for layer_params in params["layers"]:
+      W = np.array(layer_params[next(key for key in layer_params.keys() if key.endswith('_W'))], dtype=np.float32).T
+      b = np.array(layer_params[next(key for key in layer_params.keys() if key.endswith('_b'))], dtype=np.float32).T
+      if zero_bias:
+        b = np.zeros_like(b)
+      activation = layer_params["activation"]
+      for k, v in self.activation_function_names.items():
+        activation = activation.replace(k, v)
+      self.layers.append((W, b, activation))
+    
+    self.validate_layers()
+    
+  # Begin activation functions.
+  # These are called by name using the keys in the model json file
+  def sigmoid(self, x):
+    return 1 / (1 + np.exp(-x))
+
+  def identity(self, x):
+    return x
+  # End activation functions
+
+  def forward(self, x):
+    for W, b, activation in self.layers:
+      x = getattr(self, activation)(x.dot(W) + b)
+    return x
+
+  def evaluate(self, input_array):
+    in_len = len(input_array)
+    if in_len != self.input_size:
+      # If the input is length 2-4, then it's a simplified evaluation.
+      # In that case, need to add on zeros to fill out the input array to match the correct length.
+      if 2 <= in_len:
+        input_array = input_array + [0] * (self.input_size - in_len)
+      else:
+        raise ValueError(f"Input array length {len(input_array)} must be length 2 or greater")
+        
+    input_array = np.array(input_array, dtype=np.float32)
+
+    # Rescale the input array using the input_mean and input_std
+    input_array = (input_array - self.input_mean) / self.input_std
+
+    output_array = self.forward(input_array)
+
+    return float(output_array[0, 0])
+  
+  def validate_layers(self):
+    for W, b, activation in self.layers:
+      if not hasattr(self, activation):
+        raise ValueError(f"Unknown activation: {activation}")
+  
+def get_nnff_model_path(car, eps_firmware) -> Union[str, None]:
+  eps_firmware = eps_firmware.replace("\\", "")
+  model_path = f"/data/openpilot/selfdrive/car/torque_data/lat_models/{car} {eps_firmware}.json"
+  if not os.path.isfile(model_path):
+    model_path = f"/data/openpilot/selfdrive/car/torque_data/lat_models/{car}.json"
+    if not os.path.isfile(model_path):
+      model_path = None
+  return model_path
+  
+def get_nnff_model(car, eps_firmware) -> Union[FluxModel, None]:
+  model = get_nnff_model_path(car, eps_firmware)
+  if model is not None:
+    model = FluxModel(model)
+  return model
+
 # generic car and radar interfaces
 
 class CarInterfaceBase(ABC):
   def __init__(self, CP, CarController, CarState):
     self.CP = CP
     self.VM = VehicleModel(CP)
+    eps_firmware = str(next((fw.fwVersion for fw in CP.carFw if fw.ecu == "eps"), ""))
+    self.has_lateral_torque_nnff = self.initialize_lat_torque_nnff(CP.carFingerprint, eps_firmware)
 
     self.frame = 0
     self.steering_unpressed = 0
@@ -92,6 +175,13 @@ class CarInterfaceBase(ABC):
     self.CC = None
     if CarController is not None:
       self.CC = CarController(self.cp.dbc_name, CP, self.VM)
+      
+  def get_ff_nn(self, x):
+    return self.lat_torque_nnff_model.evaluate(x)
+  
+  def initialize_lat_torque_nnff(self, car, eps_firmware):
+    self.lat_torque_nnff_model = get_nnff_model(car, eps_firmware)
+    return (self.lat_torque_nnff_model is not None)
 
   @staticmethod
   def get_pid_accel_limits(CP, current_speed, cruise_speed):
@@ -107,6 +197,13 @@ class CarInterfaceBase(ABC):
 
     ret = CarInterfaceBase.get_std_params(candidate)
     ret = cls._get_params(ret, candidate, fingerprint, car_fw, experimental_long)
+    
+    # Enable torque controller for all cars
+    CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
+    eps_firmware = str(next((fw.fwVersion for fw in car_fw if fw.ecu == "eps"), ""))
+    model = get_nnff_model_path(candidate, eps_firmware)
+    if model is not None:
+      ret.lateralTuning.torque.nnModelName = os.path.splitext(os.path.basename(model))[0]
 
     # Set common params using fields set by the car interface
     # TODO: get actual value, for now starting with reasonable value for
@@ -154,6 +251,7 @@ class CarInterfaceBase(ABC):
   def get_std_params(candidate):
     ret = car.CarParams.new_message()
     ret.carFingerprint = candidate
+    ret.alternativeExperience = 1
 
     # Car docs fields
     ret.maxLateralAccel = get_torque_params(candidate)['MAX_LAT_ACCEL_MEASURED']
@@ -491,7 +589,7 @@ def get_interface_attr(attr: str, combine_brands: bool = False, ignore_none: boo
   for car_folder in sorted([x[0] for x in os.walk(BASEDIR + '/selfdrive/car')]):
     try:
       brand_name = car_folder.split('/')[-1]
-      brand_values = __import__(f'openpilot.selfdrive.car.{brand_name}.values', fromlist=[attr])
+      brand_values = __import__(f'selfdrive.car.{brand_name}.values', fromlist=[attr])
       if hasattr(brand_values, attr) or not ignore_none:
         attr_data = getattr(brand_values, attr, None)
       else:
