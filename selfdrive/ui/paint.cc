@@ -1370,8 +1370,14 @@ void DrawApilot::drawSpeed(const UIState* s, int x, int y) {
                 by = left_dist_y;             
                 left_dist_flag = false;
 
+                if (s->left_dist > 0) {
+                    if (s->left_dist < 1000) sprintf(str, "%d m", s->left_dist);
+                    else  sprintf(str, "%.1f km", s->left_dist / 1000.f);
+                    ui_draw_text(s, bx, by + 120*scale, str, 40*scale, COLOR_WHITE, BOLD);
+                }
+
                 if (s->xSignType == 124 || s->camType == 22) {
-                    ui_draw_image(s, { bx - 60, by - 50, (int)(120*scale), (int)(150*scale) }, "ic_speed_bump", 1.0f);
+                    ui_draw_image(s, { bx - (int)(60*scale), by - (int)(50*scale), (int)(120*scale), (int)(150*scale) }, "ic_speed_bump", 1.0f);
                 }
                 else {
                     nvgBeginPath(s->vg);
@@ -1387,7 +1393,7 @@ void DrawApilot::drawSpeed(const UIState* s, int x, int y) {
                     nvgFillColor(s->vg, COLOR_WHITE);
                     nvgFill(s->vg);
                     sprintf(str, "%d", s->limit_speed);
-                    ui_draw_text(s, bx, by + 25 * scale, str, 60 * scale, COLOR_BLACK, BOLD, 0.0f, 0.0f);
+                    ui_draw_text(s, bx, by + 25 * scale - 6*(1-scale), str, 60 * scale, COLOR_BLACK, BOLD, 0.0f, 0.0f);
                 }
             }
         }
@@ -1907,10 +1913,18 @@ void DrawApilot::drawLeadApilot(const UIState* s) {
     drawTurnInfo(s, x, y);
 
     static float tf_distance_x = 0.0, tf_distance_y = 0.0;
-    nvgBeginPath(s->vg);
     tf_distance_x = tf_distance_x * 0.9 + s->tf_distance_point.x() * 0.1;
     tf_distance_y = tf_distance_y * 0.9 + s->tf_distance_point.y() * 0.1;
+    nvgBeginPath(s->vg);
     nvgCircle(s->vg, tf_distance_x, tf_distance_y, 20 / 2);
+    nvgFillColor(s->vg, COLOR_RED);
+    nvgFill(s->vg);
+    nvgBeginPath(s->vg);
+    nvgCircle(s->vg, tf_distance_x - 60, tf_distance_y, 20 / 2);
+    nvgFillColor(s->vg, COLOR_RED);
+    nvgFill(s->vg);
+    nvgBeginPath(s->vg);
+    nvgCircle(s->vg, tf_distance_x + 60, tf_distance_y, 20 / 2);
     nvgFillColor(s->vg, COLOR_RED);
     nvgFill(s->vg);
 

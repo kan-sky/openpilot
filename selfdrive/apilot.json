@@ -1199,15 +1199,15 @@
     },
     {
       "group": "시험",
-      "name": "CarrotTest4",
-      "title": "당근시험4",
-      "descr": "Jerk계산시험.",
+      "name": "CarrotRadarTest2",
+      "title": "당근레이더시험Alpha (10)",
+      "descr": "alpha * 0.01",
       "egroup": "TEST",
-      "etitle": "Carrot test4",
+      "etitle": "Carrot Radar test alpha",
       "edescr": "",
-      "min": 0,
-      "max": 50,
-      "default": 0,
+      "min": 1,
+      "max": 100,
+      "default": 10,
       "unit": 1
     },
     {
