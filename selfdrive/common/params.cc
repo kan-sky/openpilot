@@ -337,6 +337,7 @@ std::unordered_map<std::string, uint32_t> keys = {
     { "CustomSteerMax", PERSISTENT },
     { "SteerDeltaUp", PERSISTENT },
     { "SteerDeltaDown", PERSISTENT },
+    { "NNFF", PERSISTENT },
 };
 
 } // namespace

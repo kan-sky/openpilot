@@ -1035,9 +1035,6 @@ EVENTS: Dict[int, Dict[str, Union[Alert, AlertCallbackType]]] = {
   EventName.audioTurn: {
      ET.WARNING: EngagementAlert(AudibleAlert.audioTurn),
   },
-  EventName.torqueNNFFLoadSuccess: {
-    ET.PERMANENT: torque_nn_load_alert,
-  },
   EventName.pedalInterceptorNoBrake: {
     ET.WARNING: Alert(
       "Braking Unavailable",
@@ -1045,5 +1042,8 @@ EVENTS: Dict[int, Dict[str, Union[Alert, AlertCallbackType]]] = {
       AlertStatus.userPrompt, AlertSize.mid,
       Priority.HIGH, VisualAlert.wrongGear, AudibleAlert.promptRepeat, 4.),
     ET.NO_ENTRY: NoEntryAlert("Shift To L To Use Pedal Interceptor"),
+  },
+  EventName.torqueNNFFLoadSuccess: {
+    ET.PERMANENT: torque_nn_load_alert,
   },
 }

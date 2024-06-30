@@ -133,6 +133,7 @@ struct CarEvent @0x9b1657f34caf3ad3 {
     autoHoldActivated @130;
     # pedal
     pedalInterceptorNoBrake @131;
+
     torqueNNFFLoadSuccess @132;
     torqueNNFFNotLoaded @133;
     radarCanErrorDEPRECATED @15;
@@ -486,7 +487,6 @@ struct CarControl {
       stopStop @21;
       audioTurn @22;
       reverseGear @23;
-      nnff @24;
     }
   }
 

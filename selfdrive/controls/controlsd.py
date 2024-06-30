@@ -120,7 +120,7 @@ class Controls:
 
     # set alternative experiences from parameters
     self.disengage_on_accelerator = self.params.get_bool("DisengageOnAccelerator")
-    self.CP.alternativeExperience = 0
+    self.CP.alternativeExperience = 1
     if not self.disengage_on_accelerator:
       self.CP.alternativeExperience |= ALTERNATIVE_EXPERIENCE.DISABLE_DISENGAGE_ON_GAS
 
@@ -156,8 +156,7 @@ class Controls:
 
     # cleanup old params
     if not self.CP.experimentalLongitudinalAvailable:
-      #self.params.remove("ExperimentalLongitudinalEnabled")
-      pass
+      self.params.delete("ExperimentalLongitudinalEnabled")
     if not self.CP.openpilotLongitudinalControl:
       self.params.delete("ExperimentalMode")
 
@@ -275,7 +274,7 @@ class Controls:
       return
     
     # show alert to indicate whether NNFF is loaded
-    if not self.nnff_alert_shown and self.sm.frame % 1000 == 0 and self.CP.lateralTuning.which() == 'torque':
+    if not self.nnff_alert_shown and self.sm.frame % 1000 == 0 and self.CP.lateralTuning.which() == 'torque' and self.CI.has_lateral_torque_nnff:
       self.nnff_alert_shown = True
       self.events.add(EventName.torqueNNFFLoadSuccess)
 

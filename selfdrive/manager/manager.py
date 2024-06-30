@@ -157,8 +157,9 @@ def get_default_params():
     ("CruiseOnDist", "0"),
     ("SteerRatioApply", "157"),
     ("CustomSteerMax", "300"),
-    ("SteerDeltaUp", "4"),       
-    ("SteerDeltaDown", "5"),       
+    ("SteerDeltaUp", "4"),
+    ("SteerDeltaDown", "5"),
+    ("NNFF", "1"),       
   ]
   return default_params
 

@@ -12,7 +12,7 @@ from common.conversions import Conversions as CV
 from common.kalman.simple_kalman import KF1D
 from common.numpy_fast import clip, interp
 from common.realtime import DT_CTRL
-from selfdrive.car import apply_hysteresis, gen_empty_fingerprint, scale_rot_inertia, scale_tire_stiffness
+from selfdrive.car import apply_hysteresis, gen_empty_fingerprint, scale_rot_inertia, scale_tire_stiffness, STD_CARGO_KG
 from selfdrive.controls.lib.drive_helpers import V_CRUISE_MAX, get_friction
 from selfdrive.controls.lib.events import Events
 from selfdrive.controls.lib.vehicle_model import VehicleModel
@@ -71,7 +71,6 @@ class FluxModel:
     self.input_mean = np.array(params["input_mean"], dtype=np.float32).T
     self.input_std = np.array(params["input_std"], dtype=np.float32).T
     self.layers = []
-    self.friction_override = False
 
     for layer_params in params["layers"]:
       W = np.array(layer_params[next(key for key in layer_params.keys() if key.endswith('_W'))], dtype=np.float32).T
@@ -138,7 +137,6 @@ def get_nnff_model(car, eps_firmware) -> Union[FluxModel, None]:
     model = FluxModel(model)
   return model
 
-
 # generic car and radar interfaces
 
 class CarInterfaceBase(ABC):
@@ -146,7 +144,6 @@ class CarInterfaceBase(ABC):
     self.CP = CP
     self.VM = VehicleModel(CP)
     eps_firmware = str(next((fw.fwVersion for fw in CP.carFw if fw.ecu == "eps"), ""))
-    self.has_lateral_torque_nnff = self.initialize_lat_torque_nnff(CP.carFingerprint, eps_firmware)
 
     self.frame = 0
     self.steering_unpressed = 0
@@ -178,6 +175,9 @@ class CarInterfaceBase(ABC):
     if CarController is not None:
       self.CC = CarController(self.cp.dbc_name, CP, self.VM)
       
+    params = Params()
+    self.has_lateral_torque_nnff = self.initialize_lat_torque_nnff(CP.carFingerprint, eps_firmware) and params.get_bool("NNFF")
+
   def get_ff_nn(self, x):
     return self.lat_torque_nnff_model.evaluate(x)
   
@@ -253,6 +253,7 @@ class CarInterfaceBase(ABC):
   def get_std_params(candidate):
     ret = car.CarParams.new_message()
     ret.carFingerprint = candidate
+    ret.alternativeExperience = 1
 
     # Car docs fields
     ret.maxLateralAccel = get_torque_params(candidate)['MAX_LAT_ACCEL_MEASURED']
@@ -592,7 +593,7 @@ def get_interface_attr(attr: str, combine_brands: bool = False, ignore_none: boo
   for car_folder in sorted([x[0] for x in os.walk(BASEDIR + '/selfdrive/car')]):
     try:
       brand_name = car_folder.split('/')[-1]
-      brand_values = __import__(f'openpilot.selfdrive.car.{brand_name}.values', fromlist=[attr])
+      brand_values = __import__(f'selfdrive.car.{brand_name}.values', fromlist=[attr])
       if hasattr(brand_values, attr) or not ignore_none:
         attr_data = getattr(brand_values, attr, None)
       else:
