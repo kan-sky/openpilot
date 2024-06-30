@@ -90,7 +90,7 @@ cdef class Params:
       self.p.putBool(k, val)
 
   def remove(self, key):
-    self.delte(key)
+    self.delete(key)
     
   def delete(self, key):
     cdef string k = self.check_key(key)

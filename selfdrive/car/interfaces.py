@@ -144,7 +144,6 @@ class CarInterfaceBase(ABC):
     self.CP = CP
     self.VM = VehicleModel(CP)
     eps_firmware = str(next((fw.fwVersion for fw in CP.carFw if fw.ecu == "eps"), ""))
-    self.has_lateral_torque_nnff = self.initialize_lat_torque_nnff(CP.carFingerprint, eps_firmware)
 
     self.frame = 0
     self.steering_unpressed = 0
@@ -176,6 +175,9 @@ class CarInterfaceBase(ABC):
     if CarController is not None:
       self.CC = CarController(self.cp.dbc_name, CP, self.VM)
       
+    params = Params()
+    self.has_lateral_torque_nnff = self.initialize_lat_torque_nnff(CP.carFingerprint, eps_firmware) and params.get_bool("NNFF")
+
   def get_ff_nn(self, x):
     return self.lat_torque_nnff_model.evaluate(x)
   

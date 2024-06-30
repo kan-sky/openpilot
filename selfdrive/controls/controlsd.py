@@ -274,7 +274,7 @@ class Controls:
       return
     
     # show alert to indicate whether NNFF is loaded
-    if not self.nnff_alert_shown and self.sm.frame % 1000 == 0 and self.CP.lateralTuning.which() == 'torque':
+    if not self.nnff_alert_shown and self.sm.frame % 1000 == 0 and self.CP.lateralTuning.which() == 'torque' and self.CI.has_lateral_torque_nnff:
       self.nnff_alert_shown = True
       self.events.add(EventName.torqueNNFFLoadSuccess)
 

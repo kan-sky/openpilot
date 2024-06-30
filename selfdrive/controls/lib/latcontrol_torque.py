@@ -47,11 +47,6 @@ class LatControlTorque(LatControl):
     self.torque_from_lateral_accel = CI.torque_from_lateral_accel()
     self.use_steering_angle = self.torque_params.useSteeringAngle
     self.steering_angle_deadzone_deg = self.torque_params.steeringAngleDeadzoneDeg
-    self.paramsCount = 0
-
-    self.lateralTorqueCustom = int(Params().get("LateralTorqueCustom", encoding="utf8"))
-    self.lateralTorqueAccelFactor = float(int(Params().get("LateralTorqueAccelFactor", encoding="utf8")))*0.001
-    self.lateralTorqueFriction = float(int(Params().get("LateralTorqueFriction", encoding="utf8")))*0.001
     
     # neural network feedforward
     self.use_nnff = CI.has_lateral_torque_nnff
@@ -74,6 +69,10 @@ class LatControlTorque(LatControl):
       self.lateral_accel_desired_deque = deque(maxlen=history_check_frames[0])
       self.roll_deque = deque(maxlen=history_check_frames[0])
       self.error_deque = deque(maxlen=history_check_frames[0])
+    self.paramsCount = 0
+    self.lateralTorqueCustom = int(Params().get("LateralTorqueCustom", encoding="utf8"))
+    self.lateralTorqueAccelFactor = float(int(Params().get("LateralTorqueAccelFactor", encoding="utf8")))*0.001
+    self.lateralTorqueFriction = float(int(Params().get("LateralTorqueFriction", encoding="utf8")))*0.001
 
   def update_live_torque_params(self, latAccelFactor, latAccelOffset, friction):
     self.torque_params.latAccelFactor = latAccelFactor
@@ -103,10 +102,12 @@ class LatControlTorque(LatControl):
   def update(self, active, CS, VM, params, last_actuators, steer_limited, desired_curvature, desired_curvature_rate, llk, lat_plan=None, model_data=None):
     self.update_params()
     pid_log = log.ControlsState.LateralTorqueState.new_message()
+    nnff_log = None
 
     if not active:
       output_torque = 0.0
       pid_log.active = False
+      self.pid.reset()
       angle_steers_des = 0.0
     else:
       if self.use_steering_angle:
@@ -192,7 +193,7 @@ class LatControlTorque(LatControl):
       #C2#pid_log.actualLateralAccel = actual_lateral_accel
       #C2#pid_log.desiredLateralAccel = desired_lateral_accel
       #C2#pid_log.saturated = self._check_saturation(self.steer_max - abs(output_torque) < 1e-3, CS, steer_limited)
-      if self.use_nnff:
+      if self.use_nnff is not None:
         pid_log.nnffLog = nnff_log
       self.latDebugText = 'latAccel={:1.3f},Friction={:1.3f}'.format(self.torque_params.latAccelFactor, self.torque_params.friction)
       self.torqDebugText = 'Kp={:1.2f},Ki={:1.2f},Kd={:1.2f},Kf={:1.2f}'.format(self.torque_params.kp, self.torque_params.ki, self.torque_params.kd, self.torque_params.kf)
