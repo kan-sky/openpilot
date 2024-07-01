@@ -137,9 +137,9 @@ class LatControlTorque(LatControl):
     self.paramsCount += 1
     if self.paramsCount > 30:
       self.paramsCount = 0
-      lateralTorqueKp = float(Params().get_int("LateralTorqueKpV", encoding="utf8"))*0.01
-      lateralTorqueKi = float(Params().get_int("LateralTorqueKiV", encoding="utf8"))*0.01
-      lateralTorqueKf = float(Params().get_int("LateralTorqueKf", encoding="utf8"))*0.01
+      lateralTorqueKp = float(Params().get_int("LateralTorqueKpV"))*0.01
+      lateralTorqueKi = float(Params().get_int("LateralTorqueKiV"))*0.01
+      lateralTorqueKf = float(Params().get_int("LateralTorqueKf"))*0.01
       self.pid._k_p = [[0], [lateralTorqueKp]]
       self.pid._k_i = [[0], [lateralTorqueKi]]
       self.pid.k_f = lateralTorqueKf
