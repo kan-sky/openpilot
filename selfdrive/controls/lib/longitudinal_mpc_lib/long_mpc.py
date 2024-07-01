@@ -625,7 +625,7 @@ class LongitudinalMpc:
   def check_model_stopping(self, carstate, v, v_ego, model_x, y):
     v_ego_kph = v_ego * CV.MS_TO_KPH
     model_v = self.vFilter.process(v[-1])
-    startSign = model_v > 5.0 or model_v > (v[0]+2)
+    startSign = (model_v > 5.0 or model_v > (v[0]+2)) # and model_x > 50.0
 
     ## 시그널이 10M이상 떨리면... 신호가 잘못된걸로...
     #if (self.prev_x - model_x) > 10:
@@ -633,8 +633,8 @@ class LongitudinalMpc:
     self.prev_x = model_x
     if v_ego_kph < 1.0: 
       stopSign = model_x < 20.0 and model_v < 10.0
-    elif v_ego_kph < 82.0:
-      stopSign = model_x < interp(v[0], [60/3.6, 80/3.6], [120.0, 150]) and ((model_v < 3.0) or (model_v < v[0]*0.7))  and abs(y[-1]) < 5.0
+    elif v_ego_kph < 80.0:
+      stopSign = model_x < 120.0 and ((model_v < 3.0) or (model_v < v[0]*0.7))  and abs(y[-1]) < 5.0
     else:
       stopSign = False
 
@@ -642,9 +642,9 @@ class LongitudinalMpc:
     self.stopSignCount = self.stopSignCount + 1 if stopSign else 0
     self.startSignCount = self.startSignCount + 1 if startSign and not stopSign else 0
 
-    if self.stopSignCount * DT_MDL > 0.0:
+    if self.stopSignCount * DT_MDL > 0.0 and carstate.rightBlinker == False:
       self.trafficState = 1
-    elif self.startSignCount * DT_MDL > 0.2:
+    elif self.startSignCount * DT_MDL > 0.1:
       self.trafficState = 2  
     else:
       self.trafficState = 0
@@ -794,7 +794,7 @@ class LongitudinalMpc:
         self.xState = XState.e2eStop
         self.stopDist = 2.0
       #elif (v_ego_kph > 5.0 and (stop_x > 60.0 and abs(y[-1])<2.0)):
-      elif v_ego_kph > 5.0: # and stop_x > 60.0:
+      elif v_ego_kph > 5.0 and stop_x > 60.0:
         self.xState = XState.e2eCruise
       else:
         #self.trafficState = 0

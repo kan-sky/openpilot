@@ -75,7 +75,7 @@ class CarInterface(CarInterfaceBase):
     ret.carName = "gm"
     ret.safetyConfigs = [get_safety_config(car.CarParams.SafetyModel.gm)]
     ret.autoResumeSng = False
-    ret.enableBsm = True #0x142 in fingerprint[CanBus.POWERTRAIN]
+
     ret.enableGasInterceptor = 0x201 in fingerprint[0]
     #ret.enableGasInterceptor = 512 in fingerprint[0]
     ret.enableCamera = is_ecu_disconnected(fingerprint[0], FINGERPRINTS, ECU_FINGERPRINT, candidate, Ecu.fwdCamera)
