@@ -237,6 +237,7 @@ class CarrotNaviHelper(CarrotBase):
     self.rightBlinkerExtCount = 0
     self.leftBlinkerExtCount = 0
     self.nav_turn = False
+    self.left_sec = 11
 
   def update_params(self):
     self.autoTurnControlSpeedLaneChange = self.params.get_int("AutoTurnControlSpeedLaneChange")
@@ -335,9 +336,15 @@ class CarrotNaviHelper(CarrotBase):
         else:
           nav_direction = 0
         self.nav_turn = nav_turn
+
+        left_sec = int(self.nav_distance / max(1, v_ego))
+        if left_sec < self.left_sec:
+          self.params.put_int_nonblocking("CarrotAudioSec", left_sec)
+          self.left_sec = left_sec
       else:
         self.nav_turn = False
-        nav_direction = 0        
+        nav_direction = 0
+        self.left_sec = 11
 
       self.debugTextNoo = "N<{}>{:.0f}[{}],T{}[{}],L{:.0f}/{:.0f},T{:.0f}/{:.0f}".format(
         self.nooHelperActivated,
@@ -390,6 +397,8 @@ class CarrotNaviSpeedManager(CarrotBase):
 
     self.activeAPM = 0
     self.roadSpeed = 0
+    self.left_sec = 11
+    self.params.put_int_nonblocking("CarrotAudioSec", self.left_sec)
 
   def update_params(self):
     self.autoNaviSpeedBumpSpeed = float(self.params.get_int("AutoNaviSpeedBumpSpeed"))
@@ -455,8 +464,15 @@ class CarrotNaviSpeedManager(CarrotBase):
       applySpeed = decelerate_for_speed_camera(safeSpeed/3.6, safeDist, v_ego, self.autoNaviSpeedDecelRate, leftDist) * CV.MS_TO_KPH
       if isSectionLimit and applySpeed > safeSpeed:
         applySpeed = safeSpeed
+      left_sec = int(leftDist / max(1, v_ego))
+      if left_sec < self.left_sec:
+        self.params.put_int_nonblocking("CarrotAudioSec", left_sec)
+        self.left_sec = left_sec
     else:
       applySpeed = 255
+      if self.left_sec != 11:
+        self.params.put_int_nonblocking("CarrotAudioSec", 11)
+      self.left_sec = 11
 
 
     if applySpeed < 200:
