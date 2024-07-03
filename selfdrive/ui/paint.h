@@ -103,9 +103,7 @@ protected:
 
 	void	drawTPMS(const UIState* s);
 	void	drawDateTime(const UIState* s);
-
-
-	QString m_navText = "";
+		
 	int icon_size = 256;
 
 	Params	params;
@@ -118,7 +116,7 @@ public:
 	void drawLeadApilot(const UIState* s);
 	void drawDebugText(UIState* s, bool show);
 	void drawDeviceState(UIState* s, bool show);
-
+	void drawCarrotModel(const UIState* s);
 
 	
 

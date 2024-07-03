@@ -13,7 +13,7 @@ from cereal.visionipc import VisionIpcClient, VisionStreamType
 
 from openpilot.common.conversions import Conversions as CV
 from openpilot.common.git import get_short_branch
-from openpilot.common.numpy_fast import clip, interp
+from openpilot.common.numpy_fast import clip
 from openpilot.common.params import Params
 from openpilot.common.realtime import config_realtime_process, Priority, Ratekeeper, DT_CTRL
 from openpilot.common.swaglog import cloudlog
@@ -29,10 +29,6 @@ from openpilot.selfdrive.controls.lib.latcontrol_angle import LatControlAngle, S
 from openpilot.selfdrive.controls.lib.latcontrol_torque import LatControlTorque
 from openpilot.selfdrive.controls.lib.longcontrol import LongControl
 from openpilot.selfdrive.controls.lib.vehicle_model import VehicleModel
-from openpilot.selfdrive.controls.lib.drive_helpers import apply_deadzone
-from selfdrive.controls.lib.lateral_planner import TRAJECTORY_SIZE
-from openpilot.selfdrive.controls.lib.vehicle_model import ACCELERATION_DUE_TO_GRAVITY
-from openpilot.selfdrive.modeld.constants import ModelConstants
 
 from openpilot.system.hardware import HARDWARE
 
@@ -62,8 +58,6 @@ ACTUATOR_FIELDS = tuple(car.CarControl.Actuators.schema.fields.keys())
 ACTIVE_STATES = (State.enabled, State.softDisabling, State.overriding)
 ENABLED_STATES = (State.preEnabled, *ACTIVE_STATES)
 
-MAX_ABS_PITCH = 0.314 # 20% grade = 18 degrees = pi/10 radians
-MAX_ABS_PRED_PITCH_DELTA = MAX_ABS_PITCH * 0.5
 
 class Controls:
   def __init__(self, CI=None):
@@ -202,8 +196,6 @@ class Controls:
     self.carrot_tmux_sent = 0
     self.steerDisabledTemporary = False
     self.seering_pressed_count = 0
-    self.pitch = 0.0
-    self.pitch_accel_deadzone = 0.01 # [radians] ≈ 1% grade 
 
   def set_initial_state(self):
     if REPLAY:
@@ -457,7 +449,7 @@ class Controls:
     # TODO: fix simulator
     if not SIMULATION or REPLAY:
       # Not show in first 1 km to allow for driving out of garage. This event shows after 5 minutes
-      if not self.sm['liveLocationKalman'].gpsOK and self.sm['liveLocationKalman'].inputsOK and (self.distance_traveled > 1500):
+      if not self.sm['liveLocationKalman'].gpsOK and self.sm['liveLocationKalman'].inputsOK and (self.distance_traveled > 1000):
         self.events.add(EventName.noGps)
       if self.sm['liveLocationKalman'].gpsOK or self.v_cruise_helper.xPosValidCount > 0:
         self.distance_traveled = 0
@@ -682,10 +674,6 @@ class Controls:
     long_plan = self.sm['longitudinalPlan']
     model_v2 = self.sm['modelV2']
 
-    if self.sm.updated['liveParameters'] and len(model_v2.orientation.y) == TRAJECTORY_SIZE:
-      future_pitch_diff = clip(interp(self.CS.pitch_future_time, ModelConstants.T_IDXS, model_v2.orientation.y), -MAX_ABS_PRED_PITCH_DELTA, MAX_ABS_PRED_PITCH_DELTA)
-      self.CS.pitch_raw = self.sm['liveParameters'].pitch + future_pitch_diff
-
     CC = car.CarControl.new_message()
     CC.enabled = self.enabled
 
@@ -722,9 +710,6 @@ class Controls:
                    (not standstill or self.joystick_mode) and not self.steerDisabledTemporary
     CC.longActive = self.enabled and not self.events.contains(ET.OVERRIDE_LONGITUDINAL) and self.CP.openpilotLongitudinalControl
 
-    if self.sm.updated['liveParameters'] and len(model_v2.orientation.y) == TRAJECTORY_SIZE:
-      self.CS.pitch_raw = self.sm['liveParameters'].pitch + future_pitch_diff
-
     actuators = CC.actuators
     actuators.longControlState = self.LoC.long_control_state
 
@@ -743,30 +728,25 @@ class Controls:
     if not CC.longActive:
       self.LoC.reset(v_pid=CS.vEgo)
 
+    curve_speed = abs(self.sm['longitudinalPlan'].curveSpeed)
+    self.lanefull_mode_enabled = self.params.get_int("UseLaneLineSpeedApply") > 0 and curve_speed > self.params.get_int("UseLaneLineCurveSpeed")
     if not self.joystick_mode:
       # accel PID loop
       pid_accel_limits = self.CI.get_pid_accel_limits(self.CP, CS.vEgo, self.v_cruise_helper.v_cruise_kph * CV.KPH_TO_MS)
       t_since_plan = (self.sm.frame - self.sm.recv_frame['longitudinalPlan']) * DT_CTRL
-      actuators.accel, actuators.jerk = self.LoC.update(CC.longActive, CS, long_plan, pid_accel_limits, t_since_plan, self.v_cruise_helper.softHoldActive)
+      actuators.accel = self.LoC.update(CC.longActive, CS, long_plan, pid_accel_limits, t_since_plan, self.v_cruise_helper.softHoldActive)
       self.v_cruise_helper.accel_output = actuators.accel # carrot: for gas pedal
-
-
-      # compute pitch-compensated accel
-      if self.sm.updated['liveParameters']:
-        self.pitch = apply_deadzone(self.sm['liveParameters'].pitchFutureLong, self.pitch_accel_deadzone)
-      actuators.accelPitchCompensated = actuators.accel + ACCELERATION_DUE_TO_GRAVITY * math.sin(self.pitch)
-
 
       if len(long_plan.speeds):
         actuators.speed = long_plan.speeds[-1]
 
       # Steering PID loop and lateral MPC
-      if self.params.get_int("UseLaneLineSpeedApply") == 0:
-        self.desired_curvature = clip_curvature(CS.vEgo, self.desired_curvature, model_v2.action.desiredCurvature)
-        actuators.curvature = self.desired_curvature
-      else:
+      if self.lanefull_mode_enabled:
         desired_curvature = get_lag_adjusted_curvature(self.CP, CS.vEgo, lat_plan.psis, lat_plan.curvatures)
         self.desired_curvature = clip_curvature(CS.vEgo, self.desired_curvature, desired_curvature)
+        actuators.curvature = self.desired_curvature
+      else:
+        self.desired_curvature = clip_curvature(CS.vEgo, self.desired_curvature, model_v2.action.desiredCurvature)
         actuators.curvature = self.desired_curvature
       actuators.steer, actuators.steeringAngleDeg, lac_log = self.LaC.update(CC.latActive, CS, self.VM, lp,
                                                                              self.steer_limited, self.desired_curvature,
@@ -809,7 +789,7 @@ class Controls:
         if undershooting and turning and good_speed and max_torque:
           lac_log.active and self.events.add(EventName.steerSaturated)
       elif lac_log.saturated:
-        if self.params.get_int("UseLaneLineSpeedApply") == 0:
+        if self.lanefull_mode_enabled:
           dpath_points = model_v2.position.y
         else:
           dpath_points = lat_plan.dPathPoints
@@ -1012,6 +992,8 @@ class Controls:
 
     controlsState.leftBlinkerExt = self.v_cruise_helper.leftBlinkerExtCount + self.v_cruise_helper.blinkerExtMode
     controlsState.rightBlinkerExt = self.v_cruise_helper.rightBlinkerExtCount  + self.v_cruise_helper.blinkerExtMode
+
+    controlsState.useLaneLines = self.lanefull_mode_enabled
 
     lat_tuning = self.CP.lateralTuning.which()
     if self.joystick_mode:

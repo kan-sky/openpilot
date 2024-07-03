@@ -81,8 +81,12 @@ class CarInterface(CarInterfaceBase):
         if 0x130 not in fingerprint[CAN.ECAN]: # 0x130(304): GEAR_SHIFTER
           if 0x40 not in fingerprint[CAN.ECAN]: # 0x40(64): GEAR_ALT
             if 112 not in fingerprint[CAN.ECAN]:  # carrot: eGV70
-              ret.extFlags |= HyundaiExtFlags.CANFD_GEARS_NONE.value
-              print("$$$CANFD GEARS_NONE")
+              if 69 in fingerprint[CAN.ECAN]:
+                ret.extFlags |= HyundaiExtFlags.CANFD_GEARS_69.value
+                print("$$$CANFD GEARS_69")
+              else:
+                ret.extFlags |= HyundaiExtFlags.CANFD_GEARS_NONE.value
+                print("$$$CANFD GEARS_NONE")
             else:
               ret.flags |= HyundaiFlags.CANFD_ALT_GEARS_2.value
               print("$$$CANFD ALT_GEARS_2")
@@ -98,8 +102,16 @@ class CarInterface(CarInterfaceBase):
         # ICE cars do not have 0x130; GEARS message on 0x40 or 0x70 instead
         if 0x130 not in fingerprint[CAN.ECAN]: # 0x130(304): GEAR_SHIFTER
           if 0x40 not in fingerprint[CAN.ECAN]: # 0x40(64): GEAR_ALT
-            ret.flags |= HyundaiFlags.CANFD_ALT_GEARS_2.value
-            print("$$$CANFD ALT_GEARS_2")
+            if 112 not in fingerprint[CAN.ECAN]:  # carrot: eGV70
+              if 69 in fingerprint[CAN.ECAN]:
+                ret.extFlags |= HyundaiExtFlags.CANFD_GEARS_69.value
+                print("$$$CANFD GEARS_69")
+              else:
+                ret.extFlags |= HyundaiExtFlags.CANFD_GEARS_NONE.value
+                print("$$$CANFD GEARS_NONE")
+            else:
+              ret.flags |= HyundaiFlags.CANFD_ALT_GEARS_2.value
+              print("$$$CANFD ALT_GEARS_2")
           else:
             ret.flags |= HyundaiFlags.CANFD_ALT_GEARS.value
             print("$$$CANFD ALT_GEARS")
@@ -160,7 +172,7 @@ class CarInterface(CarInterfaceBase):
     ret.longitudinalActuatorDelayLowerBound = 0.5
     ret.longitudinalActuatorDelayUpperBound = 0.5
 
-    if Params().get_bool("EnableRadarTracks"):
+    if Params().get_int("EnableRadarTracks") > 0:
       ret.radarTimeStep = (1.0 / 20) # 20Hz  RadarTrack 20Hz
     else:
       ret.radarTimeStep = (1.0 / 50) # 50Hz   SCC11 50Hz
@@ -253,7 +265,7 @@ class CarInterface(CarInterfaceBase):
         addr, bus = 0x730, CanBus(CP).ECAN
       print(f"$$$$$$ Disable ECU : addr={addr}, bus={bus}")
       disable_ecu(logcan, sendcan, bus=bus, addr=addr, com_cont_req=b'\x28\x83\x01', debug=True)
-    if Params().get_bool("EnableRadarTracks"): #ajouatom
+    if Params().get_int("EnableRadarTracks") > 0:
       enable_radar_tracks(CP, logcan, sendcan) 
 
     # for blinkers

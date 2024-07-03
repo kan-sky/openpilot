@@ -222,6 +222,7 @@ std::unordered_map<std::string, uint32_t> keys = {
     { "ShowTpms", PERSISTENT },
     { "ShowSteerMode", PERSISTENT },
     { "ShowDeviceState", PERSISTENT },
+    { "ShowCustomBrightness", PERSISTENT },
     { "ShowConnInfo", PERSISTENT },
     { "ShowLaneInfo", PERSISTENT },
     { "ShowBlindSpot", PERSISTENT },
@@ -266,6 +267,8 @@ std::unordered_map<std::string, uint32_t> keys = {
     { "StartAccelApply", PERSISTENT },
     { "AutoSpeedUptoRoadSpeedLimit", PERSISTENT },
     { "StopDistanceCarrot", PERSISTENT },
+    { "ComfortBrake", PERSISTENT },
+    { "TrafficStopDistanceAdjust", PERSISTENT },
     { "ALeadTauPos", PERSISTENT },
     { "ALeadTauNeg", PERSISTENT },
     { "ALeadTauThreshold", PERSISTENT },
@@ -288,6 +291,7 @@ std::unordered_map<std::string, uint32_t> keys = {
     { "CruiseMaxVals5", PERSISTENT },
     { "CruiseMaxVals6", PERSISTENT },
     { "CruiseMinVals", PERSISTENT },
+    { "MyHighModeFactor", PERSISTENT },
     { "LongitudinalTuningKpV", PERSISTENT },
     { "LongitudinalTuningKiV", PERSISTENT },
     { "LongitudinalTuningKf", PERSISTENT },
@@ -310,6 +314,7 @@ std::unordered_map<std::string, uint32_t> keys = {
     { "TFollowGap4", PERSISTENT },
     { "HapticFeedbackWhenSpeedCamera", PERSISTENT },
     { "UseLaneLineSpeed", PERSISTENT },
+    { "UseLaneLineCurveSpeed", PERSISTENT },
     { "UseLaneLineSpeedApply", PERSISTENT },
     { "AdjustLaneOffset", PERSISTENT },
     { "AdjustCurveOffset", PERSISTENT },
@@ -365,9 +370,9 @@ std::unordered_map<std::string, uint32_t> keys = {
     {"RoadName", PERSISTENT},
     {"RoadNameUI", PERSISTENT},
     {"SchedulePending", PERSISTENT},
-    {"TrafficStopDistanceAdjust", PERSISTENT},
+    
     {"UseExternalNaviRoutes", CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION },
-
+    
 };
 
 } // namespace
