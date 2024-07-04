@@ -169,17 +169,20 @@ class CarState(CarStateBase):
       ret.rightBlinker = cam_cp.vl["BCMTurnSignals"]["TurnSignals"] == 2
 
       ret.parkingBrake = cam_cp.vl["BCMGeneralPlatformStatus"]["ParkBrakeSwActive"] == 1
+
+    self.pcm_acc_status = pt_cp.vl["AcceleratorPedal2"]["CruiseState"]
+
     ret.cruiseState.available = pt_cp.vl["ECMEngineStatus"]["CruiseMainOn"] != 0
     ret.espDisabled = pt_cp.vl["ESPStatus"]["TractionControlOn"] != 1
     # for delay Accfault event
-    accFaulted = (pt_cp.vl["AcceleratorPedal2"]["CruiseState"] == AccState.FAULTED or \
+    accFaulted = (self.pcm_acc_status == AccState.FAULTED or \
                       pt_cp.vl["EBCMFrictionBrakeStatus"]["FrictionBrakeUnavailable"] == 1)
     startingState = LongCtrlState.starting
     self.accFaultedCount = self.accFaultedCount + 1 if accFaulted else 0
     ret.accFaulted = True if self.accFaultedCount > 50 else False
 
-    ret.cruiseState.enabled = pt_cp.vl["AcceleratorPedal2"]["CruiseState"] != AccState.OFF
-    ret.cruiseState.standstill = pt_cp.vl["AcceleratorPedal2"]["CruiseState"] == AccState.STANDSTILL
+    ret.cruiseState.enabled = self.pcm_acc_status != AccState.OFF
+    ret.cruiseState.standstill = self.pcm_acc_status == AccState.STANDSTILL
     if startingState:
       ret.cruiseState.standstill = False
     if self.CP.networkLocation == NetworkLocation.fwdCamera and not self.CP.flags & GMFlags.NO_CAMERA.value:
