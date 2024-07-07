@@ -291,6 +291,7 @@ class CarController(CarControllerBase):
         #can_sends.extend(hyundaican.create_acc_commands(self.packer, CC.enabled, accel, jerk, int(self.frame / 2),
         #                                                hud_control.leadVisible, set_speed_in_units, stopping,
         #                                                CC.cruiseControl.override, use_fca, CS.out.cruiseState.available))
+
         can_sends.extend(hyundaican.create_acc_commands_mix_scc(self.CP, self.packer, CC.enabled, accel, self.jerk_u, self.jerk_l, int(self.frame / 2),
                                                       hud_control, set_speed_in_units, stopping, CC, CS, self.softHoldMode, self.cb_upper, self.cb_lower, CS.out.cruiseState.available))
         self.accel_last = accel
@@ -437,31 +438,24 @@ class CarController(CarControllerBase):
     set_speed_in_units = hud_control.setSpeed * (CV.MS_TO_KPH if CS.is_metric else CV.MS_TO_MPH)
     target = int(set_speed_in_units+0.5)
     current = int(CS.out.cruiseState.speed*CV.MS_TO_KPH + 0.5)
-    v_ego_kph = CS.out.vEgo * CV.MS_TO_KPH
 
     send_button = 0
-    activate_cruise = False
-
+    if not CC.enabled:
+      self.activateCruise = 0
     if CC.enabled:
       if not CS.out.cruiseState.enabled:
-        if (hud_control.leadVisible or v_ego_kph > 10.0) and self.activateCruise == 0:
+        if (hud_control.leadVisible or current > 10.0):
           send_button = Buttons.RES_ACCEL
-          self.activateCruise = 1
-          activate_cruise = True
       elif CC.cruiseControl.resume:
         send_button = Buttons.RES_ACCEL
       elif target < current and current>= 31 and self.params.get_int("SpeedFromPCM") != 1:
         send_button = Buttons.SET_DECEL
       elif target > current and current < 160 and self.params.get_int("SpeedFromPCM") != 1:
         send_button = Buttons.RES_ACCEL
-    elif CC.cruiseControl.activate:
-      if (hud_control.leadVisible or v_ego_kph > 10.0) and self.activateCruise == 0:
+    elif CC.cruiseControl.activate and self.activateCruise == 0:
+      if (hud_control.leadVisible or current > 10.0):
         self.activateCruise = 1
         send_button = Buttons.RES_ACCEL
-        activate_cruise = True
-
-    if CS.out.brakePressed or CS.out.gasPressed:
-      self.activateCruise = 0
 
     if send_button == 0:
       self.button_spamming_count = 0
@@ -483,7 +477,8 @@ class CarController(CarControllerBase):
     send_button_allowed = (self.frame - self.last_button_frame) > self.button_wait
     CC.debugTextCC = "{} speed_diff={:.1f},{:.0f}/{:.0f}, button={}, button_wait={}, count={}".format(
       send_button_allowed, speed_diff, target, current, send_button, self.button_wait, self.button_spamming_count)
-    if send_button_allowed or activate_cruise:
+    
+    if send_button_allowed:
       self.button_spamming_count = self.button_spamming_count + 1 if Buttons.RES_ACCEL else self.button_spamming_count - 1
       return send_button
     else:
@@ -555,8 +550,8 @@ class CarController(CarControllerBase):
           self.jerk_l += 0.1 if self.jerk_l < 1.0 else -0.1
           self.jerk_count = 0
         else:
-          self.jerk_u = self.jerk_u * 0.8 + min(max(0.5, jerk * 2.0), jerk_max) * 0.2
-          self.jerk_l = self.jerk_l * 0.8 + min(max(0.5, -jerk * 2.0), jerkLimit) * 0.2
+          self.jerk_u = min(max(0.5, jerk * 2.0), jerk_max)
+          self.jerk_l = min(max(0.5, -jerk * 2.0), jerkLimit)
           #self.jerk_l = min(max(1.2, -jerk * 2.0), jerkLimit) ## 1.0으로 하니 덜감속, 1.5로하니 너무감속, 1.2로 한번해보자(231228)
           self.cb_upper = clip(0.9 + accel * 0.2, 0, 1.2)
           self.cb_lower = clip(0.8 + accel * 0.2, 0, 1.2)

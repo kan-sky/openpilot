@@ -527,7 +527,7 @@ class CarStateBase(ABC):
     self.v_ego_clu_kf = KF1D(x0=[[0.0], [0.0]],
                          A=[[1.0, DT_CTRL], [0.0, 1.0]],
                          C=[1.0, 0.0],
-                         K=[[0.1202963187], [0.2904016511]]) #GM >>>>
+                         K=[[0.12287673], [0.29666309]]) #GM >>>>
 
 
   def update_speed_kf(self, v_ego_raw):
