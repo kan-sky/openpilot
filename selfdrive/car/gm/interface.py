@@ -93,8 +93,8 @@ class CarInterface(CarInterfaceBase):
   def _get_params(ret, candidate, fingerprint, car_fw, experimental_long, docs):
     ret.carName = "gm"
     ret.safetyConfigs = [get_safety_config(car.CarParams.SafetyModel.gm)]
-    ret.autoResumeSng = True #False
-    ret.enableBsm = True # 0x142 in fingerprint[CanBus.POWERTRAIN]
+    ret.autoResumeSng = False
+    ret.enableBsm = 0x142 in fingerprint[CanBus.POWERTRAIN]
     if PEDAL_MSG in fingerprint[0]:
       ret.enableGasInterceptor = True
       ret.safetyConfigs[0].safetyParam |= Panda.FLAG_GM_GAS_INTERCEPTOR
@@ -183,7 +183,7 @@ class CarInterface(CarInterfaceBase):
       ret.startAccel = 0.8
       ret.vEgoStarting = 0.25
       ret.vEgoStopping = 0.25
-      ret.enableBsm = True #0x142 in fingerprint[CanBus.POWERTRAIN]
+      ret.enableBsm = 0x142 in fingerprint[CanBus.POWERTRAIN]
 
       # softer long tune for ev table
       if useEVTables: 
