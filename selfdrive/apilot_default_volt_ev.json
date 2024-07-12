@@ -20,8 +20,8 @@
     "content": "0"
   },
   {
-    "filename": "AdjustLaneTime",
-    "content": "10"
+     "filename": "AdjustLaneTime",
+     "content": "10"
   },
   {
     "filename": "AlwaysOnLateralEnabled",
@@ -53,7 +53,7 @@
   },
   {
     "filename": "AutoNaviSpeedBumpSpeed",
-    "content": "25"
+    "content": "30"
   },
   {
     "filename": "AutoNaviSpeedBumpTime",
@@ -65,7 +65,7 @@
   },
   {
     "filename": "AutoNaviSpeedCtrlEnd",
-    "content": "12"
+    "content": "10"
   },
   {
     "filename": "AutoNaviSpeedDecelRate",
@@ -73,7 +73,7 @@
   },
   {
     "filename": "AutoNaviSpeedSafetyFactor",
-    "content": "95"
+    "content": "100"
   },
   {
     "filename": "AutoResumeFromBrakeReleaseTrafficSign",
@@ -105,23 +105,7 @@
   },
   {
     "filename": "AutoTurnMapChange",
-    "content": "0"
-  },
-  {
-    "filename": "CarrotCountDownSec",
-    "content": "0"
-  },
-  {
-    "filename": "CarrotCountDownSpeed",
-    "content": "10"
-  },
-  {
-    "filename": "CarrotTest3",
-    "content": "0"
-  },
-  {
-    "filename": "ComfortBrake",
-    "content": "250"
+    "content": "1"
   },
   {
     "filename": "CompletedTrainingVersion",
@@ -137,27 +121,27 @@
   },
   {
     "filename": "CruiseMaxVals1",
-    "content": "170"
+    "content": "180"
   },
   {
     "filename": "CruiseMaxVals2",
-    "content": "135"
+    "content": "160"
   },
   {
     "filename": "CruiseMaxVals3",
-    "content": "80"
+    "content": "90"
   },
   {
     "filename": "CruiseMaxVals4",
-    "content": "70"
+    "content": "80"
   },
   {
     "filename": "CruiseMaxVals5",
-    "content": "45"
+    "content": "55"
   },
   {
     "filename": "CruiseMaxVals6",
-    "content": "35"
+    "content": "50"
   },
   {
     "filename": "CruiseMinVals",
@@ -177,7 +161,7 @@
   },
   {
     "filename": "CustomSteerDeltaDown",
-    "content": "6"
+    "content": "7"
   },
   {
     "filename": "CustomSteerDeltaUp",
@@ -221,7 +205,7 @@
   },
   {
     "filename": "LateralTorqueAccelFactor",
-    "content": "2300"
+    "content": "2100"
   },
   {
     "filename": "LateralTorqueCustom",
@@ -229,19 +213,11 @@
   },
   {
     "filename": "LateralTorqueFriction",
-    "content": "80"
-  },
-  {
-    "filename": "LateralTorqueKf",
     "content": "100"
   },
   {
-    "filename": "LateralTorqueKiV",
-    "content": "15"
-  },
-  {
-    "filename": "LateralTorqueKpV",
-    "content": "95"
+    "filename": "LockDoors",
+    "content": "0"
   },
   {
     "filename": "LongPitch",
@@ -252,16 +228,12 @@
     "content": "0"
   },
   {
-    "filename": "LongitudinalPersonalityMax",
-    "content": "3"
-  },
-  {
     "filename": "LongitudinalTuningKf",
     "content": "100"
   },
   {
     "filename": "LongitudinalTuningKiV",
-    "content": "360"
+    "content": "340"
   },
   {
     "filename": "LongitudinalTuningKpV",
@@ -274,10 +246,6 @@
   {
     "filename": "MaxAngleFrames",
     "content": "0"
-  },
-  {
-    "filename": "MaxTimeOffroadMin",
-    "content": "120"
   },
   {
     "filename": "MixRadarInfo",
@@ -309,7 +277,7 @@
   },
   {
     "filename": "NNFFLite",
-    "content": "1"
+    "content": "0"
   },
   {
     "filename": "NNFFModelName",
@@ -350,10 +318,6 @@
   {
     "filename": "ShowConnInfo",
     "content": "1"
-  },
-  {
-    "filename": "ShowCustomBrightness",
-    "content": "100"
   },
   {
     "filename": "ShowDateTime",
@@ -465,11 +429,11 @@
   },
   {
     "filename": "SteerActuatorDelay",
-    "content": "39"
+    "content": "28"
   },
   {
     "filename": "SteerRatio",
-    "content": "151"
+    "content": "150"
   },
   {
     "filename": "StopAccelApply",
@@ -485,7 +449,7 @@
   },
   {
     "filename": "StoppingAccel",
-    "content": "-60"
+    "content": "-80"
   },
   {
     "filename": "TFollowGap1",
@@ -505,11 +469,11 @@
   },
   {
     "filename": "TFollowLeadCarAccel",
-    "content": "7"
+    "content": "5"
   },
   {
     "filename": "TFollowLeadCarSpeed",
-    "content": "7"
+    "content": "10"
   },
   {
     "filename": "TFollowSpeedAdd",
@@ -522,10 +486,6 @@
   {
     "filename": "TSS2Tune",
     "content": "0"
-  },
-  {
-    "filename": "UseLaneLineCurveSpeed",
-    "content": "45"
   },
   {
     "filename": "UseLaneLineSpeed",
