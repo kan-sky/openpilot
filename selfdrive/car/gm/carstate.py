@@ -256,7 +256,7 @@ class CarState(CarStateBase):
       messages.append(("SPEED_RELATED", 20))
 
     if CP.enableBsm:
-      messages.append(("BCMBlindSpotMonitor", 0))
+      messages.append(("BCMBlindSpotMonitor", 10))
 
     if CP.carFingerprint in SDGM_CAR:
       messages += [
