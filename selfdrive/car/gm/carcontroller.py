@@ -1,11 +1,13 @@
+import math
+
 from cereal import car
 from openpilot.common.conversions import Conversions as CV
 from openpilot.common.params import Params
-#from openpilot.common.filter_simple import FirstOrderFilter
+from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.numpy_fast import interp, clip
 from openpilot.common.realtime import DT_CTRL
 from opendbc.can.packer import CANPacker
-from openpilot.selfdrive.car import apply_driver_steer_torque_limits
+from openpilot.selfdrive.car import apply_driver_steer_torque_limits, create_gas_interceptor_command
 from openpilot.selfdrive.car.gm import gmcan
 from openpilot.selfdrive.car.gm.values import DBC, CanBus, CarControllerParams, CruiseButtons, GMFlags, CC_ONLY_CAR, SDGM_CAR, EV_CAR, AccState
 from openpilot.selfdrive.car.interfaces import CarControllerBase
@@ -24,13 +26,9 @@ CAMERA_CANCEL_DELAY_FRAMES = 10
 MIN_STEER_MSG_INTERVAL_MS = 15
 
 # constants for pitch compensation
-#PITCH_DEADZONE = 0.01 # [radians] 0.01 ? 1% grade
-#BRAKE_PITCH_FACTOR_BP = [5., 10.] # [m/s] smoothly revert to planned accel at low speeds
-#BRAKE_PITCH_FACTOR_V = [0., 1.] # [unitless in [0,1]]; don't touch
-
-#GM, only use pitch-compensated acceleration at 10m/s+
-ACCEL_PITCH_FACTOR_BP = [5., 10.] # [m/s]
-ACCEL_PITCH_FACTOR_V = [0., 1.] # [unitless in [0-1]]
+PITCH_DEADZONE = 0.01 # [radians] 0.01 ? 1% grade
+BRAKE_PITCH_FACTOR_BP = [5., 10.] # [m/s] smoothly revert to planned accel at low speeds
+BRAKE_PITCH_FACTOR_V = [0., 1.] # [unitless in [0,1]]; don't touch
 
 class CarController(CarControllerBase):
   def __init__(self, dbc_name, CP, VM):
@@ -58,8 +56,8 @@ class CarController(CarControllerBase):
     self.long_pitch = False
     self.use_ev_tables = False
 
-    #self.pitch = FirstOrderFilter(0., 0.09 * 4, DT_CTRL * 4)  # runs at 25 Hz
-    #self.accel_g = 0.0
+    self.pitch = FirstOrderFilter(0., 0.09 * 4, DT_CTRL * 4)  # runs at 25 Hz
+    self.accel_g = 0.0
 	
   @staticmethod
   def calc_pedal_command(accel: float, long_active: bool) -> float:
@@ -82,7 +80,7 @@ class CarController(CarControllerBase):
     self.use_ev_tables = params.get_bool("EVTable")
 
     actuators = CC.actuators
-    accel = actuators.accel
+    accel = brake_accel = actuators.accel
     hud_control = CC.hudControl
     hud_alert = hud_control.visualAlert
     hud_v_cruise = hud_control.setSpeed
@@ -136,14 +134,18 @@ class CarController(CarControllerBase):
       # Gas/regen, brakes, and UI commands - all at 25Hz
       if self.frame % 4 == 0:
         stopping = actuators.longControlState == LongCtrlState.stopping
+        # GM <<<<
+        # Pitch compensated acceleration;
+        # TODO: include future pitch (sm['modelDataV2'].orientation.y) to account for long actuator delay
+        if self.long_pitch and len(CC.orientationNED) > 1:
+          self.pitch.update(CC.orientationNED[1] if len(CC.orientationNED) > 1 else 0.)
+        self.accel_g = apply_deadzone(self.pitch.x, PITCH_DEADZONE) # driving uphill is positive pitch
+        accelPitchCompensated = actuators.accel + ACCELERATION_DUE_TO_GRAVITY * math.sin(self.accel_g)
+        k = interp(CS.out.vEgo, BRAKE_PITCH_FACTOR_BP, BRAKE_PITCH_FACTOR_V)
+        brake_accel = k * accelPitchCompensated + (1. - k) * actuators.accel
         at_full_stop = CC.longActive and CS.out.standstill
         near_stop = CC.longActive and (CS.out.vEgo < self.params.NEAR_STOP_BRAKE_PHASE)
         interceptor_gas_cmd = 0
-        # Pitch compensated acceleration;
-        # TODO: include future pitch (sm['modelDataV2'].orientation.y) to account for long actuator delay
-        #self.pitch.update(CC.orientationNED[1])
-        #self.accel_g = ACCELERATION_DUE_TO_GRAVITY * apply_deadzone(self.pitch.x, PITCH_DEADZONE) # driving uphill is positive pitch
-        #accel += self.accel_g
         if not CC.longActive:
           # ASCM sends max regen when not enabled
           self.apply_gas = self.params.INACTIVE_REGEN
@@ -155,10 +157,8 @@ class CarController(CarControllerBase):
           # Normal operation
           #GM, brake_accel = actuators.accel + self.accel_g * interp(CS.out.vEgo, BRAKE_PITCH_FACTOR_BP, BRAKE_PITCH_FACTOR_V)
           if self.CP.carFingerprint in EV_CAR and self.use_ev_tables:
-            k = interp(CS.out.vEgo, ACCEL_PITCH_FACTOR_BP, ACCEL_PITCH_FACTOR_V)
-            brake_accel = k * actuators.accelPitchCompensated + (1. - k) * actuators.accel
             self.params.update_ev_gas_brake_threshold(CS.out.vEgo)
-            self.apply_gas = int(round(interp(actuators.accelPitchCompensated if self.long_pitch else actuators.accel, self.params.EV_GAS_LOOKUP_BP, self.params.GAS_LOOKUP_V)))
+            self.apply_gas = int(round(interp(accelPitchCompensated if self.long_pitch else actuators.accel, self.params.EV_GAS_LOOKUP_BP, self.params.GAS_LOOKUP_V)))
             self.apply_brake = int(round(interp(brake_accel if self.long_pitch else actuators.accel, self.params.EV_BRAKE_LOOKUP_BP, self.params.BRAKE_LOOKUP_V)))
           else:
             self.apply_gas = int(round(interp(accel if self.long_pitch else actuators.accel, self.params.GAS_LOOKUP_BP, self.params.GAS_LOOKUP_V)))
@@ -207,10 +207,13 @@ class CarController(CarControllerBase):
           can_sends.append(gmcan.create_friction_brake_command(self.packer_ch, friction_brake_bus, self.apply_brake,
                                                                idx, CC.enabled, near_stop, at_full_stop, self.CP))
 
-        # Send dashboard UI commands (ACC status)
-        send_fcw = hud_alert == VisualAlert.fcw
-        can_sends.append(gmcan.create_acc_dashboard_command(self.packer_pt, CanBus.POWERTRAIN, CC.enabled,
-                                                            hud_v_cruise * CV.MS_TO_KPH, hud_control, send_fcw))
+          # Send dashboard UI commands (ACC status)
+          send_fcw = hud_alert == VisualAlert.fcw
+          can_sends.append(gmcan.create_acc_dashboard_command(self.packer_pt, CanBus.POWERTRAIN, CC.enabled,
+                                                              hud_v_cruise * CV.MS_TO_KPH, hud_control, send_fcw))
+      else:
+        # to keep accel steady for logs when not sending gas
+        accel += self.accel_g
 
       # Radar needs to know current speed and yaw rate (50hz),
       # and that ADAS is alive (10hz)
