@@ -350,7 +350,7 @@ class CarInterfaceBase(ABC):
     return ret
 
   @staticmethod
-  def configure_torque_tune(candidate, tune, steering_angle_deadzone_deg=0.2, use_steering_angle=True):
+  def configure_torque_tune(candidate, tune, steering_angle_deadzone_deg=0.0, use_steering_angle=True):
     params = get_torque_params(candidate)
 
     tune.init('torque')
@@ -428,8 +428,8 @@ class CarInterfaceBase(ABC):
       events.add(EventName.speedTooHigh)
     if cs_out.cruiseState.nonAdaptive:
       events.add(EventName.wrongCruiseMode)
-    #if cs_out.brakeHoldActive and self.CP.openpilotLongitudinalControl:
-    #  events.add(EventName.brakeHold)
+    if cs_out.brakeHoldActive and self.CP.openpilotLongitudinalControl:
+      events.add(EventName.brakeHold)
     if cs_out.parkingBrake:
       events.add(EventName.parkBrake)
     if cs_out.accFaulted:
@@ -447,8 +447,6 @@ class CarInterfaceBase(ABC):
       if b.type == ButtonType.cancel:
         events.add(EventName.buttonCancel)
         print("$$$$$$$$$$$$$$ EventName.buttonCancel")
-      if b.type == ButtonType.gapAdjustCruise:
-        distance_button_pressed = True
 
     # Handle permanent and temporary steering faults
     # tw: steer warning
@@ -523,11 +521,7 @@ class CarStateBase(ABC):
     x0=[[0.0], [0.0]]
     K = get_kalman_gain(DT_CTRL, np.array(A), np.array(C), np.array(Q), R)
     self.v_ego_kf = KF1D(x0=x0, A=A, C=C[0], K=K)
-    #GM <<<
-    self.v_ego_clu_kf = KF1D(x0=[[0.0], [0.0]],
-                         A=[[1.0, DT_CTRL], [0.0, 1.0]],
-                         C=[1.0, 0.0],
-                         K=[[0.12287673], [0.29666309]]) #GM >>>>
+    self.v_ego_clu_kf = KF1D(x0=x0, A=A, C=C[0], K=K)
 
 
   def update_speed_kf(self, v_ego_raw):
