@@ -13,7 +13,7 @@
   },
   {
     "filename": "AdjustCurveOffset",
-    "content": "4"
+    "content": "0"
   },
   {
     "filename": "AdjustLaneOffset",
@@ -21,7 +21,7 @@
   },
   {
     "filename": "AdjustLaneTime",
-    "content": "10"
+    "content": "7"
   },
   {
     "filename": "AlwaysOnLateralEnabled",
@@ -45,7 +45,7 @@
   },
   {
     "filename": "AutoCurveSpeedLowerLimit",
-    "content": "45"
+    "content": "41"
   },
   {
     "filename": "AutoLaneChangeSpeed",
@@ -109,7 +109,7 @@
   },
   {
     "filename": "CarrotCountDownSec",
-    "content": "0"
+    "content": "11"
   },
   {
     "filename": "CarrotCountDownSpeed",
@@ -177,7 +177,7 @@
   },
   {
     "filename": "CustomSteerDeltaDown",
-    "content": "6"
+    "content": "7"
   },
   {
     "filename": "CustomSteerDeltaUp",
@@ -214,6 +214,14 @@
   {
     "filename": "IsMetric",
     "content": "1"
+  },
+  {
+    "filename": "LaneChangeLaneCheck",
+    "content": "1"
+  },
+  {
+    "filename": "LaneChangeNeedTorque",
+    "content": "0"
   },
   {
     "filename": "LanguageSetting",
@@ -257,15 +265,15 @@
   },
   {
     "filename": "LongitudinalTuningKf",
-    "content": "100"
+    "content": "105"
   },
   {
     "filename": "LongitudinalTuningKiV",
-    "content": "360"
+    "content": "350"
   },
   {
     "filename": "LongitudinalTuningKpV",
-    "content": "115"
+    "content": "105"
   },
   {
     "filename": "MapboxStyle",
@@ -298,6 +306,10 @@
   {
     "filename": "MyEcoModeFactor",
     "content": "90"
+  },
+  {
+    "filename": "MyHighModeFactor",
+    "content": "100"
   },
   {
     "filename": "MySafeModeFactor",
@@ -469,7 +481,7 @@
   },
   {
     "filename": "SteerRatio",
-    "content": "151"
+    "content": "150"
   },
   {
     "filename": "StopAccelApply",
@@ -485,7 +497,7 @@
   },
   {
     "filename": "StoppingAccel",
-    "content": "-60"
+    "content": "-50"
   },
   {
     "filename": "TFollowGap1",
@@ -505,11 +517,11 @@
   },
   {
     "filename": "TFollowLeadCarAccel",
-    "content": "7"
+    "content": "3"
   },
   {
     "filename": "TFollowLeadCarSpeed",
-    "content": "7"
+    "content": "5"
   },
   {
     "filename": "TFollowSpeedAdd",
