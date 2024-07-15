@@ -372,7 +372,7 @@ class CarInterface(CarInterfaceBase):
     # kans: 정지 상태이면서, 자동재개 신호(self.CP.autoResumeSng)가 비활성화되어 있고, 
     # resumeRequired 이벤트가 비활성화되어 있지 않으면, resumeRequired 이벤트를 활성화하고, 
     # resumeRequired 이벤트를 한번 보여주게 한다.
-    if ret.cruiseState.standstill and not self.CP.autoResumeSng and not self.CS.disable_resumeRequired:
+    if ret.cruiseState.standstill and not (self.CP.autoResumeSng or self.CS.disable_resumeRequired):
       events.add(EventName.resumeRequired)
       self.CS.resumeRequired_shown = True
 
@@ -388,7 +388,7 @@ class CarInterface(CarInterfaceBase):
       self.CS.belowSteerSpeed_shown = True
 
     # kans: belowSteerSpeed 이벤트가 한번 표시된 후에는, 속도가 최소조향속도보다 높아질 때까지 belowSteerSpeed 이벤트를 비활성화한다.
-    if self.CS.belowSteerSpeed_shown and ret.vEgo > self.CP.minSteerSpeed:
+    if self.CS.belowSteerSpeed_shown and ret.vEgo >= self.CP.minSteerSpeed:
       self.CS.disable_belowSteerSpeed = True # kans
 
     if (self.CP.flags & GMFlags.CC_LONG.value) and ret.vEgo < self.CP.minEnableSpeed and ret.cruiseState.enabled:
