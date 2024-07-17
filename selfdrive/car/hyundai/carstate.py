@@ -651,4 +651,4 @@ class CarState(CarStateBase):
           ("BLINDSPOTS_REAR_CORNERS", 20),
         ]
 
-    return CANParser(DBC[CP.carFingerprint]["pt"]
+    return CANParser(DBC[CP.carFingerprint]["pt"], messages, CanBus(CP).CAM)
