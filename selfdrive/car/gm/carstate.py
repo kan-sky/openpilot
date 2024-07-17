@@ -46,7 +46,7 @@ class CarState(CarStateBase):
     self.accFaultedCount = 0
 
     # cruiseMain default(test from nd0706-vision)
-    self.cruiseMain_on = True
+    self.cruiseMain_on = True if Params().get_int("AutoEngage") == 2 else False
 
   def update(self, pt_cp, cam_cp, loopback_cp):
     ret = car.CarState.new_message()

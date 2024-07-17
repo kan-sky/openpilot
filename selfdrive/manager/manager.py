@@ -82,6 +82,7 @@ def get_default_params():
     ("AutoCurveSpeedAggressiveness", "100"),
 
     ("AutoTurnControl", "0"),
+    ("AutoEngage", "0"),
 
     ("AutoLaneChangeSpeed", "20"),
     ("LaneChangeNeedTorque", "0"),
