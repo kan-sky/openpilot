@@ -143,6 +143,7 @@ class LatControlTorque(LatControl):
       self.pid._k_p = [[0], [lateralTorqueKp]]
       self.pid._k_i = [[0], [lateralTorqueKi]]
       self.pid.k_f = lateralTorqueKf
+
     elif self.paramsCount == 10:
       self.lateralTorqueCustom = Params().get_int("LateralTorqueCustom")
       self.lateralTorqueAccelFactor = float(Params().get_int("LateralTorqueAccelFactor"))*0.001

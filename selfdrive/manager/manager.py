@@ -68,6 +68,7 @@ def get_default_params():
     ("ShowPlotMode", "0"),
 
     ("AutoCruiseControl", "2"),    
+    ("AutoEngage", "0"),    
     ("AutoResumeFromGasSpeed", "30"),
     ("AutoCancelFromGasMode", "2"),    
     ("AutoResumeFromBrakeReleaseTrafficSign", "0"),
@@ -82,7 +83,6 @@ def get_default_params():
     ("AutoCurveSpeedAggressiveness", "100"),
 
     ("AutoTurnControl", "0"),
-    ("AutoEngage", "0"),
 
     ("AutoLaneChangeSpeed", "20"),
     ("LaneChangeNeedTorque", "0"),
