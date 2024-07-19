@@ -1,5 +1,3 @@
-import math
-
 from cereal import car
 from openpilot.common.conversions import Conversions as CV
 from openpilot.common.params import Params
@@ -27,8 +25,8 @@ MIN_STEER_MSG_INTERVAL_MS = 15
 
 # constants for pitch compensation
 PITCH_DEADZONE = 0.01 # [radians] 0.01 ? 1% grade
-BRAKE_PITCH_FACTOR_BP = [5., 10.] # [m/s] smoothly revert to planned accel at low speeds
-BRAKE_PITCH_FACTOR_V = [0., 1.] # [unitless in [0,1]]; don't touch
+BRAKE_PITCH_FACTOR_BP = [5., 10., 20., 25.] # [m/s] smoothly revert to planned accel at low speeds
+BRAKE_PITCH_FACTOR_V = [0., 1., .97, .98] # [unitless in [0,1]]; don't touch
 
 class CarController(CarControllerBase):
   def __init__(self, dbc_name, CP, VM):
@@ -58,7 +56,7 @@ class CarController(CarControllerBase):
 
     self.pitch = FirstOrderFilter(0., 0.09 * 4, DT_CTRL * 4)  # runs at 25 Hz
     self.accel_g = 0.0
-	
+
   @staticmethod
   def calc_pedal_command(accel: float, long_active: bool) -> float:
     if not long_active: return 0.
@@ -134,15 +132,15 @@ class CarController(CarControllerBase):
       # Gas/regen, brakes, and UI commands - all at 25Hz
       if self.frame % 4 == 0:
         stopping = actuators.longControlState == LongCtrlState.stopping
-        # GM <<<<
+
         # Pitch compensated acceleration;
         # TODO: include future pitch (sm['modelDataV2'].orientation.y) to account for long actuator delay
         if self.long_pitch and len(CC.orientationNED) > 1:
-          self.pitch.update(CC.orientationNED[1] if len(CC.orientationNED) > 1 else 0.)
-        self.accel_g = apply_deadzone(self.pitch.x, PITCH_DEADZONE) # driving uphill is positive pitch
-        accelPitchCompensated = actuators.accel + ACCELERATION_DUE_TO_GRAVITY * math.sin(self.accel_g)
-        k = interp(CS.out.vEgo, BRAKE_PITCH_FACTOR_BP, BRAKE_PITCH_FACTOR_V)
-        brake_accel = k * accelPitchCompensated + (1. - k) * actuators.accel
+          self.pitch.update(CC.orientationNED[1])
+          self.accel_g = ACCELERATION_DUE_TO_GRAVITY * apply_deadzone(self.pitch.x, PITCH_DEADZONE) # driving uphill is positive pitch
+          accel += self.accel_g
+          brake_accel = actuators.accel + self.accel_g * interp(CS.out.vEgo, BRAKE_PITCH_FACTOR_BP, BRAKE_PITCH_FACTOR_V)
+
         at_full_stop = CC.longActive and CS.out.standstill
         near_stop = CC.longActive and (CS.out.vEgo < self.params.NEAR_STOP_BRAKE_PHASE)
         interceptor_gas_cmd = 0
@@ -155,10 +153,9 @@ class CarController(CarControllerBase):
           self.apply_brake = int(min(-100 * self.CP.stopAccel, self.params.MAX_BRAKE))
         else:
           # Normal operation
-          #GM, brake_accel = actuators.accel + self.accel_g * interp(CS.out.vEgo, BRAKE_PITCH_FACTOR_BP, BRAKE_PITCH_FACTOR_V)
           if self.CP.carFingerprint in EV_CAR and self.use_ev_tables:
             self.params.update_ev_gas_brake_threshold(CS.out.vEgo)
-            self.apply_gas = int(round(interp(accelPitchCompensated if self.long_pitch else actuators.accel, self.params.EV_GAS_LOOKUP_BP, self.params.GAS_LOOKUP_V)))
+            self.apply_gas = int(round(interp(accel if self.long_pitch else actuators.accel, self.params.EV_GAS_LOOKUP_BP, self.params.GAS_LOOKUP_V)))
             self.apply_brake = int(round(interp(brake_accel if self.long_pitch else actuators.accel, self.params.EV_BRAKE_LOOKUP_BP, self.params.BRAKE_LOOKUP_V)))
           else:
             self.apply_gas = int(round(interp(accel if self.long_pitch else actuators.accel, self.params.GAS_LOOKUP_BP, self.params.GAS_LOOKUP_V)))

@@ -1,11 +1,11 @@
 [
   {
     "filename": "ALeadTauNeg",
-    "content": "60"
+    "content": "0"
   },
   {
     "filename": "ALeadTauPos",
-    "content": "90"
+    "content": "0"
   },
   {
     "filename": "ALeadTauThreshold",
@@ -13,11 +13,11 @@
   },
   {
     "filename": "AdjustCurveOffset",
-    "content": "0"
+    "content": "2"
   },
   {
     "filename": "AdjustLaneOffset",
-    "content": "0"
+    "content": "5"
   },
   {
     "filename": "AdjustLaneTime",
@@ -46,6 +46,10 @@
   {
     "filename": "AutoCurveSpeedLowerLimit",
     "content": "41"
+  },
+  {
+    "filename": "AutoEngage",
+    "content": "2"
   },
   {
     "filename": "AutoLaneChangeSpeed",
@@ -237,7 +241,7 @@
   },
   {
     "filename": "LateralTorqueFriction",
-    "content": "80"
+    "content": "60"
   },
   {
     "filename": "LateralTorqueKf",
@@ -274,6 +278,10 @@
   {
     "filename": "LongitudinalTuningKpV",
     "content": "105"
+  },
+  {
+    "filename": "ManualSteeringOverride",
+    "content": "1"
   },
   {
     "filename": "MapboxStyle",
@@ -449,7 +457,7 @@
   },
   {
     "filename": "SoftHoldMode",
-    "content": "0"
+    "content": "1"
   },
   {
     "filename": "SoundVolumeAdjust",
@@ -517,7 +525,7 @@
   },
   {
     "filename": "TFollowLeadCarAccel",
-    "content": "3"
+    "content": "5"
   },
   {
     "filename": "TFollowLeadCarSpeed",
@@ -537,7 +545,7 @@
   },
   {
     "filename": "UseLaneLineCurveSpeed",
-    "content": "45"
+    "content": "90"
   },
   {
     "filename": "UseLaneLineSpeed",
