@@ -25,8 +25,8 @@ MIN_STEER_MSG_INTERVAL_MS = 15
 
 # constants for pitch compensation
 PITCH_DEADZONE = 0.01 # [radians] 0.01 ? 1% grade
-BRAKE_PITCH_FACTOR_BP = [5., 10., 20., 25.] # [m/s] smoothly revert to planned accel at low speeds
-BRAKE_PITCH_FACTOR_V = [0., 1., .97, .98] # [unitless in [0,1]]; don't touch
+BRAKE_PITCH_FACTOR_BP = [5., 10.] # [m/s] smoothly revert to planned accel at low speeds
+BRAKE_PITCH_FACTOR_V = [0., .1] # [unitless in [0,1]]; don't touch
 
 class CarController(CarControllerBase):
   def __init__(self, dbc_name, CP, VM):
