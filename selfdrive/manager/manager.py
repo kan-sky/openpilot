@@ -68,6 +68,7 @@ def get_default_params():
     ("ShowPlotMode", "0"),
 
     ("AutoCruiseControl", "2"),    
+    ("AutoEngage", "0"),    
     ("AutoResumeFromGasSpeed", "30"),
     ("AutoCancelFromGasMode", "2"),    
     ("AutoResumeFromBrakeReleaseTrafficSign", "0"),
@@ -136,6 +137,7 @@ def get_default_params():
     ("CanfdHDA2", "0"),
     ("SoundVolumeAdjust", "100"),
     ("SoundVolumeAdjustEngage", "10"),
+    ("CarrotCountDownSpeed", "10"),
     ("StartRecord", "0"),
     ("StopRecord", "0"),
     ("TFollowSpeedAdd", "10"),
