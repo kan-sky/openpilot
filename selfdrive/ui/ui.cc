@@ -431,9 +431,9 @@ void update_navi_instruction(UIState* s) {
     if (s->roadLimitSpeed < roadLimitSpeed_OSM) s->roadLimitSpeed = roadLimitSpeed_OSM;
 
     int camLimitSpeed = road_limit_speed.getCamLimitSpeed() * (s->scene.is_metric ? 1 : KM_TO_MILE);
-    int camLimitSpeedLeftDist = road_limit_speed.getCamLimitSpeedLeftDist() * (s->scene.is_metric ? MILE_TO_KM : KM_TO_MILE);
+    int camLimitSpeedLeftDist = road_limit_speed.getCamLimitSpeedLeftDist() * (s->scene.is_metric ? 1 : KM_TO_MILE);
     int sectionLimitSpeed = road_limit_speed.getSectionLimitSpeed() * (s->scene.is_metric ? 1 : KM_TO_MILE);
-    int sectionLeftDist = road_limit_speed.getSectionLeftDist() * (s->scene.is_metric ? MILE_TO_KM : KM_TO_MILE);
+    int sectionLeftDist = road_limit_speed.getSectionLeftDist() * (s->scene.is_metric ? 1 : KM_TO_MILE);
     s->camType = road_limit_speed.getCamType();
 
     s->limit_speed = 0;
@@ -450,7 +450,7 @@ void update_navi_instruction(UIState* s) {
     //const auto road_limit_speed = sm["roadLimitSpeed"].getRoadLimitSpeed();
     s->xSpdLimit = road_limit_speed.getXSpdLimit() * (s->scene.is_metric ? 1 : KM_TO_MILE);
     s->xSignType = road_limit_speed.getXSignType();
-    s->xSpdDist = road_limit_speed.getXSpdDist() * (s->scene.is_metric ? MILE_TO_KM : KM_TO_MILE);
+    s->xSpdDist = road_limit_speed.getXSpdDist() * (s->scene.is_metric ? 1 : KM_TO_MILE);
     s->m_navText = QString::fromStdString(road_limit_speed.getXRoadName());
     if (s->limit_speed > 0);
     else if (s->xSpdLimit > 0 && s->xSpdDist > 0) {
