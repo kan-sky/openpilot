@@ -458,21 +458,27 @@ class VCruiseHelper:
           elif color in ["Red Light", "Yello Light"]:
             traffic_state1 += 1
 
+    #print(self.traffic_light_q)
     if traffic_state11 > 0:
       self.traffic_state = 11
       self._add_log("Red light triggered")
+      #print("Red light triggered")
     elif traffic_state22 > 0:
       self.traffic_state = 22
       self._add_log("Green light triggered")
+      #print("Green light triggered")
     elif traffic_state1 > 0:
       self.traffic_state = 1
       self._add_log("Red light continued")
+      #print("Red light continued")
     elif traffic_state2 > 0:
       self.traffic_state = 2
       self._add_log("Green light continued")
+      #print("Green light continued")
     else:
       pass
       #self.traffic_state = 0
+      #print("TrafficLight none")
 
     self.traffic_light_q.append((x,y,color))
 
@@ -596,6 +602,11 @@ class VCruiseHelper:
           if self.cruiseButtonMode in [2,3] and self.params.get_int("EnableAVM") > 0:
             self.activeAVM = 2 if self.activeAVM == 0 else 0
             self._add_log("Button long pressed..Enable AVM{}".format(self.activeAVM))
+          elif self.cruiseButtonMode in [3]:
+            self.traffic_light_count = 0.5 / DT_CTRL
+            self.traffic_state = 11
+            controls.events.add(EventName.audioPrompt)
+            self._add_log("Button force decel")
           else:
             v_cruise_kph = button_kph
             self._add_log("Button long pressed..{:.0f}".format(v_cruise_kph))
@@ -614,7 +625,7 @@ class VCruiseHelper:
           if self.softHoldActive > 0 and self.autoCruiseControl > 0:
             self.softHoldActive = 0
             self._add_log("Button softhold released ..")
-          elif self.xState == 5 and self.cruiseButtonMode in [3]: ## 5:e2eStopped
+          elif self.xState in [3, 5] and self.cruiseButtonMode in [3]: ## 5:e2eStopped
             self.traffic_light_count = 0.5 / DT_CTRL
             self.traffic_state = 22
             self._add_log("Button start (traffic ignore)")
