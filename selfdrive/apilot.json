@@ -620,7 +620,7 @@
       "egroup": "BUTN",
       "etitle": "Cruise Button spam1(8)",
       "edescr": "",
-      "min": 1,
+      "min": 0,
       "max": 20,
       "default": 0,
       "unit": 1
@@ -633,7 +633,7 @@
       "egroup": "BUTN",
       "etitle": "Cruise Button spam2(30)",
       "edescr": "",
-      "min": 1,
+      "min": 0,
       "max": 200,
       "default": 0,
       "unit": 1
@@ -646,7 +646,7 @@
       "egroup": "BUTN",
       "etitle": "Cruise Button spam3(1)",
       "edescr": "",
-      "min": 1,
+      "min": 0,
       "max": 20,
       "default": 0,
       "unit": 1
@@ -1130,7 +1130,7 @@
       "min": 0,
       "max": 500,
       "default": 0,
-      "unit": 10
+      "unit": 1
     },
     {
       "group": "조향일반",
@@ -1143,7 +1143,7 @@
       "min": 0,
       "max": 500,
       "default": 0,
-      "unit": 10
+      "unit": 1
     },
     {
       "group": "조향일반",
