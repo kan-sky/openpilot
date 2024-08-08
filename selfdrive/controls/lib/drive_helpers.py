@@ -447,13 +447,13 @@ class VCruiseHelper:
     for pdata in self.traffic_light_q:
       px, py, pcolor = pdata
       if abs(x - px) < 0.3 and abs(y - py) < 0.3:
-        if pcolor in ["Green Light", "Left turn", "Left turn"]:
+        if pcolor in ["Green Light", "Left turn"]:
           if color in ["Red Light", "Yello Light"]:
             traffic_state11 += 1
-          elif color in ["Green Light", "Left turn", "Left turn"]:
+          elif color in ["Green Light", "Left turn"]:
             traffic_state2 += 1
         elif pcolor in ["Red Light", "Yello Light"]:
-          if color in ["Green Light", "Left turn", "Left turn"]:
+          if color in ["Green Light", "Left turn"]:
             traffic_state22 += 1
           elif color in ["Red Light", "Yello Light"]:
             traffic_state1 += 1
@@ -510,7 +510,7 @@ class VCruiseHelper:
     elif self.v_ego_kph_set > self.autoResumeFromGasSpeed > 0:
       if self.cruiseActivate <= 0:
         if self.gas_pressed_value > 0.6 or self.gas_pressed_count_prev > 3.0 / DT_CTRL:
-          if self.gas_pressed_max_aego < 1.0: #CS.aEgo < 0.5: #self.autoCruiseCancelTimer > 0: # 간혹, 저속으로 길게누를때... 기존속도로 resume되면... 브레이크를 밟게됨.
+          if self.gas_pressed_max_aego < 1.5 or self.gas_pressed_value < 0.3:
             v_cruise_kph = self.v_ego_kph_set
           self.autoCruiseCancelTimer = 0
           self._add_log_auto_cruise("Cruise Activate from gas(deep/long pressed)")          
@@ -604,7 +604,7 @@ class VCruiseHelper:
             self._add_log("Button long pressed..Enable AVM{}".format(self.activeAVM))
           elif self.cruiseButtonMode in [3]:
             self.traffic_light_count = 0.5 / DT_CTRL
-            self.traffic_state = 11
+            self.traffic_state = 33
             controls.events.add(EventName.audioPrompt)
             self._add_log("Button force decel")
           else:
