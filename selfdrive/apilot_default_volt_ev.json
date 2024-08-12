@@ -133,6 +133,18 @@
   },
   {
     "filename": "CruiseButtonMode",
+    "content": "3"
+  },
+  {
+    "filename": "CruiseButtonTest1",
+    "content": "0"
+  },
+  {
+    "filename": "CruiseButtonTest2",
+    "content": "0"
+  },
+  {
+    "filename": "CruiseButtonTest3",
     "content": "0"
   },
   {
@@ -268,6 +280,10 @@
     "content": "3"
   },
   {
+    "filename": "LongitudinalTuningDeadzoneV",
+    "content": "15"
+  },
+  {
     "filename": "LongitudinalTuningKf",
     "content": "102"
   },
@@ -278,6 +294,22 @@
   {
     "filename": "LongitudinalTuningKpV",
     "content": "105"
+  },
+  {
+    "filename": "MSLCEnabled",
+    "content": "0"
+  },
+  {
+    "filename": "MTSCAggressiveness",
+    "content": "100"
+  },
+  {
+    "filename": "MTSCCurvatureCheck",
+    "content": "0"
+  },
+  {
+    "filename": "MTSCEnabled",
+    "content": "0"
   },
   {
     "filename": "ManualSteeringOverride",
@@ -361,7 +393,7 @@
   },
   {
     "filename": "ShowBlindSpot",
-    "content": "1"
+    "content": "0"
   },
   {
     "filename": "ShowConnInfo",
@@ -542,6 +574,10 @@
   {
     "filename": "TrafficStopDistanceAdjust",
     "content": "140"
+  },
+  {
+    "filename": "UseExternalNaviRoutes",
+    "content": "1"
   },
   {
     "filename": "UseLaneLineCurveSpeed",
