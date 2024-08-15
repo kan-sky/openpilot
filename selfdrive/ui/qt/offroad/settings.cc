@@ -236,15 +236,40 @@ DevicePanel::DevicePanel(SettingsWindow* parent) : ListWidget(parent) {
     addItem(new LabelControl(tr("Dongle ID"), getDongleId().value_or(tr("N/A"))));
     addItem(new LabelControl(tr("Serial"), params.get("HardwareSerial").c_str()));
 
-  auto PowerOffBtn = new ButtonControl(tr("Powwer Off"), tr("SHUTDOWN"), "");
-  connect(PowerOffBtn, &ButtonControl::clicked, [&]() {
-    if (ConfirmationDialog::confirm(tr("Are you sure you want to power off?"), tr("Shutdown"), this)) {
-      params.putBool("DoShutdown", true);
-    }
-  });
-  addItem(PowerOffBtn);
+    // power buttons
+    QHBoxLayout* power_layout = new QHBoxLayout();
+    power_layout->setSpacing(30);
 
-  // offroad-only buttons
+    QPushButton* reboot_btn = new QPushButton(tr("Reboot"));
+    reboot_btn->setObjectName("reboot_btn");
+    power_layout->addWidget(reboot_btn);
+    QObject::connect(reboot_btn, &QPushButton::clicked, this, &DevicePanel::reboot);
+
+    QPushButton* poweroff_btn = new QPushButton(tr("Power Off"));
+    poweroff_btn->setObjectName("poweroff_btn");
+    power_layout->addWidget(poweroff_btn);
+    QObject::connect(poweroff_btn, &QPushButton::clicked, this, &DevicePanel::poweroff);
+
+    if (!Hardware::PC()) {
+        connect(uiState(), &UIState::offroadTransition, poweroff_btn, &QPushButton::setVisible);
+    }
+
+    setStyleSheet(R"(
+    #reboot_btn { height: 120px; border-radius: 15px; background-color: #393939; }
+    #reboot_btn:pressed { background-color: #4a4a4a; }
+    #poweroff_btn { height: 120px; border-radius: 15px; background-color: #E22C2C; }
+    #poweroff_btn:pressed { background-color: #FF2424; }
+    )");
+    addItem(power_layout);
+    auto PowerOffBtn = new ButtonControl(tr("Powwer Off"), tr("SHUTDOWN"), "");
+    connect(PowerOffBtn, &ButtonControl::clicked, [&]() {
+      if (ConfirmationDialog::confirm(tr("Are you sure you want to power off?"), tr("Shutdown"), this)) {
+        params.putBool("DoShutdown", true);
+      }
+    });
+    addItem(PowerOffBtn);
+
+    // offroad-only buttons
 
     auto dcamBtn = new ButtonControl(tr("Driver Camera"), tr("PREVIEW"),
         tr("Preview the driver facing camera to ensure that driver monitoring has good visibility. (vehicle must be off)"));
@@ -304,31 +329,6 @@ DevicePanel::DevicePanel(SettingsWindow* parent) : ListWidget(parent) {
     addItem(new CarrotParamsControl(20, "비젼롱컨사용 (HKG)", "비젼을 이용한 롱컨을 이용중임, (카니발4_HDA2, 아이오닉6 X)", "../assets/offroad/icon_shell.png"));
     addItem(new CarrotParamsControl(30, "자동크루즈 사용 (HKG)", "롱컨이 가능한차량만 가능함", "../assets/offroad/icon_shell.png"));
 
-    // power buttons
-    QHBoxLayout* power_layout = new QHBoxLayout();
-    power_layout->setSpacing(30);
-
-    QPushButton* reboot_btn = new QPushButton(tr("Reboot"));
-    reboot_btn->setObjectName("reboot_btn");
-    power_layout->addWidget(reboot_btn);
-    QObject::connect(reboot_btn, &QPushButton::clicked, this, &DevicePanel::reboot);
-
-    QPushButton* poweroff_btn = new QPushButton(tr("Power Off"));
-    poweroff_btn->setObjectName("poweroff_btn");
-    power_layout->addWidget(poweroff_btn);
-    QObject::connect(poweroff_btn, &QPushButton::clicked, this, &DevicePanel::poweroff);
-
-    if (!Hardware::PC()) {
-        connect(uiState(), &UIState::offroadTransition, poweroff_btn, &QPushButton::setVisible);
-    }
-
-    setStyleSheet(R"(
-    #reboot_btn { height: 120px; border-radius: 15px; background-color: #393939; }
-    #reboot_btn:pressed { background-color: #4a4a4a; }
-    #poweroff_btn { height: 120px; border-radius: 15px; background-color: #E22C2C; }
-    #poweroff_btn:pressed { background-color: #FF2424; }
-  )");
-    addItem(power_layout);
 
 
     struct DefaultSetting {
