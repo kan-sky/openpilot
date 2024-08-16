@@ -557,7 +557,7 @@
       "edescr": "0: Not used, Lane Change Speed",
       "min": 0,
       "max": 100,
-      "default": 60,
+      "default": 0,
       "unit": 5
     },
     {
@@ -1116,7 +1116,7 @@
       "edescr": "Lainline mode, above curve speed",
       "min": 0,
       "max": 200,
-      "default": 0,
+      "default": 90,
       "unit": 10
     },
     {

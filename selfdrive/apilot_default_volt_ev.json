@@ -13,11 +13,11 @@
   },
   {
     "filename": "AdjustCurveOffset",
-    "content": "3"
+    "content": "0"
   },
   {
     "filename": "AdjustLaneOffset",
-    "content": "5"
+    "content": "0"
   },
   {
     "filename": "AdjustLaneTime",
@@ -97,7 +97,7 @@
   },
   {
     "filename": "AutoTurnControlSpeedLaneChange",
-    "content": "50"
+    "content": "0"
   },
   {
     "filename": "AutoTurnControlSpeedTurn",
@@ -369,7 +369,7 @@
   },
   {
     "filename": "PathOffset",
-    "content": "-4"
+    "content": "0"
   },
   {
     "filename": "RecordFront",
