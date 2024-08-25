@@ -21,7 +21,7 @@ def long_control_state_trans(CP, active, long_control_state, v_ego, v_target,
                   (brake_pressed or cruise_standstill))
   stopping_condition = planned_stop or stay_stopped
   # kans: accelerating 조건이 신호출발 막는다고 판단
-  starting_condition = not planned_stop and
+  starting_condition = (not planned_stop and
                         not cruise_standstill and
                         not brake_pressed)
   started_condition = v_ego > CP.vEgoStarting
