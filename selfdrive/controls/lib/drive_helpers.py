@@ -450,7 +450,7 @@ class VCruiseHelper:
     traffic_red_trig = 0
     traffic_green_trig = 0
     for pdata in self.traffic_light_q:
-      px, py, pcolor,pcnf = pdata
+      px, py, pcolor, pcnf = pdata
       if abs(x - px) < 0.2 and abs(y - py) < 0.2:
         if pcolor in ["Green Light", "Left turn"]:
           if color in ["Red Light", "Yellow Light"]:
@@ -579,7 +579,7 @@ class VCruiseHelper:
         self.button_cnt = 0
     if self.button_cnt > self.button_long_time:
       self.long_pressed = True
-      V_CRUISE_DELTA = 10
+      V_CRUISE_DELTA = 5
       if self.button_prev == ButtonType.cancel:
         button_type = ButtonType.cancel
         self.button_cnt = 0          
