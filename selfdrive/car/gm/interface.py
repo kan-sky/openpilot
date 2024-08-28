@@ -180,7 +180,7 @@ class CarInterface(CarInterfaceBase):
       ret.longitudinalTuning.kiV = [0.36]
       ret.stoppingDecelRate = 0.2 # brake_travel/s while trying to stop
       ret.stopAccel = -0.5
-      ret.startAccel = 0.8
+      ret.startAccel = 1.2
       ret.vEgoStarting = 0.25
       ret.vEgoStopping = 0.25
       ret.enableBsm = 0x142 in fingerprint[CanBus.POWERTRAIN]
@@ -193,7 +193,7 @@ class CarInterface(CarInterfaceBase):
         ret.longitudinalTuning.kiV = [0.36]
         ret.stoppingDecelRate = 0.1 # brake_travel/s while trying to stop
         ret.stopAccel = -0.5
-        ret.startAccel = 0.8
+        ret.startAccel = 1.2
         ret.vEgoStarting = 0.25
         ret.vEgoStopping = 0.25
 
