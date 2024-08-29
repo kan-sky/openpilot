@@ -400,6 +400,9 @@ class CarInterfaceBase(ABC):
 
     return reader
 
+  @staticmethod
+  def get_params_adjust_set_speed(CP):
+    return [10], [20]
 
   def create_common_events(self, cs_out, extra_gears=None, pcm_enable=True, allow_enable=True,
                            enable_buttons=(ButtonType.accelCruise, ButtonType.decelCruise)):

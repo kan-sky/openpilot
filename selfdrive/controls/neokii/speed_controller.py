@@ -55,7 +55,7 @@ class SpeedController:
     self.prev_cruise_enabled = False
     self.limited_lead = False
 
-    self.wait_count_list, self.alive_count_list = CI.get_params_adjust_set_speed()
+    self.wait_count_list, self.alive_count_list = CI.get_params_adjust_set_speed(CP)
     random.shuffle(self.wait_count_list)
     random.shuffle(self.alive_count_list)
 
@@ -250,7 +250,7 @@ class SpeedController:
     clu_speed = CS.vEgoCluster * self.speed_conv_to_clu
     ascc_enabled = enabled and CS.cruiseState.enabled and 1 < CS.cruiseState.speed < 255 and not CS.brakePressed
 
-    btn_pressed = self.CI.CS.cruise_buttons[-1] != Buttons.NONE
+    btn_pressed = self.CI.CS.cruise_buttons != Buttons.NONE
 
     if not self.long_control:
       if not ascc_enabled or CS.cruiseState.standstill or btn_pressed:

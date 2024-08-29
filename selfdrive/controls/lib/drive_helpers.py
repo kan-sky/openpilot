@@ -450,7 +450,7 @@ class VCruiseHelper:
     traffic_red_trig = 0
     traffic_green_trig = 0
     for pdata in self.traffic_light_q:
-      px, py, pcolor, pcnf = pdata
+      px, py, pcolor,pcnf = pdata
       if abs(x - px) < 0.2 and abs(y - py) < 0.2:
         if pcolor in ["Green Light", "Left turn"]:
           if color in ["Red Light", "Yellow Light"]:
@@ -459,7 +459,7 @@ class VCruiseHelper:
           elif color in ["Green Light", "Left turn"]:
             traffic_green += cnf
         elif pcolor in ["Red Light", "Yellow Light"]:
-          if color in ["Green Light", "Left turn"]:
+          if color in ["Green Light"]: #, "Left turn"]:
             traffic_green_trig += cnf
             traffic_green += cnf
           elif color in ["Red Light", "Yellow Light"]:
@@ -847,7 +847,7 @@ class VCruiseHelper:
     if v_cruise_kph < roadSpeed:
       v_cruise_kph = roadSpeed
     else:
-      for speed in range (40, int(self.cruiseSpeedMax), self.cruiseSpeedUnit):
+      for speed in range (10, int(self.cruiseSpeedMax), self.cruiseSpeedUnit):
         if v_cruise_kph < speed:
           v_cruise_kph = speed
           break
