@@ -33,6 +33,13 @@ def manager_init() -> None:
     params.clear_all(ParamKeyType.DEVELOPMENT_ONLY)
 
   default_params: list[tuple[str, str | bytes]] = [
+    # carrot
+    ("LongPitch", "1"),
+    ("EVTable", "1"),
+    ("CustomSteerMax", "300"),
+    ("CustomSteerDeltaUp", "7"),
+    ("CustomSteerDeltaDown", "4"),
+    ("LongitudinalPersonalityMax", "3"),
     ("CompletedTrainingVersion", "0"),
     ("DisengageOnAccelerator", "0"),
     ("GsmMetered", "1"),

@@ -159,6 +159,7 @@ std::unordered_map<std::string, uint32_t> keys = {
     {"LiveTorqueParameters", PERSISTENT | DONT_LOG},
     {"LocationFilterInitialState", PERSISTENT},
     {"LongitudinalPersonality", PERSISTENT},
+    {"LongitudinalPersonalityMax", PERSISTENT},
     {"NetworkMetered", PERSISTENT},
     {"ObdMultiplexingChanged", CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION},
     {"ObdMultiplexingEnabled", CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION},
@@ -199,6 +200,17 @@ std::unordered_map<std::string, uint32_t> keys = {
     {"UpdaterTargetBranch", CLEAR_ON_MANAGER_START},
     {"UpdaterLastFetchTime", PERSISTENT},
     {"Version", PERSISTENT},
+
+    // Community
+    {"SupportedCars", PERSISTENT},
+    {"SupportedCars_gm", PERSISTENT}, // kans
+    {"SelectedCar_v2", PERSISTENT},
+    // carrot
+    {"CustomSteerMax", PERSISTENT},
+    {"CustomSteerDeltaUp", PERSISTENT},
+    {"CustomSteerDeltaDown", PERSISTENT},
+    {"EVTable", PERSISTENT},
+    {"LongPitch", PERSISTENT},
 };
 
 } // namespace

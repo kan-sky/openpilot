@@ -112,6 +112,15 @@ class CarState:
   # process meta
   cumLagMs: float = auto_field()
 
+  brakeLights: bool = auto_field()
+  @auto_dataclass
+  class Tpms:
+    enabled: bool = auto_field()
+    fl: float = auto_field()
+    fr: float = auto_field()
+    rl: float = auto_field()
+    rr: float = auto_field()
+
   @auto_dataclass
   class WheelSpeeds:
     # optional wheel speeds
@@ -209,6 +218,8 @@ class CarControl:
   cruiseControl: 'CarControl.CruiseControl' = field(default_factory=lambda: CarControl.CruiseControl())
   hudControl: 'CarControl.HUDControl' = field(default_factory=lambda: CarControl.HUDControl())
 
+  steerRatio: float = auto_field()
+
   @auto_dataclass
   class Actuators:
     # range from 0.0 - 1.0
@@ -237,6 +248,7 @@ class CarControl:
     cancel: bool = auto_field()
     resume: bool = auto_field()
     override: bool = auto_field()
+    activate: bool = auto_field()
 
   @auto_dataclass
   class HUDControl:
@@ -251,6 +263,11 @@ class CarControl:
     rightLaneDepart: bool = auto_field()
     leftLaneDepart: bool = auto_field()
     leadDistanceBars: int = auto_field()  # 1-3: 1 is closest, 3 is farthest. some ports may utilize 2-4 bars instead
+
+    # carrot
+    objDist: int = auto_field()
+    objRelSpd: int = auto_field()
+    softHold: int = auto_field()
 
     class VisualAlert(StrEnum):
       # these are the choices from the Honda
@@ -278,6 +295,14 @@ class CarControl:
       promptRepeat = auto()
       promptDistracted = auto()
 
+      # carrot
+      trafficSignGreen = auto()
+      trafficSignChanged = auto()
+      stopping = auto()
+      bsdWarning = auto()
+      stopStop = auto()
+      reverseGear = auto()
+
 
 @auto_dataclass
 class CarParams:
@@ -290,6 +315,7 @@ class CarParams:
   pcmCruise: bool = auto_field()  # is openpilot's state tied to the PCM's cruise state?
   enableDsu: bool = auto_field()  # driving support unit
   enableBsm: bool = auto_field()  # blind spot monitoring
+  enableGasInterceptor: bool = auto_field()  # GM one pedal
   flags: int = auto_field()  # flags for car specific quirks
   experimentalLongitudinalAvailable: bool = auto_field()
 
