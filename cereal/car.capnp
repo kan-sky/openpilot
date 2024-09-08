@@ -53,6 +53,7 @@ struct OnroadEvent @0x9b1657f34caf3ad3 {
     parkBrake @29;
     manualRestart @30;
     lowSpeedLockout @31;
+    plannerError @32; # carrot
     joystickDebug @34;
     steerTempUnavailableSilent @35;
     resumeRequired @36;
@@ -116,6 +117,15 @@ struct OnroadEvent @0x9b1657f34caf3ad3 {
     espActive @121;
     personalityChanged @122;
 
+    # carrot
+    trafficStopping @123;
+    audioPrompt @124;
+    stopStop @125;
+    trafficSignGreen @126;
+    trafficSignChanged @127;
+    torqueNNLoad @128;
+    pedalInterceptorNoBrake @129;
+
     radarCanErrorDEPRECATED @15;
     communityFeatureDisallowedDEPRECATED @62;
     radarCommIssueDEPRECATED @67;
@@ -140,7 +150,6 @@ struct OnroadEvent @0x9b1657f34caf3ad3 {
     startupFuzzyFingerprintDEPRECATED @97;
     noTargetDEPRECATED @25;
     brakeUnavailableDEPRECATED @2;
-    plannerErrorDEPRECATED @32;
     gpsMalfunctionDEPRECATED @94;
     roadCameraErrorDEPRECATED @100;
     driverCameraErrorDEPRECATED @101;
@@ -233,6 +242,15 @@ struct CarState {
   # process meta
   cumLagMs @50 :Float32;
 
+
+  struct Tpms {
+    enabled @0 :Bool;
+    fl @1 :Float32;
+    fr @2 :Float32;
+    rl @3 :Float32;
+    rr @4 :Float32;
+  }
+
   struct WheelSpeeds {
     # optional wheel speeds
     fl @0 :Float32;
@@ -287,7 +305,7 @@ struct CarState {
 
   # deprecated
   errorsDEPRECATED @0 :List(OnroadEvent.EventName);
-  brakeLightsDEPRECATED @19 :Bool;
+  brakeLights @19 :Bool;
   steeringRateLimitedDEPRECATED @29 :Bool;
   canMonoTimesDEPRECATED @12: List(UInt64);
   canRcvTimeoutDEPRECATED @49 :Bool;
@@ -350,6 +368,8 @@ struct CarControl {
   cruiseControl @4 :CruiseControl;
   hudControl @5 :HUDControl;
 
+  steerRatio @17 :Float32;
+
   struct Actuators {
     # range from 0.0 - 1.0
     gas @0: Float32;
@@ -378,6 +398,7 @@ struct CarControl {
     cancel @0: Bool;
     resume @1: Bool;
     override @4: Bool;
+    activate @5: Bool;  # carrot
     speedOverrideDEPRECATED @2: Float32;
     accelOverrideDEPRECATED @3: Float32;
   }
@@ -394,6 +415,11 @@ struct CarControl {
     rightLaneDepart @8: Bool;
     leftLaneDepart @9: Bool;
     leadDistanceBars @10: Int8;  # 1-3: 1 is closest, 3 is farthest. some ports may utilize 2-4 bars instead
+
+    # carrot
+    objDist @11: Int32;
+    objRelSpd @12: Float32;
+    softHold @13: Int32;
 
     enum VisualAlert {
       # these are the choices from the Honda
@@ -421,6 +447,14 @@ struct CarControl {
       prompt @6;
       promptRepeat @7;
       promptDistracted @8;
+
+      # carrot
+      trafficSignGreen @9;
+      trafficSignChanged @10;
+      stopping @11;
+      bsdWarning @12;
+      stopStop @13;
+      reverseGear @14;
     }
   }
 
@@ -692,7 +726,7 @@ struct CarParams {
     gateway @1;    # Integration at vehicle's CAN gateway
   }
 
-  enableGasInterceptorDEPRECATED @2 :Bool;
+  enableGasInterceptor @2 :Bool; # kans
   enableCameraDEPRECATED @4 :Bool;
   enableApgsDEPRECATED @6 :Bool;
   steerRateCostDEPRECATED @33 :Float32;

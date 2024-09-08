@@ -739,6 +739,7 @@ struct ControlsState @0x97ff69c53601abf1 {
   curvature @37 :Float32;  # path curvature from vehicle model
   desiredCurvature @61 :Float32;  # lag adjusted curvatures used by lateral controllers
   forceDecel @51 :Bool;
+  trafficLight @66 :Int32; # carrot
 
   lateralControlState :union {
     indiState @52 :LateralINDIState;
@@ -792,6 +793,10 @@ struct ControlsState @0x97ff69c53601abf1 {
     saturated @7 :Bool;
     actualLateralAccel @9 :Float32;
     desiredLateralAccel @10 :Float32;
+    latAccelFactor @11 :Float32;
+    latAccelOffset @12 :Float32;
+    friction @13 :Float32;
+    nnLog @14 :List(Float32); # kans
    }
 
   struct LateralLQRState {
@@ -1120,9 +1125,20 @@ struct LongitudinalPlan @0xe00b5b3eba12876c {
   shouldStop @37: Bool;
   allowThrottle @38: Bool;
   allowBrake @39: Bool;
+  vTarget @40 :Float32;
 
 
   solverExecutionTime @35 :Float32;
+
+  # carrot
+  trafficState @41 :Int32;
+  xState @42 :Int32;
+  curveSpeed @43 : Float32;
+  leftBlinkerExt @44: Int32;
+  rightBlinkerExt @45: Int32;
+  limitSpeed @46: Float32;
+  vCruiseTarget @47: Float32;
+  tFollow @48: Float32;
 
   enum LongitudinalPlanSource {
     cruise @0;
@@ -2432,6 +2448,11 @@ struct Event {
     customReserved7 @114 :Custom.CustomReserved7;
     customReserved8 @115 :Custom.CustomReserved8;
     customReserved9 @116 :Custom.CustomReserved9;
+    
+    # neokii
+    naviData @130 :NaviData;
+    naviGps @131 :NaviGps;
+    naviObstacles @132 :NaviObstacles;
 
     # *********** legacy + deprecated ***********
     model @9 :Legacy.ModelData; # TODO: rename modelV2 and mark this as deprecated
@@ -2476,5 +2497,50 @@ struct Event {
     uiPlanDEPRECATED @106 :UiPlan;
     liveLocationKalmanDEPRECATED @72 :LiveLocationKalman;
     liveTracksDEPRECATED @16 :List(LiveTracksDEPRECATED);
+  }
+}
+
+struct NaviData {
+    active @0 :Int16;
+    roadLimitSpeed @1 :Int16;
+    isHighway @2 :Bool;
+    camType @3 :Int16;
+    camLimitSpeedLeftDist @4 :Int16;
+    camLimitSpeed @5 :Int16;
+    sectionLimitSpeed @6 :Int16;
+    sectionLeftDist @7 :Int16;
+    sectionAvgSpeed @8 :Int16;
+    sectionLeftTime @9 :Int16;
+    sectionAdjustSpeed @10 :Bool;
+    camSpeedFactor @11 :Float32;
+    currentRoadName @12 :Text;
+    isNda2 @13 :Bool;
+    ts @14 :TrafficSignal;
+
+    struct TrafficSignal {
+      isGreenLightOn @0 :Bool;
+      isLeftLightOn @1 :Bool;
+      isRedLightOn @2 :Bool;
+      greenLightRemainTime @3 :Int16;
+      leftLightRemainTime @4 :Int16;
+      redLightRemainTime @5 :Int16;
+      distance @6 :Int16;
+  }
+}
+
+struct NaviGps {
+  latitude @0 :Float32;
+  longitude @1 :Float32;
+  heading @2 :Float32;
+  speed @3 :Float32;
+}
+
+struct NaviObstacles {
+  obstacles @0 :List(Obstacle);
+
+  struct Obstacle {
+    valid @0: Bool;
+    type @1: Int16;
+    obstacle @2:List(Float32);
   }
 }
