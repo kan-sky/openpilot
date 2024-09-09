@@ -145,12 +145,19 @@ class Car:
     self.car_events = CarSpecificEvents(self.CP)
     self.mock_carstate = MockCarState()
     self.v_cruise_helper = VCruiseHelper(self.CP)
-
+    # NDA
+    self.v_cruise_kph_limit = 0
+    self.slowing_down = False
+    self.slowing_down_sound_alert = False
     self.is_metric = self.params.get_bool("IsMetric")
     self.experimental_mode = self.params.get_bool("ExperimentalMode")
 
     # card is driven by can recv, expected at 100Hz
     self.rk = Ratekeeper(100, print_delay_threshold=None)
+    # carrot
+    self.carrotCruiseActivate = 0
+    self._panda_controls_not_allowed = False
+    self.enable_avail = False
 
   def state_update(self) -> tuple[car.CarState, structs.RadarData | None]:
     """carState update loop, driven by can"""
@@ -177,12 +184,60 @@ class Car:
     if can_rcv_valid and REPLAY:
       self.can_log_mono_time = messaging.log_from_bytes(can_strs[0]).logMonoTime
 
+    gear = car.CarState.GearShifter
+    drivingGear = CS.gearShifter not in (gear.neutral, gear.park, gear.reverse, gear.unknown)
+    if self.CP.pcmCruise:
+      self.enable_avail = drivingGear and (self.sm['radarState'].leadOne.radar or CS.vEgo * CV.MS_TO_KPH > 10.0)
+    else:
+      self.enable_avail = drivingGear and not self.events.contains(ET.NO_ENTRY)
+
     # TODO: mirror the carState.cruiseState struct?
     self.v_cruise_helper.update_v_cruise(CS, self.sm['carControl'].enabled, self.is_metric)
-    CS.vCruise = float(self.v_cruise_helper.v_cruise_kph)
-    CS.vCruiseCluster = float(self.v_cruise_helper.v_cruise_cluster_kph)
+
+
+    # NDA
+    apply_limit_speed, road_limit_speed, left_dist, first_started, cam_type, max_speed_log = \
+      SpeedLimiter.instance().get_max_speed(self.v_cruise_helper.v_cruise_kph, self.is_metric)
+    if apply_limit_speed >= 20:
+      self.v_cruise_kph_limit = min(apply_limit_speed, self.v_cruise_helper.v_cruise_kph)
+      if CS.vEgo * CV.MS_TO_KPH > apply_limit_speed:
+        if not self.slowing_down:
+          self.slowing_down_sound_alert = True
+          self.slowing_down = True
+    else:
+      self.reset()
+      self.v_cruise_kph_limit = self.v_cruise_helper.v_cruise_kph
+
+    if not self.enabled and self.v_cruise_helper.cruiseActivate > 0: # carrot
+      self.carrotCruiseActivate = 1
+      if self.enable_avail:
+        if not self.CP.pcmCruise and self._panda_controls_not_allowed:
+          print("####MakeEvent: buttonEnable1")
+        elif self.CP.pcmCruise and CS.cruiseState.enabled: # 이미 pcmCruise가 enabled되어 있는경우
+          print("#####MakeEvent: buttonEnable2")
+        else:
+          print("####MakeEvent: buttonEnable3", self.CP.pcmCruise, CS.cruiseState.enabled, self._panda_controls_not_allowed)
+        self.events.add(EventName.buttonEnable)
+        self.carrotCruiseActivate = 1
+      else:
+        print("CruiseActivate: Button Enable: Cannot enabled....###")
+        self.v_cruise_helper.softHoldActive = 0
+      self.v_cruise_helper.cruiseActivate = 0
+    if self.enabled and self.v_cruise_helper.cruiseActivate < 0:
+      print("CruiseActivate: Button Cancel: ....")
+      self.events.add(EventName.buttonCancel)
+      self.carrotCruiseActivate = -1
+      self.v_cruise_helper.cruiseActivate = 0
+
+    CS.vCruise = float(self.self.v_cruise_kph_limit)
+    CS.vCruiseCluster = float(self.v_cruise_helper.v_cruise_kph_set)
 
     return CS, RD
+
+
+  def reset(self):
+    self.slowing_down = False
+    self.slowing_down_sound_alert = False
 
   def update_events(self, CS: car.CarState, RD: structs.RadarData | None):
     self.events.clear()
@@ -206,6 +261,10 @@ class Car:
     if RD is not None and len(RD.errors):
       self.events.add(EventName.radarFault)
 
+    # kans: NDA event
+    if self.slowing_down_sound_alert:
+      self.events.add(EventName.slowingDownSpeedSound)
+      self.slowing_down_sound_alert = False
     CS.events = self.events.to_msg()
 
   def state_publish(self, CS: car.CarState, RD: structs.RadarData | None):

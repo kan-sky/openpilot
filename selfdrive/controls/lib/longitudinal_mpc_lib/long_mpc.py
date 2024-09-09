@@ -4,12 +4,14 @@ import time
 import numpy as np
 from cereal import log
 from opendbc.car.interfaces import ACCEL_MIN
-from openpilot.common.numpy_fast import clip
+from openpilot.common.numpy_fast import clip, interp
 from openpilot.common.realtime import DT_MDL
 from openpilot.common.swaglog import cloudlog
 # WARNING: imports outside of constants will not trigger a rebuild
 from openpilot.selfdrive.modeld.constants import index_function
 from openpilot.selfdrive.controls.radard import _LEAD_ACCEL_TAU
+from openpilot.common.conversions import Conversions as CV
+from openpilot.common.params import Params
 
 if __name__ == '__main__':  # generating code
   from openpilot.third_party.acados.acados_template import AcadosModel, AcadosOcp, AcadosOcpSolver
@@ -17,6 +19,8 @@ else:
   from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.c_generated_code.acados_ocp_solver_pyx import AcadosOcpSolverCython
 
 from casadi import SX, vertcat
+from openpilot.common.filter_simple import StreamingMovingAverage
+from enum import Enum
 
 MODEL_NAME = 'long'
 LONG_MPC_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -27,23 +31,26 @@ SOURCES = ['lead0', 'lead1', 'cruise', 'e2e']
 
 X_DIM = 3
 U_DIM = 1
-PARAM_DIM = 6
+PARAM_DIM = 8
 COST_E_DIM = 5
 COST_DIM = COST_E_DIM + 1
 CONSTR_DIM = 4
 
-X_EGO_OBSTACLE_COST = 3.
+X_EGO_OBSTACLE_COST = 5. #3. 숫자가 클수록 정지선에 다가감
 X_EGO_COST = 0.
 V_EGO_COST = 0.
 A_EGO_COST = 0.
 J_EGO_COST = 5.0
-A_CHANGE_COST = 200.
+A_CHANGE_COST = 150. # 200. 클수록 가속력이 줄어듬.
 DANGER_ZONE_COST = 100.
 CRASH_DISTANCE = .25
-LEAD_DANGER_FACTOR = 0.75
+LEAD_DANGER_FACTOR = 0.8
 LIMIT_COST = 1e6
 ACADOS_SOLVER_TYPE = 'SQP_RTI'
 
+
+CRUISE_GAP_BP = [1., 2., 3.]
+CRUISE_GAP_V = [0.9, 1.8, 2.7]
 
 # Fewer timestamps don't hurt performance and lead to
 # much better convergence of the MPC with low iterations
@@ -56,6 +63,25 @@ FCW_IDXS = T_IDXS < 5.0
 T_DIFFS = np.diff(T_IDXS, prepend=[0.])
 COMFORT_BRAKE = 2.5
 STOP_DISTANCE = 6.0
+
+class XState(Enum):
+  lead = 0
+  cruise = 1
+  e2eCruise = 2
+  e2eStop = 3
+  e2ePrepare = 4
+  e2eStopped = 5
+
+  def __str__(self):
+    return self.name
+
+class TrafficState(Enum):
+  off = 0
+  red = 1
+  green = 2
+
+  def __str__(self):
+    return self.name
 
 def get_jerk_factor(personality=log.LongitudinalPersonality.standard):
   if personality==log.LongitudinalPersonality.relaxed:
@@ -78,16 +104,24 @@ def get_T_FOLLOW(personality=log.LongitudinalPersonality.standard):
   else:
     raise NotImplementedError("Longitudinal personality not supported")
 
-def get_stopped_equivalence_factor(v_lead):
-  return (v_lead**2) / (2 * COMFORT_BRAKE)
+def get_T_FOLLOW_Factor(personality=log.LongitudinalPersonality.standard):
+  if personality==log.LongitudinalPersonality.relaxed:
+    return 1.0
+  elif personality==log.LongitudinalPersonality.standard:
+    return 1.0
+  elif personality==log.LongitudinalPersonality.aggressive:
+    return 1.0
+  else:
+    raise NotImplementedError("Longitudinal personality not supported")
 
-def get_safe_obstacle_distance(v_ego, t_follow):
-  return (v_ego**2) / (2 * COMFORT_BRAKE) + t_follow * v_ego + STOP_DISTANCE
+def get_stopped_equivalence_factor(v_lead, comfort_brake):
+  return (v_lead**2) / (2 * comfort_brake)
 
-def desired_follow_distance(v_ego, v_lead, t_follow=None):
-  if t_follow is None:
-    t_follow = get_T_FOLLOW()
-  return get_safe_obstacle_distance(v_ego, t_follow) - get_stopped_equivalence_factor(v_lead)
+def get_safe_obstacle_distance(v_ego, t_follow, stop_distance, comfort_brake):
+  return (v_ego**2) / (2 * comfort_brake) + t_follow * v_ego + stop_distance
+
+def desired_follow_distance(v_ego, v_lead, t_follow, stop_distance=STOP_DISTANCE, comfort_brake=COMFORT_BRAKE):
+  return get_safe_obstacle_distance(v_ego, t_follow, stop_distance, comfort_brake) - get_stopped_equivalence_factor(v_lead, comfort_brake)
 
 
 def gen_long_model():
@@ -117,7 +151,9 @@ def gen_long_model():
   prev_a = SX.sym('prev_a')
   lead_t_follow = SX.sym('lead_t_follow')
   lead_danger_factor = SX.sym('lead_danger_factor')
-  model.p = vertcat(a_min, a_max, x_obstacle, prev_a, lead_t_follow, lead_danger_factor)
+  stop_distance = SX.sym('stop_distance')
+  comfort_brake = SX.sym('comfort_brake')
+  model.p = vertcat(a_min, a_max, x_obstacle, prev_a, lead_t_follow, lead_danger_factor, stop_distance, comfort_brake)
 
   # dynamics model
   f_expl = vertcat(v_ego, a_ego, j_ego)
@@ -153,11 +189,13 @@ def gen_long_ocp():
   prev_a = ocp.model.p[3]
   lead_t_follow = ocp.model.p[4]
   lead_danger_factor = ocp.model.p[5]
+  stop_distance = ocp.model.p[6]
+  comfort_brake = ocp.model.p[7]
 
   ocp.cost.yref = np.zeros((COST_DIM, ))
   ocp.cost.yref_e = np.zeros((COST_E_DIM, ))
 
-  desired_dist_comfort = get_safe_obstacle_distance(v_ego, lead_t_follow)
+  desired_dist_comfort = get_safe_obstacle_distance(v_ego, lead_t_follow, stop_distance, comfort_brake)
 
   # The main cost in normal operation is how close you are to the "desired" distance
   # from an obstacle at every timestep. This obstacle can be a lead car
@@ -183,7 +221,7 @@ def gen_long_ocp():
 
   x0 = np.zeros(X_DIM)
   ocp.constraints.x0 = x0
-  ocp.parameter_values = np.array([-1.2, 1.2, 0.0, 0.0, get_T_FOLLOW(), LEAD_DANGER_FACTOR])
+  ocp.parameter_values = np.array([-1.2, 1.2, 0.0, 0.0, get_T_FOLLOW(), LEAD_DANGER_FACTOR, STOP_DISTANCE, COMFORT_BRAKE])
 
 
   # We put all constraint cost weights to 0 and only set them at runtime
@@ -222,11 +260,37 @@ def gen_long_ocp():
 
 class LongitudinalMpc:
   def __init__(self, mode='acc', dt=DT_MDL):
+    self.trafficStopDistanceAdjust = 1.6 # 클수록 정지선에 다가가거나 지나치므로 적당히...
+    self.aChangeCost = 150
+    self.aChangeCostStart = 40
+    #self.lo_timer = 0 
+    #self.v_ego_prev = 0.0
+    self.trafficState = TrafficState.off
+    self.xStopFilter = StreamingMovingAverage(3)
+    self.xStopFilter2 = StreamingMovingAverage(15)
+    self.vFilter = StreamingMovingAverage(10)
+    self.stop_distance = STOP_DISTANCE
+    self.fakeCruiseDistance = 0.0
+    self.comfortBrake = COMFORT_BRAKE
+    self.comfort_brake = self.comfortBrake
+    self.xState = XState.cruise
+    self.xStop = 0.0
+    self.stopDist = 0.0
+    #self.myDrivingMode = 3 # general mode
+    self.actual_stop_distance = 0.0
+    self.mySafeFactor = 1.0
+    self.stopping_count = 0
+    self.traffic_starting_count = 0
+    self.user_stop_distance = -1
+
+    self.t_follow = 0
+
     self.mode = mode
     self.dt = dt
     self.solver = AcadosOcpSolverCython(MODEL_NAME, ACADOS_SOLVER_TYPE, N)
     self.reset()
     self.source = SOURCES[2]
+    self.experimentalMode = False
 
   def reset(self):
     # self.solver = AcadosOcpSolverCython(MODEL_NAME, ACADOS_SOLVER_TYPE, N)
@@ -243,6 +307,12 @@ class LongitudinalMpc:
     self.x_sol = np.zeros((N+1, X_DIM))
     self.u_sol = np.zeros((N,1))
     self.params = np.zeros((N+1, PARAM_DIM))
+    self.t_follow = get_T_FOLLOW()
+    self.xState = XState.cruise
+    self.startSignCount = 0
+    self.stopSignCount = 0
+    self.trafficState = TrafficState.off
+    
     for i in range(N+1):
       self.solver.set(i, 'x', np.zeros(X_DIM))
     self.last_cloudlog_t = 0
@@ -276,11 +346,11 @@ class LongitudinalMpc:
   def set_weights(self, prev_accel_constraint=True, personality=log.LongitudinalPersonality.standard):
     jerk_factor = get_jerk_factor(personality)
     if self.mode == 'acc':
-      a_change_cost = A_CHANGE_COST if prev_accel_constraint else 0
+      a_change_cost = self.aChangeCost if prev_accel_constraint else self.aChangeCostStart
       cost_weights = [X_EGO_OBSTACLE_COST, X_EGO_COST, V_EGO_COST, A_EGO_COST, jerk_factor * a_change_cost, jerk_factor * J_EGO_COST]
       constraint_cost_weights = [LIMIT_COST, LIMIT_COST, LIMIT_COST, DANGER_ZONE_COST]
     elif self.mode == 'blended':
-      a_change_cost = 40.0 if prev_accel_constraint else 0
+      a_change_cost = 40.0 if prev_accel_constraint else self.aChangeCostStart
       cost_weights = [0., 0.1, 0.2, 5.0, a_change_cost, 1.0]
       constraint_cost_weights = [LIMIT_COST, LIMIT_COST, LIMIT_COST, 50.0]
     else:
@@ -332,26 +402,57 @@ class LongitudinalMpc:
     self.cruise_min_a = min_a
     self.max_a = max_a
 
-  def update(self, radarstate, v_cruise, x, v, a, j, personality=log.LongitudinalPersonality.standard):
-    t_follow = get_T_FOLLOW(personality)
+  def update(self, sm, reset_state, prev_accel_constraint, radarstate, v_cruise, x, v, a, j, personality=log.LongitudinalPersonality.standard):
+    #t_follow = get_T_FOLLOW(personality)
+    carstate = sm['carState']
+    controlsState = sm['controlsState']
+    model = sm['modelV2']
     v_ego = self.x0[1]
+    a_ego = self.x0[2]
+    self.trafficState = TrafficState.off
     self.status = radarstate.leadOne.status or radarstate.leadTwo.status
 
     lead_xv_0 = self.process_lead(radarstate.leadOne)
     lead_xv_1 = self.process_lead(radarstate.leadTwo)
 
+    leadDistanceBars = carstate.cruiseState.leadDistanceBars
+    cruise_gap = int(clip(leadDistanceBars, 1., 3.)) if leadDistanceBars > 0 else 3
+    self.t_follow = interp(float(cruise_gap), CRUISE_GAP_BP, CRUISE_GAP_V)
+    self.t_follow *= get_T_FOLLOW_Factor(personality)
+    stop_distance = ntune_scc_get('stopDistance')
+    comfort_brake = ntune_scc_get('comportBrake')
+
     # To estimate a safe distance from a moving lead, we calculate how much stopping
     # distance that lead needs as a minimum. We can add that to the current distance
     # and then treat that as a stopped car/obstacle at this new distance.
-    lead_0_obstacle = lead_xv_0[:,0] + get_stopped_equivalence_factor(lead_xv_0[:,1])
-    lead_1_obstacle = lead_xv_1[:,0] + get_stopped_equivalence_factor(lead_xv_1[:,1])
+    lead_0_obstacle = lead_xv_0[:,0] + get_stopped_equivalence_factor(lead_xv_0[:,1], comfort_brake)
+    lead_1_obstacle = lead_xv_1[:,0] + get_stopped_equivalence_factor(lead_xv_1[:,1], comfort_brake)
 
     self.params[:,0] = ACCEL_MIN
     self.params[:,1] = self.max_a
 
+    if self.experimentalMode:
+      self.mode == 'blended'
+      stop_x = 1000.0
+    else:
+      v_cruise, stop_x, self.mode = self.update_apilot(carstate, controlsState, radarstate, model, v_cruise)
+    xe, ve = x[-1], v[-1]
+    if self.xState == XState.e2eStop:
+      self.max_a = 0.0
+
+    self.set_weights(prev_accel_constraint=prev_accel_constraint, personality=personality)
+
     # Update in ACC mode or ACC/e2e blend
     if self.mode == 'acc':
-      self.params[:,5] = LEAD_DANGER_FACTOR
+
+      if radarstate.leadOne.status:
+        lead_danger_factor = interp(radarstate.leadOne.dRel, [STOP_DISTANCE, 10.], [0.85, LEAD_DANGER_FACTOR])
+      else:
+        lead_danger_factor = LEAD_DANGER_FACTOR
+
+      self.params[:,5] = lead_danger_factor
+      adjustDist = self.trafficStopDistanceAdjust if v_ego > 0.1 else -2.0
+      x2 = stop_x * np.ones(N+1) + adjustDist
 
       # Fake an obstacle for cruise, this ensures smooth acceleration to set speed
       # when the leads are no factor.
@@ -360,12 +461,19 @@ class LongitudinalMpc:
       v_cruise_clipped = np.clip(v_cruise * np.ones(N+1),
                                  v_lower,
                                  v_upper)
-      cruise_obstacle = np.cumsum(T_DIFFS * v_cruise_clipped) + get_safe_obstacle_distance(v_cruise_clipped, t_follow)
-      x_obstacles = np.column_stack([lead_0_obstacle, lead_1_obstacle, cruise_obstacle])
+      cruise_obstacle = np.cumsum(T_DIFFS * v_cruise_clipped) + get_safe_obstacle_distance(v_cruise_clipped, self.t_follow, stop_distance, comfort_brake)
+      x_obstacles = np.column_stack([lead_0_obstacle, lead_1_obstacle, cruise_obstacle, x2])
       self.source = SOURCES[np.argmin(x_obstacles[0])]
 
       # These are not used in ACC mode
       x[:], v[:], a[:], j[:] = 0.0, 0.0, 0.0, 0.0
+
+      cruise_target = T_IDXS * np.clip(v_cruise, v_ego - 2.0, 1e3) + x[0]
+      xforward = ((v[1:] + v[:-1]) / 2) * (T_IDXS[1:] - T_IDXS[:-1])
+      x = np.cumsum(np.insert(xforward, 0, x[0]))
+
+      x_and_cruise = np.column_stack([x, cruise_target])
+      x = np.min(x_and_cruise, axis=1)
 
     elif self.mode == 'blended':
       self.params[:,5] = 1.0
@@ -392,9 +500,16 @@ class LongitudinalMpc:
       self.solver.set(i, "yref", self.yref[i])
     self.solver.set(N, "yref", self.yref[N][:COST_E_DIM])
 
+    navi_obstacles = sm['naviObstacles']
+    for obstacle in navi_obstacles.obstacles:
+      if obstacle.valid and len(obstacle.obstacle) == 13:
+        x_obstacles = np.column_stack([x_obstacles, obstacle.obstacle])
+
     self.params[:,2] = np.min(x_obstacles, axis=1)
     self.params[:,3] = np.copy(self.prev_a)
-    self.params[:,4] = t_follow
+    self.params[:,4] = self.t_follow
+    self.params[:,6] = stop_distance
+    self.params[:,7] = comfort_brake
 
     self.run()
     if (np.any(lead_xv_0[FCW_IDXS,0] - self.x_sol[FCW_IDXS,0] < CRASH_DISTANCE) and
@@ -406,9 +521,9 @@ class LongitudinalMpc:
     # Check if it got within lead comfort range
     # TODO This should be done cleaner
     if self.mode == 'blended':
-      if any((lead_0_obstacle - get_safe_obstacle_distance(self.x_sol[:,1], t_follow))- self.x_sol[:,0] < 0.0):
+      if any((lead_0_obstacle - get_safe_obstacle_distance(self.x_sol[:,1], self.t_follow, stop_distance, comfort_brake)) - self.x_sol[:, 0] < 0.0):
         self.source = 'lead0'
-      if any((lead_1_obstacle - get_safe_obstacle_distance(self.x_sol[:,1], t_follow))- self.x_sol[:,0] < 0.0) and \
+      if any((lead_1_obstacle - get_safe_obstacle_distance(self.x_sol[:,1], self.t_follow, stop_distance, comfort_brake)) - self.x_sol[:, 0] < 0.0) and \
          (lead_1_obstacle[0] - lead_0_obstacle[0]):
         self.source = 'lead1'
 
@@ -453,6 +568,142 @@ class LongitudinalMpc:
       # reset = 1
     # print(f"long_mpc timings: total internal {self.solve_time:.2e}, external: {(time.monotonic() - t0):.2e} qp {self.time_qp_solution:.2e}, \
     # lin {self.time_linearization:.2e} qp_iter {qp_iter}, reset {reset}")
+
+
+
+  def update_stop_dist(self, stop_x):
+    stop_x = self.xStopFilter.process(stop_x, median = True)
+    stop_x = self.xStopFilter2.process(stop_x)
+    return stop_x
+
+
+  def check_model_stopping(self, v, v_ego, model_x, y):
+    v_ego_kph = v_ego * CV.MS_TO_KPH
+    model_v = self.vFilter.process(v[-1])
+    startSign = model_v > 5.0 or model_v > (v[0]+2)
+
+    if v_ego_kph < 1.0:
+      stopSign = model_x < 20.0 and model_v < 10.0
+    elif v_ego_kph < 82.0:
+      stopSign = model_x < interp(v[0], [60/3.6, 80/3.6], [120.0, 150]) and ((model_v < 3.0) or (model_v < v[0]*0.7))  and abs(y[-1]) < 5.0
+    else:
+      stopSign = False
+
+    #self.stopSignCount = self.stopSignCount + 1 if (stopSign and (model_x > get_safe_obstacle_distance(v_ego, t_follow=0, comfort_brake=COMFORT_BRAKE, stop_distance=-1.0))) else 0
+    self.stopSignCount = self.stopSignCount + 1 if stopSign else 0
+    self.startSignCount = self.startSignCount + 1 if startSign and not stopSign else 0
+
+    if self.stopSignCount * DT_MDL > 0.0:
+      self.trafficState = TrafficState.red
+    elif self.startSignCount * DT_MDL > 0.2:
+      self.trafficState = TrafficState.green
+    else:
+      self.trafficState = TrafficState.off
+
+
+  def update_apilot(self, carstate, controlsState, radarstate, model, v_cruise):
+    v_ego = carstate.vEgo
+    v_ego_kph = v_ego * CV.MS_TO_KPH
+    x = model.position.x
+    y = model.position.y
+    v = model.velocity.x
+
+    self.fakeCruiseDistance = 0.0
+    radar_detected = radarstate.leadOne.status & radarstate.leadOne.radar
+
+    self.xStop = self.update_stop_dist(x[31])
+    stop_model_x = self.xStop
+
+    #self.check_model_stopping(v, v_ego, self.xStop, y)
+    self.check_model_stopping(v, v_ego, x[-1], y)
+
+    if (carstate.rightBlinker and not carstate.leftBlinker):
+      self.trafficState = TrafficState.off
+    ##elif controlsState.trafficLight in [22, 2] and self.xState == XState.e2eStopped:
+    elif controlsState.trafficLight in [22] and self.xState in [XState.e2eStop, XState.e2eStopped]:
+      self.trafficState = TrafficState.green
+      self.xState = XState.e2eCruise
+      self.traffic_starting_count = 10.0 / DT_MDL  ##신호출발시 10초가 될때까지 신호감지를 정지함.
+    elif controlsState.trafficLight in [33] and self.user_stop_distance < 0:
+      user_stop_decel = 0.5
+      self.user_stop_distance = v_ego ** 2 / (user_stop_decel * 2)
+
+    if carstate.gasPressed or carstate.brakePressed:
+      self.user_stop_distance = -1
+
+    if self.xState == XState.e2eStopped:
+      if carstate.gasPressed:
+        self.xState = XState.e2ePrepare
+      elif radar_detected and (radarstate.leadOne.dRel - stop_model_x) < 2.0:
+        self.xState = XState.lead
+      elif self.stopping_count == 0:
+        if self.trafficState == TrafficState.green:
+          self.xState = XState.e2ePrepare
+      self.stopping_count = max(0, self.stopping_count - 1)
+      v_cruise = 0
+    elif self.xState == XState.e2eStop:
+      self.stopping_count = 0
+      if carstate.gasPressed:
+        self.xState = XState.e2ePrepare
+      elif radar_detected and (radarstate.leadOne.dRel - stop_model_x) < 2.0:
+        self.xState = XState.lead
+      else:
+        if self.trafficState == TrafficState.green:
+          self.xState = XState.e2ePrepare
+        else:
+          self.comfort_brake = COMFORT_BRAKE * 0.9
+          #self.comfort_brake = COMFORT_BRAKE
+          self.trafficStopAdjustRatio = interp(v_ego_kph, [0, 100], [1.0, 0.7])
+          stop_dist = self.xStop * interp(self.xStop, [0, 100], [1.0, self.trafficStopAdjustRatio])  ##남은거리에 따라 정지거리 비율조정
+          if stop_dist > 10.0: ### 10M이상일때만, self.actual_stop_distance를 업데이트함.
+            self.actual_stop_distance = stop_dist
+          stop_model_x = 0
+          self.fakeCruiseDistance = 0 if self.actual_stop_distance > 10.0 else 10.0
+          if v_ego < 0.3:
+            self.stopping_count = 0.5 / DT_MDL
+            self.xState = XState.e2eStopped
+    elif self.xState == XState.e2ePrepare:
+      if self.status:
+        self.xState = XState.lead
+      elif v_ego_kph < 5.0 and self.trafficState != TrafficState.green:
+        self.xState = XState.e2eStop
+        self.actual_stop_distance = 2.0
+      elif v_ego_kph > 5.0: # and stop_model_x > 30.0:
+        self.xState = XState.e2eCruise
+    else: #XState.lead, XState.cruise, XState.e2eCruise
+      self.traffic_starting_count = max(0, self.traffic_starting_count - 1)
+      if self.status:
+        self.xState = XState.lead
+      elif self.trafficState == TrafficState.red and abs(carstate.steeringAngleDeg) < 30 and self.traffic_starting_count == 0:
+        self.xState = XState.e2eStop
+        self.actual_stop_distance = self.xStop
+      else:
+        self.xState = XState.e2eCruise
+
+    if self.trafficState in [TrafficState.off, TrafficState.green] or self.xState not in [XState.e2eStop, XState.e2eStopped]:
+      stop_model_x = 1000.0
+
+    if self.user_stop_distance >= 0:
+      self.user_stop_distance = max(0, self.user_stop_distance - v_ego * DT_MDL)
+      self.actual_stop_distance = self.user_stop_distance
+      self.xState = XState.e2eStop if self.user_stop_distance > 0 else XState.e2eStopped
+      
+    mode = 'blended' if self.xState in [XState.e2ePrepare] else 'acc'
+
+    self.comfort_brake *= self.mySafeFactor
+    self.actual_stop_distance = max(0, self.actual_stop_distance - (v_ego * DT_MDL))
+    
+    if stop_model_x == 1000.0: ##  e2eCruise, lead인경우
+      self.actual_stop_distance = 0.0
+    elif self.actual_stop_distance > 0: ## e2eStop, e2eStopped인경우..
+      stop_model_x = 0.0
+      
+    #self.debugLongText = "XState({}),stop_x={:.1f},stopDist={:.1f},Traffic={}".format(str(self.xState), stop_x, self.actual_stop_distance, str(self.trafficState))
+    #번호를 읽을때는 self.xState.value
+      
+    stop_dist =  stop_model_x + self.actual_stop_distance
+    stop_dist = max(stop_dist, v_ego ** 2 / (self.comfort_brake * 2))
+    return v_cruise, stop_dist, mode
 
 
 if __name__ == "__main__":

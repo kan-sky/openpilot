@@ -56,6 +56,20 @@ class Controls:
     elif self.CP.lateralTuning.which() == 'torque':
       self.LaC = LatControlTorque(self.CP, self.CI)
 
+    # NDA
+    self.v_cruise_kph_limit = 0
+    self.slowing_down = False
+    self.slowing_down_sound_alert = False
+
+
+    self.carrotCruiseActivate = 0 # carrot
+    self._panda_controls_not_allowed = False # carrot
+    self.enable_avail = False # carrot
+
+  def reset(self):
+    self.slowing_down = False
+    self.slowing_down_sound_alert = False
+
   def update(self):
     self.sm.update(15)
     if self.sm.updated["liveCalibration"]:
@@ -139,6 +153,15 @@ class Controls:
     CC.cruiseControl.override = CC.enabled and not CC.longActive and self.CP.openpilotLongitudinalControl
     CC.cruiseControl.cancel = CS.cruiseState.enabled and (not CC.enabled or not self.CP.pcmCruise)
 
+    ### carrot
+    if self.CP.pcmCruise:
+      if self.enabled and self.carrotCruiseActivate < 0:
+        print("pcmCruise: carrotCruiseActivate: cancel")
+        CC.cruiseControl.cancel = True
+      elif CC.cruiseControl.cancel: 
+        #print("Cancel state...enabled={}, activate={}".format(self.enabled, self.carrotCruiseActivate))
+        if self.carrotCruiseActivate > 0:
+          CC.cruiseControl.cancel = False
     speeds = self.sm['longitudinalPlan'].speeds
     if len(speeds):
       CC.cruiseControl.resume = CC.enabled and CS.cruiseState.standstill and speeds[-1] > 0.1
@@ -148,7 +171,8 @@ class Controls:
     hudControl.speedVisible = CC.enabled
     hudControl.lanesVisible = CC.enabled
     hudControl.leadVisible = self.sm['longitudinalPlan'].hasLead
-    hudControl.leadDistanceBars = self.sm['selfdriveState'].personality.raw + 1
+    #hudControl.leadDistanceBars = self.sm['selfdriveState'].personality.raw + 1
+    hudControl.leadDistanceBars = CS.cruiseState.leadDistanceBars
     hudControl.visualAlert = self.sm['selfdriveState'].alertHudVisual
 
     hudControl.rightLaneVisible = True
