@@ -241,7 +241,15 @@ struct CarState {
 
   # process meta
   cumLagMs @50 :Float32;
-
+  # carrot
+  tpms @55 : Tpms;
+  vCluRatio @56 :Float32;
+  driverOverride @57 : Int32; #0: Normal, 1:Gas, 2:Brake
+  chargeMeter @58 : Float32;
+  motorRpm @59 : Float32;
+  totalDistance @60 : Float32;
+  speedLimit @61 : Int32;
+  speedLimitDistance @62 : Float32;
 
   struct Tpms {
     enabled @0 :Bool;
@@ -267,6 +275,7 @@ struct CarState {
     speedOffset @3 :Float32;
     standstill @4 :Bool;
     nonAdaptive @5 :Bool;
+    leadDistanceBars @7 :Int8;
   }
 
   enum GearShifter {

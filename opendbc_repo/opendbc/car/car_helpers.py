@@ -169,12 +169,17 @@ def get_car(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_multip
     carlog.error({"event": "car doesn't match any fingerprints", "fingerprints": repr(fingerprints)})
     candidate = "MOCK"
 
-  selected_car = Params().get("SelectedCar_v2")
+  selected_car = Params().get("CarSelected2")
   if selected_car:
     def find_car(name: str):
       from opendbc.car.hyundai.values import CAR as HYUNDAI
       from opendbc.car.gm.values import CAR as GM
+      from opendbc.car.toyota.values import CAR as TOYOTA
       for platform in GM:
+        for doc in platform.config.car_docs:
+          if name == doc.name:
+            return platform
+      for platform in TOYOTA:
         for doc in platform.config.car_docs:
           if name == doc.name:
             return platform
@@ -183,24 +188,12 @@ def get_car(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_multip
           if name == doc.name:
             return platform
       return None
-    found_platform = find_car(selected_car.decode("utf-8"))
-    if found_platform is not None:
-      candidate = found_platform
+    found_car = find_car(selected_car.decode("utf-8"))
+    if found_car is not None:
+      candidate = found_car
 
-  print('candidate !!!!!!!!!', candidate)
-  Params().put("CarFingerprints", json.dumps(fingerprints))
-
-  car_fingerprints = {
-    'candidate': candidate,
-    'fingerprints': fingerprints
-  }
-
-  try:
-    with open('/data/log/car_fingerprints', 'w') as f:
-      now = datetime.datetime.now()
-      f.write(now.strftime('[%Y-%m-%d %H:%M:%S]') + "\n\n" + json.dumps(car_fingerprints, indent=2))
-  except:
-    pass
+  print(f"SelectedCar = {candidate}")
+  Params().put("CarName", candidate)
 
   CarInterface, _, _ = interfaces[candidate]
   CP: CarParams = CarInterface.get_params(candidate, fingerprints, car_fw, experimental_long_allowed, docs=False)
@@ -211,6 +204,12 @@ def get_car(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_multip
 
   return get_car_interface(CP)
 
+def write_car_param():
+  platform = MOCK.MOCK
+  params = Params()
+  CarInterface, _, _, _ = interfaces[platform]
+  CP = CarInterface.get_non_essential_params(platform)
+  params.put("CarParams", CP.to_bytes())
 
 def get_demo_car_params():
   platform = MOCK.MOCK

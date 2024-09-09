@@ -204,7 +204,7 @@ std::unordered_map<std::string, uint32_t> keys = {
     // Community
     {"SupportedCars", PERSISTENT},
     {"SupportedCars_gm", PERSISTENT}, // kans
-    {"SelectedCar_v2", PERSISTENT},
+    {"CarSelected2", PERSISTENT},
     // carrot
     {"CustomSteerMax", PERSISTENT},
     {"CustomSteerDeltaUp", PERSISTENT},
