@@ -37,6 +37,15 @@ class CarSpecificEvents:
     self.no_steer_warning = False
     self.silent_steer_warning = True
 
+    # kans: steer이벤트(일시불가) 줄이기 위해
+    self.belowSteerSpeed_shown = False
+    self.disable_belowSteerSpeed = False
+    self.resumeRequired_shown = False
+    self.disable_resumeRequired = False
+
+    # tw: steer warning
+    self.steer_warning = 0
+
   def update(self, CS: CarStateBase, CS_prev: car.CarState, CC: CarControllerBase, CC_prev: car.CarControl):
     if self.CP.carName in ('body', 'mock'):
       events = Events()
@@ -125,10 +134,30 @@ class CarSpecificEvents:
       if below_min_enable_speed and not (CS.out.standstill and CS.out.brake >= 20 and
                                          self.CP.networkLocation == NetworkLocation.fwdCamera):
         events.add(EventName.belowEngageSpeed)
-      if CS.out.cruiseState.standstill:
+
+      # kans:
+      # 정지 상태이면서, 자동재개 신호(self.CP.autoResumeSng)가 비활성화되어 있고, 
+      # resumeRequired 이벤트가 비활성화되어 있지 않으면, resumeRequired 이벤트를 활성화하고, 
+      # resumeRequired 이벤트를 한번 보여주게 한다.
+      if CS.out.cruiseState.standstill and not (self.CP.autoResumeSng or self.disable_resumeRequired):
         events.add(EventName.resumeRequired)
-      if CS.out.vEgo < self.CP.minSteerSpeed:
+        self.resumeRequired_shown = True
+
+      # kans: resumeRequired 이벤트가 표시된 후에는, 자동으로 재개될 때까지 resumeRequired 이벤트를 비활성화한다.
+      if self.resumeRequired_shown and not CS.out.cruiseState.standstill:
+        self.disable_resumeRequired = True
+
+      # kans: 속도가 최소조향속도 미만이고, belowSteerSpeed 이벤트가 비활성화되어 있지 않으면, 
+      # belowSteerSpeed 이벤트를 활성화하고,
+      # belowSteerSpeed이벤트를 한번 보여주게 한다.
+      if CS.out.vEgo < self.CP.minSteerSpeed and not self.disable_belowSteerSpeed:
         events.add(EventName.belowSteerSpeed)
+        self.belowSteerSpeed_shown = True
+
+      # kans: belowSteerSpeed 이벤트가 한번 표시된 후에는, 속도가 최소조향속도보다 높아질 때까지 belowSteerSpeed 이벤트를 비활성화한다.
+      if self.belowSteerSpeed_shown and CS.out.vEgo >= self.CP.minSteerSpeed:
+        self.disable_belowSteerSpeed = True # kans
+
 
     elif self.CP.carName == 'volkswagen':
       events = self.create_common_events(CS.out, CS_prev, extra_gears=[GearShifter.eco, GearShifter.sport, GearShifter.manumatic],
@@ -199,8 +228,8 @@ class CarSpecificEvents:
       events.add(EventName.speedTooHigh)
     if CS.cruiseState.nonAdaptive:
       events.add(EventName.wrongCruiseMode)
-    if CS.brakeHoldActive and self.CP.openpilotLongitudinalControl:
-      events.add(EventName.brakeHold)
+    #if CS.brakeHoldActive and self.CP.openpilotLongitudinalControl:
+    #  events.add(EventName.brakeHold)
     if CS.parkingBrake:
       events.add(EventName.parkBrake)
     if CS.accFaulted:
@@ -220,28 +249,32 @@ class CarSpecificEvents:
       if not self.CP.pcmCruise and (b.type in enable_buttons and not b.pressed):
         events.add(EventName.buttonEnable)
       # Disable on rising and falling edge of cancel for both stock and OP long
-      if b.type == ButtonType.cancel:
-        events.add(EventName.buttonCancel)
+      #if b.type == ButtonType.cancel:
+      #  events.add(EventName.buttonCancel)
 
     # Handle permanent and temporary steering faults
-    self.steering_unpressed = 0 if CS.steeringPressed else self.steering_unpressed + 1
-    if CS.steerFaultTemporary:
-      if CS.steeringPressed and (not CS_prev.steerFaultTemporary or self.no_steer_warning):
+    # tw: steer warning
+    self.steer_warning = self.steer_warning + 1 if CS_prev.steerFaultTemporary else 0
+    self.steering_unpressed = 0 if CS_prev.steeringPressed else self.steering_unpressed + 1
+    if CS_prev.steerFaultPermanent: # 스티어폴트 선행.
+      events.add(EventName.steerUnavailable)
+
+    elif CS_prev.steerFaultTemporary: # 일시오류 체크.
+      if CS_prev.steeringPressed and (not CS_prev.steerFaultTemporary or self.no_steer_warning):
         self.no_steer_warning = True
       else:
         self.no_steer_warning = False
 
-        # if the user overrode recently, show a less harsh alert
-        if self.silent_steer_warning or CS.standstill or self.steering_unpressed < int(1.5 / DT_CTRL):
-          self.silent_steer_warning = True
-          events.add(EventName.steerTempUnavailableSilent)
+        # 핸들손올림이나 일시 스티어오류가 0.5초이상일때 경고하며, 운전자 개입은 안하는 것으로 한다.
+        if self.steering_unpressed > int(0.5/DT_CTRL) and self.steer_warning > int(0.5/DT_CTRL):
+          pass # events.add(EventName.steerTempUnavailable)
         else:
-          events.add(EventName.steerTempUnavailable)
+          events.add(EventName.steerTempUnavailableSilent)
+
     else:
       self.no_steer_warning = False
       self.silent_steer_warning = False
-    if CS.steerFaultPermanent:
-      events.add(EventName.steerUnavailable)
+
 
     # we engage when pcm is active (rising edge)
     # enabling can optionally be blocked by the car interface

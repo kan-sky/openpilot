@@ -22,7 +22,7 @@ __version__ = '0.0.10'
 CANPACKET_HEAD_SIZE = 0x6
 DLC_TO_LEN = [0, 1, 2, 3, 4, 5, 6, 7, 8, 12, 16, 20, 24, 32, 48, 64]
 LEN_TO_DLC = {length: dlc for (dlc, length) in enumerate(DLC_TO_LEN)}
-PANDA_BUS_CNT = 3
+PANDA_BUS_CNT = 4
 
 
 def calculate_checksum(data):
@@ -220,6 +220,13 @@ class Panda:
 
   FLAG_GM_HW_CAM = 1
   FLAG_GM_HW_CAM_LONG = 2
+  FLAG_GM_HW_SDGM = 4
+  FLAG_GM_CC_LONG = 8
+  FLAG_GM_HW_ASCM_LONG = 16
+  FLAG_GM_NO_CAMERA = 32
+  FLAG_GM_NO_ACC = 64
+  FLAG_GM_PEDAL_LONG = 128  # TODO: This can be inferred
+  FLAG_GM_GAS_INTERCEPTOR = 256
 
   FLAG_FORD_LONG_CONTROL = 1
   FLAG_FORD_CANFD = 2

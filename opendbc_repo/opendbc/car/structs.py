@@ -138,6 +138,7 @@ class CarState:
     speedOffset: float = auto_field()
     standstill: bool = auto_field()
     nonAdaptive: bool = auto_field()
+    leadDistanceBars: int = auto_field()
 
   class GearShifter(StrEnum):
     unknown = auto()
