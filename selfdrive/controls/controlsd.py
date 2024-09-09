@@ -99,6 +99,7 @@ class Controls:
 
     CC = car.CarControl.new_message()
     CC.enabled = self.sm['selfdriveState'].enabled
+    CC.steerRatio = sr
 
     # Check which actuators can be enabled
     standstill = CS.vEgo <= max(self.CP.minSteerSpeed, MIN_LATERAL_CONTROL_SPEED) or CS.standstill
@@ -175,6 +176,10 @@ class Controls:
     hudControl.leadDistanceBars = CS.cruiseState.leadDistanceBars
     hudControl.visualAlert = self.sm['selfdriveState'].alertHudVisual
 
+    ## carrot
+    no_entry_events = self.events.contains(ET.NO_ENTRY)
+    CC.cruiseControl.activate = self.carrotCruiseActivate > 0 and not no_entry_events
+    #CC.hudControl.softHold = self.v_cruise_helper.softHoldActive
     hudControl.rightLaneVisible = True
     hudControl.leftLaneVisible = True
     if self.sm.valid['driverAssistance']:
