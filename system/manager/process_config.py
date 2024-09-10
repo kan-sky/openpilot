@@ -93,6 +93,8 @@ procs = [
   NativeProcess("bridge", "cereal/messaging", ["./bridge"], notcar),
   PythonProcess("webrtcd", "system.webrtc.webrtcd", notcar),
   PythonProcess("webjoystick", "tools.bodyteleop.web", notcar),
+  # NDA
+  PythonProcess("road_speed_limiter", "selfdrive.carrot.road_speed_limiter", always_run),
 ]
 
 managed_processes = {p.name: p for p in procs}

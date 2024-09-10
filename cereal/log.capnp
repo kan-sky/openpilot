@@ -21,6 +21,7 @@ enum LongitudinalPersonality {
   aggressive @0;
   standard @1;
   relaxed @2;
+  moreRelaxed @3;
 }
 
 struct InitData {
@@ -2437,6 +2438,9 @@ struct Event {
     customReservedRawData1 @125 :Data;
     customReservedRawData2 @126 :Data;
 
+    # NDA
+    naviData @133 :NaviData;
+
     # *********** Custom: reserved for forks ***********
     customReserved0 @107 :Custom.CustomReserved0;
     customReserved1 @108 :Custom.CustomReserved1;
@@ -2449,10 +2453,10 @@ struct Event {
     customReserved8 @115 :Custom.CustomReserved8;
     customReserved9 @116 :Custom.CustomReserved9;
     
-    # neokii
-    naviData @130 :NaviData;
-    naviGps @131 :NaviGps;
-    naviObstacles @132 :NaviObstacles;
+    # NDA
+    naviData @134 :NaviData;
+    naviGps @135 :NaviGps;
+    naviObstacles @136 :NaviObstacles;
 
     # *********** legacy + deprecated ***********
     model @9 :Legacy.ModelData; # TODO: rename modelV2 and mark this as deprecated

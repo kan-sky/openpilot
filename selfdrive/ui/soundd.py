@@ -38,6 +38,14 @@ sound_list: dict[int, tuple[str, int | None, float]] = {
 
   AudibleAlert.warningSoft: ("warning_soft.wav", None, MAX_VOLUME),
   AudibleAlert.warningImmediate: ("warning_immediate.wav", None, MAX_VOLUME),
+
+  AudibleAlert.trafficSignGreen: ("traffic_sign_green.wav", 1, MAX_VOLUME),
+  AudibleAlert.trafficSignChanged: ("traffic_sign_changed.wav", 1, MAX_VOLUME),
+  AudibleAlert.bsdWarning: ("audio_car_watchout.wav", None, MAX_VOLUME),
+  AudibleAlert.reverseGear: ("reverse_gear.wav", 1, MAX_VOLUME),
+  AudibleAlert.stopStop: ("audio_stopstop.wav", None, MAX_VOLUME),
+  AudibleAlert.stopping: ("audio_stopping.wav", None, MAX_VOLUME),
+  AudibleAlert.slowingDownSpeed: ("slowing_down_speed.wav", 1, MAX_VOLUME),
 }
 
 def check_selfdrive_timeout_alert(sm):
@@ -48,6 +56,31 @@ def check_selfdrive_timeout_alert(sm):
       return True
 
   return False
+
+def linear_resample(samples, original_rate, new_rate):
+    if original_rate == new_rate:
+        return samples
+
+    # Calculate the resampling factor and the number of samples in the resampled signal
+    resampling_factor = float(new_rate) / original_rate
+    num_resampled_samples = int(len(samples) * resampling_factor)
+
+    # Create the resampled signal array
+    resampled = np.zeros(num_resampled_samples, dtype=np.float32)
+
+    for i in range(num_resampled_samples):
+        # Calculate the original sample index
+        orig_index = i / resampling_factor
+
+        # Find the two nearest original samples
+        lower_index = int(orig_index)
+        upper_index = min(lower_index + 1, len(samples) - 1)
+
+        # Perform linear interpolation
+        resampled[i] = (samples[lower_index] * (upper_index - orig_index) +
+                        samples[upper_index] * (orig_index - lower_index))
+
+    return resampled
 
 
 class Soundd:
@@ -71,12 +104,28 @@ class Soundd:
 
       wavefile = wave.open(BASEDIR + "/selfdrive/assets/sounds/" + filename, 'r')
 
-      assert wavefile.getnchannels() == 1
+      #assert wavefile.getnchannels() == 1
+
       assert wavefile.getsampwidth() == 2
-      assert wavefile.getframerate() == SAMPLE_RATE
+      #assert wavefile.getframerate() == SAMPLE_RATE
+
+      actual_sample_rate = wavefile.getframerate()
+
+      nchannels = wavefile.getnchannels()
+      #print("nchannels=", nchannels, ",sound=", sound_list[sound])
+      assert nchannels in [1,2]
+      #print("loading...")
 
       length = wavefile.getnframes()
-      self.loaded_sounds[sound] = np.frombuffer(wavefile.readframes(length), dtype=np.int16).astype(np.float32) / (2**16/2)
+      frames = wavefile.readframes(length)
+      samples = np.frombuffer(frames, dtype=np.int16)
+
+      if nchannels == 2:
+        samples = samples[0::2] / 2 + samples[1::2] / 2
+
+      resampled_samples = linear_resample(samples, actual_sample_rate, SAMPLE_RATE) * volume
+
+      self.loaded_sounds[sound] = resampled_samples.astype(np.float32) / (2**16/2)
 
   def get_sound_data(self, frames): # get "frames" worth of data from the current alert sound, looping when required
 

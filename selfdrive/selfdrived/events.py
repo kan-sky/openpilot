@@ -420,11 +420,11 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
       "Steering Temporarily Unavailable",
       "",
       AlertStatus.userPrompt, AlertSize.small,
-      Priority.LOW, VisualAlert.steerRequired, AudibleAlert.prompt, 1.8),
+      Priority.LOW, VisualAlert.steerRequired, AudibleAlert.none, 1.8),
   },
 
   EventName.preDriverDistracted: {
-    ET.PERMANENT: Alert(
+    ET.WARNING: Alert(
       "Pay Attention",
       "",
       AlertStatus.normal, AlertSize.small,
@@ -432,7 +432,7 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
   },
 
   EventName.promptDriverDistracted: {
-    ET.PERMANENT: Alert(
+    ET.WARNING: Alert(
       "Pay Attention",
       "Driver Distracted",
       AlertStatus.userPrompt, AlertSize.mid,
@@ -440,7 +440,7 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
   },
 
   EventName.driverDistracted: {
-    ET.PERMANENT: Alert(
+    ET.WARNING: Alert(
       "DISENGAGE IMMEDIATELY",
       "Driver Distracted",
       AlertStatus.critical, AlertSize.full,
@@ -448,7 +448,7 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
   },
 
   EventName.preDriverUnresponsive: {
-    ET.PERMANENT: Alert(
+    ET.WARNING: Alert(
       "Touch Steering Wheel: No Face Detected",
       "",
       AlertStatus.normal, AlertSize.small,
@@ -456,7 +456,7 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
   },
 
   EventName.promptDriverUnresponsive: {
-    ET.PERMANENT: Alert(
+    ET.WARNING: Alert(
       "Touch Steering Wheel",
       "Driver Unresponsive",
       AlertStatus.userPrompt, AlertSize.mid,
@@ -464,7 +464,7 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
   },
 
   EventName.driverUnresponsive: {
-    ET.PERMANENT: Alert(
+    ET.WARNING: Alert(
       "DISENGAGE IMMEDIATELY",
       "Driver Unresponsive",
       AlertStatus.critical, AlertSize.full,
@@ -495,7 +495,7 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
     ET.WARNING: Alert(
       "Steer Left to Start Lane Change Once Safe",
       "",
-      AlertStatus.normal, AlertSize.small,
+      AlertStatus.normal, AlertSize.none,
       Priority.LOW, VisualAlert.none, AudibleAlert.none, .1),
   },
 
@@ -503,7 +503,7 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
     ET.WARNING: Alert(
       "Steer Right to Start Lane Change Once Safe",
       "",
-      AlertStatus.normal, AlertSize.small,
+      AlertStatus.normal, AlertSize.none,
       Priority.LOW, VisualAlert.none, AudibleAlert.none, .1),
   },
 
@@ -511,7 +511,7 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
     ET.WARNING: Alert(
       "Car Detected in Blindspot",
       "",
-      AlertStatus.userPrompt, AlertSize.small,
+      AlertStatus.userPrompt, AlertSize.none,
       Priority.LOW, VisualAlert.none, AudibleAlert.prompt, .1),
   },
 
@@ -519,7 +519,7 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
     ET.WARNING: Alert(
       "Changing Lanes",
       "",
-      AlertStatus.normal, AlertSize.small,
+      AlertStatus.normal, AlertSize.none,
       Priority.LOW, VisualAlert.none, AudibleAlert.none, .1),
   },
 
@@ -527,8 +527,8 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
     ET.WARNING: Alert(
       "Take Control",
       "Turn Exceeds Steering Limit",
-      AlertStatus.userPrompt, AlertSize.mid,
-      Priority.LOW, VisualAlert.steerRequired, AudibleAlert.promptRepeat, 2.),
+      AlertStatus.normal, AlertSize.small,
+      Priority.LOW, VisualAlert.none, AudibleAlert.none, 2.),
   },
 
   # Thrown when the fan is driven at >50% but is not rotating
@@ -817,7 +817,7 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
 
   EventName.accFaulted: {
     ET.IMMEDIATE_DISABLE: ImmediateDisableAlert("Cruise Fault: Restart the Car"),
-    ET.PERMANENT: NormalPermanentAlert("Cruise Fault: Restart the car to engage"),
+    #ET.PERMANENT: NormalPermanentAlert("Cruise Fault: Restart the car to engage"),
     ET.NO_ENTRY: NoEntryAlert("Cruise Fault: Restart the Car"),
   },
 
@@ -873,9 +873,9 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
     ET.PERMANENT: Alert(
       "Reverse\nGear",
       "",
-      AlertStatus.normal, AlertSize.full,
-      Priority.LOWEST, VisualAlert.none, AudibleAlert.none, .2, creation_delay=0.5),
-    ET.USER_DISABLE: ImmediateDisableAlert("Reverse Gear"),
+      AlertStatus.normal, AlertSize.none,
+      Priority.LOWEST, VisualAlert.none, AudibleAlert.reverseGear, .2, creation_delay=0.5),
+    ET.SOFT_DISABLE: SoftDisableAlert("Reverse Gear"),
     ET.NO_ENTRY: NoEntryAlert("Reverse Gear"),
   },
 
@@ -931,6 +931,39 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
 
   EventName.personalityChanged: {
     ET.WARNING: personality_changed_alert,
+  },
+
+  EventName.speedDownSpeed: {
+    ET.PERMANENT: Alert("Slowing down", "", AlertStatus.normal, AlertSize.small,
+                        Priority.LOW, VisualAlert.none, AudibleAlert.none, .1),
+  },
+
+  EventName.slowingDownSpeedSound: {
+    ET.PERMANENT: Alert("Slowing down", "", AlertStatus.normal, AlertSize.small,
+                        Priority.MID, VisualAlert.none, AudibleAlert.slowingDownSpeed, 2.),
+  },
+
+  EventName.trafficSignGreen: {
+    ET.WARNING: EngagementAlert(AudibleAlert.trafficSignGreen),
+  },
+
+  EventName.trafficSignChanged: {
+    ET.WARNING: Alert(
+      "신호가바뀌었어요.",
+      "",
+      AlertStatus.normal, AlertSize.small,
+      Priority.LOW, VisualAlert.none, AudibleAlert.trafficSignChanged, 1.),
+  },
+
+  EventName.audioPrompt: {
+     ET.WARNING: EngagementAlert(AudibleAlert.prompt),
+  },
+  EventName.trafficStopping: {
+    ET.WARNING: EngagementAlert(AudibleAlert.stopping),
+  },
+
+  EventName.stopStop: {
+     ET.WARNING: EngagementAlert(AudibleAlert.stopStop),
   },
 
 }

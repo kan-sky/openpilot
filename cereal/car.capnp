@@ -116,6 +116,8 @@ struct OnroadEvent @0x9b1657f34caf3ad3 {
     actuatorsApiUnavailable @120;
     espActive @121;
     personalityChanged @122;
+    slowingDownSpeed @131;
+    slowingDownSpeedSound @132;
 
     # carrot
     trafficStopping @123;
@@ -125,6 +127,7 @@ struct OnroadEvent @0x9b1657f34caf3ad3 {
     trafficSignChanged @127;
     torqueNNLoad @128;
     pedalInterceptorNoBrake @129;
+    speedDown @130;
 
     radarCanErrorDEPRECATED @15;
     communityFeatureDisallowedDEPRECATED @62;
@@ -457,6 +460,7 @@ struct CarControl {
       promptRepeat @7;
       promptDistracted @8;
 
+      slowingDownSpeed @16;
       # carrot
       trafficSignGreen @9;
       trafficSignChanged @10;
@@ -464,6 +468,7 @@ struct CarControl {
       bsdWarning @12;
       stopStop @13;
       reverseGear @14;
+      speedDown @15;
     }
   }
 
@@ -491,6 +496,7 @@ struct CarParams {
 
   notCar @66 :Bool;  # flag for non-car robotics platforms
 
+  enableGasInterceptor @2 :Bool;
   pcmCruise @3 :Bool;        # is openpilot's state tied to the PCM's cruise state?
   enableDsu @5 :Bool;        # driving support unit
   enableBsm @56 :Bool;       # blind spot monitoring
@@ -735,7 +741,6 @@ struct CarParams {
     gateway @1;    # Integration at vehicle's CAN gateway
   }
 
-  enableGasInterceptor @2 :Bool; # kans
   enableCameraDEPRECATED @4 :Bool;
   enableApgsDEPRECATED @6 :Bool;
   steerRateCostDEPRECATED @33 :Float32;
