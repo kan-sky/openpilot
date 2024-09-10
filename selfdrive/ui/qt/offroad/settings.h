@@ -9,6 +9,7 @@
 #include <QPushButton>
 #include <QStackedWidget>
 #include <QWidget>
+#include <QStackedLayout>
 
 #include "selfdrive/ui/ui.h"
 #include "selfdrive/ui/qt/util.h"
@@ -47,10 +48,12 @@ public:
 signals:
   void reviewTrainingGuide();
   void showDriverView();
+  void closeSettings();
 
 private slots:
   void poweroff();
   void reboot();
+  void rebuild();
   void updateCalibDescription();
 
 private:
@@ -98,4 +101,30 @@ private:
 
   Params params;
   ParamWatcher *fs_watch;
+};
+
+class SelectCar : public QWidget {
+  Q_OBJECT
+public:
+  explicit SelectCar(QWidget* parent = 0);
+
+private:
+
+signals:
+  void backPress();
+  void selectedCar();
+
+};
+
+class CommunityPanel : public ListWidget {
+  Q_OBJECT
+public:
+  explicit CommunityPanel(SettingsWindow *parent);
+  void showEvent(QShowEvent *event) override;
+
+private:
+  Params params;
+  std::map<std::string, ParamControl*> toggles;
+
+  void updateToggles();
 };

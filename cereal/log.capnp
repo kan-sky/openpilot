@@ -740,7 +740,7 @@ struct ControlsState @0x97ff69c53601abf1 {
   curvature @37 :Float32;  # path curvature from vehicle model
   desiredCurvature @61 :Float32;  # lag adjusted curvatures used by lateral controllers
   forceDecel @51 :Bool;
-  trafficLight @66 :Int32; # carrot
+  trafficLight @67 :Int32; # carrot
 
   lateralControlState :union {
     indiState @52 :LateralINDIState;
@@ -2438,9 +2438,6 @@ struct Event {
     customReservedRawData1 @125 :Data;
     customReservedRawData2 @126 :Data;
 
-    # NDA
-    naviData @133 :NaviData;
-
     # *********** Custom: reserved for forks ***********
     customReserved0 @107 :Custom.CustomReserved0;
     customReserved1 @108 :Custom.CustomReserved1;
@@ -2454,9 +2451,9 @@ struct Event {
     customReserved9 @116 :Custom.CustomReserved9;
     
     # NDA
-    naviData @134 :NaviData;
-    naviGps @135 :NaviGps;
-    naviObstacles @136 :NaviObstacles;
+    naviData @133 :NaviData;
+    naviGps @134 :NaviGps;
+    naviObstacles @135 :NaviObstacles;
 
     # *********** legacy + deprecated ***********
     model @9 :Legacy.ModelData; # TODO: rename modelV2 and mark this as deprecated

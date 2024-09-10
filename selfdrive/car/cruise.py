@@ -7,7 +7,7 @@ from openpilot.common.realtime import DT_CTRL
 from openpilot.common.params import Params
 import collections
 
-EventName = car.CarEvent.EventName
+EventName = car.OnroadEvent.EventName
 
 # WARNING: this value was determined based on the model's training distribution,
 #          model predictions above this speed can be unpredictable

@@ -159,11 +159,6 @@ class CAR(Platforms):
   CHEVROLET_BOLT_EUV = GMPlatformConfig(
     [
       GMCarDocs("Chevrolet Bolt EUV 2022-23", "Premier or Premier Redline Trim without Super Cruise Package", video_link="https://youtu.be/xvwzGMUA210"),
-    ],
-    GMCarSpecs(mass=1669, wheelbase=2.63779, steerRatio=16.8, centerToFrontRatio=0.4, tireStiffnessFactor=1.0),
-  )
-  CHEVROLET_BOLT_EV = GMPlatformConfig(
-    [
       GMCarDocs("Chevrolet Bolt EV 2022-23", "2LT Trim with Adaptive Cruise Control Package"),
     ],
     GMCarSpecs(mass=1669, wheelbase=2.63779, steerRatio=16.8, centerToFrontRatio=0.4, tireStiffnessFactor=1.0),
@@ -206,7 +201,7 @@ class CAR(Platforms):
     CarSpecs(mass=2731, wheelbase=3.302, steerRatio=17.3, centerToFrontRatio=0.49),
   )
   CHEVROLET_SUBURBAN_CC = GMPlatformConfig(
-    [GMCarDocs("Chevrolet Suburban 2016-20")],
+    [GMCarDocs("Chevrolet Suburban Premier 2016-2020 - No-ACC")],
     CHEVROLET_SUBURBAN.specs,
   )
   GMC_YUKON_CC = GMPlatformConfig(
@@ -218,20 +213,16 @@ class CAR(Platforms):
     CarSpecs(mass=2358, wheelbase=3.11, steerRatio=17.7, centerToFrontRatio=0.4),
   )
   CHEVROLET_TRAILBLAZER_CC = GMPlatformConfig(
-    [GMCarDocs("CHEVROLET TRAILBLAZER NO ACC")],
+    [GMCarDocs("Chevrolet Trailblazer 2021-22")],
     CHEVROLET_TRAILBLAZER.specs,
-  )
-  CHEVROLET_MALIBU_CC = GMPlatformConfig(
-    [GMCarDocs("Chevrolet Malibu No ACC")],
-    CarSpecs(mass=1450, wheelbase=2.8, steerRatio=15.8, centerToFrontRatio=0.4),
-  )
-  CADILLAC_XT5_CC = GMPlatformConfig(
-    [GMCarDocs("Cadillac XT5 No ACC")],
-    CarSpecs(mass=1810, wheelbase=2.86, steerRatio=16.34, centerToFrontRatio=0.5),
   )
   CADILLAC_XT4 = GMPlatformConfig(
     [GMCarDocs("Cadillac XT4 2023", "Driver Assist Package")],
     CarSpecs(mass=1660, wheelbase=2.78, steerRatio=14.4, centerToFrontRatio=0.4),
+  )
+  CADILLAC_XT5_CC = GMPlatformConfig(
+    [GMCarDocs("Cadillac XT5 No ACC")],
+    CarSpecs(mass=1810, wheelbase=2.86, steerRatio=16.34, centerToFrontRatio=0.5),
   )
   CHEVROLET_TRAVERSE = GMPlatformConfig(
     [GMCarDocs("Chevrolet Traverse 2023", "Driver Assist Package")],
@@ -240,6 +231,14 @@ class CAR(Platforms):
   BUICK_BABYENCLAVE = GMPlatformConfig(
     [GMCarDocs("Buick Baby Enclave 2020-23", "Driver Assist Package")],
     CarSpecs(mass=2050, wheelbase=2.86, steerRatio=16.0, centerToFrontRatio=0.5),
+  )
+  CHEVROLET_MALIBU_CC = GMPlatformConfig(
+    [GMCarDocs("Chevrolet Malibu 2023 No ACC")],
+    CarSpecs(mass=1450, wheelbase=2.8, steerRatio=15.8, centerToFrontRatio=0.4),
+  )
+  CHEVROLET_TRAX = GMPlatformConfig(
+    [GMCarDocs("Chevrolet TRAX 2024")],
+    CarSpecs(mass=1365, wheelbase=2.7, steerRatio=15.7, centerToFrontRatio=0.4),
   )
 
 

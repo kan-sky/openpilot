@@ -13,7 +13,7 @@ from opendbc.car.gm.values import CAR, CarControllerParams, EV_CAR, CAMERA_ACC_C
 from opendbc.car.interfaces import CarInterfaceBase, TorqueFromLateralAccelCallbackType, FRICTION_THRESHOLD, LatControlInputs, NanoFFModel
 
 ButtonType = structs.CarState.ButtonEvent.Type
-EventName = car.CarEvent.EventName
+EventName = car.OnroadEvent.EventName
 GearShifter = structs.CarState.GearShifter
 TransmissionType = structs.CarParams.TransmissionType
 NetworkLocation = structs.CarParams.NetworkLocation

@@ -707,7 +707,8 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
   },
 
   EventName.wrongGear: {
-    ET.SOFT_DISABLE: user_soft_disable_alert("Gear not D"),
+    ET.USER_DISABLE: EngagementAlert(AudibleAlert.disengage),
+    #ET.SOFT_DISABLE: user_soft_disable_alert("Gear not D"),
     ET.NO_ENTRY: NoEntryAlert("Gear not D"),
   },
 
@@ -933,7 +934,7 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
     ET.WARNING: personality_changed_alert,
   },
 
-  EventName.speedDownSpeed: {
+  EventName.slowingDownSpeed: {
     ET.PERMANENT: Alert("Slowing down", "", AlertStatus.normal, AlertSize.small,
                         Priority.LOW, VisualAlert.none, AudibleAlert.none, .1),
   },
