@@ -1,5 +1,5 @@
 from cereal import car
-from openpilot.common.numpy_fast import clip
+from openpilot.common.numpy_fast import clip, interp
 from openpilot.common.realtime import DT_CTRL
 from openpilot.selfdrive.controls.lib.drive_helpers import CONTROL_N
 from openpilot.common.pid import PIDController
@@ -52,6 +52,8 @@ class LongControl:
                              (CP.longitudinalTuning.kiBP, CP.longitudinalTuning.kiV),
                              k_f=CP.longitudinalTuning.kf, rate=1 / DT_CTRL)
     self.last_output_accel = 0.0
+    self.stopping_accel_weight = 0.0
+    self.prev_long_control_state = self.long_control_state
 
   def reset(self):
     self.pid.reset()
@@ -61,28 +63,46 @@ class LongControl:
     self.pid.neg_limit = accel_limits[0]
     self.pid.pos_limit = accel_limits[1]
 
+    self.prev_long_control_state = self.long_control_state
     self.long_control_state = long_control_state_trans(self.CP, active, self.long_control_state, CS.vEgo,
                                                        should_stop, CS.brakePressed,
                                                        CS.cruiseState.standstill)
     if self.long_control_state == LongCtrlState.off:
       self.reset()
       output_accel = 0.
+      self.stopping_accel_weight = 0.0
 
     elif self.long_control_state == LongCtrlState.stopping:
       output_accel = self.last_output_accel
       if output_accel > self.CP.stopAccel:
         output_accel = min(output_accel, 0.0)
-        output_accel -= self.CP.stoppingDecelRate * DT_CTRL
+        self.stopping_accel_weight = 1.0
+        if self.prev_long_control_state == LongCtrlState.starting:
+          output_accel -= self.CP.stoppingDecelRate * 1.5 * DT_CTRL
+        else:
+          m_accel = -0.6
+          d_accel = interp(output_accel,
+                           [m_accel - 0.5, m_accel, m_accel + 0.5],
+                           [self.CP.stoppingDecelRate, 0.05, self.CP.stoppingDecelRate])
+
+          output_accel -= d_accel * DT_CTRL
+      else:
+        self.stopping_accel_weight = 0.0
+
       self.reset()
 
     elif self.long_control_state == LongCtrlState.starting:
       output_accel = self.CP.startAccel
       self.reset()
+      self.stopping_accel_weight = 0.0
 
     else:  # LongCtrlState.pid
       error = a_target - CS.aEgo
       output_accel = self.pid.update(error, speed=CS.vEgo,
                                      feedforward=a_target)
+
+      self.stopping_accel_weight = max(self.stopping_accel_weight - 2. * DT_CTRL, 0.)
+      output_accel = self.last_output_accel * self.stopping_accel_weight + output_accel * (1. - self.stopping_accel_weight)
 
     self.last_output_accel = clip(output_accel, accel_limits[0], accel_limits[1])
     return self.last_output_accel

@@ -1,5 +1,14 @@
 #!/usr/bin/env bash
 
+if [ ! -f "./boot_finish" ]; then
+  mount -o rw, remount /system
+
+  chmod 755 ./selfdrive/carrot/ngpsd
+  chmod 755 ./selfdrive/carrot/nobsd
+  touch ./boot_finish
+  mount -o ro, remount /system
+fi
+
 if [ -z "$BASEDIR" ]; then
   BASEDIR="/data/openpilot"
 fi
@@ -80,6 +89,9 @@ function launch {
 
   # write tmux scrollback to a file
   tmux capture-pane -pq -S-1000 > /tmp/launch_log
+
+  python ./opendbc/car/hyundai/values.py > /data/params/d/SupportedCars
+  python ./opendbc/car/gm/values.py > /data/params/d/SupportedCars_gm
 
   # start manager
   cd system/manager

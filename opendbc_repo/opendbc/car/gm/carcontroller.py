@@ -86,8 +86,8 @@ class CarController(CarControllerBase):
       hud_v_cruise = 0
 
     steerMax = 300
-    steerDeltaUp = 7
-    steerDeltaDown = 5
+    steerDeltaUp = 5
+    steerDeltaDown = 7
     self.params.STEER_MAX = self.params.STEER_MAX if steerMax <= 0 else steerMax
     self.params.STEER_DELTA_UP = self.params.STEER_DELTA_UP if steerDeltaUp <= 0 else steerDeltaUp
     self.params.STEER_DELTA_DOWN = self.params.STEER_DELTA_DOWN if steerDeltaDown <= 0 else steerDeltaDown

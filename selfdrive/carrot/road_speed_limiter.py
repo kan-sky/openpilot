@@ -401,7 +401,7 @@ class SpeedLimiter:
     self.naviData = None
     self.logMonoTime = 0
 
-    self.haptic_feedback_speed_camera = Params().get_bool('HapticFeedbackWhenSpeedCamera')
+    #self.haptic_feedback_speed_camera = Params().get_bool('HapticFeedbackWhenSpeedCamera')
     self.prev_active_cam = False
     self.active_cam = False
     self.active_cam_time = time.monotonic()
@@ -435,17 +435,17 @@ class SpeedLimiter:
       limit_speed = self.naviData.camLimitSpeed
       self.active_cam = limit_speed > 0 and left_dist > 0
 
-      if self.haptic_feedback_speed_camera:
-        now = time.monotonic()
-        if self.prev_active_cam != self.active_cam:
-          self.prev_active_cam = self.active_cam
-          if self.active_cam:
-            if now - self.active_cam_time > 10.0:
-              self.active_cam_end_time = now + 1.5
-              self.active_cam_time = now
+      #if self.haptic_feedback_speed_camera:
+      #  now = time.monotonic()
+      #  if self.prev_active_cam != self.active_cam:
+      #    self.prev_active_cam = self.active_cam
+      #    if self.active_cam:
+      #      if now - self.active_cam_time > 10.0:
+      #        self.active_cam_end_time = now + 1.5
+      #        self.active_cam_time = now
 
-        if self.active_cam_end_time - time.monotonic() > 0:
-          return True
+      #  if self.active_cam_end_time - time.monotonic() > 0:
+      #    return True
 
     return False
 

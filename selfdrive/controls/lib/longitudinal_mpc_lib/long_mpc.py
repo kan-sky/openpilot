@@ -419,8 +419,8 @@ class LongitudinalMpc:
     cruise_gap = int(clip(leadDistanceBars, 1., 3.)) if leadDistanceBars > 0 else 3
     self.t_follow = interp(float(cruise_gap), CRUISE_GAP_BP, CRUISE_GAP_V)
     self.t_follow *= get_T_FOLLOW_Factor(personality)
-    stop_distance = ntune_scc_get('stopDistance')
-    comfort_brake = ntune_scc_get('comportBrake')
+    stop_distance = self.stop_distance
+    comfort_brake = self.comfortBrake
 
     # To estimate a safe distance from a moving lead, we calculate how much stopping
     # distance that lead needs as a minimum. We can add that to the current distance
@@ -499,11 +499,6 @@ class LongitudinalMpc:
     for i in range(N):
       self.solver.set(i, "yref", self.yref[i])
     self.solver.set(N, "yref", self.yref[N][:COST_E_DIM])
-
-    navi_obstacles = sm['naviObstacles']
-    for obstacle in navi_obstacles.obstacles:
-      if obstacle.valid and len(obstacle.obstacle) == 13:
-        x_obstacles = np.column_stack([x_obstacles, obstacle.obstacle])
 
     self.params[:,2] = np.min(x_obstacles, axis=1)
     self.params[:,3] = np.copy(self.prev_a)

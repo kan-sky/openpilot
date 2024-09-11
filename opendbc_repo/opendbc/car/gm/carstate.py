@@ -209,7 +209,7 @@ class CarState(CarStateBase):
       ret.vEgoCluster = cluSpeed * speed_conv
       vEgoClu, aEgoClu = self.update_clu_speed_kf(ret.vEgoCluster)
       #ret.vCluRatio = (ret.vEgo / vEgoClu) if (vEgoClu > 3. and ret.vEgo > 3.) else 1.0
-      ret.exState.vCluRatio = (ret.vEgo / vEgoClu) if (vEgoClu > 3. and ret.vEgo > 3.) else 1.0
+      ret.vCluRatio = (ret.vEgo / vEgoClu) if (vEgoClu > 3. and ret.vEgo > 3.) else 1.0
 
     # t_Follow Cruise Gap
     ret.cruiseState.leadDistanceBars = self.t_Follow_level

@@ -5,7 +5,7 @@ import threading
 
 import cereal.messaging as messaging
 
-from cereal import car
+from cereal import car, log
 
 from panda import ALTERNATIVE_EXPERIENCE
 
@@ -23,6 +23,8 @@ from openpilot.selfdrive.car.cruise import VCruiseHelper
 from openpilot.selfdrive.car.car_specific import CarSpecificEvents, MockCarState
 from openpilot.selfdrive.car.helpers import convert_carControl, convert_to_capnp
 from openpilot.selfdrive.selfdrived.events import Events, ET
+from openpilot.common.conversions import Conversions as CV
+from openpilot.selfdrive.carrot.road_speed_limiter import SpeedLimiter
 
 REPLAY = "REPLAY" in os.environ
 
@@ -69,7 +71,7 @@ class Car:
 
   def __init__(self, CI=None, RI=None) -> None:
     self.can_sock = messaging.sub_sock('can', timeout=20)
-    self.sm = messaging.SubMaster(['pandaStates', 'carControl', 'onroadEvents'])
+    self.sm = messaging.SubMaster(['pandaStates', 'carControl', 'onroadEvents', 'radarState', 'selfdriveState', 'longitudinalPlan'])
     self.pm = messaging.PubMaster(['sendcan', 'carState', 'carParams', 'carOutput', 'liveTracks'])
 
     self.can_rcv_cum_timeout_counter = 0
@@ -83,6 +85,9 @@ class Car:
     self.params = Params()
 
     self.can_callbacks = can_comm_callbacks(self.can_sock, self.pm.sock['sendcan'])
+
+    # kans
+    self.personality = self.read_personality_param()
 
     if CI is None:
       # wait for one pandaState and one CAN packet
@@ -143,6 +148,7 @@ class Car:
     self.events = Events()
 
     self.car_events = CarSpecificEvents(self.CP)
+    self.enabled = False
     self.mock_carstate = MockCarState()
     self.v_cruise_helper = VCruiseHelper(self.CP)
     # NDA
@@ -174,7 +180,7 @@ class Car:
     RD: structs.RadarData | None = self.RI.update(can_list)
 
     self.sm.update(0)
-
+    self.enabled = self.sm['selfdriveState'].enabled
     can_rcv_valid = len(can_strs) > 0
 
     # Check for CAN timeout
@@ -192,7 +198,7 @@ class Car:
       self.enable_avail = drivingGear and not self.events.contains(ET.NO_ENTRY)
 
     # TODO: mirror the carState.cruiseState struct?
-    self.v_cruise_helper.update_v_cruise(CS, self.sm['carControl'].enabled, self.is_metric)
+    self.v_cruise_helper.update_v_cruise(CS, self.sm['carControl'].enabled, self.is_metric, self)
 
 
     # NDA
@@ -229,7 +235,7 @@ class Car:
       self.carrotCruiseActivate = -1
       self.v_cruise_helper.cruiseActivate = 0
 
-    CS.vCruise = float(self.self.v_cruise_kph_limit)
+    CS.vCruise = float(self.v_cruise_kph_limit)
     CS.vCruiseCluster = float(self.v_cruise_helper.v_cruise_kph_set)
 
     return CS, RD
@@ -265,6 +271,7 @@ class Car:
     if self.slowing_down_sound_alert:
       self.events.add(EventName.slowingDownSpeedSound)
       self.slowing_down_sound_alert = False
+
     CS.events = self.events.to_msg()
 
   def state_publish(self, CS: car.CarState, RD: structs.RadarData | None):
@@ -333,10 +340,17 @@ class Car:
     self.initialized_prev = initialized
     self.CS_prev = CS.as_reader()
 
+  def read_personality_param(self):
+    try:
+      return int(self.params.get('LongitudinalPersonality'))
+    except (ValueError, TypeError):
+      return log.LongitudinalPersonality.standard
+
   def params_thread(self, evt):
     while not evt.is_set():
       self.is_metric = self.params.get_bool("IsMetric")
       self.experimental_mode = self.params.get_bool("ExperimentalMode") and self.CP.openpilotLongitudinalControl
+      self.personality = self.read_personality_param()
       time.sleep(0.1)
 
   def card_thread(self):

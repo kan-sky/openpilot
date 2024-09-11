@@ -296,6 +296,7 @@ class CarControl:
       promptRepeat = auto()
       promptDistracted = auto()
 
+      slowingDownSpeed = auto()
       # carrot
       trafficSignGreen = auto()
       trafficSignChanged = auto()

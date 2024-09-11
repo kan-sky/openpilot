@@ -12,6 +12,8 @@ from opendbc.car.interfaces import get_interface_attr
 from opendbc.car.mock.values import CAR as MOCK
 from opendbc.car.vin import get_vin, is_valid_vin, VIN_UNKNOWN
 
+from openpilot.common.params import Params
+
 FRAME_FINGERPRINT = 100  # 1s
 
 
@@ -120,6 +122,7 @@ def fingerprint(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_mu
     carlog.error({"event": "Malformed VIN", "vin": vin})
     vin = VIN_UNKNOWN
   carlog.warning("VIN %s", vin)
+  Params().put("CarVin", vin) # kans
 
   # disable OBD multiplexing for CAN fingerprinting and potential ECU knockouts
   set_obd_multiplexing(False)
@@ -195,7 +198,7 @@ def get_car(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_multip
   print(f"SelectedCar = {candidate}")
   Params().put("CarName", candidate)
 
-  CarInterface, _, _ = interfaces[candidate]
+  CarInterface, _, _, _ = interfaces[candidate]
   CP: CarParams = CarInterface.get_params(candidate, fingerprints, car_fw, experimental_long_allowed, docs=False)
   CP.carVin = vin
   CP.carFw = car_fw

@@ -11,6 +11,7 @@ from openpilot.common.swaglog import cloudlog
 
 from opendbc.car.car_helpers import get_car_interface
 from openpilot.selfdrive.controls.lib.drive_helpers import clip_curvature
+from openpilot.selfdrive.selfdrived.events import Events, ET
 from openpilot.selfdrive.controls.lib.latcontrol import LatControl, MIN_LATERAL_CONTROL_SPEED
 from openpilot.selfdrive.controls.lib.latcontrol_pid import LatControlPID
 from openpilot.selfdrive.controls.lib.latcontrol_angle import LatControlAngle, STEER_ANGLE_SATURATION_THRESHOLD
@@ -23,6 +24,7 @@ from openpilot.selfdrive.locationd.helpers import PoseCalibrator, Pose
 State = log.SelfdriveState.OpenpilotState
 LaneChangeState = log.LaneChangeState
 LaneChangeDirection = log.LaneChangeDirection
+EventName = car.OnroadEvent.EventName
 
 ACTUATOR_FIELDS = tuple(car.CarControl.Actuators.schema.fields.keys())
 
@@ -42,6 +44,7 @@ class Controls:
 
     self.steer_limited = False
     self.desired_curvature = 0.0
+    self.events = Events()
 
     self.pose_calibrator = PoseCalibrator()
     self.calibrated_pose: Pose|None = None

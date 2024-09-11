@@ -10,7 +10,7 @@ from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.realtime import DT_MDL
 from openpilot.selfdrive.modeld.constants import ModelConstants
 from openpilot.selfdrive.controls.lib.longcontrol import LongCtrlState
-from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import LongitudinalMpc
+from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import LongitudinalMpc, N
 from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import T_IDXS as T_IDXS_MPC
 from openpilot.selfdrive.controls.lib.drive_helpers import CONTROL_N, get_speed_error
 from openpilot.selfdrive.car.cruise import V_CRUISE_MAX
@@ -163,7 +163,7 @@ class LongitudinalPlanner:
     x, v, a, j = self.parse_model(sm['modelV2'], self.v_model_error)
     self.v_cruise_last = v_cruise
 
-    self.mpc.update(sm, reset_state, prev_accel_constraint, sm['radarState'],  v_cruise, x, v, a, j, personality=sm['controlsState'].personality)
+    self.mpc.update(sm, reset_state, prev_accel_constraint, sm['radarState'],  v_cruise, x, v, a, j, personality=sm['selfdriveState'].personality)
 
     self.v_desired_trajectory_full = np.interp(CONTROL_N_T_IDX, T_IDXS_MPC, self.mpc.v_solution)
     self.a_desired_trajectory_full = np.interp(CONTROL_N_T_IDX, T_IDXS_MPC, self.mpc.a_solution)
