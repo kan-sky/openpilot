@@ -165,11 +165,11 @@ class LongitudinalPlanner:
 
     self.mpc.update(sm, reset_state, prev_accel_constraint, sm['radarState'],  v_cruise, x, v, a, j, personality=sm['selfdriveState'].personality)
 
-    self.v_desired_trajectory_full = np.interp(CONTROL_N_T_IDX, T_IDXS_MPC, self.mpc.v_solution)
-    self.a_desired_trajectory_full = np.interp(CONTROL_N_T_IDX, T_IDXS_MPC, self.mpc.a_solution)
+    self.v_desired_trajectory_full = np.interp(ModelConstants.T_IDXS, T_IDXS_MPC, self.mpc.v_solution)
+    self.a_desired_trajectory_full = np.interp(ModelConstants.T_IDXS, T_IDXS_MPC, self.mpc.a_solution)
     self.v_desired_trajectory = self.v_desired_trajectory_full[:CONTROL_N]
     self.a_desired_trajectory = self.a_desired_trajectory_full[:CONTROL_N]
-    self.j_desired_trajectory = np.interp(CONTROL_N_T_IDX[:CONTROL_N], T_IDXS_MPC[:-1], self.mpc.j_solution)
+    self.j_desired_trajectory = np.interp(ModelConstants.T_IDXS[:CONTROL_N], T_IDXS_MPC[:-1], self.mpc.j_solution)
 
     # TODO counter is only needed because radar is glitchy, remove once radar is gone
     self.fcw = self.mpc.crash_cnt > 2 and not sm['carState'].standstill and not reset_state
@@ -179,10 +179,10 @@ class LongitudinalPlanner:
     # Interpolate 0.05 seconds and save as starting point for next iteration
     a_prev = self.a_desired
     if self.CP.transmissionType == TransmissionType.direct and EV_CAR:
-      self.a_desired = float(interp(self.CP.radarTimeStep, CONTROL_N_T_IDX[:CONTROL_N], self.a_desired_trajectory))
+      self.a_desired = float(interp(self.CP.radarTimeStep, CONTROL_N_T_IDX, self.a_desired_trajectory))
       self.v_desired_filter.x = self.v_desired_filter.x + self.CP.radarTimeStep * (self.a_desired + a_prev) / 2.0
     else:
-      self.a_desired = float(interp(self.dt, CONTROL_N_T_IDX[:CONTROL_N], self.a_desired_trajectory))
+      self.a_desired = float(interp(self.dt, CONTROL_N_T_IDX, self.a_desired_trajectory))
       self.v_desired_filter.x = self.v_desired_filter.x + self.dt * (self.a_desired + a_prev) / 2.0
 
   def publish(self, sm, pm):

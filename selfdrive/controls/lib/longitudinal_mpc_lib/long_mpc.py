@@ -36,15 +36,15 @@ COST_E_DIM = 5
 COST_DIM = COST_E_DIM + 1
 CONSTR_DIM = 4
 
-X_EGO_OBSTACLE_COST = 5. #3. 숫자가 클수록 정지선에 다가감
+X_EGO_OBSTACLE_COST = 3. # 숫자가 클수록 정지선에 다가감
 X_EGO_COST = 0.
 V_EGO_COST = 0.
 A_EGO_COST = 0.
 J_EGO_COST = 5.0
-A_CHANGE_COST = 150. # 200. 클수록 가속력이 줄어듬.
+A_CHANGE_COST = 120. # 200. 클수록 가속력이 줄어듬.
 DANGER_ZONE_COST = 100.
 CRASH_DISTANCE = .25
-LEAD_DANGER_FACTOR = 0.8
+LEAD_DANGER_FACTOR = 0.9
 LIMIT_COST = 1e6
 ACADOS_SOLVER_TYPE = 'SQP_RTI'
 
@@ -260,8 +260,8 @@ def gen_long_ocp():
 
 class LongitudinalMpc:
   def __init__(self, mode='acc', dt=DT_MDL):
-    self.trafficStopDistanceAdjust = 1.6 # 클수록 정지선에 다가가거나 지나치므로 적당히...
-    self.aChangeCost = 150
+    self.trafficStopDistanceAdjust = 1.3 # 클수록 정지선에 다가가거나 지나치므로 적당히...
+    self.aChangeCost = 120
     self.aChangeCostStart = 40
     #self.lo_timer = 0 
     #self.v_ego_prev = 0.0
