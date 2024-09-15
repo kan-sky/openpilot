@@ -66,9 +66,9 @@ class LongControl:
     self.pid.neg_limit = accel_limits[0]
     self.pid.pos_limit = accel_limits[1]
 
-    #self.CP.startingState = True if self.startAccelApply > 0.0 else False
-    self.CP.startAccel = 2.0 * self.startAccelApply
-    self.CP.stopAccel = -2.0 * self.stopAccelApply
+    CP.startingState = True if self.startAccelApply > 0.0 else False
+    CP.startAccel = 2.0 * self.startAccelApply
+    CP.stopAccel = -2.0 * self.stopAccelApply
 
     output_accel = self.last_output_accel
     self.long_control_state = long_control_state_trans(self.CP, active, self.long_control_state, CS.vEgo,
