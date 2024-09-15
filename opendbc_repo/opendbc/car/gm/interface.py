@@ -110,7 +110,7 @@ class CarInterface(CarInterfaceBase):
       ret.transmissionType = TransmissionType.automatic
 
     ret.longitudinalTuning.kpBP = [0., 33.]
-    ret.longitudinalTuning.kiBP = [5., 35.]
+    ret.longitudinalTuning.kiBP = [0, 20 * CV.KPH_TO_MS, 30 * CV.KPH_TO_MS, 50 * CV.KPH_TO_MS, 70 * CV.KPH_TO_MS, 120 * CV.KPH_TO_MS]
 
     if candidate in CAMERA_ACC_CAR:
       ret.experimentalLongitudinalAvailable = True
@@ -181,8 +181,8 @@ class CarInterface(CarInterfaceBase):
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
       ret.longitudinalTuning.kpBP = [0., 12.0, 17.0, 23.0, 31.0, 39.0]
       ret.longitudinalTuning.kpV = [1.5, 0.7, 0.5, 0.4, 0.3, 0.2]
-      ret.longitudinalTuning.kiBP = [0.]
-      ret.longitudinalTuning.kiV = [0.36]
+      ret.longitudinalTuning.kiBP = [0, 20 * CV.KPH_TO_MS, 30 * CV.KPH_TO_MS, 50 * CV.KPH_TO_MS, 70 * CV.KPH_TO_MS, 120 * CV.KPH_TO_MS]
+      ret.longitudinalTuning.kiV = [0.35, 0.53, 0.62, 0.7, 0.5, 0.36]
       ret.stoppingDecelRate = 2.2 # brake_travel/s while trying to stop
       ret.stopAccel = -0.5                                             
       ret.startingState = True
@@ -195,8 +195,8 @@ class CarInterface(CarInterfaceBase):
       if useEVTables: 
         ret.longitudinalTuning.kpBP = [0., 12.0, 17.0, 23.0, 31.0, 39.0]
         ret.longitudinalTuning.kpV = [1.5, 0.7, 0.5, 0.4, 0.3, 0.2]
-        ret.longitudinalTuning.kiBP = [0.]
-        ret.longitudinalTuning.kiV = [0.36]
+        ret.longitudinalTuning.kiBP = [0, 20 * CV.KPH_TO_MS, 30 * CV.KPH_TO_MS, 50 * CV.KPH_TO_MS, 70 * CV.KPH_TO_MS, 120 * CV.KPH_TO_MS]
+        ret.longitudinalTuning.kiV = [0.35, 0.53, 0.62, 0.7, 0.5, 0.36]
         ret.stoppingDecelRate = 2.1 # brake_travel/s while trying to stop
         ret.stopAccel = -0.5
         ret.startAccel = 1.2
