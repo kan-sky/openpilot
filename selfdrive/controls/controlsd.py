@@ -38,9 +38,9 @@ class Controls:
 
     self.CI = get_car_interface(self.CP)
 
-    self.sm = messaging.SubMaster(['liveParameters', 'liveTorqueParameters', 'modelV2', 'selfdriveState',
+    self.sm = messaging.SubMaster(['liveParameters', 'radarState', 'liveTorqueParameters', 'modelV2', 'selfdriveState',
                                    'liveCalibration', 'livePose', 'longitudinalPlan', 'carState', 'carOutput',
-                                   'driverMonitoringState', 'onroadEvents', 'driverAssistance'], poll='carState')
+                                   'driverMonitoringState', 'onroadEvents', 'driverAssistance'], ignore_avg_freq=ignore+['radarState'], poll='carState')
     self.pm = messaging.PubMaster(['carControl', 'controlsState'])
 
     self.steer_limited = False
@@ -78,7 +78,11 @@ class Controls:
     # Update VehicleModel
     lp = self.sm['liveParameters']
     x = max(lp.stiffnessFactor, 0.1)
-    sr = max(lp.steerRatio, 0.1)
+
+    #carrot
+    steer_ratio = 15.2 # float(self.params.get_int("SteerRatio")) / 10.0
+
+    sr = max(steer_ratio if steer_ratio > 1.0 else lp.steerRatio, 0.1)
     self.VM.update_params(x, sr)
 
     # Update Torque Params
@@ -115,7 +119,7 @@ class Controls:
 
     # accel PID loop
     pid_accel_limits = self.CI.get_pid_accel_limits(self.CP, CS.vEgo, self.v_cruise_helper.v_cruise_kph * CV.KPH_TO_MS)
-    actuators.accel = self.LoC.update(CC.longActive, CS, long_plan.aTarget, long_plan.shouldStop, pid_accel_limits)
+    actuators.accel = self.LoC.update(CC.longActive, CS, long_plan.aTarget, long_plan.shouldStop, pid_accel_limits, self.v_cruise_helper.softHoldActive)
     self.v_cruise_helper.accel_output = actuators.accel # carrot: for gas pedal
 
     # Steering PID loop and lateral MPC
@@ -165,13 +169,18 @@ class Controls:
     hudControl.setSpeed = float(CS.vCruiseCluster * CV.KPH_TO_MS)
     hudControl.speedVisible = CC.enabled
     hudControl.lanesVisible = CC.enabled
-    hudControl.leadVisible = self.sm['longitudinalPlan'].hasLead
+    #hudControl.leadVisible = self.sm['longitudinalPlan'].hasLead
+    hudControl.leadVisible = self.sm['radarState'].leadOne.radar
     #hudControl.leadDistanceBars = self.sm['selfdriveState'].personality.raw + 1
     hudControl.leadDistanceBars = CS.cruiseState.leadDistanceBars
     hudControl.visualAlert = self.sm['selfdriveState'].alertHudVisual
 
     ## carrot
     no_entry_events = self.events.contains(ET.NO_ENTRY)
+    lead_one = self.sm['radarState'].leadOne
+    hudControl.objDist = int(lead_one.dRel) if lead_one.status else 0
+    hudControl.objRelSpd = lead_one.vRel if lead_one.status else 0
+
     CC.cruiseControl.activate = self.carrotCruiseActivate > 0 and not no_entry_events
     CC.hudControl.softHold = self.v_cruise_helper.softHoldActive
     hudControl.rightLaneVisible = True
