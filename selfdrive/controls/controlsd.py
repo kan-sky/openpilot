@@ -10,6 +10,7 @@ from openpilot.common.realtime import config_realtime_process, Priority, Ratekee
 from openpilot.common.swaglog import cloudlog
 
 from opendbc.car.car_helpers import get_car_interface
+from openpilot.selfdrive.car.cruise import VCruiseHelper,
 from openpilot.selfdrive.controls.lib.drive_helpers import clip_curvature
 from openpilot.selfdrive.selfdrived.events import Events, ET
 from openpilot.selfdrive.controls.lib.latcontrol import LatControl, MIN_LATERAL_CONTROL_SPEED
@@ -59,6 +60,8 @@ class Controls:
     elif self.CP.lateralTuning.which() == 'torque':
       self.LaC = LatControlTorque(self.CP, self.CI)
 
+    # kans
+    self.v_cruise_helper = VCruiseHelper(self.CP)
     self.carrotCruiseActivate = 0 # carrot
 
   def update(self):
@@ -111,8 +114,9 @@ class Controls:
       self.LoC.reset()
 
     # accel PID loop
-    pid_accel_limits = self.CI.get_pid_accel_limits(self.CP, CS.vEgo, CS.vCruise * CV.KPH_TO_MS)
+    pid_accel_limits = self.CI.get_pid_accel_limits(self.CP, CS.vEgo, self.v_cruise_helper.v_cruise_kph * CV.KPH_TO_MS)
     actuators.accel = self.LoC.update(CC.longActive, CS, long_plan.aTarget, long_plan.shouldStop, pid_accel_limits)
+    self.v_cruise_helper.accel_output = actuators.accel # carrot: for gas pedal
 
     # Steering PID loop and lateral MPC
     self.desired_curvature = clip_curvature(CS.vEgo, self.desired_curvature, model_v2.action.desiredCurvature)
@@ -169,7 +173,7 @@ class Controls:
     ## carrot
     no_entry_events = self.events.contains(ET.NO_ENTRY)
     CC.cruiseControl.activate = self.carrotCruiseActivate > 0 and not no_entry_events
-    #CC.hudControl.softHold = self.v_cruise_helper.softHoldActive
+    CC.hudControl.softHold = self.v_cruise_helper.softHoldActive
     hudControl.rightLaneVisible = True
     hudControl.leftLaneVisible = True
     if self.sm.valid['driverAssistance']:
