@@ -236,6 +236,7 @@ class VCruiseHelper:
   #    self.sendEvent_frame = self.frame
 
   def _update_event_apilot(self, CS, car_controls):
+    self.events.clear()
     lp = car_controls.sm['longitudinalPlan']
     xState = lp.xState
     trafficState = lp.trafficState
