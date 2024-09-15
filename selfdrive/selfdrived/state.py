@@ -3,7 +3,6 @@ from openpilot.selfdrive.selfdrived.events import Events, ET
 from openpilot.common.realtime import DT_CTRL
 # kans
 from openpilot.common.params import Params
-from openpilot.selfdrive.car.cruise import VCruiseHelper
 
 State = log.SelfdriveState.OpenpilotState
 
@@ -22,12 +21,10 @@ class StateMachine:
       #self.params.remove("ExperimentalLongitudinalEnabled")
       pass
     if not self.CP.openpilotLongitudinalControl: # carrot: always remove Experimental Mode
-      self.params.remove("ExperimentalMode")
+      Params().remove("ExperimentalMode")
     self.current_alert_types = [ET.PERMANENT]
     self.state = State.disabled
     self.soft_disable_timer = 0
-    # kans
-    self.v_cruise_helper = VCruiseHelper(self.CP)
 
   def update(self, events: Events):
     # decrement the soft disable timer at every step, as it's reset on
@@ -103,7 +100,6 @@ class StateMachine:
           else:
             self.state = State.enabled
           self.current_alert_types.append(ET.ENABLE)
-          self.v_cruise_helper.initialize_v_cruise(CS, self.experimental_mode)
 
     # Check if openpilot is engaged and actuators are enabled
     enabled = self.state in ENABLED_STATES
