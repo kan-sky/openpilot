@@ -59,8 +59,8 @@ class LongControl:
     self.pid.reset()
 
   def update(self, active, CS, a_target, should_stop, accel_limits, softHoldActive):
-      self.startAccelApply = 0.8
-      self.stopAccelApply = 0.6
+    self.startAccelApply = 0.8
+    self.stopAccelApply = 0.6
       
     """Update longitudinal control. This updates the state machine and runs a PID loop"""
     self.pid.neg_limit = accel_limits[0]
