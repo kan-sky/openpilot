@@ -238,7 +238,11 @@ class Car:
       self.events.add(EventName.buttonCancel)
       self.carrotCruiseActivate = -1
       self.v_cruise_helper.cruiseActivate = 0
-
+    self.v_cruise_helper.cruiseActivate = 0
+    if not self.enabled and not self.CP.pcmCruise:
+      if self.carrotCruiseActivate > 0:
+        print(f"self.state = {self.state}, self.enabled = {self.enabled}, pcmCruise={self.CP.pcmCruise}")
+      self.carrotCruiseActivate = 0
     # kans
     CS.vCruise = float(self.v_cruise_kph_limit)
     CS.vCruiseCluster = float(self.v_cruise_helper.v_cruise_kph_set)
