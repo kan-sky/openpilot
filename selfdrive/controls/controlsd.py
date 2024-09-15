@@ -34,13 +34,17 @@ class Controls:
     self.params = Params()
     cloudlog.info("controlsd is waiting for CarParams")
     self.CP = messaging.log_from_bytes(self.params.get("CarParams", block=True), car.CarParams)
+    # kans
+    self.sensor_packets = []
     cloudlog.info("controlsd got CarParams")
 
     self.CI = get_car_interface(self.CP)
+    # kans
+    ignore = self.sensor_packets
 
     self.sm = messaging.SubMaster(['liveParameters', 'radarState', 'liveTorqueParameters', 'modelV2', 'selfdriveState',
                                    'liveCalibration', 'livePose', 'longitudinalPlan', 'carState', 'carOutput',
-                                   'driverMonitoringState', 'onroadEvents', 'driverAssistance'], ignore_avg_freq=ignore+['radarState'], poll='carState')
+                                   'driverMonitoringState', 'onroadEvents', 'driverAssistance'] + self.sensor_packets, ignore_avg_freq=ignore+['radarState'], poll='carState')
     self.pm = messaging.PubMaster(['carControl', 'controlsState'])
 
     self.steer_limited = False
