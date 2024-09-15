@@ -109,8 +109,8 @@ class CarInterface(CarInterfaceBase):
     else:
       ret.transmissionType = TransmissionType.automatic
 
-    ret.longitudinalTuning.kpBP = [0., 33.]
-    ret.longitudinalTuning.kiBP = [0, 20 * CV.KPH_TO_MS, 30 * CV.KPH_TO_MS, 50 * CV.KPH_TO_MS, 70 * CV.KPH_TO_MS, 120 * CV.KPH_TO_MS]
+    ret.longitudinalTuning.kpBP = [0.]
+    ret.longitudinalTuning.kiBP = [0.]
 
     if candidate in CAMERA_ACC_CAR:
       ret.experimentalLongitudinalAvailable = True
@@ -153,8 +153,8 @@ class CarInterface(CarInterfaceBase):
       ret.minSteerSpeed = (6.7 if useEVTables else 7) * CV.MPH_TO_MS
 
       # Tuning
-      ret.longitudinalTuning.kpV = [1.5, 0.2]
-      ret.longitudinalTuning.kiV = [3.6, 3.5]
+      ret.longitudinalTuning.kpV = [1.15]
+      ret.longitudinalTuning.kiV = [3.5]
       ret.stoppingDecelRate = 2.2
       if ret.enableGasInterceptor:
         # Need to set ASCM long limits when using pedal interceptor, instead of camera ACC long limits
@@ -167,7 +167,7 @@ class CarInterface(CarInterfaceBase):
     #                   (ret.networkLocation == NetworkLocation.gateway and ret.radarUnavailable)
 
     # Start with a baseline tuning for all GM vehicles. Override tuning as needed in each model section below.
-    ret.steerActuatorDelay = 0.25  # Default delay, not measured yet
+    ret.steerActuatorDelay = 0.28  # Default delay, not measured yet
 
     ret.steerLimitTimer = 0.4
     ret.radarTimeStep = 0.0667  # GM radar runs at 15Hz instead of standard 20Hz
@@ -177,14 +177,14 @@ class CarInterface(CarInterfaceBase):
       ret.minEnableSpeed = -1
       ret.tireStiffnessFactor = 0.469  # Stock Michelin Energy Saver A/S, LiveParameters
       ret.centerToFront = ret.wheelbase * 0.45  # Volt Gen 1, TODO corner weigh
-      ret.steerActuatorDelay = 0.38 if useEVTables else 0.4
+      ret.steerActuatorDelay = 0.28 if useEVTables else 0.3
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
-      ret.longitudinalTuning.kpBP = [0., 12.0, 17.0, 23.0, 31.0, 39.0]
-      ret.longitudinalTuning.kpV = [1.5, 0.7, 0.5, 0.4, 0.3, 0.2]
-      ret.longitudinalTuning.kiBP = [0, 20 * CV.KPH_TO_MS, 30 * CV.KPH_TO_MS, 50 * CV.KPH_TO_MS, 70 * CV.KPH_TO_MS, 120 * CV.KPH_TO_MS]
-      ret.longitudinalTuning.kiV = [0.35, 0.53, 0.62, 0.7, 0.5, 0.36]
-      ret.stoppingDecelRate = 2.2 # brake_travel/s while trying to stop
-      ret.stopAccel = -0.5                                             
+      ret.longitudinalTuning.kpBP = [0.]
+      ret.longitudinalTuning.kpV = [1.15]
+      ret.longitudinalTuning.kiBP = [0.]
+      ret.longitudinalTuning.kiV = [0.35]
+      ret.stoppingDecelRate = 0.2 # brake_travel/s while trying to stop
+      ret.stopAccel = -1.5                                             
       ret.startingState = True
       ret.startAccel = 1.5
       ret.vEgoStarting = 0.25
@@ -193,12 +193,12 @@ class CarInterface(CarInterfaceBase):
 
       # softer long tune for ev table
       if useEVTables: 
-        ret.longitudinalTuning.kpBP = [0., 12.0, 17.0, 23.0, 31.0, 39.0]
+        ret.longitudinalTuning.kpBP = [0.]
         ret.longitudinalTuning.kpV = [1.5, 0.7, 0.5, 0.4, 0.3, 0.2]
-        ret.longitudinalTuning.kiBP = [0, 20 * CV.KPH_TO_MS, 30 * CV.KPH_TO_MS, 50 * CV.KPH_TO_MS, 70 * CV.KPH_TO_MS, 120 * CV.KPH_TO_MS]
-        ret.longitudinalTuning.kiV = [0.35, 0.53, 0.62, 0.7, 0.5, 0.36]
-        ret.stoppingDecelRate = 2.1 # brake_travel/s while trying to stop
-        ret.stopAccel = -0.5
+        ret.longitudinalTuning.kiBP = [0.]
+        ret.longitudinalTuning.kiV = [0.35]
+        ret.stoppingDecelRate = 0.2 # brake_travel/s while trying to stop
+        ret.stopAccel = -1.5
         ret.startAccel = 1.2
         ret.vEgoStarting = 0.25
         ret.vEgoStopping = 0.25

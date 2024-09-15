@@ -52,32 +52,46 @@ class LongControl:
                              (CP.longitudinalTuning.kiBP, CP.longitudinalTuning.kiV),
                              k_f=CP.longitudinalTuning.kf, rate=1 / DT_CTRL)
     self.last_output_accel = 0.0
+    self.startAccelApply = 0.0
+    self.stopAccelApply = 0.0
 
   def reset(self):
     self.pid.reset()
 
-  def update(self, active, CS, a_target, should_stop, accel_limits):
+  def update(self, active, CS, a_target, should_stop, accel_limits, softHoldActive):
+      self.startAccelApply = 0.8
+      self.stopAccelApply = 0.6
+      
     """Update longitudinal control. This updates the state machine and runs a PID loop"""
     self.pid.neg_limit = accel_limits[0]
     self.pid.pos_limit = accel_limits[1]
 
+    self.CP.startingState = True if self.startAccelApply > 0.0 else False
+    self.CP.startAccel = 2.0 * self.startAccelApply
+    self.CP.stopAccel = -2.0 * self.stopAccelApply
+    output_accel = self.last_output_accel
     self.long_control_state = long_control_state_trans(self.CP, active, self.long_control_state, CS.vEgo,
                                                        should_stop, CS.brakePressed,
                                                        CS.cruiseState.standstill)
+
+    if active and softHoldActive > 0:
+      self.long_control_state = LongCtrlState.stopping
+
     if self.long_control_state == LongCtrlState.off:
-      self.reset()
+      self.reset(CS.vEgo)
       output_accel = 0.
 
     elif self.long_control_state == LongCtrlState.stopping:
-      output_accel = self.last_output_accel
       if output_accel > self.CP.stopAccel:
         output_accel = min(output_accel, 0.0)
         output_accel -= self.CP.stoppingDecelRate * DT_CTRL
-      self.reset()
+        if softHoldActive > 0:
+          output_accel = self.CP.stopAccel
+      self.reset(CS.vEgo)
 
     elif self.long_control_state == LongCtrlState.starting:
       output_accel = self.CP.startAccel
-      self.reset()
+      self.reset(CS.vEgo)
 
     else:  # LongCtrlState.pid
       error = a_target - CS.aEgo
