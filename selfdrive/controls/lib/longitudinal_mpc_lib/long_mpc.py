@@ -62,7 +62,7 @@ T_IDXS = np.array(T_IDXS_LST)
 FCW_IDXS = T_IDXS < 5.0
 T_DIFFS = np.diff(T_IDXS, prepend=[0.])
 COMFORT_BRAKE = 2.5
-STOP_DISTANCE = 6.0
+STOP_DISTANCE = 7.0
 
 class XState(Enum):
   lead = 0
@@ -114,7 +114,7 @@ def get_T_FOLLOW_Factor(personality=log.LongitudinalPersonality.standard):
   else:
     raise NotImplementedError("Longitudinal personality not supported")
 
-def get_stopped_equivalence_factor(v_lead, comfort_brake):
+def get_stopped_equivalence_factor(v_lead, comfort_brake, stop_distance=STOP_DISTANCE):
   return (v_lead**2) / (2 * comfort_brake)
 
 def get_safe_obstacle_distance(v_ego, t_follow, stop_distance, comfort_brake):
@@ -308,6 +308,7 @@ class LongitudinalMpc:
     self.u_sol = np.zeros((N,1))
     self.params = np.zeros((N+1, PARAM_DIM))
     self.t_follow = get_T_FOLLOW()
+    self.comfort_brake = self.comfortBrake
     self.xState = XState.cruise
     self.startSignCount = 0
     self.stopSignCount = 0
@@ -410,6 +411,9 @@ class LongitudinalMpc:
     v_ego = self.x0[1]
     a_ego = self.x0[2]
     self.trafficState = TrafficState.off
+    # carrot
+    self.comfort_brake = self.comfortBrake
+    applyStopDistance = self.stop_distance  * (2.0 - self.mySafeFactor)
     self.status = radarstate.leadOne.status or radarstate.leadTwo.status
 
     lead_xv_0 = self.process_lead(radarstate.leadOne)
@@ -425,8 +429,8 @@ class LongitudinalMpc:
     # To estimate a safe distance from a moving lead, we calculate how much stopping
     # distance that lead needs as a minimum. We can add that to the current distance
     # and then treat that as a stopped car/obstacle at this new distance.
-    lead_0_obstacle = lead_xv_0[:,0] + get_stopped_equivalence_factor(lead_xv_0[:,1], comfort_brake)
-    lead_1_obstacle = lead_xv_1[:,0] + get_stopped_equivalence_factor(lead_xv_1[:,1], comfort_brake)
+    lead_0_obstacle = lead_xv_0[:,0] + get_stopped_equivalence_factor(lead_xv_0[:,1], comfort_brake, applyStopDistance)
+    lead_1_obstacle = lead_xv_1[:,0] + get_stopped_equivalence_factor(lead_xv_1[:,1], comfort_brake, applyStopDistance)
 
     self.params[:,0] = ACCEL_MIN
     self.params[:,1] = self.max_a
@@ -461,7 +465,7 @@ class LongitudinalMpc:
       v_cruise_clipped = np.clip(v_cruise * np.ones(N+1),
                                  v_lower,
                                  v_upper)
-      cruise_obstacle = np.cumsum(T_DIFFS * v_cruise_clipped) + get_safe_obstacle_distance(v_cruise_clipped, self.t_follow, stop_distance, comfort_brake)
+      cruise_obstacle = np.cumsum(T_DIFFS * v_cruise_clipped) + get_safe_obstacle_distance(v_cruise_clipped, self.t_follow, stop_distance, self.comfort_brake)
       x_obstacles = np.column_stack([lead_0_obstacle, lead_1_obstacle, cruise_obstacle, x2])
       self.source = SOURCES[np.argmin(x_obstacles[0])]
 
@@ -504,7 +508,7 @@ class LongitudinalMpc:
     self.params[:,3] = np.copy(self.prev_a)
     self.params[:,4] = self.t_follow
     self.params[:,6] = stop_distance
-    self.params[:,7] = comfort_brake
+    self.params[:,7] = self.comfort_brake
 
     self.run()
     if (np.any(lead_xv_0[FCW_IDXS,0] - self.x_sol[FCW_IDXS,0] < CRASH_DISTANCE) and
@@ -516,9 +520,9 @@ class LongitudinalMpc:
     # Check if it got within lead comfort range
     # TODO This should be done cleaner
     if self.mode == 'blended':
-      if any((lead_0_obstacle - get_safe_obstacle_distance(self.x_sol[:,1], self.t_follow, stop_distance, comfort_brake)) - self.x_sol[:, 0] < 0.0):
+      if any((lead_0_obstacle - get_safe_obstacle_distance(self.x_sol[:,1], self.t_follow, stop_distance, self.comfort_brake)) - self.x_sol[:, 0] < 0.0):
         self.source = 'lead0'
-      if any((lead_1_obstacle - get_safe_obstacle_distance(self.x_sol[:,1], self.t_follow, stop_distance, comfort_brake)) - self.x_sol[:, 0] < 0.0) and \
+      if any((lead_1_obstacle - get_safe_obstacle_distance(self.x_sol[:,1], self.t_follow, stop_distance, self.comfort_brake)) - self.x_sol[:, 0] < 0.0) and \
          (lead_1_obstacle[0] - lead_0_obstacle[0]):
         self.source = 'lead1'
 
@@ -646,7 +650,7 @@ class LongitudinalMpc:
         if self.trafficState == TrafficState.green:
           self.xState = XState.e2ePrepare
         else:
-          self.comfort_brake = COMFORT_BRAKE * 0.9
+          self.comfort_brake = COMFORT_BRAKE
           #self.comfort_brake = COMFORT_BRAKE
           self.trafficStopAdjustRatio = interp(v_ego_kph, [0, 100], [1.0, 0.7])
           stop_dist = self.xStop * interp(self.xStop, [0, 100], [1.0, self.trafficStopAdjustRatio])  ##남은거리에 따라 정지거리 비율조정

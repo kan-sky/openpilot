@@ -6,7 +6,7 @@ from cereal import car, log
 import cereal.messaging as messaging
 from openpilot.common.conversions import Conversions as CV
 from openpilot.common.params import Params
-from openpilot.common.realtime import config_realtime_process, Priority, Ratekeeper
+from openpilot.common.realtime import config_realtime_process, Priority, Ratekeeper, DT_CTRL
 from openpilot.common.swaglog import cloudlog
 
 from opendbc.car.car_helpers import get_car_interface
@@ -49,6 +49,7 @@ class Controls:
 
     self.steer_limited = False
     self.desired_curvature = 0.0
+    self.CC = car.CarControl.new_message()
     self.events = Events()
 
     self.pose_calibrator = PoseCalibrator()
@@ -84,7 +85,7 @@ class Controls:
     x = max(lp.stiffnessFactor, 0.1)
 
     #carrot
-    steer_ratio = 15.2 # float(self.params.get_int("SteerRatio")) / 10.0
+    steer_ratio = float(int(Params().get("SteerRatio"))) / 10.0
 
     sr = max(steer_ratio if steer_ratio > 1.0 else lp.steerRatio, 0.1)
     self.VM.update_params(x, sr)
@@ -119,10 +120,11 @@ class Controls:
     if not CC.latActive:
       self.LaC.reset()
     if not CC.longActive:
-      self.LoC.reset()
+      self.LoC.reset(v_pid=CS.vEgo)
 
     # accel PID loop
     pid_accel_limits = self.CI.get_pid_accel_limits(self.CP, CS.vEgo, self.v_cruise_helper.v_cruise_kph * CV.KPH_TO_MS)
+    t_since_plan = (self.sm.frame - self.sm.recv_frame['longitudinalPlan']) * DT_CTRL
     actuators.accel = self.LoC.update(CC.longActive, CS, long_plan.aTarget, long_plan.shouldStop, pid_accel_limits, self.v_cruise_helper.softHoldActive)
     self.v_cruise_helper.accel_output = actuators.accel # carrot: for gas pedal
 
@@ -217,9 +219,11 @@ class Controls:
     cs.lateralPlanMonoTime = self.sm.logMonoTime['modelV2']
     cs.desiredCurvature = self.desired_curvature
     cs.longControlState = self.LoC.long_control_state
+    cs.vPid = float(self.LoC.v_pid)
     cs.upAccelCmd = float(self.LoC.pid.p)
     cs.uiAccelCmd = float(self.LoC.pid.i)
     cs.ufAccelCmd = float(self.LoC.pid.f)
+    cs.trafficLight = self.v_cruise_helper.traffic_state
     cs.forceDecel = bool((self.sm['driverMonitoringState'].awarenessStatus < 0.) or
                          (self.sm['selfdriveState'].state == State.softDisabling))
 
@@ -239,6 +243,8 @@ class Controls:
     cc_send.carControl = CC
     self.pm.send('carControl', cc_send)
 
+    # copy CarControl to pass to CarInterface on the next iteration
+    self.CC = CC
   def run(self):
     rk = Ratekeeper(100, print_delay_threshold=None)
     while True:

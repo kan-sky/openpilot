@@ -544,7 +544,7 @@
       "edescr": "0: Not used, Lane Change Speed",
       "min": 0,
       "max": 100,
-      "default": 0,
+      "default": 60,
       "unit": 5
     },
     {
@@ -607,7 +607,7 @@
       "egroup": "BUTN",
       "etitle": "Cruise Button spam1(8)",
       "edescr": "",
-      "min": 0,
+      "min": 1,
       "max": 20,
       "default": 0,
       "unit": 1
@@ -620,7 +620,7 @@
       "egroup": "BUTN",
       "etitle": "Cruise Button spam2(30)",
       "edescr": "",
-      "min": 0,
+      "min": 1,
       "max": 200,
       "default": 0,
       "unit": 1
@@ -633,7 +633,7 @@
       "egroup": "BUTN",
       "etitle": "Cruise Button spam3(1)",
       "edescr": "",
-      "min": 0,
+      "min": 1,
       "max": 20,
       "default": 0,
       "unit": 1
@@ -1103,7 +1103,7 @@
       "edescr": "Lainline mode, above curve speed",
       "min": 0,
       "max": 200,
-      "default": 90,
+      "default": 0,
       "unit": 10
     },
     {
@@ -1117,7 +1117,7 @@
       "min": 0,
       "max": 500,
       "default": 0,
-      "unit": 1
+      "unit": 10
     },
     {
       "group": "조향일반",
@@ -1130,7 +1130,7 @@
       "min": 0,
       "max": 500,
       "default": 0,
-      "unit": 1
+      "unit": 10
     },
     {
       "group": "조향일반",
@@ -1525,8 +1525,8 @@
     {
       "group": "감속제어",
       "name": "MTSCEnabled",
-      "title": "Map Turn Speed Controller",
-      "descr": "지도기반 속도제어",
+      "title": "MTSC Enabled",
+      "descr": "",
       "egroup": "SPEED",
       "etitle": "MTSC Enabled",
       "edescr": "",
@@ -1539,7 +1539,7 @@
       "group": "감속제어",
       "name": "MTSCCurvatureCheck",
       "title": "MTSC CurvatureCheck",
-      "descr": "지도기반 커브제어 사용",
+      "descr": "",
       "egroup": "SPEED",
       "etitle": "MTSC CurvatureCheck",
       "edescr": "",
@@ -1552,7 +1552,7 @@
       "group": "감속제어",
       "name": "MTSCAggressiveness",
       "title": "MTSC Aggressiveness",
-      "descr": "지도기반 커브 민감도(기본100)",
+      "descr": "",
       "egroup": "SPEED",
       "etitle": "MTSC Aggressiveness",
       "edescr": "",

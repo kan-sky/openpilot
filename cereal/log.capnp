@@ -732,6 +732,7 @@ struct ControlsState @0x97ff69c53601abf1 {
   lateralPlanMonoTime @50 :UInt64;
 
   longControlState @30 :Car.CarControl.Actuators.LongControlState;
+  vPid @2 :Float32;
   vTargetLead @3 :Float32;
   upAccelCmd @4 :Float32;
   uiAccelCmd @5 :Float32;
@@ -869,7 +870,6 @@ struct ControlsState @0x97ff69c53601abf1 {
   canMonoTimesDEPRECATED @21 :List(UInt64);
   desiredCurvatureRateDEPRECATED @62 :Float32;
   canErrorCounterDEPRECATED @57 :UInt32;
-  vPidDEPRECATED @2 :Float32;
   alertBlinkingRateDEPRECATED @42 :Float32;
   alertText1DEPRECATED @24 :Text;
   alertText2DEPRECATED @25 :Text;

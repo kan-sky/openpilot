@@ -207,11 +207,18 @@ std::unordered_map<std::string, uint32_t> keys = {
     {"SupportedCars_gm", PERSISTENT}, // kans
     {"CarSelected2", PERSISTENT},
     // carrot
+    { "LongitudinalTuningKpV", PERSISTENT },
+    { "LongitudinalTuningKiV", PERSISTENT },
+    { "LongitudinalTuningKf", PERSISTENT },
+    { "StopAccelApply", PERSISTENT },
+    { "StoppingAccel", PERSISTENT },
+    { "StartAccelApply", PERSISTENT },
     {"CustomSteerMax", PERSISTENT},
     {"CustomSteerDeltaUp", PERSISTENT},
     {"CustomSteerDeltaDown", PERSISTENT},
     {"EVTable", PERSISTENT},
     { "CarName", CLEAR_ON_MANAGER_START },
+    {"SteerRatio", PERSISTENT},
     {"LongPitch", PERSISTENT},
 };
 

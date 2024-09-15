@@ -95,6 +95,8 @@ procs = [
   PythonProcess("webjoystick", "tools.bodyteleop.web", notcar),
   # NDA
   PythonProcess("road_speed_limiter", "selfdrive.carrot.road_speed_limiter", always_run),
+  # Apilot
+  PythonProcess("carrot_man", "selfdrive.carrot.carrot_man", always_run),
 ]
 
 managed_processes = {p.name: p for p in procs}

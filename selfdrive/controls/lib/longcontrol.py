@@ -1,9 +1,12 @@
 from cereal import car
 from openpilot.common.numpy_fast import clip, interp
 from openpilot.common.realtime import DT_CTRL
-from openpilot.selfdrive.controls.lib.drive_helpers import CONTROL_N
+from openpilot.selfdrive.controls.lib.drive_helpers import CONTROL_N, apply_deadzone
 from openpilot.common.pid import PIDController
 from openpilot.selfdrive.modeld.constants import ModelConstants
+from openpilot.common.params import Params
+# kans
+import cereal.messaging as messaging
 
 CONTROL_N_T_IDX = ModelConstants.T_IDXS[:CONTROL_N]
 
@@ -51,38 +54,38 @@ class LongControl:
     self.pid = PIDController((CP.longitudinalTuning.kpBP, CP.longitudinalTuning.kpV),
                              (CP.longitudinalTuning.kiBP, CP.longitudinalTuning.kiV),
                              k_f=CP.longitudinalTuning.kf, rate=1 / DT_CTRL)
+    self.v_pid = 0.0
     self.last_output_accel = 0.0
+    self.readParamCount = 0
+    self.longitudinalTuningKpV = 1.0
+    self.longitudinalTuningKiV = 0.0
+    self.longitudinalTuningKf = 1.0
     self.startAccelApply = 0.0
     self.stopAccelApply = 0.0
 
-  def reset(self):
+  def reset(self, v_pid):
+    """Reset PID controller and change setpoint"""
     self.pid.reset()
+    self.v_pid = v_pid
 
   def update(self, active, CS, a_target, should_stop, accel_limits, softHoldActive):
-    self.startAccelApply = 0.8
-    self.stopAccelApply = 0.6
-      
+    self.readParamCount += 1
     """Update longitudinal control. This updates the state machine and runs a PID loop"""
     self.pid.neg_limit = accel_limits[0]
     self.pid.pos_limit = accel_limits[1]
 
-    CP.startingState = True if self.startAccelApply > 0.0 else False
-    CP.startAccel = 2.0 * self.startAccelApply
-    CP.stopAccel = -2.0 * self.stopAccelApply
-
-    output_accel = self.last_output_accel
     self.long_control_state = long_control_state_trans(self.CP, active, self.long_control_state, CS.vEgo,
                                                        should_stop, CS.brakePressed,
                                                        CS.cruiseState.standstill)
 
     if active and softHoldActive > 0:
       self.long_control_state = LongCtrlState.stopping
-
     if self.long_control_state == LongCtrlState.off:
       self.reset(CS.vEgo)
       output_accel = 0.
 
     elif self.long_control_state == LongCtrlState.stopping:
+      output_accel = self.last_output_accel
       if output_accel > self.CP.stopAccel:
         output_accel = min(output_accel, 0.0)
         output_accel -= self.CP.stoppingDecelRate * DT_CTRL
