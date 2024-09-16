@@ -39,12 +39,12 @@ sound_list: dict[int, tuple[str, int | None, float]] = {
   AudibleAlert.warningSoft: ("warning_soft.wav", None, MAX_VOLUME),
   AudibleAlert.warningImmediate: ("warning_immediate.wav", None, MAX_VOLUME),
 
-  AudibleAlert.trafficSignGreen: ("traffic_sign_green.wav", 1, MAX_VOLUME),
-  AudibleAlert.trafficSignChanged: ("traffic_sign_changed.wav", 1, MAX_VOLUME),
+  AudibleAlert.trafficSignGreen: ("traffic_sign_green.wav", None, MAX_VOLUME),
+  AudibleAlert.trafficSignChanged: ("traffic_sign_changed.wav", None, MAX_VOLUME),
   AudibleAlert.bsdWarning: ("audio_car_watchout.wav", None, MAX_VOLUME),
   AudibleAlert.reverseGear: ("reverse_gear.wav", 1, MAX_VOLUME),
   AudibleAlert.stopStop: ("audio_stopstop.wav", None, MAX_VOLUME),
-  AudibleAlert.stopping: ("audio_stopping.wav", 1, MAX_VOLUME),
+  AudibleAlert.stopping: ("audio_stopping.wav", None, MAX_VOLUME),
   AudibleAlert.slowingDownSpeed: ("slowing_down_speed.wav", 1, MAX_VOLUME),
 }
 
