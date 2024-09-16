@@ -137,11 +137,11 @@ class VCruiseHelper:
         self.update_button_timers(CS, enabled)
       else:
         #self.v_cruise_kph = CS.cruiseState.speed * CV.MS_TO_KPH
-        if self.params.get_int("SpeedFromPCM") == 1:
+        if int(self.params.get("SpeedFromPCM")) == 1:
           self.v_cruise_kph_set = CS.cruiseState.speedCluster * CV.MS_TO_KPH
         self._update_v_cruise_apilot(CS, car_controls)
         self.v_cruise_cluster_kph = self.v_cruise_kph
-        if self.params.get_int("SpeedFromPCM") == 0:
+        if int(self.params.get("SpeedFromPCM")) == 0:
           self._update_event_apilot(CS, car_controls)
     else:
       self.v_cruise_kph = V_CRUISE_INITIAL#V_CRUISE_UNSET
@@ -489,7 +489,7 @@ class VCruiseHelper:
             self._add_log("Button long gap pressed ..pcmCruise can't adjust")
           else:
             self._add_log("Button gap pressed ..")
-            longitudinalPersonalityMax = self.params.get_int("LongitudinalPersonalityMax")
+            longitudinalPersonalityMax = int(self.params.get("LongitudinalPersonalityMax"))
             car_controls.personality = (car_controls.personality - 1) % longitudinalPersonalityMax
             self.params.put_nonblocking('LongitudinalPersonality', str(car_controls.personality))
          
