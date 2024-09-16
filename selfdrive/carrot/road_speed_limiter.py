@@ -506,7 +506,7 @@ class SpeedLimiter:
           starting_dist = v_ego * 8.
         else:
           safe_dist = v_ego * 11.
-          starting_dist = v_ego * 22.
+          starting_dist = v_ego * 18.
 
         if self.slowing_down and self.last_limit_speed_left_dist - cam_limit_speed_left_dist < -(v_ego * 5):
           self.slowing_down = False
