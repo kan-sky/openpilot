@@ -119,7 +119,7 @@ class VCruiseHelper:
       self.cruiseEcoControl = int(self.params.get("CruiseEcoControl"))
     elif self.params_count >= 100:
 
-      self.speedFromPCM = int(self.params.get("SpeedFromPCM")0
+      self.speedFromPCM = int(self.params.get("SpeedFromPCM"))
       self.params_count = 0
   @property
   def v_cruise_initialized(self):
