@@ -47,6 +47,7 @@ def manager_init() -> None:
     ("StopAccelApply", "60"),
     ("StoppingAccel", "-50"),
     ("SteerRatio", "152"),
+    ("SpeedFromPCM", "0"),
 
     ("CompletedTrainingVersion", "0"),
     ("DisengageOnAccelerator", "0"),

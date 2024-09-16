@@ -216,6 +216,7 @@ std::unordered_map<std::string, uint32_t> keys = {
     {"CustomSteerMax", PERSISTENT},
     {"CustomSteerDeltaUp", PERSISTENT},
     {"CustomSteerDeltaDown", PERSISTENT},
+    {"SpeedFromPCM", PERSISTENT},
     {"EVTable", PERSISTENT},
     { "CarName", CLEAR_ON_MANAGER_START },
     {"SteerRatio", PERSISTENT},
