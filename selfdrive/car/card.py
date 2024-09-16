@@ -72,9 +72,9 @@ class Car:
 
   def __init__(self, CI=None, RI=None) -> None:
     self.can_sock = messaging.sub_sock('can', timeout=20)
-    # kans add 'radarState', 'selfdriveState', 'longitudinalPlan'
+    # kans add 'radarState', 'selfdriveState', 'longitudinalPlan', 'controlsState'
     self.sm = messaging.SubMaster(['pandaStates', 'carControl', 'onroadEvents', 'radarState', 'selfdriveState', 'longitudinalPlan', 'controlsState'])
-    self.pm = messaging.PubMaster(['sendcan', 'carState', 'carParams', 'carOutput', 'liveTracks', 'selfdriveState'])
+    self.pm = messaging.PubMaster(['sendcan', 'carState', 'carParams', 'carOutput', 'liveTracks'])
 
     self.can_rcv_cum_timeout_counter = 0
 
@@ -89,6 +89,7 @@ class Car:
     self.can_callbacks = can_comm_callbacks(self.can_sock, self.pm.sock['sendcan'])
 
     # kans
+    self.traffic_light = None
     self.personality = self.read_personality_param()
 
     if CI is None:
@@ -184,6 +185,7 @@ class Car:
 
     self.sm.update(0)
     self.enabled = self.sm['selfdriveState'].enabled
+    self.traffic_light = self.sm['controlsState'].trafficLight
     can_rcv_valid = len(can_strs) > 0
 
     # Check for CAN timeout
@@ -308,8 +310,7 @@ class Car:
     self.pm.send('carState', cs_send)
 
     # kans
-    self.sm.update(0)
-    self.v_cruise_helper.traffic_state = self.sm['controlsState'].trafficLight
+    self.traffic_light = self.v_cruise_helper.traffic_state
 
     if RD is not None:
       tracks_msg = messaging.new_message('liveTracks')
