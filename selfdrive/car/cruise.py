@@ -229,28 +229,28 @@ class VCruiseHelper:
 
     self.v_cruise_cluster_kph = self.v_cruise_kph
 
-  #def _make_event(self, car_controls, event_name):
-  #  if (self.frame - self.sendEvent_frame) > (5.0 / DT_CTRL) or event_name != self.sendEvent:
-  #    self.sendEvent = event_name
-  #    car_controls.events.add(event_name)
-  #    self.sendEvent_frame = self.frame
+  def _make_event(self, car_controls, event_name):
+    if (self.frame - self.sendEvent_frame) > (5.0 / DT_CTRL) or event_name != self.sendEvent:
+      self.sendEvent = event_name
+      car_controls.events.add(event_name)
+      self.sendEvent_frame = self.frame
 
   def _update_event_apilot(self, CS, car_controls):
-    self.events.clear()
+    car_controls.events.clear()
     lp = car_controls.sm['longitudinalPlan']
     xState = lp.xState
     trafficState = lp.trafficState
 
     if xState != self.xState and car_controls.enabled and self.brake_pressed_count < 0 and self.gas_pressed_count < 0: #0:lead, 1:cruise, 2:e2eCruise, 3:e2eStop, 4:e2ePrepare, 5:e2eStopped
       if xState == 3 and CS.vEgo > 5.0:
-        self.events.add(EventName.trafficStopping)  # stopping
+        self._make_event(car_controls, EventName.trafficStopping)  # stopping
       elif (xState == 4 or (xState == 2 and self.xState in [3,5])) and self.softHoldActive == 0:
-        self.events.add(EventName.trafficSignGreen) # starting
+        self._make_event(car_controls, EventName.trafficSignGreen) # starting
     self.xState = xState
 
     if trafficState != self.trafficState: #0: off, 1:red, 2:green
       if self.softHoldActive == 2 and trafficState == 2:
-        self.events.add(EventName.trafficSignChanged)
+        self._make_event(car_controls, EventName.trafficSignChanged)
     self.trafficState = trafficState
 
   def _update_lead(self, car_controls):
@@ -265,6 +265,7 @@ class VCruiseHelper:
       self.lead_vLead = 0
 
   def _update_v_cruise_apilot(self, CS, car_controls):
+
     self._update_lead(car_controls)
     self.v_ego_kph_set = int(CS.vEgoCluster * CV.MS_TO_KPH + 0.5)
     if self.v_cruise_kph_set > 200:
@@ -301,7 +302,7 @@ class VCruiseHelper:
           elif color in ["Green Light", "Left turn"]:
             traffic_green += cnf
         elif pcolor in ["Red Light", "Yellow Light"]:
-          if color in ["Green Light", "Left turn"]:
+          if color in ["Green Light"]: #, "Left turn"]:
             traffic_green_trig += cnf
             traffic_green += cnf
           elif color in ["Red Light", "Yellow Light"]:
@@ -389,7 +390,7 @@ class VCruiseHelper:
     button_kph = v_cruise_kph
     buttonEvents = CS.buttonEvents
     button_speed_up_diff = 1
-    button_speed_dn_diff = 1
+    button_speed_dn_diff = self.cruiseSpeedUnit if self.cruiseButtonMode in [1, 2, 3] else 1
 
     button_type = 0
     if self.button_cnt > 0:
@@ -445,7 +446,7 @@ class VCruiseHelper:
           if self.cruiseButtonMode in [3]:
             self.traffic_light_count = 0.5 / DT_CTRL
             self.traffic_state = 33
-            self.events.add(EventName.audioPrompt)
+            car_controls.events.add(EventName.audioPrompt)
             self._add_log("Button force decel")
           else:
             v_cruise_kph = button_kph
@@ -480,7 +481,7 @@ class VCruiseHelper:
           else:
             self.cruiseActiveReady = 1
             self.cruiseActivate = -1
-            self.events.add(EventName.audioPrompt)
+            car_controls.events.add(EventName.audioPrompt)
         elif button_type == ButtonType.cancel:
           print("************* cancel button pressed..")
         elif button_type == ButtonType.gapAdjustCruise:
@@ -506,7 +507,7 @@ class VCruiseHelper:
         else:
           self._add_log("Button cancel : Cruise OFF")
         self.autoCruiseCancelState = 1
-        self.events.add(EventName.audioPrompt)
+        car_controls.events.add(EventName.audioPrompt)
         print("autoCruiseCancelSate = {}".format(self.autoCruiseCancelState))
       else:
         self.autoCruiseCancelState = 0
@@ -604,7 +605,7 @@ class VCruiseHelper:
         self._add_log_auto_cruise("Auto Cruise Activate")
         self.cruiseActivate = 1
       elif cruiseOnDist > 0 and CS.vEgo > 0.02 and  0 < self.lead_dRel < cruiseOnDist:
-        self.events.add(EventName.stopStop)
+        self._make_event(car_controls, EventName.stopStop)
         self._add_log_auto_cruise("CruiseOnDist Activate")
         self.cruiseActivate = 1
 

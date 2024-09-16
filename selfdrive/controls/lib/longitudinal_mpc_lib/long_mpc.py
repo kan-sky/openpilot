@@ -36,7 +36,7 @@ COST_E_DIM = 5
 COST_DIM = COST_E_DIM + 1
 CONSTR_DIM = 4
 
-X_EGO_OBSTACLE_COST = 3. # 숫자가 클수록 정지선에 다가감
+X_EGO_OBSTACLE_COST = 4. # 숫자가 클수록 정지선에 다가감
 X_EGO_COST = 0.
 V_EGO_COST = 0.
 A_EGO_COST = 0.
@@ -44,7 +44,7 @@ J_EGO_COST = 5.0
 A_CHANGE_COST = 120. # 200. 클수록 가속력이 줄어듬.
 DANGER_ZONE_COST = 100.
 CRASH_DISTANCE = .25
-LEAD_DANGER_FACTOR = 0.9
+LEAD_DANGER_FACTOR = 0.8
 LIMIT_COST = 1e6
 ACADOS_SOLVER_TYPE = 'SQP_RTI'
 
@@ -62,7 +62,7 @@ T_IDXS = np.array(T_IDXS_LST)
 FCW_IDXS = T_IDXS < 5.0
 T_DIFFS = np.diff(T_IDXS, prepend=[0.])
 COMFORT_BRAKE = 2.5
-STOP_DISTANCE = 7.0
+STOP_DISTANCE = 6.0
 
 class XState(Enum):
   lead = 0
@@ -262,8 +262,8 @@ def gen_long_ocp():
 
 class LongitudinalMpc:
   def __init__(self, mode='acc', dt=DT_MDL):
-    self.trafficStopDistanceAdjust = 1.3 # 클수록 정지선에 다가가거나 지나치므로 적당히...
-    self.aChangeCost = 120
+    self.trafficStopDistanceAdjust = 1.4 # 클수록 정지선에 다가가거나 지나치므로 적당히...
+    self.aChangeCost = 140
     self.aChangeCostStart = 40
     #self.lo_timer = 0 
     #self.v_ego_prev = 0.0
@@ -653,7 +653,7 @@ class LongitudinalMpc:
         if self.trafficState == TrafficState.green:
           self.xState = XState.e2ePrepare
         else:
-          self.comfort_brake = COMFORT_BRAKE
+          self.comfort_brake = COMFORT_BRAKE * 0.9
           #self.comfort_brake = COMFORT_BRAKE
           self.trafficStopAdjustRatio = interp(v_ego_kph, [0, 100], [1.0, 0.7])
           stop_dist = self.xStop * interp(self.xStop, [0, 100], [1.0, self.trafficStopAdjustRatio])  ##남은거리에 따라 정지거리 비율조정

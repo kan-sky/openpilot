@@ -154,8 +154,8 @@ class CarInterface(CarInterfaceBase):
 
       # Tuning
       ret.longitudinalTuning.kpV = [1.15]
-      ret.longitudinalTuning.kiV = [3.5]
-      ret.stoppingDecelRate = 2.2
+      ret.longitudinalTuning.kiV = [0.35]
+      ret.stoppingDecelRate = 1.0
       if ret.enableGasInterceptor:
         # Need to set ASCM long limits when using pedal interceptor, instead of camera ACC long limits
         ret.safetyConfigs[0].safetyParam |= Panda.FLAG_GM_HW_ASCM_LONG
@@ -185,7 +185,7 @@ class CarInterface(CarInterfaceBase):
       ret.longitudinalTuning.kiV = [0.35]
       ret.longitudinalTuning.kf = 1.05
       ret.stoppingDecelRate = 0.2 # brake_travel/s while trying to stop
-      ret.stopAccel = -1.5                                             
+      ret.stopAccel = -0.5
       ret.startingState = True
       ret.startAccel = 1.5
       ret.vEgoStarting = 0.25
@@ -199,8 +199,8 @@ class CarInterface(CarInterfaceBase):
         ret.longitudinalTuning.kiBP = [0.]
         ret.longitudinalTuning.kiV = [0.35]
         ret.longitudinalTuning.kf = 1.05
-        ret.stoppingDecelRate = 0.2 # brake_travel/s while trying to stop
-        ret.stopAccel = -1.5
+        ret.stoppingDecelRate = 1.0 # brake_travel/s while trying to stop
+        ret.stopAccel = -0.5
         ret.startingState = True
         ret.startAccel = 1.5
         ret.vEgoStarting = 0.25

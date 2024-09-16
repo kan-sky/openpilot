@@ -16,8 +16,8 @@ GearShifter = structs.CarState.GearShifter
 STANDSTILL_THRESHOLD = 10 * 0.0311 * CV.KPH_TO_MS
 LongCtrlState = car.CarControl.Actuators.LongControlState # kans
 BUTTONS_DICT = {CruiseButtons.RES_ACCEL: ButtonType.accelCruise, CruiseButtons.DECEL_SET: ButtonType.decelCruise,
-                CruiseButtons.MAIN: ButtonType.altButton3, CruiseButtons.CANCEL: ButtonType.cancel}
-
+                CruiseButtons.MAIN: ButtonType.altButton3, CruiseButtons.CANCEL: ButtonType.cancel,
+                CruiseButtons.GAP_DIST: ButtonType.gapAdjustCruise}
 
 class CarState(CarStateBase):
   def __init__(self, CP):
@@ -208,7 +208,6 @@ class CarState(CarStateBase):
       cluSpeed = pt_cp.vl["SPEED_RELATED"]["ClusterSpeed"]
       ret.vEgoCluster = cluSpeed * speed_conv
       vEgoClu, aEgoClu = self.update_clu_speed_kf(ret.vEgoCluster)
-      #ret.vCluRatio = (ret.vEgo / vEgoClu) if (vEgoClu > 3. and ret.vEgo > 3.) else 1.0
       ret.vCluRatio = (ret.vEgo / vEgoClu) if (vEgoClu > 3. and ret.vEgo > 3.) else 1.0
 
     # t_Follow Cruise Gap
