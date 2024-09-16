@@ -15,7 +15,7 @@ LongCtrlState = car.CarControl.Actuators.LongControlState
 
 def long_control_state_trans(CP, active, long_control_state, v_ego,
                              should_stop, brake_pressed, cruise_standstill):
-  stopping_condition = should_stop
+  stopping_condition = should_stop or cruise_standstill or brake_pressed
   starting_condition = (not should_stop and
                         not cruise_standstill and
                         not brake_pressed)
@@ -111,7 +111,7 @@ class LongControl:
       #error = a_target - CS.aEgo
       error = long_plan.vTarget - CS.vEgo
       output_accel = self.pid.update(error, speed=CS.vEgo,
-                                     feedforward=long_plan.aTarget * 1.2))
+                                     feedforward=long_plan.aTarget * 1.2)
 
       self.stopping_accel_weight = max(self.stopping_accel_weight - 2. * DT_CTRL, 0.)
       output_accel = self.last_output_accel * self.stopping_accel_weight + output_accel * (1. - self.stopping_accel_weight)
