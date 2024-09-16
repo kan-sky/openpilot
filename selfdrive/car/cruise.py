@@ -336,7 +336,7 @@ class VCruiseHelper:
     self.traffic_light_q.append((x,y,color,cnf))
 
   def _add_log_auto_cruise(self, log):
-    if self.autoCruiseControl != 0:
+    if self.autoCruiseControl > 0:
       self._add_log(log)
 
   def _add_log(self, log):
