@@ -106,7 +106,7 @@ class VCruiseHelper:
       self.autoResumeFromGasSpeed = int(self.params.get("AutoResumeFromGasSpeed"))
       self.autoCancelFromGasMode = int(self.params.get("AutoCancelFromGasMode"))
       self.autoResumeFromBrakeReleaseTrafficSign = int(self.params.get("AutoResumeFromBrakeReleaseTrafficSign"))
-      self.autoCruiseControl = int(self.params.ge("AutoCruiseControl"))
+      self.autoCruiseControl = int(self.params.get("AutoCruiseControl"))
       self.cruiseButtonMode = int(self.params.get("CruiseButtonMode"))
       self.cruiseOnDist = float(int(self.params.get("CruiseOnDist"))) / 100.
       self.softHoldMode = int(self.params.get("SoftHoldMode"))
