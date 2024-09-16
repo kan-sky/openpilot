@@ -56,26 +56,22 @@ class LongControl:
                              k_f=CP.longitudinalTuning.kf, rate=1 / DT_CTRL)
     self.v_pid = 0.0
     self.last_output_accel = 0.0
-    self.readParamCount = 0
-    self.longitudinalTuningKpV = 1.0
-    self.longitudinalTuningKiV = 0.0
-    self.longitudinalTuningKf = 1.0
-    self.startAccelApply = 0.0
-    self.stopAccelApply = 0.0
+    self.stopping_accel_weight = 0.0
+    self.prev_long_control_state = self.long_control_state
 
   def reset(self, v_pid):
     """Reset PID controller and change setpoint"""
     self.pid.reset()
     self.v_pid = v_pid
 
-  def update(self, active, CS, a_target, should_stop, accel_limits, softHoldActive):
-    self.readParamCount += 1
+  def update(self, active, CS, long_plan, accel_limits, softHoldActive):
     """Update longitudinal control. This updates the state machine and runs a PID loop"""
     self.pid.neg_limit = accel_limits[0]
     self.pid.pos_limit = accel_limits[1]
 
+    self.prev_long_control_state = self.long_control_state
     self.long_control_state = long_control_state_trans(self.CP, active, self.long_control_state, CS.vEgo,
-                                                       should_stop, CS.brakePressed,
+                                                       long_plan.shouldStop, CS.brakePressed,
                                                        CS.cruiseState.standstill)
 
     if active and softHoldActive > 0:
@@ -83,24 +79,42 @@ class LongControl:
     if self.long_control_state == LongCtrlState.off:
       self.reset(CS.vEgo)
       output_accel = 0.
+      self.stopping_accel_weight = 0.0
 
     elif self.long_control_state == LongCtrlState.stopping:
       output_accel = self.last_output_accel
       if output_accel > self.CP.stopAccel:
         output_accel = min(output_accel, 0.0)
-        output_accel -= self.CP.stoppingDecelRate * DT_CTRL
-        if softHoldActive > 0:
-          output_accel = self.CP.stopAccel
+        self.stopping_accel_weight = 1.0
+        if self.prev_long_control_state == LongCtrlState.starting:
+          output_accel -= self.CP.stoppingDecelRate * 1.5 * DT_CTRL
+          if softHoldActive > 0:
+            output_accel = self.CP.stopAccel
+        else:
+          m_accel = -0.6
+          d_accel = interp(output_accel,
+                           [m_accel - 0.5, m_accel, m_accel + 0.5],
+                           [self.CP.stoppingDecelRate, 0.05, self.CP.stoppingDecelRate])
+
+          output_accel -= d_accel * DT_CTRL
+      else:
+        self.stopping_accel_weight = 0.0
+
       self.reset(CS.vEgo)
 
     elif self.long_control_state == LongCtrlState.starting:
       output_accel = self.CP.startAccel
       self.reset(CS.vEgo)
+      self.stopping_accel_weight = 0.0
 
     else:  # LongCtrlState.pid
-      error = a_target - CS.aEgo
+      #error = a_target - CS.aEgo
+      error = long_plan.vTarget - CS.vEgo
       output_accel = self.pid.update(error, speed=CS.vEgo,
-                                     feedforward=a_target)
+                                     feedforward=long_plan.aTarget * 1.2))
+
+      self.stopping_accel_weight = max(self.stopping_accel_weight - 2. * DT_CTRL, 0.)
+      output_accel = self.last_output_accel * self.stopping_accel_weight + output_accel * (1. - self.stopping_accel_weight)
 
     self.last_output_accel = clip(output_accel, accel_limits[0], accel_limits[1])
     return self.last_output_accel
