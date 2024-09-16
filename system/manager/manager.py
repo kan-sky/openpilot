@@ -54,9 +54,9 @@ def manager_init() -> None:
     ("SoftHoldMode", "0"),       
     ("AutoSpeedUptoRoadSpeedLimit", "100"),
     ("CruiseButtonMode", "0"),      
-    ("CruiseSpeedUnit", "10"),
-    ("CruiseSpeedMin", "10"),
-    ("CruiseEcoControl", "2"),
+    ("CruiseSpeedUnit", "5"),
+    ("CruiseSpeedMin", "0"),
+    ("CruiseEcoControl", "1"),
     ("CruiseOnDist", "500"),
 
     ("CompletedTrainingVersion", "0"),
