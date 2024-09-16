@@ -176,7 +176,7 @@ class Controls:
 
     hudControl = CC.hudControl
     if self.CP.pcmCruise:
-      hudControl.setSpeed = max(30/3.6, setSpeed if self.v_cruise_helper.speedFromPCM != 2 else float(self.v_cruise_helper.v_cruise_cluster_kph * CV.KPH_TO_MS) # float(v_cruise_kph_long * CV.KPH_TO_MS)) # kans
+      hudControl.setSpeed = max(30/3.6, setSpeed if self.v_cruise_helper.speedFromPCM != 2 else float(self.v_cruise_helper.v_cruise_cluster_kph * CV.KPH_TO_MS)) # float(v_cruise_kph_long * CV.KPH_TO_MS)) # kans
     else:
       hudControl.setSpeed = setSpeed if self.v_cruise_helper.xState == 3 else float(self.v_cruise_helper.v_cruise_cluster_kph * CV.KPH_TO_MS) # float(v_cruise_kph_long * CV.KPH_TO_MS)) # kans
     # Comma-> hudControl.setSpeed = float(CS.vCruiseCluster * CV.KPH_TO_MS)
