@@ -154,7 +154,7 @@
       "edescr": "",
       "min": 0,
       "max": 10,
-      "default": 2,
+      "default": 1,
       "unit": 1
     },
     {
@@ -165,9 +165,9 @@
       "egroup": "CRUISE",
       "etitle": "CruiseSpeedMin(2)",
       "edescr": "",
-      "min": 5,
+      "min": 0,
       "max": 50,
-      "default": 10,
+      "default": 0,
       "unit": 5
     },
     {
@@ -659,7 +659,7 @@
       "egroup": "CRUISE",
       "etitle": "GasCruiseON:Speed",
       "edescr": "",
-      "min": 5,
+      "min": 0,
       "max": 140,
       "default": 0,
       "unit": 5
@@ -1181,7 +1181,7 @@
       "edescr": "0:NotUsed,1:Use,2:SCC control",
       "min": 0,
       "max": 2,
-      "default": 1,
+      "default": 0,
       "unit": 1
     },
     {

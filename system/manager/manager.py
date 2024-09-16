@@ -19,7 +19,6 @@ from openpilot.common.swaglog import cloudlog, add_file_handler
 from openpilot.system.version import get_build_metadata, terms_version, training_version
 
 
-
 def manager_init() -> None:
   save_bootlog()
 
@@ -48,6 +47,17 @@ def manager_init() -> None:
     ("StoppingAccel", "-50"),
     ("SteerRatio", "152"),
     ("SpeedFromPCM", "0"),
+    ("AutoCruiseControl", "0"),    
+    ("AutoResumeFromGasSpeed", "0"),
+    ("AutoCancelFromGasMode", "0"),    
+    ("AutoResumeFromBrakeReleaseTrafficSign", "0"),
+    ("SoftHoldMode", "0"),       
+    ("AutoSpeedUptoRoadSpeedLimit", "100"),
+    ("CruiseButtonMode", "0"),      
+    ("CruiseSpeedUnit", "10"),
+    ("CruiseSpeedMin", "10"),
+    ("CruiseEcoControl", "2"),
+    ("CruiseOnDist", "500"),
 
     ("CompletedTrainingVersion", "0"),
     ("DisengageOnAccelerator", "0"),

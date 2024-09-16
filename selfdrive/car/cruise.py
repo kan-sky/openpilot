@@ -82,41 +82,44 @@ class VCruiseHelper:
 
     # carrot params
     self.params_count = 0
-    self.autoResumeFromGasSpeed = 0 # 자동인게이지 속도를 임의로 정함(0km/h)
-    self.autoCancelFromGasMode = 0 # 가스페달에도 크루즈유지 모드로 임의설정
-    self.autoResumeFromBrakeReleaseTrafficSign = 0 # 언브레이크시 오토크루즈 OFF
-    self.autoCruiseControl = 0 # 벌트는 사용하지 않음
-    self.cruiseButtonMode = 0
-    self.autoSpeedUptoRoadSpeedLimit = 1 # 기본값 100%, 즉, 1곱하기.
-    self.cruiseOnDist = 5 # 크루주온 거리 5미터로 임의설정
-    self.softHoldMode = True # 소프트홀드 사용함으로 임의설정
-    self.cruiseSpeedMin = 0 # 크루즈 최소속도 임의설정
+    self.autoResumeFromGasSpeed = int(self.params.get("AutoResumeFromGasSpeed"))
+    self.autoCancelFromGasMode = int(self.params.get("AutoCancelFromGasMode"))
+    self.autoResumeFromBrakeReleaseTrafficSign = int(self.params.get("AutoResumeFromBrakeReleaseTrafficSign"))
+    self.autoCruiseControl = int(self.params.get("AutoCruiseControl"))
+    self.cruiseButtonMode = int(self.params.get("CruiseButtonMode"))
+    self.autoSpeedUptoRoadSpeedLimit = float(int(self.params.get("AutoSpeedUptoRoadSpeedLimit"))) * 0.01
+    self.cruiseOnDist = float(int(self.params.get("CruiseOnDist", encoding="utf8"))) / 100.
+    self.softHoldMode = int(self.params.get("SoftHoldMode"))
+    self.cruiseSpeedMin = int(self.params.get("CruiseSpeedMin"))
+    
+    self.speedFromPCM = int(self.params.get("SpeedFromPCM"))
+    self.cruiseEcoControl = int(self.params.get("CruiseEcoControl"))
+    self.cruiseSpeedUnit = int(self.params.get("CruiseSpeedUnit"))
 
-    self.speedFromPCM = 0 # 벌트는 사용하지 않음.
-    self.cruiseEcoControl = 0.2 # 크루즈연비 .2km/h로 임의설정
-    self.cruiseSpeedUnit = 5
+
   def _params_update(self, car_controls):
     self.frame += 1
     self.params_count += 1
     if self.params_count == 10:
       pass
     elif self.params_count == 20:
-      self.autoResumeFromGasSpeed = 0 # 자동인게이지 속도를 임의로 정함(0km/h)
-      self.autoCancelFromGasMode = 0 # 가스페달에도 크루즈유지 모드로 임의설정
-      self.autoResumeFromBrakeReleaseTrafficSign = 0 # 언브레이크시 오토크루즈 OFF
-      self.autoCruiseControl = 0 # 벌트는 사용하지 않음
-      self.cruiseButtonMode = 0
-      self.cruiseOnDist = 5 # 크루주온 거리 5미터로 임의설정
-      self.softHoldMode = True # 소프트홀드 사용함으로 임의설정
-      self.cruiseSpeedMin = 0
+      self.autoResumeFromGasSpeed = int(self.params.get("AutoResumeFromGasSpeed"))
+      self.autoCancelFromGasMode = int(self.params.get("AutoCancelFromGasMode"))
+      self.autoResumeFromBrakeReleaseTrafficSign = int(self.params.get("AutoResumeFromBrakeReleaseTrafficSign"))
+      self.autoCruiseControl = int(self.params.ge("AutoCruiseControl"))
+      self.cruiseButtonMode = int(self.params.get("CruiseButtonMode"))
+      self.cruiseOnDist = float(int(self.params.get("CruiseOnDist"))) / 100.
+      self.softHoldMode = int(self.params.get("SoftHoldMode"))
+      self.cruiseSpeedMin = int(self.params.get("CruiseSpeedMin"))
     elif self.params_count == 30:
-      self.autoSpeedUptoRoadSpeedLimit = 1 # 기본값 100%, 즉, 1곱하기.
+      self.autoSpeedUptoRoadSpeedLimit = float(int(self.params.get("AutoSpeedUptoRoadSpeedLimit"))) * 0.01
     elif self.params_count == 40:
-      self.cruiseSpeedUnit = 5
+      self.cruiseSpeedUnit = int(self.params.get("CruiseSpeedUnit"))
     elif self.params_count == 50:
-      self.cruiseEcoControl = 0.2 # 크루즈연비 .2km/h로 임의설정
+      self.cruiseEcoControl = int(self.params.get("CruiseEcoControl"))
     elif self.params_count >= 100:
-      self.speedFromPCM = 0 # 벌트는 사용하지 않음.
+
+      self.speedFromPCM = int(self.params.get("SpeedFromPCM")0
       self.params_count = 0
   @property
   def v_cruise_initialized(self):
@@ -130,11 +133,11 @@ class VCruiseHelper:
     if CS.cruiseState.available:
       if not self.CP.pcmCruise:
         # if stock cruise is completely disabled, then we can use our own set speed logic
-        self._update_v_cruise_non_pcm(CS, enabled, is_metric)
+        #self._update_v_cruise_non_pcm(CS, enabled, is_metric)
         self._update_v_cruise_apilot(CS, car_controls)
         self.v_cruise_cluster_kph = self.v_cruise_kph
         self._update_event_apilot(CS, car_controls)
-        self.update_button_timers(CS, enabled)
+        #self.update_button_timers(CS, enabled)
       else:
         #self.v_cruise_kph = CS.cruiseState.speed * CV.MS_TO_KPH
         if int(self.params.get("SpeedFromPCM")) == 1:
@@ -224,8 +227,10 @@ class VCruiseHelper:
     # 250kph or above probably means we never had a set speed
     if any(b.type in (ButtonType.accelCruise, ButtonType.resumeCruise) for b in CS.buttonEvents) and self.v_cruise_kph_last < 250:
       self.v_cruise_kph = self.v_cruise_kph_set = self.v_cruise_kph_last
+      self._add_log("Button init speed...{:.0f}".format(self.v_cruise_kph))
     else:
       self.v_cruise_kph = self.v_cruise_kph_set = int(round(clip(CS.vEgo * CV.MS_TO_KPH, initial, self.cruiseSpeedMax)))
+      self._add_log("Button init current speed...{:.0f}".format(self.v_cruise_kph))
 
     self.v_cruise_cluster_kph = self.v_cruise_kph
 
@@ -424,11 +429,11 @@ class VCruiseHelper:
         button_type = ButtonType.cancel
         self.button_cnt = 0          
       elif self.button_prev == ButtonType.accelCruise:
-        button_kph += V_CRUISE_DELTA - (button_kph % V_CRUISE_DELTA)
+        button_kph += V_CRUISE_DELTA - button_kph % V_CRUISE_DELTA
         button_type = ButtonType.accelCruise
         self.button_cnt %= self.button_long_time
       elif self.button_prev == ButtonType.decelCruise:
-        button_kph -= V_CRUISE_DELTA - (-button_kph % V_CRUISE_DELTA)
+        button_kph -= V_CRUISE_DELTA - -button_kph % V_CRUISE_DELTA
         button_type = ButtonType.decelCruise
         self.button_cnt %= self.button_long_time
       elif self.button_prev == ButtonType.gapAdjustCruise:
