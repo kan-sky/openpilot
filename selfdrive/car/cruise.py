@@ -312,19 +312,19 @@ class VCruiseHelper:
     if traffic_red_trig > 0:
       self.traffic_state = 11
       self._add_log("Red light triggered")
-      #print("Red light triggered")
+
     elif traffic_green_trig > 0 and traffic_green > traffic_red:  #주변에 red light의 cnf보다 더 크면 출발... 감지오류로 출발하는경우가 생김.
       self.traffic_state = 22
       self._add_log("Green light triggered")
-      #print("Green light triggered")
+
     elif traffic_red > 0:
       self.traffic_state = 1
       self._add_log("Red light continued")
-      #print("Red light continued")
+
     elif traffic_green > 0:
       self.traffic_state = 2
       self._add_log("Green light continued")
-      #print("Green light continued")
+
     else:
       pass
 

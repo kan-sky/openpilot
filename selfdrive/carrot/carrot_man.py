@@ -41,7 +41,7 @@ class CarrotMan:
     is_tmux_sent = False
     sm = messaging.SubMaster(['deviceState'])
 
-    self.save_toggle_values()
+    #self.save_toggle_values()
 
     while True:
       try:
@@ -120,7 +120,7 @@ class CarrotMan:
       print(f"ftp sending error...: {e}")
 
     if send_settings:
-      self.save_toggle_values()
+      #self.save_toggle_values()
       try:
         #with open("/data/backup_params.json", "rb") as file:
         with open("/data/toggle_values.json", "rb") as file:
@@ -143,11 +143,11 @@ class CarrotMan:
       else:
         time.sleep(1)
 
-  def save_toggle_values(self):
+  """def save_toggle_values(self):
     #toggle_values = fleet.get_all_toggle_values()
     file_path = os.path.join('/data', 'toggle_values.json')
     with open(file_path, 'w') as file:
-      json.dump(toggle_values, file, indent=2) 
+      json.dump(toggle_values, file, indent=2) """
 
   def carrot_cmd_zmq(self):
 
