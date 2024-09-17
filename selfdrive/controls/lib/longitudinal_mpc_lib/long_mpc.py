@@ -41,7 +41,7 @@ X_EGO_COST = 0.
 V_EGO_COST = 0.
 A_EGO_COST = 0.
 J_EGO_COST = 5.0
-A_CHANGE_COST = 120. # 200. 클수록 가속력이 줄어듬.
+A_CHANGE_COST = 150. # 200. 클수록 가속력이 줄어듬.
 DANGER_ZONE_COST = 100.
 CRASH_DISTANCE = .25
 LEAD_DANGER_FACTOR = 0.8
@@ -223,7 +223,7 @@ def gen_long_ocp():
 
   x0 = np.zeros(X_DIM)
   ocp.constraints.x0 = x0
-  ocp.parameter_values = np.array([-1.2, 1.2, 0.0, 0.0, get_T_FOLLOW(), LEAD_DANGER_FACTOR, STOP_DISTANCE, COMFORT_BRAKE])
+  ocp.parameter_values = np.array([-1.2, 1.2, 0.0, 0.0, get_T_FOLLOW(), LEAD_DANGER_FACTOR, stop_distance, comfort_brake])
 
 
   # We put all constraint cost weights to 0 and only set them at runtime
@@ -262,8 +262,8 @@ def gen_long_ocp():
 
 class LongitudinalMpc:
   def __init__(self, mode='acc', dt=DT_MDL):
-    self.trafficStopDistanceAdjust = 1.4 # 클수록 정지선에 다가가거나 지나치므로 적당히...
-    self.aChangeCost = 140
+    self.trafficStopDistanceAdjust = 1.5 # 클수록 정지선에 다가가거나 지나치므로 적당히...
+    self.aChangeCost = 150
     self.aChangeCostStart = 40
     #self.lo_timer = 0 
     #self.v_ego_prev = 0.0
@@ -451,13 +451,8 @@ class LongitudinalMpc:
 
     # Update in ACC mode or ACC/e2e blend
     if self.mode == 'acc':
+      self.params[:,5] = LEAD_DANGER_FACTOR
 
-      if radarstate.leadOne.status:
-        lead_danger_factor = interp(radarstate.leadOne.dRel, [STOP_DISTANCE, 10.], [0.85, LEAD_DANGER_FACTOR])
-      else:
-        lead_danger_factor = LEAD_DANGER_FACTOR
-
-      self.params[:,5] = lead_danger_factor
       adjustDist = self.trafficStopDistanceAdjust if v_ego > 0.1 else -2.0
       x2 = stop_x * np.ones(N+1) + adjustDist
 
@@ -510,7 +505,7 @@ class LongitudinalMpc:
     self.params[:,2] = np.min(x_obstacles, axis=1)
     self.params[:,3] = np.copy(self.prev_a)
     self.params[:,4] = self.t_follow
-    self.params[:,6] = stop_distance
+    self.params[:,6] = applyStopDistance
     self.params[:,7] = self.comfort_brake
 
     self.run()
