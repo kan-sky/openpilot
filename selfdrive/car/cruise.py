@@ -307,7 +307,7 @@ class VCruiseHelper:
           elif color in ["Green Light", "Left turn"]:
             traffic_green += cnf
         elif pcolor in ["Red Light", "Yellow Light"]:
-          if color in ["Green Light"]: #, "Left turn"]:
+          if color in ["Green Light", "Left turn"]:
             traffic_green_trig += cnf
             traffic_green += cnf
           elif color in ["Red Light", "Yellow Light"]:
@@ -317,7 +317,7 @@ class VCruiseHelper:
     if traffic_red_trig > 0:
       self.traffic_state = 11
       self._add_log("Red light triggered")
-      self.events.add(EventName.trafficStopping)  # stopping
+
     elif traffic_green_trig > 0 and traffic_green > traffic_red:  #주변에 red light의 cnf보다 더 크면 출발... 감지오류로 출발하는경우가 생김.
       self.traffic_state = 22
       self._add_log("Green light triggered")
@@ -325,7 +325,7 @@ class VCruiseHelper:
     elif traffic_red > 0:
       self.traffic_state = 1
       self._add_log("Red light continued")
-      self.events.add(EventName.trafficStopping)  # stopping
+
     elif traffic_green > 0:
       self.traffic_state = 2
       self._add_log("Green light continued")
