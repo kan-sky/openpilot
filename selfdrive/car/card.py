@@ -282,6 +282,22 @@ class Car:
     if self.slowing_down_sound_alert:
       self.events.add(EventName.slowingDownSpeedSound)
       self.slowing_down_sound_alert = False
+    # kans: traffic event
+    lp = self.sm['longitudinalPlan']
+    xState = lp.xState
+    trafficState = lp.trafficState
+
+    if xState != self.v_cruise_helper.xState and self.enabled and self.v_cruise_helper.brake_pressed_count < 0 and self.v_cruise_helper.gas_pressed_count < 0: #0:lead, 1:cruise, 2:e2eCruise, 3:e2eStop, 4:e2ePrepare, 5:e2eStopped
+      if xState == 3 and CS.vEgo > 5.0:
+        self.events.add(EventName.trafficStopping)  # stopping
+      elif (xState == 4 or (xState == 2 and self.v_cruise_helper.xState in [3,5])) and self.v_cruise_helper.softHoldActive == 0:
+        self.events.add(EventName.trafficSignGreen) # starting
+    self.v_cruise_helper.xState = xState
+
+    if trafficState != self.v_cruise_helper.trafficState: #0: off, 1:red, 2:green
+      if self.v_cruise_helper.softHoldActive == 2 and trafficState == 2:
+        self.events.add(EventName.trafficSignChanged)
+    self.v_cruise_helper.trafficState = trafficState
 
     CS.events = self.events.to_msg()
 
