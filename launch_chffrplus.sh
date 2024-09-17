@@ -5,6 +5,9 @@ if [ ! -f "./boot_finish" ]; then
 
   chmod 755 ./selfdrive/carrot/ngpsd
   chmod 755 ./selfdrive/carrot/nobsd
+  chmod 755 ./selfdrive/carrot/carrot_man.py
+  chmod 755 ./selfdrive/apilot.py
+  chmod 755 ./selfdrive/debug/debug_console_carrot.py
   touch ./boot_finish
   mount -o ro, remount /system
 fi
