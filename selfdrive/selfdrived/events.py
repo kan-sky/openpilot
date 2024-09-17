@@ -944,22 +944,30 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
   },
 
   EventName.trafficSignGreen: {
-    ET.WARNING: EngagementAlert(AudibleAlert.trafficSignGreen),
+    ET.PERMANENT: Alert(
+      "출발합니다!",
+      "",
+      AlertStatus.normal, AlertSize.small,
+      Priority.MID, VisualAlert.none, AudibleAlert.trafficSignGreen, 2.),
   },
 
   EventName.trafficSignChanged: {
-    ET.WARNING: Alert(
-      "신호가바뀌었어요.",
+    ET.PERMANENT: Alert(
+      "신호 바뀌었어요!",
       "",
       AlertStatus.normal, AlertSize.small,
-      Priority.LOW, VisualAlert.none, AudibleAlert.trafficSignChanged, 1.),
+      Priority.MID, VisualAlert.none, AudibleAlert.trafficSignChanged, 1.),
   },
 
   EventName.audioPrompt: {
      ET.WARNING: EngagementAlert(AudibleAlert.prompt),
   },
   EventName.trafficStopping: {
-    ET.WARNING: EngagementAlert(AudibleAlert.stopping),
+    ET.PERMANENT: Alert(
+      "정지합니다!",
+      "",
+      AlertStatus.normal, AlertSize.small,
+      Priority.MID, VisualAlert.none, AudibleAlert.stopping, 3.),
   },
 
   EventName.stopStop: {
