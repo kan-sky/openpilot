@@ -167,19 +167,12 @@ class Controls:
       elif CC.cruiseControl.cancel: 
         if self.carrotCruiseActivate > 0:
           CC.cruiseControl.cancel = False
-    setSpeed = float(self.v_cruise_helper.v_cruise_cluster_kph * CV.KPH_TO_MS) # carrot
     speeds = self.sm['longitudinalPlan'].speeds
     if len(speeds):
       CC.cruiseControl.resume = CC.enabled and CS.cruiseState.standstill and speeds[-1] > 0.1
-      vCluRatio = CS.vCluRatio if CS.vCluRatio > 0.5 else 1.0 # carrot
-      setSpeed = speeds[-1] / vCluRatio # carrot
 
     hudControl = CC.hudControl
-    if self.CP.pcmCruise:
-      hudControl.setSpeed = max(30/3.6, setSpeed if self.v_cruise_helper.speedFromPCM != 2 else float(self.v_cruise_helper.v_cruise_cluster_kph * CV.KPH_TO_MS)) # float(v_cruise_kph_long * CV.KPH_TO_MS)) # kans
-    else:
-      hudControl.setSpeed = setSpeed if self.v_cruise_helper.xState == 3 else float(self.v_cruise_helper.v_cruise_cluster_kph * CV.KPH_TO_MS) # float(v_cruise_kph_long * CV.KPH_TO_MS)) # kans
-    # Comma-> hudControl.setSpeed = float(CS.vCruiseCluster * CV.KPH_TO_MS)
+    hudControl.setSpeed = float(CS.vCruiseCluster * CV.KPH_TO_MS)
     hudControl.speedVisible = CC.enabled
     hudControl.lanesVisible = CC.enabled
     #hudControl.leadVisible = self.sm['longitudinalPlan'].hasLead
