@@ -29,7 +29,7 @@ from openpilot.selfdrive.carrot.road_speed_limiter import SpeedLimiter
 
 REPLAY = "REPLAY" in os.environ
 
-State = log.ControlsState.OpenpilotState
+State = log.SelfdriveState.OpenpilotState
 ACTIVE_STATES = (State.enabled, State.softDisabling, State.overriding)
 ENABLED_STATES = (State.preEnabled, *ACTIVE_STATES)
 EventName = car.OnroadEvent.EventName
