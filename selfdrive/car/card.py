@@ -286,7 +286,7 @@ class Car:
 
     # kans: NDA event
     if self.slowing_down_sound_alert:
-      self.events.add(EventName.slowingDownSpeedSound)
+      self.events.add(EventName.speedDown)
       self.slowing_down_sound_alert = False
     # kans: traffic event
     lp = self.sm['longitudinalPlan']

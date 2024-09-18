@@ -969,7 +969,9 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
       AlertStatus.normal, AlertSize.small,
       Priority.MID, VisualAlert.none, AudibleAlert.stopping, 3.),
   },
-
+  EventName.speedDown: {
+     ET.WARNING: EngagementAlert(AudibleAlert.speedDown),
+  },
   EventName.stopStop: {
      ET.WARNING: EngagementAlert(AudibleAlert.stopStop),
   },
