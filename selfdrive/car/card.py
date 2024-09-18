@@ -29,6 +29,9 @@ from openpilot.selfdrive.carrot.road_speed_limiter import SpeedLimiter
 
 REPLAY = "REPLAY" in os.environ
 
+State = log.ControlsState.OpenpilotState
+ACTIVE_STATES = (State.enabled, State.softDisabling, State.overriding)
+ENABLED_STATES = (State.preEnabled, *ACTIVE_STATES)
 EventName = car.OnroadEvent.EventName
 
 # forward
@@ -151,7 +154,8 @@ class Car:
     self.events = Events()
 
     self.car_events = CarSpecificEvents(self.CP)
-    self.enabled = False
+    self.state = State.disabled # kans
+    self.enabled = False # kans
 
     self.mock_carstate = MockCarState()
     self.v_cruise_helper = VCruiseHelper(self.CP)
@@ -184,8 +188,11 @@ class Car:
     RD: structs.RadarData | None = self.RI.update(can_list)
 
     self.sm.update(0)
-    self.enabled = self.sm['selfdriveState'].enabled
+    # kans
+    #self.enabled = self.sm['selfdriveState'].enabled
+    self.enabled = self.sm['carControl'].enabled
     self.traffic_light = self.sm['controlsState'].trafficLight
+
     can_rcv_valid = len(can_strs) > 0
 
     # Check for CAN timeout
@@ -194,7 +201,7 @@ class Car:
 
     if can_rcv_valid and REPLAY:
       self.can_log_mono_time = messaging.log_from_bytes(can_strs[0]).logMonoTime
-
+    # kans
     gear = car.CarState.GearShifter
     drivingGear = CS.gearShifter not in (gear.neutral, gear.park, gear.reverse, gear.unknown)
     if self.CP.pcmCruise:
@@ -203,9 +210,7 @@ class Car:
       self.enable_avail = drivingGear and not self.events.contains(ET.NO_ENTRY)
 
     # TODO: mirror the carState.cruiseState struct?
-    # kans
-    self.v_cruise_helper.update_v_cruise(CS, self.sm['carControl'].enabled, self.is_metric, self)
-
+    self.v_cruise_helper.update_v_cruise(CS, self.enabled, self.is_metric, self) # kans
 
     # NDA
     apply_limit_speed, road_limit_speed, left_dist, first_started, cam_type, max_speed_log = \
@@ -240,14 +245,15 @@ class Car:
       self.events.add(EventName.buttonCancel)
       self.carrotCruiseActivate = -1
       self.v_cruise_helper.cruiseActivate = 0
+    self.enabled = self.state in ENABLED_STATES
     self.v_cruise_helper.cruiseActivate = 0
     if not self.enabled and not self.CP.pcmCruise:
       if self.carrotCruiseActivate > 0:
         print(f"self.state = {self.state}, self.enabled = {self.enabled}, pcmCruise={self.CP.pcmCruise}")
       self.carrotCruiseActivate = 0
     # kans
-    CS.vCruise = float(self.v_cruise_kph_limit)
-    CS.vCruiseCluster = float(self.v_cruise_helper.v_cruise_kph_set)
+    CS.vCruise = float(self.v_cruise_kph_limit) # float(self.v_cruise_helper.v_cruise_kph)
+    CS.vCruiseCluster = float(self.v_cruise_helper.v_cruise_kph_set) # float(self.v_cruise_helper.v_cruise_cluster_kph)
 
     return CS, RD
 
@@ -317,7 +323,7 @@ class Car:
     co_send.carOutput.actuatorsOutput = convert_to_capnp(self.last_actuators_output)
     self.pm.send('carOutput', co_send)
 
-    # kick off controlsd step while we actuate the latest carControl packet
+    # carState # kick off controlsd step while we actuate the latest carControl packet
     cs_send = messaging.new_message('carState')
     cs_send.valid = CS.canValid
     cs_send.carState = CS
@@ -370,6 +376,7 @@ class Car:
     self.initialized_prev = initialized
     self.CS_prev = CS.as_reader()
 
+  # kans add read_personality_param()
   def read_personality_param(self):
     try:
       return int(self.params.get('LongitudinalPersonality'))
@@ -380,7 +387,7 @@ class Car:
     while not evt.is_set():
       self.is_metric = self.params.get_bool("IsMetric")
       self.experimental_mode = self.params.get_bool("ExperimentalMode") and self.CP.openpilotLongitudinalControl
-      self.personality = self.read_personality_param()
+      self.personality = self.read_personality_param() # kans
       time.sleep(0.1)
 
   def card_thread(self):

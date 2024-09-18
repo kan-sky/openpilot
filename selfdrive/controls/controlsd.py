@@ -66,6 +66,7 @@ class Controls:
       self.LaC = LatControlTorque(self.CP, self.CI)
 
     # kans
+    self.enable = False
     self.v_cruise_helper = VCruiseHelper(self.CP)
     self.carrotCruiseActivate = 0 # carrot
 
@@ -161,7 +162,7 @@ class Controls:
 
     # carrot
     if self.CP.pcmCruise:
-      if self.enabled and self.carrotCruiseActivate < 0:
+      if CC.enabled and self.carrotCruiseActivate < 0:
         print("pcmCruise: carrotCruiseActivate: cancel")
         CC.cruiseControl.cancel = True
       elif CC.cruiseControl.cancel: 
