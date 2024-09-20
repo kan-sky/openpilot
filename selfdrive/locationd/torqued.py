@@ -10,6 +10,7 @@ from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.controls.lib.vehicle_model import ACCELERATION_DUE_TO_GRAVITY
 from openpilot.selfdrive.locationd.helpers import PointBuckets, ParameterEstimator, PoseCalibrator, Pose
+from openpilot.selfdrive.controls.torq_tune import torque_get
 
 HISTORY = 5  # secs
 POINTS_PER_BUCKET = 1500
@@ -50,6 +51,13 @@ class TorqueBuckets(PointBuckets):
 
 
 class TorqueEstimator(ParameterEstimator):
+
+  def get_friction(self):
+    return torque_get('friction')
+
+  def get_lat_accel_factor(self):
+    return torque_get('latAccelFactor')
+
   def __init__(self, CP, decimated=False, track_all_points=False):
     self.hist_len = int(HISTORY / DT_MDL)
     self.lag = CP.steerActuatorDelay + .2  # from controlsd
@@ -71,11 +79,12 @@ class TorqueEstimator(ParameterEstimator):
     self.offline_friction = 0.0
     self.offline_latAccelFactor = 0.0
     self.resets = 0.0
-    self.use_params = CP.carName in ALLOWED_CARS and CP.lateralTuning.which() == 'torque'
+    #self.use_params = CP.carName in ALLOWED_CARS and CP.lateralTuning.which() == 'torque'
+    self.use_params = False
 
     if CP.lateralTuning.which() == 'torque':
-      self.offline_friction = CP.lateralTuning.torque.friction
-      self.offline_latAccelFactor = CP.lateralTuning.torque.latAccelFactor
+      self.offline_friction = self.get_friction()
+      self.offline_latAccelFactor = self.get_lat_accel_factor()
 
     self.calibrator = PoseCalibrator()
 
@@ -126,8 +135,8 @@ class TorqueEstimator(ParameterEstimator):
   def get_restore_key(CP, version):
     a, b = None, None
     if CP.lateralTuning.which() == 'torque':
-      a = CP.lateralTuning.torque.friction
-      b = CP.lateralTuning.torque.latAccelFactor
+      a = self.get_friction()
+      b = self.get_lat_accel_factor()
     return (CP.carFingerprint, CP.lateralTuning.which(), a, b, version)
 
   def reset(self):
@@ -207,23 +216,31 @@ class TorqueEstimator(ParameterEstimator):
     liveTorqueParameters.version = VERSION
     liveTorqueParameters.useParams = self.use_params
 
-    # Calculate raw estimates when possible, only update filters when enough points are gathered
-    if self.filtered_points.is_calculable():
-      latAccelFactor, latAccelOffset, frictionCoeff = self.estimate_params()
-      liveTorqueParameters.latAccelFactorRaw = float(latAccelFactor)
-      liveTorqueParameters.latAccelOffsetRaw = float(latAccelOffset)
-      liveTorqueParameters.frictionCoefficientRaw = float(frictionCoeff)
+    self.checkTorqTune()
 
-      if self.filtered_points.is_valid():
-        if any(val is None or np.isnan(val) for val in [latAccelFactor, latAccelOffset, frictionCoeff]):
-          cloudlog.exception("Live torque parameters are invalid.")
-          liveTorqueParameters.liveValid = False
-          self.reset()
-        else:
-          liveTorqueParameters.liveValid = True
-          latAccelFactor = np.clip(latAccelFactor, self.min_lataccel_factor, self.max_lataccel_factor)
-          frictionCoeff = np.clip(frictionCoeff, self.min_friction, self.max_friction)
-          self.update_params({'latAccelFactor': latAccelFactor, 'latAccelOffset': latAccelOffset, 'frictionCoefficient': frictionCoeff})
+    try:
+
+      # Calculate raw estimates when possible, only update filters when enough points are gathered
+      if self.filtered_points.is_calculable():
+        latAccelFactor, latAccelOffset, frictionCoeff = self.estimate_params()
+        liveTorqueParameters.latAccelFactorRaw = float(latAccelFactor)
+        liveTorqueParameters.latAccelOffsetRaw = float(latAccelOffset)
+        liveTorqueParameters.frictionCoefficientRaw = float(frictionCoeff)
+
+        if self.filtered_points.is_valid():
+          if any(val is None or np.isnan(val) for val in [latAccelFactor, latAccelOffset, frictionCoeff]):
+            cloudlog.exception("Live torque parameters are invalid.")
+            liveTorqueParameters.liveValid = False
+            self.reset()
+          else:
+            liveTorqueParameters.liveValid = True
+            latAccelFactor = np.clip(latAccelFactor, self.min_lataccel_factor, self.max_lataccel_factor)
+            frictionCoeff = np.clip(frictionCoeff, self.min_friction, self.max_friction)
+            self.update_params({'latAccelFactor': latAccelFactor, 'latAccelOffset': latAccelOffset, 'frictionCoefficient': frictionCoeff})
+
+
+    except:
+      pass
 
     if with_points:
       liveTorqueParameters.points = self.filtered_points.get_points()[:, [0, 2]].tolist()
@@ -236,6 +253,12 @@ class TorqueEstimator(ParameterEstimator):
     liveTorqueParameters.maxResets = self.resets
     return msg
 
+  def checkTorqTune(self):
+    if abs(self.get_friction() - self.offline_friction) > 0.0001 \
+            or abs(self.get_lat_accel_factor() - self.offline_latAccelFactor) > 0.0001:
+      self.reset()
+      self.offline_friction = self.get_friction()
+      self.offline_latAccelFactor = self.get_lat_accel_factor()
 
 def main(demo=False):
   config_realtime_process([0, 1, 2, 3], 5)

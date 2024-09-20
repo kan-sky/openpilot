@@ -55,6 +55,7 @@ struct OnroadEvent @0x9b1657f34caf3ad3 {
     lowSpeedLockout @31;
     plannerError @32; # carrot
     joystickDebug @34;
+    longitudinalManeuver @134;
     steerTempUnavailableSilent @35;
     resumeRequired @36;
     preDriverDistracted @37;
@@ -116,18 +117,19 @@ struct OnroadEvent @0x9b1657f34caf3ad3 {
     actuatorsApiUnavailable @120;
     espActive @121;
     personalityChanged @122;
-    slowingDownSpeed @131;
-    slowingDownSpeedSound @132;
+    aeb @123;
+    slowingDownSpeed @124;
+    slowingDownSpeedSound @125;
 
     # carrot
-    trafficStopping @123;
-    audioPrompt @124;
-    stopStop @125;
-    trafficSignGreen @126;
-    trafficSignChanged @127;
-    torqueNNLoad @128;
-    pedalInterceptorNoBrake @129;
-    speedDown @130;
+    trafficStopping @126;
+    audioPrompt @127;
+    stopStop @128;
+    trafficSignGreen @129;
+    trafficSignChanged @130;
+    torqueNNLoad @131;
+    pedalInterceptorNoBrake @132;
+    speedDown @133;
 
     radarCanErrorDEPRECATED @15;
     communityFeatureDisallowedDEPRECATED @62;
@@ -365,12 +367,10 @@ struct CarControl {
   latActive @11: Bool;
   longActive @12: Bool;
 
-  # Actuator commands as computed by controlsd
+  # Final actuator commands
   actuators @6 :Actuators;
 
-  # moved to CarOutput
-  actuatorsOutputDEPRECATED @10 :Actuators;
-
+  # Blinker controls
   leftBlinker @15: Bool;
   rightBlinker @16: Bool;
 
@@ -383,20 +383,20 @@ struct CarControl {
   steerRatio @17 :Float32;
 
   struct Actuators {
-    # range from 0.0 - 1.0
-    gas @0: Float32;
-    brake @1: Float32;
-    # range from -1.0 - 1.0
-    steer @2: Float32;
-    # value sent over can to the car
-    steerOutputCan @8: Float32;
+    # lateral commands, mutually exclusive
+    steer @2: Float32;  # [0.0, 1.0]
     steeringAngleDeg @3: Float32;
-
     curvature @7: Float32;
 
-    speed @6: Float32; # m/s
-    accel @4: Float32; # m/s^2
+    # longitudinal commands
+    accel @4: Float32;  # m/s^2
     longControlState @5: LongControlState;
+
+    # these are only for logging the actual values sent to the car over CAN
+    gas @0: Float32;   # [0.0, 1.0]
+    brake @1: Float32; # [0.0, 1.0]
+    steerOutputCan @8: Float32;   # value sent over can to the car
+    speed @6: Float32;  # m/s
 
     enum LongControlState @0xe40f3a917d908282{
       off @0;
@@ -460,7 +460,6 @@ struct CarControl {
       promptRepeat @7;
       promptDistracted @8;
 
-      slowingDownSpeed @16;
       # carrot
       trafficSignGreen @9;
       trafficSignChanged @10;
@@ -469,6 +468,7 @@ struct CarControl {
       stopStop @13;
       reverseGear @14;
       speedDown @15;
+      slowingDownSpeed @16;
     }
   }
 
@@ -478,6 +478,7 @@ struct CarControl {
   activeDEPRECATED @7 :Bool;
   rollDEPRECATED @8 :Float32;
   pitchDEPRECATED @9 :Float32;
+  actuatorsOutputDEPRECATED @10 :Actuators;
 }
 
 struct CarOutput {
@@ -496,7 +497,7 @@ struct CarParams {
 
   notCar @66 :Bool;  # flag for non-car robotics platforms
 
-  enableGasInterceptor @2 :Bool;
+  enableGasInterceptor @2 :Bool; # kans
   pcmCruise @3 :Bool;        # is openpilot's state tied to the PCM's cruise state?
   enableDsu @5 :Bool;        # driving support unit
   enableBsm @56 :Bool;       # blind spot monitoring

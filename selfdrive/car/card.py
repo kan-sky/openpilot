@@ -91,10 +91,6 @@ class Car:
 
     self.can_callbacks = can_comm_callbacks(self.can_sock, self.pm.sock['sendcan'])
 
-    # kans
-    self.traffic_light = None
-    self.personality = self.read_personality_param()
-
     if CI is None:
       # wait for one pandaState and one CAN packet
       print("Waiting for CAN messages...")
@@ -154,15 +150,17 @@ class Car:
     self.events = Events()
 
     self.car_events = CarSpecificEvents(self.CP)
-    self.state = State.disabled # kans
-    self.enabled = False # kans
-
     self.mock_carstate = MockCarState()
     self.v_cruise_helper = VCruiseHelper(self.CP)
     # NDA
     self.v_cruise_kph_limit = 0
     self.slowing_down = False
     self.slowing_down_sound_alert = False
+    # kans
+    self.state = State.disabled
+    self.enabled = False
+    self.traffic_light = None
+    self.personality = self.read_personality_param()
     self.is_metric = self.params.get_bool("IsMetric")
     self.experimental_mode = self.params.get_bool("ExperimentalMode")
 
