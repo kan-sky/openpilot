@@ -41,14 +41,14 @@ class torqTune():
     self.invalidated = False
     self.CP = CP
     self.ctrl = weakref.ref(ctrl) if ctrl is not None else None
-    self.type = LatType.NONE
+    self.type = LateralType.NONE
     self.group = GroupType.NONE if group is None else group
     self.config = {}
     self.key = str(self)
     self.disable_lateral_live_tuning = False
 
     if "LatControlTorque" in str(type(ctrl)):
-      self.type = LatType.TORQUE
+      self.type = LateralType.TORQUE
       self.file = CONF_LAT_TORQUE_FILE
     else:
       self.file = CONF_PATH + group + ".json"
@@ -132,7 +132,7 @@ class torqTune():
 
   def checkValid(self):
 
-    if self.type == LatType.TORQUE or self.group == GroupType.TORQUE:
+    if self.type == LateralType.TORQUE or self.group == GroupType.TORQUE:
       return self.checkValidTorque()
 
     return False
@@ -142,7 +142,7 @@ class torqTune():
     if self.disable_lateral_live_tuning:
       return
 
-    if self.type == LatType.TORQUE:
+    if self.type == LateralType.TORQUE:
       self.updateTorque()
 
 
@@ -172,7 +172,7 @@ class torqTune():
 
     try:
       if self.CP is not None:
-        if self.type == LatType.TORQUE:
+        if self.type == LateralType.TORQUE:
           self.config["useSteeringAngle"] = 1. if self.CP.lateralTuning.torque.useSteeringAngle else 0.
           self.config["latAccelFactor"] = self.CP.lateralTuning.torque.latAccelFactor
           self.config["friction"] = round(self.CP.lateralTuning.torque.friction, 3)
