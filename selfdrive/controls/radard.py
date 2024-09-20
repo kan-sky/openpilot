@@ -138,9 +138,13 @@ def match_vision_to_track(v_ego: float, lead: capnp._DynamicStructReader, tracks
 
   # if no 'sane' match is found return -1
   # stationary radar points can be false positives
-  dist_sane = abs(track.dRel - offset_vision_dist) < max([(offset_vision_dist)*.25, 5.0])
+  dist_sane = abs(track.dRel - offset_vision_dist) < max([(offset_vision_dist)*.3, 5.0])
   vel_sane = (abs(track.vRel + v_ego - lead.v[0]) < 10) or (v_ego + track.vRel > 3)
   if dist_sane and vel_sane:
+    if len(model.position.x) == 33:
+      path_y = interp(track.dRel, list(model.position.x), list(model.position.y))
+      if abs(path_y - track.yRel) < 2.:
+        return track
     return track
   else:
     return None
@@ -154,8 +158,8 @@ def get_RadarState_from_vision(lead_msg: capnp._DynamicStructReader, v_ego: floa
     "vRel": float(lead_v_rel_pred),
     "vLead": float(v_ego + lead_v_rel_pred),
     "vLeadK": float(v_ego + lead_v_rel_pred),
-    "aLeadK": 0.0,
-    "aLeadTau": 0.3,
+    "aLeadK": float(lead_msg.a[0]),
+    "aLeadTau": 0.1,
     "fcw": False,
     "modelProb": float(lead_msg.prob),
     "status": True,
@@ -164,11 +168,11 @@ def get_RadarState_from_vision(lead_msg: capnp._DynamicStructReader, v_ego: floa
   }
 
 
-def get_lead(v_ego: float, ready: bool, tracks: dict[int, Track], lead_msg: capnp._DynamicStructReader,
+def get_lead(v_ego: float, ready: bool, tracks: dict[int, Track], model: capnp._DynamicStructReader, lead_msg: capnp._DynamicStructReader,
              model_v_ego: float, low_speed_override: bool = True) -> dict[str, Any]:
   # Determine leads, this is where the essential logic happens
-  if len(tracks) > 0 and ready and lead_msg.prob > .5:
-    track = match_vision_to_track(v_ego, lead_msg, tracks)
+  if len(tracks) > 0 and ready: # and lead_msg.prob > .5:
+    track = match_vision_to_track(v_ego, model, lead_msg, tracks)
   else:
     track = None
 
@@ -249,8 +253,14 @@ class RadarD:
       model_v_ego = self.v_ego
     leads_v3 = sm['modelV2'].leadsV3
     if len(leads_v3) > 1:
-      self.radar_state.leadOne = get_lead(self.v_ego, self.ready, self.tracks, leads_v3[0], model_v_ego, low_speed_override=True)
-      self.radar_state.leadTwo = get_lead(self.v_ego, self.ready, self.tracks, leads_v3[1], model_v_ego, low_speed_override=False)
+      self.radar_state.leadOne = get_lead(self.v_ego, self.ready, self.tracks, sm['modelV2'], leads_v3[0], model_v_ego, low_speed_override=True)
+      self.radar_state.leadTwo = get_lead(self.v_ego, self.ready, self.tracks, sm['modelV2'], leads_v3[1], model_v_ego, low_speed_override=False)
+      if self.radar_state.leadOne.status:
+        if self.radar_state.leadOne.radar:
+          if len(self.tracks) == 1 and leads_v3[1].prob > .5:
+            self.radar_state.leadTwo = get_RadarState_from_vision(leads_v3[1], self.v_ego, model_v_ego)
+        else:
+          self.radar_state.leadOne.dRel -= 0.5
 
   def publish(self, pm: messaging.PubMaster):
     assert self.radar_state is not None

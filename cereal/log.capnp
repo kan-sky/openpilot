@@ -2250,6 +2250,9 @@ struct NavInstruction {
   speedLimitSign @11 :SpeedLimitSign;
 
   allManeuvers @12 :List(Maneuver);
+  
+  imageUrl @13 :Text;
+  
 
   struct Lane {
     directions @0 :List(Direction);
@@ -2319,6 +2322,11 @@ struct EncodeData {
   unixTimestampNanos @3 :UInt64;
   width @4 :UInt32;
   height @5 :UInt32;
+}
+
+struct DebugAlert {
+  alertText1 @0 :Text;
+  alertText2 @1 :Text;
 }
 
 struct UserFlag {
@@ -2424,11 +2432,11 @@ struct Event {
     uiDebug @102 :UIDebug;
 
     # *********** debug ***********
-    testJoystick @52 :Joystick;
     roadEncodeData @86 :EncodeData;
     driverEncodeData @87 :EncodeData;
     wideRoadEncodeData @88 :EncodeData;
     qRoadEncodeData @89 :EncodeData;
+    alertDebug @133 :DebugAlert;
 
     livestreamRoadEncodeData @120 :EncodeData;
     livestreamWideRoadEncodeData @121 :EncodeData;
@@ -2450,10 +2458,10 @@ struct Event {
     customReserved8 @115 :Custom.CustomReserved8;
     customReserved9 @116 :Custom.CustomReserved9;
     
-    # NDA
-    naviData @133 :NaviData;
-    naviGps @134 :NaviGps;
-    naviObstacles @135 :NaviObstacles;
+    # neokii
+    naviData @134 :NaviData;
+    naviGps @135 :NaviGps;
+    naviObstacles @136 :NaviObstacles;
 
     # *********** legacy + deprecated ***********
     model @9 :Legacy.ModelData; # TODO: rename modelV2 and mark this as deprecated
@@ -2498,6 +2506,7 @@ struct Event {
     uiPlanDEPRECATED @106 :UiPlan;
     liveLocationKalmanDEPRECATED @72 :LiveLocationKalman;
     liveTracksDEPRECATED @16 :List(LiveTracksDEPRECATED);
+    testJoystickDEPRECATED @52 :Joystick;
   }
 }
 
