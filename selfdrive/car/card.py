@@ -216,6 +216,11 @@ class Car:
       (CS.regenBraking and (not self.CS_prev.regenBraking or not CS.standstill)):
       self.events.add(EventName.pedalPressed)
 
+    if CS.brakePressed and CS.standstill:
+      self.events.add(EventName.preEnableStandstill)
+
+    if CS.gasPressed:
+      self.events.add(EventName.gasPressedOverride)
     if RD is not None and len(RD.errors):
       self.events.add(EventName.radarFault)
 

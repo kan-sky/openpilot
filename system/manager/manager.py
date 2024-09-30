@@ -18,6 +18,7 @@ from openpilot.system.athena.registration import register, UNREGISTERED_DONGLE_I
 from openpilot.common.swaglog import cloudlog, add_file_handler
 from openpilot.system.version import get_build_metadata, terms_version, training_version
 
+
 def manager_init() -> None:
   save_bootlog()
 
@@ -31,6 +32,9 @@ def manager_init() -> None:
     params.clear_all(ParamKeyType.DEVELOPMENT_ONLY)
 
   default_params: list[tuple[str, str | bytes]] = [
+    # kans
+    ("LongPitch", "1"),
+    ("EVTable", "1"),
     ("CompletedTrainingVersion", "0"),
     ("DisengageOnAccelerator", "0"),
     ("GsmMetered", "1"),
@@ -48,52 +52,53 @@ def manager_init() -> None:
     ("ShowPathColor", "13"),
     ("ShowPathModeCruiseOff", "0"),
     ("ShowPathColorCruiseOff", "19"),
-    ("ShowPlotMode", "0"),
+    ("ShowPlotMode", "1"),
     ("AutoCruiseControl", "0"),    
     ("SoftHoldMode", "0"),       
 
-    ("AutoCurveSpeedLowerLimit", "30"),
+    ("AutoCurveSpeedLowerLimit", "40"),
     ("AutoCurveSpeedFactor", "120"),
-    ("AutoCurveSpeedAggressiveness", "100"),
+    ("AutoCurveSpeedAggressiveness", "110"),
 
     ("AutoTurnControl", "0"),
     ("AutoTurnControlSpeedTurn", "20"),
     ("AutoTurnControlTurnEnd", "6"),
 
-    ("AutoNaviSpeedCtrlEnd", "7"),
+    ("AutoNaviSpeedCtrlEnd", "12"),
     ("AutoNaviSpeedBumpTime", "1"),
-    ("AutoNaviSpeedBumpSpeed", "35"),
-    ("AutoNaviSpeedSafetyFactor", "105"),
+    ("AutoNaviSpeedBumpSpeed", "25"),
+    ("AutoNaviSpeedSafetyFactor", "95"),
     ("AutoNaviSpeedDecelRate", "120"),
     ("StopDistanceCarrot", "550"), 
     ("MyDrivingMode", "3"),      
-    ("CruiseMaxVals1", "200"),
-    ("CruiseMaxVals2", "160"),
-    ("CruiseMaxVals3", "130"),
-    ("CruiseMaxVals4", "110"),
-    ("CruiseMaxVals5", "95"),
-    ("CruiseMaxVals6", "80"),
-    ("LongTuningKpV", "100"),     
-    ("LongTuningKiV", "0"),     
-    ("LongTuningKf", "100"),     
+    ("CruiseMaxVals1", "150"),
+    ("CruiseMaxVals2", "70"),
+    ("CruiseMaxVals3", "50"),
+    ("CruiseMaxVals4", "40"),
+    ("CruiseMaxVals5", "30"),
+    ("CruiseMaxVals6", "20"),
+    ("LongTuningKpV", "115"),     
+    ("LongTuningKiV", "350"),     
+    ("LongTuningKf", "102"),     
     ("LongActuatorDelay", "20"),     
     ("EnableRadarTracks", "0"),      
     ("HyundaiCameraSCC", "0"),
     ("CanfdHDA2", "0"),
     ("SoundVolumeAdjust", "100"),
-    ("SoundVolumeAdjustEngage", "10"),
-    ("TFollowGap1", "110"),
-    ("TFollowGap2", "120"),
-    ("TFollowGap3", "140"),
-    ("TFollowGap4", "160"),
+    ("SoundVolumeAdjustEngage", "90"),
+    ("TFollowGap1", "90"),
+    ("TFollowGap2", "180"),
+    ("TFollowGap3", "270"),
+    ("TFollowGap4", "90"),
     ("MaxAngleFrames", "89"),       
     ("LateralTorqueCustom", "0"),       
-    ("LateralTorqueAccelFactor", "2500"),       
-    ("LateralTorqueFriction", "100"),
-    ("CustomSteerMax", "0"),       
-    ("CustomSteerDeltaUp", "0"),       
-    ("CustomSteerDeltaDown", "0"),       
-    ("SteerActuatorDelay", "30"),       
+    ("LateralTorqueAccelFactor", "2400"),       
+    ("LateralTorqueFriction", "70"),
+    ("CustomSteerMax", "300"),       
+    ("CustomSteerDeltaUp", "5"),       
+    ("CustomSteerDeltaDown", "7"),       
+    ("SteerActuatorDelay", "45"),       
+    ("MaxTimeOffroadMin", "60"),
 
   ]
 

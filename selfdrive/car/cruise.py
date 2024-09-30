@@ -12,7 +12,7 @@ from openpilot.common.numpy_fast import clip
 V_CRUISE_MIN = 8
 V_CRUISE_MAX = 145
 V_CRUISE_UNSET = 255
-V_CRUISE_INITIAL = 40
+V_CRUISE_INITIAL = 30
 V_CRUISE_INITIAL_EXPERIMENTAL_MODE = 105
 IMPERIAL_INCREMENT = round(CV.MPH_TO_KPH, 1)  # round here to avoid rounding errors incrementing set speed
 
@@ -306,7 +306,7 @@ class VCruiseCarrot:
         self.button_cnt = 0
     if self.button_cnt > self.button_long_time:
       self.long_pressed = True
-      V_CRUISE_DELTA = 10
+      V_CRUISE_DELTA = 5
       if self.button_prev == ButtonType.cancel:
         button_type = ButtonType.cancel
         self.button_cnt = 0          
@@ -385,7 +385,7 @@ class VCruiseCarrot:
     if v_cruise_kph < self.nRoadLimitSpeed:
       v_cruise_kph = self.nRoadLimitSpeed
     else:
-      for speed in range (40, 160, self._cruise_speed_unit):
+      for speed in range (10, 160, self._cruise_speed_unit):
         if v_cruise_kph < speed:
           v_cruise_kph = speed
           break;
@@ -396,7 +396,7 @@ class VCruiseCarrot:
       enable = 0
       self._add_log(reason + " > Canceled")
     else:
-      if self.autoCruiseControl == 0 and enable > 0:
+      if self.autoCruiseControl == 0 and enable != 0:
         enable = 0
         return
       self._activate_cruise = enable
