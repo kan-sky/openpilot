@@ -178,11 +178,13 @@ def main(demo=False):
   cloudlog.info("modeld got CarParams: %s", CP.carName)
 
   # TODO this needs more thought, use .2s extra for now to estimate other delays
-  steer_delay = params.get_float("SteerActuatorDelay") * 0.01 #CP.steerActuatorDelay + .2
+  #steer_delay = params.get_float("SteerActuatorDelay") * 0.01 #CP.steerActuatorDelay + .2
 
   DH = DesireHelper()
 
   while True:
+    steer_delay = params.get_float("SteerActuatorDelay") * 0.01 #CP.steerActuatorDelay + .2
+    
     # Keep receiving frames until we are at least 1 frame ahead of previous extra frame
     while meta_main.timestamp_sof < meta_extra.timestamp_sof + 25000000:
       buf_main = vipc_client_main.recv()

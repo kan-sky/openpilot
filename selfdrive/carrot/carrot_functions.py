@@ -84,7 +84,7 @@ class CarrotPlanner:
     self.comfortBrake = 2.4 #params.get_float("ComfortBrake") / 100.
     self.comfort_brake = self.comfortBrake
 
-    self.soft_hold_active = False
+    self.soft_hold_active = 0
     self.events = Events()
     self.left_sec = -1
     self.autoNaviSpeedDecelRate = 1.2
@@ -106,6 +106,9 @@ class CarrotPlanner:
 
 
     self.trafficState_carrot = 0
+
+    self.eco_over_speed = 2
+    self.eco_target_speed = 0
 
   def _params_update(self):
     self.frame += 1
@@ -187,10 +190,11 @@ class CarrotPlanner:
       self.trafficState = TrafficState.off
   
   def _update_carrot_man(self, sm, v_ego_kph, v_cruise_kph):
+    v_cruise_kph = self.cruise_eco_control(v_ego_kph, v_cruise_kph)
     if sm.alive['carrotMan']:
       carrot_man = sm['carrotMan']
       if self.trafficState_carrot == 1 and carrot_man.trafficState == 2:
-        if self.soft_hold_active:
+        if self.soft_hold_active > 0:
           self.events.add(EventName.trafficSignChanged)
         elif self.xState in [XState.e2eStop, XState.e2eStopped]:
           self.xState = XState.e2eCruise
@@ -210,7 +214,28 @@ class CarrotPlanner:
         self.left_sec = left_sec
 
     return v_cruise_kph
-  
+
+  def cruise_eco_control(self, v_ego_kph, v_cruise_kph):
+    v_cruise_kph_apply = v_cruise_kph
+    if self.eco_over_speed > 0:
+      if self.eco_target_speed > 0:
+        if self.eco_target_speed < v_cruise_kph:
+          self.eco_target_speed = v_cruise_kph
+        elif self.eco_target_speed > v_cruise_kph:
+          self.eco_target_speed = 0
+      elif self.eco_target_speed == 0 and v_ego_kph + 3 < v_cruise_kph and v_cruise_kph > 20.0:  # 주행중 속도가 떨어지면 다시 크루즈연비제어 시작.
+        self.eco_target_speed = v_cruise_kph
+
+      if self.eco_target_speed != 0:  ## 크루즈 연비 제어모드 작동중일때: 연비제어 종료지점
+        if v_ego_kph > self.eco_target_speed: # 설정속도를 초과하면..
+          self.eco_target_speed = 0
+        else:
+          v_cruise_kph_apply = self.eco_target_speed + self.eco_over_speed  # + 설정 속도로 설정함.
+    else:
+      self.eco_target_speed = 0
+
+    return v_cruise_kph_apply
+
   def update(self, sm, v_cruise_kph):
     self._params_update()
 
@@ -221,7 +246,8 @@ class CarrotPlanner:
     radarstate = sm['radarState']
     model = sm['modelV2']
 
-    self.soft_hold_active = sm['carControl'].hudControl.softHoldActive
+    #self.soft_hold_active = sm['carControl'].hudControl.softHoldActive # carrot 1
+    self.soft_hold_active = sm['carState'].softHoldActive # carrot 2
 
     self.comfort_brake = self.comfortBrake
 	

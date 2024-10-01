@@ -105,9 +105,34 @@ void OnroadWindow::updateState(const UIState &s) {
   nvg->updateState(s);
 
   QColor bgColor = bg_colors[s.status];
-  if (bg != bgColor) {
+  QColor bgColor_long = bg_colors[s.status];
+  const SubMaster& sm = *(s.sm);
+  const auto car_control = sm["carControl"].getCarControl();
+  //if (s.status == STATUS_DISENGAGED && car_control.getLatActive()) {
+  //    bgColor = bg_colors[STATUS_LAT_ACTIVE];
+  //}
+  const auto car_state = sm["carState"].getCarState();
+  if (car_state.getSteeringPressed()) {
+      bgColor = bg_colors[STATUS_OVERRIDE];
+  }
+  else if (car_control.getLatActive()) {
+      bgColor = bg_colors[STATUS_ENGAGED];
+  }
+  else
+      bgColor = bg_colors[STATUS_DISENGAGED];
+
+  if (car_state.getGasPressed()) {
+      bgColor_long = bg_colors[STATUS_OVERRIDE];
+  }
+  else if (car_control.getLongActive()) {
+      bgColor_long = bg_colors[STATUS_ENGAGED];
+  }
+  else
+      bgColor_long = bg_colors[STATUS_DISENGAGED];
+  if (bg != bgColor || bg_long != bgColor_long) {
     // repaint border
     bg = bgColor;
+    bg_long = bgColor_long;
     update();
   }
   else {
@@ -121,7 +146,13 @@ void OnroadWindow::offroadTransition(bool offroad) {
 
 void OnroadWindow::paintEvent(QPaintEvent *event) {
   QPainter p(this);
-  p.fillRect(rect(), QColor(bg.red(), bg.green(), bg.blue(), 255));
+  //p.fillRect(rect(), QColor(bg.red(), bg.green(), bg.blue(), 255));
+  QRect upperRect(0, 0, width(), height() / 2);
+  p.fillRect(upperRect, QColor(bg.red(), bg.green(), bg.blue(), 255));
+
+  QRect lowerRect(0, height() / 2, width(), height() / 2);
+  p.fillRect(lowerRect, QColor(bg_long.red(), bg_long.green(), bg_long.blue(), 255));
+
 }
 void OnroadWindow::updateStateText() {
     //QPainter p(this);
@@ -161,7 +192,24 @@ void OnroadWindow::updateStateText() {
     //extern int g_fps;
     //const auto cp = sm["carParams"].getCarParams();
     //top.sprintf("%s Long, FPS: %d", hasLongitudinalControl(cp)?"OP":"Stock", g_fps);
-    top = "topRight";
+    auto deviceState = sm["deviceState"].getDeviceState();
+    const auto freeSpace = deviceState.getFreeSpacePercent();
+    const auto memoryUsage = deviceState.getMemoryUsagePercent();
+    const auto cpuTempC = deviceState.getCpuTempC();
+    float cpuTemp = 0.0f;
+    int   size = sizeof(cpuTempC) / sizeof(cpuTempC[0]);
+    if (size > 0) {
+        for (int i = 0; i < size; i++) {
+            cpuTemp += cpuTempC[i];
+        }
+        cpuTemp /= static_cast<float>(size);
+    }
+
+    //top.sprintf("MEM: %d%% DISK: %.0f%% CPU: %.0f¡ÆC", memoryUsage, freeSpace, cpuTemp);
+    //top.sprintf("MEM: %d%% DISK: %.0f%% CPU: %.0f\xC2\xB0C", memoryUsage, freeSpace, cpuTemp);
+    //top.sprintf("MEM: %d%% DISK: %.0f%% CPU: %.0f¡ÆC", memoryUsage, freeSpace, cpuTemp);
+    top.sprintf("MEM: %d%% DISK: %.0f%% CPU: %.0f\u00B0C", memoryUsage, freeSpace, cpuTemp);
+
     topRightLabel->setText(top);
 
     Params params = Params();

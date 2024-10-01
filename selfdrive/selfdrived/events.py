@@ -522,7 +522,7 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
       "Steer Left to Start Lane Change Once Safe",
       "",
       AlertStatus.normal, AlertSize.none,
-      Priority.LOW, VisualAlert.none, AudibleAlert.none, .1),
+      Priority.LOW, VisualAlert.none, AudibleAlert.prompt, .1),
   },
 
   EventName.preLaneChangeRight: {
@@ -530,7 +530,7 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
       "Steer Right to Start Lane Change Once Safe",
       "",
       AlertStatus.normal, AlertSize.none,
-      Priority.LOW, VisualAlert.none, AudibleAlert.none, .1),
+      Priority.LOW, VisualAlert.none, AudibleAlert.prompt, .1),
   },
 
   EventName.laneChangeBlocked: {

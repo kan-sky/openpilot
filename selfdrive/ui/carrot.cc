@@ -166,7 +166,7 @@ static void ui_draw_text_a(const UIState* s, float x, float y, const char* strin
 
 
 //##################### drawPlot
-#define PLOT_MAX 300
+#define PLOT_MAX 400 //500
 class DrawPlot : public QObject {
     Q_OBJECT
 protected:
@@ -176,7 +176,7 @@ protected:
     float   plotMin = 0.;
     float   plotMax = 0.;
     float   plotShift = 0.0;
-    float   plotX = 300.0;
+    float   plotX = 400.0;// 300.0;
     float   plotWidth = 1000;
     float   plotY = 30.0;
     float   plotHeight = 300.0;
@@ -223,6 +223,12 @@ protected:
 
         float   accel_out = car_control.getActuators().getAccel();
 
+        const cereal::ModelDataV2::Reader& model = sm["modelV2"].getModelV2();
+        const auto position = model.getPosition();
+        const auto velocity = model.getVelocity();
+
+        auto lead_radar = sm["radarState"].getRadarState().getLeadOne();
+
         // 0: yellow, 1: green, 2: orange
         switch (show_plot_mode) {
         case 0:
@@ -230,13 +236,25 @@ protected:
             data[0] = a_ego;
             data[1] = accel;
             data[2] = accel_out;
-            sprintf(title, "1.Accel (Y:actual, G:desired, O:apply)");
+            sprintf(title, "1.Accel (Y:a_ego, G:a_target, O:a_out)");
             break;
         case 2:
             data[0] = speeds_0;
             data[1] = v_ego;
             data[2] = a_ego;
-            sprintf(title, "3.Speed/Accel(G:speed, Y:accel, O:a_ego)");
+            sprintf(title, "2.Speed/Accel(Y:speed_0, G:v_ego, O:a_ego)");
+            break;
+        case 3:
+            data[0] = position.getX()[32];
+            data[1] = velocity.getX()[32];
+            data[2] = velocity.getX()[0];
+            sprintf(title, "3.Model(Y:pos_32, G:vel_32, O:vel_0)");
+			break;
+        case 4:
+            data[0] = a_ego;
+            data[1] = lead_radar.getALeadK();
+            data[2] = lead_radar.getVRel();
+            sprintf(title, "4.Lead(Y:a_ego, G:a_lead, O:v_lead)");
             break;
         default:
             data[0] = data[1] = data[2] = 0;
@@ -379,7 +397,7 @@ private:
 
     float   v_ego = 0.0;
     bool    brakeHoldActive = false;
-    bool    softHoldActive = false;
+    int    softHoldActive = 0;
     bool    longActive = false;
 
 protected:
@@ -389,7 +407,7 @@ protected:
 
         v_ego = sm["carState"].getCarState().getVEgo();
         brakeHoldActive = sm["carState"].getCarState().getBrakeHoldActive();
-        softHoldActive = sm["carControl"].getCarControl().getHudControl().getSoftHoldActive();
+        softHoldActive = sm["carState"].getCarState().getSoftHoldActive();
         longActive = sm["carControl"].getCarControl().getLongActive();
         auto lp = sm["longitudinalPlan"].getLongitudinalPlan();
         xState = lp.getXState();
@@ -1496,6 +1514,7 @@ public:
     int     trafficState_carrot = 0;
     int     active_carrot = 0;
     char    carrot_man_debug[128] = "";
+    float   xTarget = 0.0;
 
     QString szPosRoadName = "";
 
@@ -1549,6 +1568,7 @@ public:
 		}
         xState = lp.getXState();
         trafficState = lp.getTrafficState();
+        xTarget = lp.getXTarget();
 
         s->max_distance = std::clamp(*(model_position.getX().end() - 1),
             MIN_DRAW_DISTANCE, MAX_DRAW_DISTANCE);
@@ -1616,13 +1636,18 @@ public:
         char apply_speed_str[32];
         int apply_x = bx + 250;
         int apply_y = by - 50;
-        sprintf(apply_speed_str, "%.0f", apply_speed);
 
         if (apply_source.length()) {
+            sprintf(apply_speed_str, "%.0f", apply_speed);
             textColor = COLOR_OCHRE;    // apply speed가 작동되면... 색을 바꾸자.
             ui_draw_text(s, apply_x, apply_y, apply_speed_str, 50, textColor, BOLD, 1.0, 5.0, COLOR_BLACK, COLOR_BLACK);
             ui_draw_text(s, apply_x, apply_y - 50, apply_source.toStdString().c_str(), 30, textColor, BOLD, 1.0, 5.0, COLOR_BLACK, COLOR_BLACK);
         }
+		else if(abs(xTarget - v_cruise) > 0.5) {
+            sprintf(apply_speed_str, "%.0f", xTarget);
+			ui_draw_text(s, apply_x, apply_y, apply_speed_str, 50, textColor, BOLD, 1.0, 5.0, COLOR_BLACK, COLOR_BLACK);
+            ui_draw_text(s, apply_x, apply_y - 50, "eco", 30, textColor, BOLD, 1.0, 5.0, COLOR_BLACK, COLOR_BLACK);
+		}
 
         // draw gap info
         char driving_mode_str[32] = "연비";

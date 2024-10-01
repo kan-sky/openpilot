@@ -1,5 +1,3 @@
-import datetime
-import json
 import os
 import time
 
@@ -209,12 +207,6 @@ def get_car(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_multip
 
   return get_car_interface(CP)
 
-def write_car_param():
-  platform = MOCK.MOCK
-  params = Params()
-  CarInterface, _, _, _ = interfaces[platform]
-  CP = CarInterface.get_non_essential_params(platform)
-  params.put("CarParams", CP.to_bytes())
 
 def get_demo_car_params():
   platform = MOCK.MOCK

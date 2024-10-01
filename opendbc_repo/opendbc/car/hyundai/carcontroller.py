@@ -6,7 +6,7 @@ from opendbc.car.common.numpy_fast import clip
 from opendbc.car.hyundai import hyundaicanfd, hyundaican
 from opendbc.car.hyundai.carstate import CarState
 from opendbc.car.hyundai.hyundaicanfd import CanBus
-from opendbc.car.hyundai.values import HyundaiFlags, Buttons, CarControllerParams, CANFD_CAR, CAR, CAN_GEARS, HyundaiExtFlags
+from opendbc.car.hyundai.values import HyundaiFlags, Buttons, CarControllerParams, CAR, CAN_GEARS, HyundaiExtFlags
 from opendbc.car.interfaces import CarControllerBase
 
 VisualAlert = structs.CarControl.HUDControl.VisualAlert
@@ -65,6 +65,7 @@ class CarController(CarControllerBase):
     self.max_angle_frames = MAX_ANGLE_FRAMES
     self.blinking_signal = False # 1Hz
     self.blinking_frame = int(1.0 / DT_CTRL)
+    #self.soft_hold_mode = 0
 
   def update(self, CC, CS, now_nanos):
 
@@ -80,6 +81,7 @@ class CarController(CarControllerBase):
         self.params.STEER_DELTA_UP = steerDeltaUp
       if steerDeltaDown > 0:
         self.params.STEER_DELTA_DOWN = steerDeltaDown
+      #self.soft_hold_mode = 2 if params.get_int("AutoCruiseControl") > 0 else 0
 
     actuators = CC.actuators
     hud_control = CC.hudControl
@@ -135,7 +137,7 @@ class CarController(CarControllerBase):
     # tester present - w/ no response (keeps relevant ECU disabled)
     if self.frame % 100 == 0 and not (self.CP.flags & HyundaiFlags.CANFD_CAMERA_SCC.value) and self.CP.openpilotLongitudinalControl:
       # for longitudinal control, either radar or ADAS driving ECU
-      addr, bus = 0x7d0, self.CAN.ECAN if self.CP.carFingerprint in CANFD_CAR else 0
+      addr, bus = 0x7d0, self.CAN.ECAN if self.CP.flags & HyundaiFlags.CANFD else 0
       if self.CP.flags & HyundaiFlags.CANFD_HDA2.value:
         addr, bus = 0x730, self.CAN.ECAN
       can_sends.append(make_tester_present_msg(addr, bus, suppress_response=True))
@@ -146,7 +148,7 @@ class CarController(CarControllerBase):
 
     camera_scc = self.CP.flags & HyundaiFlags.CAMERA_SCC
     # CAN-FD platforms
-    if self.CP.carFingerprint in CANFD_CAR:
+    if self.CP.flags & HyundaiFlags.CANFD:
       hda2 = self.CP.flags & HyundaiFlags.CANFD_HDA2
       hda2_long = hda2 and self.CP.openpilotLongitudinalControl
 
@@ -184,7 +186,7 @@ class CarController(CarControllerBase):
                                                              set_speed_in_units, hud_control, self.hyundai_jerk.jerk_u, self.hyundai_jerk.jerk_l, CS.cruise_info))
           else:
             can_sends.append(hyundaicanfd.create_acc_control(self.packer, self.CAN, CC.enabled, self.accel_last, accel, stopping, CC.cruiseControl.override,
-                                                             set_speed_in_units, hud_control, self.hyundai_jerk.jerk_u, self.hyundai_jerk.jerk_l))
+                                                             set_speed_in_units, hud_control, self.hyundai_jerk.jerk_u, self.hyundai_jerk.jerk_l, CS))
           self.accel_last = accel
       else:
         # button presses
@@ -313,7 +315,7 @@ class HyundaiJerk:
       self.jerk_l = jerkLimit          
       #self.jerk_count = 0
     else:
-      if CP.carFingerprint in CANFD_CAR:
+      if CP.flags & HyundaiFlags.CANFD:
         self.jerk_u = min(max(0.5, jerk * 2.0), jerk_max)
         self.jerk_l = min(max(1.0, -jerk * 3.0), jerkLimit)
       else:
