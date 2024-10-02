@@ -190,7 +190,6 @@ class CarrotPlanner:
       self.trafficState = TrafficState.off
   
   def _update_carrot_man(self, sm, v_ego_kph, v_cruise_kph):
-    v_cruise_kph = self.cruise_eco_control(v_ego_kph, v_cruise_kph)
     if sm.alive['carrotMan']:
       carrot_man = sm['carrotMan']
       if self.trafficState_carrot == 1 and carrot_man.trafficState == 2:
@@ -253,7 +252,10 @@ class CarrotPlanner:
 	
     v_ego = carstate.vEgo
     v_ego_kph = v_ego * CV.MS_TO_KPH
+    v_ego_cluster = carstate.vEgoCluster
+    v_ego_cluster_kph = v_ego_cluster * CV.MS_TO_KPH
 
+    v_cruise_kph = self.cruise_eco_control(v_ego_cluster_kph, v_cruise_kph)
     v_cruise_kph = self._update_carrot_man(sm, v_ego_kph, v_cruise_kph)
 
     v_cruise = v_cruise_kph * CV.KPH_TO_MS

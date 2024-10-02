@@ -75,6 +75,9 @@ class DesireHelper:
       else:
         self.atc_active = 0
       one_blinker = leftBlinker != rightBlinker
+    if not one_blinker:
+      self.blinker_bypass = False
+    one_blinker &= not self.blinker_bypass
 
     if not lateral_active or self.lane_change_timer > LANE_CHANGE_TIME_MAX:
       self.lane_change_state = LaneChangeState.off
@@ -139,6 +142,13 @@ class DesireHelper:
       self.lane_change_timer += DT_MDL
 
     self.prev_one_blinker = one_blinker
+    steering_pressed = carstate.steeringPressed and \
+                     ((carstate.steeringTorque < 0 and self.lane_change_direction == LaneChangeDirection.left) or
+                      (carstate.steeringTorque > 0 and self.lane_change_direction == LaneChangeDirection.right))
+    if steering_pressed:
+      self.lane_change_direction = LaneChangeDirection.none
+      self.lane_change_state = LaneChangeState.off
+      self.blinker_bypass = True
 
     if self.turn_direction != TurnDirection.none:
       self.desire = TURN_DESIRES[self.turn_direction]
