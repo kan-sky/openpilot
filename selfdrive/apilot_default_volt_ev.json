@@ -1,0 +1,267 @@
+[
+  {
+    "filename": "AutoCruiseControl",
+    "content": "0"
+  },
+  {
+    "filename": "AutoCurveSpeedAggressiveness",
+    "content": "110"
+  },
+  {
+    "filename": "AutoCurveSpeedFactor",
+    "content": "120"
+  },
+  {
+    "filename": "AutoCurveSpeedLowerLimit",
+    "content": "40"
+  },
+  {
+    "filename": "AutoNaviSpeedBumpSpeed",
+    "content": "20"
+  },
+  {
+    "filename": "AutoNaviSpeedBumpTime",
+    "content": "1"
+  },
+  {
+    "filename": "AutoNaviSpeedCtrlEnd",
+    "content": "12"
+  },
+  {
+    "filename": "AutoNaviSpeedDecelRate",
+    "content": "150"
+  },
+  {
+    "filename": "AutoNaviSpeedSafetyFactor",
+    "content": "95"
+  },
+  {
+    "filename": "AutoTurnControl",
+    "content": "2"
+  },
+  {
+    "filename": "AutoTurnControlSpeedTurn",
+    "content": "20"
+  },
+  {
+    "filename": "AutoTurnControlTurnEnd",
+    "content": "3"
+  },
+  {
+    "filename": "BootCount",
+    "content": "21"
+  },
+  {
+    "filename": "CanfdHDA2",
+    "content": "0"
+  },
+  {
+    "filename": "CruiseMaxVals1",
+    "content": "150"
+  },
+  {
+    "filename": "CruiseMaxVals2",
+    "content": "70"
+  },
+  {
+    "filename": "CruiseMaxVals3",
+    "content": "50"
+  },
+  {
+    "filename": "CruiseMaxVals4",
+    "content": "40"
+  },
+  {
+    "filename": "CruiseMaxVals5",
+    "content": "30"
+  },
+  {
+    "filename": "CruiseMaxVals6",
+    "content": "20"
+  },
+  {
+    "filename": "CustomSteerDeltaDown",
+    "content": "7"
+  },
+  {
+    "filename": "CustomSteerDeltaUp",
+    "content": "5"
+  },
+  {
+    "filename": "CustomSteerMax",
+    "content": "300"
+  },
+  {
+    "filename": "DisengageOnAccelerator",
+    "content": "0"
+  },
+  {
+    "filename": "EVTable",
+    "content": "1"
+  },
+  {
+    "filename": "EnableRadarTracks",
+    "content": "0"
+  },
+  {
+    "filename": "GsmMetered",
+    "content": "1"
+  },
+  {
+    "filename": "HasAcceptedTerms",
+    "content": "2"
+  },
+  {
+    "filename": "HyundaiCameraSCC",
+    "content": "0"
+  },
+  {
+    "filename": "IsMetric",
+    "content": "1"
+  },
+
+  {
+    "filename": "LateralTorqueAccelFactor",
+    "content": "2400"
+  },
+  {
+    "filename": "LateralTorqueCustom",
+    "content": "1"
+  },
+  {
+    "filename": "LateralTorqueFriction",
+    "content": "600"
+  },
+  {
+    "filename": "LongActuatorDelay",
+    "content": "30"
+  },
+  {
+    "filename": "LongPitch",
+    "content": "1"
+  },
+  {
+    "filename": "LongTuningKf",
+    "content": "105"
+  },
+  {
+    "filename": "LongTuningKiV",
+    "content": "100"
+  },
+  {
+    "filename": "LongTuningKpV",
+    "content": "100"
+  },
+  {
+    "filename": "LongitudinalPersonality",
+    "content": "0"
+  },
+  {
+    "filename": "LongitudinalPersonalityMax",
+    "content": "3"
+  },
+  {
+    "filename": "MaxAngleFrames",
+    "content": "80"
+  },
+  {
+    "filename": "MaxTimeOffroadMin",
+    "content": "160"
+  },
+  {
+    "filename": "MyDrivingMode",
+    "content": "3"
+  },
+  {
+    "filename": "OpenpilotEnabledToggle",
+    "content": "1"
+  },
+  {
+    "filename": "RecordFront",
+    "content": "0"
+  },
+  {
+    "filename": "RouteCount",
+    "content": "8"
+  },
+  {
+    "filename": "ShowDateTime",
+    "content": "1"
+  },
+  {
+    "filename": "ShowDebugUI",
+    "content": "0"
+  },
+  {
+    "filename": "ShowLaneInfo",
+    "content": "2"
+  },
+  {
+    "filename": "ShowPathColor",
+    "content": "13"
+  },
+  {
+    "filename": "ShowPathColorCruiseOff",
+    "content": "19"
+  },
+  {
+    "filename": "ShowPathEnd",
+    "content": "1"
+  },
+  {
+    "filename": "ShowPathMode",
+    "content": "14"
+  },
+  {
+    "filename": "ShowPathModeCruiseOff",
+    "content": "12"
+  },
+  {
+    "filename": "ShowPlotMode",
+    "content": "1"
+  },
+  {
+    "filename": "ShowRadarInfo",
+    "content": "3"
+  },
+  {
+    "filename": "SoftHoldMode",
+    "content": "0"
+  },
+  {
+    "filename": "SoundVolumeAdjust",
+    "content": "100"
+  },
+  {
+    "filename": "SoundVolumeAdjustEngage",
+    "content": "90"
+  },
+  {
+    "filename": "SshEnabled",
+    "content": "1"
+  },
+  {
+    "filename": "SteerActuatorDelay",
+    "content": "41"
+  },
+  {
+    "filename": "StopDistanceCarrot",
+    "content": "550"
+  },
+  {
+    "filename": "TFollowGap1",
+    "content": "90"
+  },
+  {
+    "filename": "TFollowGap2",
+    "content": "180"
+  },
+  {
+    "filename": "TFollowGap3",
+    "content": "270"
+  },
+  {
+    "filename": "TFollowGap4",
+    "content": "90"
+  },
+]
