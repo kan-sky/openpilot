@@ -127,6 +127,18 @@ class Car:
       safety_config.safetyModel = structs.CarParams.SafetyModel.noOutput
       self.CP.safetyConfigs = [safety_config]
 
+    if self.CP.secOcRequired and not self.params.get_bool("IsReleaseBranch"):
+      secoc_key = self.params.get("SecOCKey", encoding='utf8')
+      if secoc_key is not None:
+        saved_secoc_key = bytes.fromhex(secoc_key.strip())
+        if len(saved_secoc_key) == 16:
+          self.CP.secOcKeyAvailable = True
+          self.CI.CS.secoc_key = saved_secoc_key
+          if controller_available:
+            self.CI.CC.secoc_key = saved_secoc_key
+        else:
+          cloudlog.warning("Saved SecOC key is invalid")
+
     # Write previous route's CarParams
     prev_cp = self.params.get("CarParamsPersistent")
     if prev_cp is not None:
@@ -190,8 +202,9 @@ class Car:
   def update_events(self, CS: car.CarState, RD: structs.RadarData | None):
     self.events.clear()
 
-    #CS.events = self.car_events.update(self.CI.CS, self.CS_prev, self.CI.CC, self.CC_prev).to_msg()
-    events = self.car_events.update(self.CI.CS, self.CS_prev, self.CI.CC, self.CC_prev)
+    #CS.events = self.car_events.update(self.CI.CS, self.CS_prev, self.CC_prev).to_msg()
+    
+    events = self.car_events.update(self.CI.CS, self.CS_prev, self.CC_prev)
 
     no_entry_events = events.contains(ET.NO_ENTRY)
     while self.v_cruise_helper.events:

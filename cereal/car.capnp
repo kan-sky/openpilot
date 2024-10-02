@@ -52,7 +52,6 @@ struct OnroadEvent @0x9b1657f34caf3ad3 {
     brakeHold @28;
     parkBrake @29;
     manualRestart @30;
-    lowSpeedLockout @31;
     joystickDebug @34;
     longitudinalManeuver @124;
     steerTempUnavailableSilent @35;
@@ -87,6 +86,7 @@ struct OnroadEvent @0x9b1657f34caf3ad3 {
     startup @75;
     startupNoCar @76;
     startupNoControl @77;
+    startupNoSecOcKey @125;
     startupMaster @78;
     fcw @79;
     steerSaturated @80;
@@ -103,7 +103,6 @@ struct OnroadEvent @0x9b1657f34caf3ad3 {
     selfdriveInitializing @98;
     usbError @99;
     cruiseMismatch @106;
-    lkasDisabled @107;
     canBusMissing @111;
     selfdrivedLagging @112;
     resumeBlocked @113;
@@ -117,9 +116,9 @@ struct OnroadEvent @0x9b1657f34caf3ad3 {
     espActive @121;
     personalityChanged @122;
     aeb @123;
-    torqueNNLoad @147;
+    torqueNNLoad @148;
 
-    softHold @125;
+    softHold @147;
     trafficStopping @126;
     audioPrompt @127;
     audioRefuse @128;
@@ -173,6 +172,8 @@ struct OnroadEvent @0x9b1657f34caf3ad3 {
     wideRoadCameraErrorDEPRECATED @102;
     highCpuUsageDEPRECATED @105;
     startupNoFwDEPRECATED @104;
+    lowSpeedLockoutDEPRECATED @31;
+    lkasDisabledDEPRECATED @107;
   }
 }
 
@@ -222,6 +223,7 @@ struct CarState {
   steeringPressed @9 :Bool;        # if the user is using the steering wheel
   steerFaultTemporary @35 :Bool;   # temporary EPS fault
   steerFaultPermanent @36 :Bool;   # permanent EPS fault
+  invalidLkasSetting @55 :Bool;    # stock LKAS is incorrectly configured (i.e. on or off)
   stockAeb @30 :Bool;
   stockFcw @31 :Bool;
   espDisabled @32 :Bool;
@@ -260,7 +262,7 @@ struct CarState {
   cumLagMs @50 :Float32;
 
 
-  tpms @55 : Tpms;
+  tpms @59 : Tpms;
   vCluRatio @56 :Float32;
   logCarrot @57 :Text;
   softHoldActive @58 :Int16;    #0: not active, 1: active ready, 2: activated
@@ -317,7 +319,7 @@ struct CarState {
       cancel @5;
       altButton1 @6;
       altButton2 @7;
-      altButton3 @8;
+      mainCruise @8;
       setCruise @9;
       resumeCruise @10;
       gapAdjustCruise @11;
@@ -519,7 +521,7 @@ struct CarParams {
   enableDsu @5 :Bool;        # driving support unit
   enableBsm @56 :Bool;       # blind spot monitoring
   flags @64 :UInt32;         # flags for car specific quirks
-  extFlags @75 :UInt32;     # carrot ext car flags
+  extFlags @77 :UInt32;     # carrot ext car flags
   experimentalLongitudinalAvailable @71 :Bool;
 
   minEnableSpeed @7 :Float32;
@@ -581,6 +583,9 @@ struct CarParams {
   networkLocation @50 :NetworkLocation;  # Where Panda/C2 is integrated into the car's CAN network
 
   wheelSpeedFactor @63 :Float32; # Multiplier on wheels speeds to computer actual speeds
+
+  secOcRequired @75 :Bool;  # Car requires SecOC message authentication to operate
+  secOcKeyAvailable @76 :Bool;  # Stored SecOC key loaded from params
 
   struct SafetyConfig {
     safetyModel @0 :SafetyModel;

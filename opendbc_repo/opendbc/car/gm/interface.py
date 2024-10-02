@@ -283,6 +283,9 @@ class CarInterface(CarInterfaceBase):
 
     elif candidate == CAR.CHEVROLET_TRAX:
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
+    elif candidate == CAR.CHEVROLET_TRAVERSE:
+      ret.steerActuatorDelay = 0.2
+      CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
 
     elif candidate in CC_ONLY_CAR:
       ret.flags |= GMFlags.CC_LONG.value
@@ -314,5 +317,6 @@ class CarInterface(CarInterfaceBase):
 
     if 608 in fingerprint[CanBus.POWERTRAIN]:
       ret.flags |= GMFlags.SPEED_RELATED_MSG.value
+
 
     return ret

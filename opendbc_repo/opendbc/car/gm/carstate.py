@@ -16,7 +16,7 @@ GearShifter = structs.CarState.GearShifter
 STANDSTILL_THRESHOLD = 10 * 0.0311 * CV.KPH_TO_MS
 LongCtrlState = car.CarControl.Actuators.LongControlState # kans
 BUTTONS_DICT = {CruiseButtons.RES_ACCEL: ButtonType.accelCruise, CruiseButtons.DECEL_SET: ButtonType.decelCruise,
-                CruiseButtons.MAIN: ButtonType.altButton3, CruiseButtons.CANCEL: ButtonType.cancel,
+                CruiseButtons.MAIN: ButtonType.mainCruise, CruiseButtons.CANCEL: ButtonType.cancel,
                 CruiseButtons.GAP_DIST: ButtonType.gapAdjustCruise}
 
 class CarState(CarStateBase):
@@ -62,9 +62,6 @@ class CarState(CarStateBase):
       self.distance_button_pressed = cam_cp.vl["ASCMSteeringButton"]["DistanceButton"] != 0
       self.buttons_counter = cam_cp.vl["ASCMSteeringButton"]["RollingCounter"]
     self.pscm_status = copy.copy(pt_cp.vl["PSCMStatus"])
-    # This is to avoid a fault where you engage while still moving backwards after shifting to D.
-    # An Equinox has been seen with an unsupported status (3), so only check if either wheel is in reverse (2)
-    self.moving_backward = (pt_cp.vl["EBCMWheelSpdRear"]["RLWheelDir"] == 2) or (pt_cp.vl["EBCMWheelSpdRear"]["RRWheelDir"] == 2)
     # GAP_DIST
     if self.cruise_buttons in [CruiseButtons.UNPRESS, CruiseButtons.INIT] and self.distance_button_pressed:
       self.cruise_buttons = CruiseButtons.GAP_DIST
@@ -86,16 +83,20 @@ class CarState(CarStateBase):
       self.pt_lka_steering_cmd_counter = pt_cp.vl["ASCMLKASteeringCmd"]["RollingCounter"]
       self.cam_lka_steering_cmd_counter = cam_cp.vl["ASCMLKASteeringCmd"]["RollingCounter"]
 
+    # This is to avoid a fault where you engage while still moving backwards after shifting to D.
+    # An Equinox has been seen with an unsupported status (3), so only check if either wheel is in reverse (2)
+    left_whl_sign = -1 if pt_cp.vl["EBCMWheelSpdRear"]["RLWheelDir"] == 2 else 1
+    right_whl_sign = -1 if pt_cp.vl["EBCMWheelSpdRear"]["RRWheelDir"] == 2 else 1
     ret.wheelSpeeds = self.get_wheel_speeds(
-      pt_cp.vl["EBCMWheelSpdFront"]["FLWheelSpd"],
-      pt_cp.vl["EBCMWheelSpdFront"]["FRWheelSpd"],
-      pt_cp.vl["EBCMWheelSpdRear"]["RLWheelSpd"],
-      pt_cp.vl["EBCMWheelSpdRear"]["RRWheelSpd"],
+      left_whl_sign * pt_cp.vl["EBCMWheelSpdFront"]["FLWheelSpd"],
+      right_whl_sign * pt_cp.vl["EBCMWheelSpdFront"]["FRWheelSpd"],
+      left_whl_sign * pt_cp.vl["EBCMWheelSpdRear"]["RLWheelSpd"],
+      right_whl_sign * pt_cp.vl["EBCMWheelSpdRear"]["RRWheelSpd"],
     )
     ret.vEgoRaw = (ret.wheelSpeeds.fl + ret.wheelSpeeds.fr + ret.wheelSpeeds.rl + ret.wheelSpeeds.rr) / 4.
     ret.vEgo, ret.aEgo = self.update_speed_kf(ret.vEgoRaw)
     # sample rear wheel speeds, standstill=True if ECM allows engagement with brake
-    ret.standstill = ret.wheelSpeeds.rl <= STANDSTILL_THRESHOLD and ret.wheelSpeeds.rr <= STANDSTILL_THRESHOLD
+    ret.standstill = abs(ret.wheelSpeeds.rl) <= STANDSTILL_THRESHOLD and abs(ret.wheelSpeeds.rr) <= STANDSTILL_THRESHOLD
 
     if pt_cp.vl["ECMPRDNL2"]["ManualMode"] == 1:
       ret.gearShifter = self.parse_gear_shifter("T")

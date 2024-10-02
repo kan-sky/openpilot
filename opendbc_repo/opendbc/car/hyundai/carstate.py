@@ -68,6 +68,7 @@ class CarState(CarStateBase):
 
     self.params = CarControllerParams(CP)
 
+    self.main_enabled = True #if Params().get_int("AutoEngage") == 2 else False
     self.gear_shifter = GearShifter.drive # Gear_init for Nexo ?? unknown 21.02.23.LSW
 
   def update(self, cp, cp_cam, *_) -> structs.CarState:
@@ -120,12 +121,12 @@ class CarState(CarStateBase):
     # cruise state
     if self.CP.openpilotLongitudinalControl:
       # These are not used for engage/disengage since openpilot keeps track of state using the buttons
-      ret.cruiseState.available = cp.vl["TCS13"]["ACCEnable"] == 0
+      ret.cruiseState.available = self.main_enabled #cp.vl["TCS13"]["ACCEnable"] == 0
       ret.cruiseState.enabled = cp.vl["TCS13"]["ACC_REQ"] == 1
       ret.cruiseState.standstill = False
       ret.cruiseState.nonAdaptive = False
     else:
-      ret.cruiseState.available = cp_cruise.vl["SCC11"]["MainMode_ACC"] == 1
+      self.main_enabled = ret.cruiseState.available = cp_cruise.vl["SCC11"]["MainMode_ACC"] == 1
       ret.cruiseState.enabled = cp_cruise.vl["SCC12"]["ACCMode"] != 0
       ret.cruiseState.standstill = cp_cruise.vl["SCC11"]["SCCInfoDisplay"] == 4.
       ret.cruiseState.nonAdaptive = cp_cruise.vl["SCC11"]["SCCInfoDisplay"] == 2.  # Shows 'Cruise Control' on dash
@@ -219,12 +220,13 @@ class CarState(CarStateBase):
       cruise_button = cp.vl_all["CLU11"]["CF_Clu_CruiseSwState"]
     self.cruise_buttons.extend(cruise_button)
     # }} carrot
+    prev_main_buttons = self.main_buttons[-1]
+    #self.cruise_buttons.extend(cp.vl_all["CLU11"]["CF_Clu_CruiseSwState"])
     self.main_buttons.extend(cp.vl_all["CLU11"]["CF_Clu_CruiseSwMain"])
     self.mdps12 = copy.copy(cp.vl["MDPS12"])
 
-
-    if self.CP.openpilotLongitudinalControl:
-      ret.buttonEvents = create_button_events(self.cruise_buttons[-1], prev_cruise_buttons, BUTTONS_DICT)
+    ret.buttonEvents = [*create_button_events(self.cruise_buttons[-1], prev_cruise_buttons, BUTTONS_DICT),
+                        *create_button_events(self.main_buttons[-1], prev_main_buttons, {1: ButtonType.mainCruise})]
 
 
     tpms_unit = cp.vl["TPMS11"]["UNIT"] * 0.725 if int(cp.vl["TPMS11"]["UNIT"]) > 0 else 1.
@@ -246,6 +248,8 @@ class CarState(CarStateBase):
     vEgoClu, aEgoClu = self.update_clu_speed_kf(ret.vEgoCluster)
     ret.vCluRatio = (ret.vEgo / vEgoClu) if (vEgoClu > 3. and ret.vEgo > 3.) else 1.0
 
+    if prev_main_buttons == 0 and self.main_buttons[-1] != 0:
+      self.main_enabled = not self.main_enabled
     return ret
 
   def update_canfd(self, cp, cp_cam) -> structs.CarState:
@@ -321,7 +325,7 @@ class CarState(CarStateBase):
 
     # cruise state
     # CAN FD cars enable on main button press, set available if no TCS faults preventing engagement
-    ret.cruiseState.available = cp.vl["TCS"]["ACCEnable"] == 0
+    ret.cruiseState.available = self.main_enabled #cp.vl["TCS"]["ACCEnable"] == 0
     if self.CP.openpilotLongitudinalControl:
       # These are not used for engage/disengage since openpilot keeps track of state using the buttons
       ret.cruiseState.enabled = cp.vl["TCS"]["ACC_REQ"] == 1
@@ -364,7 +368,12 @@ class CarState(CarStateBase):
         #print("empty cruise btns...")
       else:
         self.cruise_buttons_msg = copy.copy(cp.vl_all[self.cruise_btns_msg_canfd])
+    prev_main_buttons = self.main_buttons[-1]
+    #self.cruise_buttons.extend(cp.vl_all[self.cruise_btns_msg_canfd]["CRUISE_BUTTONS"])
     self.main_buttons.extend(cp.vl_all[self.cruise_btns_msg_canfd]["ADAPTIVE_CRUISE_MAIN_BTN"])
+    if self.main_buttons[-1] != prev_main_buttons and not self.main_buttons[-1]: # and self.CP.openpilotLongitudinalControl: #carrot
+      self.main_enabled = not self.main_enabled
+      print("main_enabled = {}".format(self.main_enabled))
     self.buttons_counter = cp.vl[self.cruise_btns_msg_canfd]["COUNTER"]
     ret.accFaulted = cp.vl["TCS"]["ACCEnable"] != 0  # 0 ACC CONTROL ENABLED, 1-3 ACC CONTROL DISABLED
 
@@ -379,8 +388,8 @@ class CarState(CarStateBase):
     ret.vCluRatio = (ret.vEgo / vEgoClu) if (vEgoClu > 3. and ret.vEgo > 3.) else 1.0
 
 
-    if self.CP.openpilotLongitudinalControl:
-      ret.buttonEvents = create_button_events(self.cruise_buttons[-1], prev_cruise_buttons, BUTTONS_DICT)
+    ret.buttonEvents = [*create_button_events(self.cruise_buttons[-1], prev_cruise_buttons, BUTTONS_DICT),
+                        *create_button_events(self.main_buttons[-1], prev_main_buttons, {1: ButtonType.mainCruise})]
 
     return ret
 
@@ -528,7 +537,7 @@ class CarState(CarStateBase):
     # ����, ���� EV6: 1, 1 => True, inADAS: 1, 0 => False
     # ����, 0, 0 => True
     if CP.enableBsm:
-      if CP.flags & Hyundai.CAMERA_SCC.value and CP.extFlags & HyundaiExtFlags.BSM_IN_ADAS.value:
+      if CP.flags & HyundaiFlags.CAMERA_SCC.value and CP.extFlags & HyundaiExtFlags.BSM_IN_ADAS.value:
         pass
       else:
         messages += [
