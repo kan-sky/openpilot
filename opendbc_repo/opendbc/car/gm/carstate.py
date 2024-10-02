@@ -201,6 +201,7 @@ class CarState(CarStateBase):
       vEgoClu, aEgoClu = self.update_clu_speed_kf(ret.vEgoCluster)
       if self.CP.carFingerprint in CAR.CHEVROLET_VOLT:
         ret.vCluRatio = (ret.vEgo / vEgoClu) if (vEgoClu > 3. and ret.vEgo > 3.) else 1.0
+        print("vCluRatio={}".format(ret.vCluRatio))
       else:
         ret.vCluRatio = 0.96
 
