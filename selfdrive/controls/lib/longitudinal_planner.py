@@ -225,7 +225,7 @@ class LongitudinalPlanner:
 
     longitudinalPlan.hasLead = sm['radarState'].leadOne.status
     longitudinalPlan.longitudinalPlanSource = self.mpc.source
-    longitudinalPlan.fcw = self.fcw
+    longitudinalPlan.fcw = False #self.fcw
         
     a_target, should_stop, v_target = get_accel_from_plan(self.CP, longitudinalPlan.speeds, longitudinalPlan.accels)
     longitudinalPlan.aTarget = a_target
