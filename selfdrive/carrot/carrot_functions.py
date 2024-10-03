@@ -70,7 +70,7 @@ class CarrotPlanner:
     self.startSignCount = 0
     self.stopSignCount = 0
     
-    self.myDrivingMode = 3 #params.get_int("MyDrivingMode")
+    self.myDrivingMode = self.params.get_int("MyDrivingMode")
     self.myEcoModeFactor = 0.9 #params.get_float("MyEcoModeFactor") / 100.
     self.mySafeModeFactor = 0.8 #params.get_float("MySafeModeFactor") / 100.
     self.mySafeFactor = 1.0
@@ -274,6 +274,9 @@ class CarrotPlanner:
 
     #self.check_model_stopping(v, v_ego, self.xStop, y)
     self.check_model_stopping(v, v_ego, x[-1], y)
+
+    if self.myDrivingMode == 4:
+      self.trafficState = TrafficState.off
     
     #self.update_user_control()
 

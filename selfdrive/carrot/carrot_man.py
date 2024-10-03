@@ -540,7 +540,7 @@ class CarrotServ:
     self.szGoalName = ""
     self.vpPosPointLat = 0.0
     self.vpPosPointLon = 0.0
-    self.roadcate = 0
+    self.roadcate = 8
 
     self.nPosSpeed = 0.0
     self.nPosAngle = 0.0
@@ -885,21 +885,21 @@ class CarrotServ:
   def update_auto_turn(self, v_ego_kph, sm, x_turn_info, x_dist_to_turn):
     turn_speed = self.autoTurnControlSpeedTurn
     stop_speed = 1
-    turn_dist = 50
-    fork_dist = 20
+    turn_dist_for_speed = 5 #50
+    fork_dist_for_speed = 5 #20
     fork_speed = self.nRoadLimitSpeed
-    stop_dist = 1
+    stop_dist_for_speed = 5
     start_fork_dist = interp(self.nRoadLimitSpeed, [30, 50, 100], [160, 200, 350])
     start_turn_dist = interp(self.nTBTNextRoadWidth, [5, 10], [43, 60])
     turn_info_mapping = {
-        1: {"type": "turn left", "speed": turn_speed, "dist": turn_dist, "start": start_fork_dist},
-        2: {"type": "turn right", "speed": turn_speed, "dist": turn_dist, "start": start_fork_dist},
-        5: {"type": "straight", "speed": turn_speed, "dist": turn_dist, "start": start_turn_dist},
-        3: {"type": "fork left", "speed": fork_speed, "dist": fork_dist, "start": start_fork_dist},
-        4: {"type": "fork right", "speed": fork_speed, "dist": fork_dist, "start": start_fork_dist},
-        6: {"type": "straight", "speed": fork_speed, "dist": fork_dist, "start": start_fork_dist},
-        7: {"type": "straight", "speed": stop_speed, "dist": stop_dist, "start": 1000},
-        8: {"type": "straight", "speed": stop_speed, "dist": stop_dist, "start": 1000},
+        1: {"type": "turn left", "speed": turn_speed, "dist": turn_dist_for_speed, "start": start_fork_dist},
+        2: {"type": "turn right", "speed": turn_speed, "dist": turn_dist_for_speed, "start": start_fork_dist},
+        5: {"type": "straight", "speed": turn_speed, "dist": turn_dist_for_speed, "start": start_turn_dist},
+        3: {"type": "fork left", "speed": fork_speed, "dist": fork_dist_for_speed, "start": start_fork_dist},
+        4: {"type": "fork right", "speed": fork_speed, "dist": fork_dist_for_speed, "start": start_fork_dist},
+        6: {"type": "straight", "speed": fork_speed, "dist": fork_dist_for_speed, "start": start_fork_dist},
+        7: {"type": "straight", "speed": stop_speed, "dist": stop_dist_for_speed, "start": 1000},
+        8: {"type": "straight", "speed": stop_speed, "dist": stop_dist_for_speed, "start": 1000},
     }
 
     default_mapping = {"type": "none", "speed": 0, "dist": 0, "start": 1000}
@@ -933,7 +933,7 @@ class CarrotServ:
     atc_desired = 250    
     if atc_speed > 0 and x_dist_to_turn > 0:
       decel = self.autoNaviSpeedDecelRate
-      safe_sec = 3.0      
+      safe_sec = 2.0      
       atc_desired = min(atc_desired, self.calculate_current_speed(x_dist_to_turn - atc_dist, atc_speed, safe_sec, decel))
 
 
@@ -967,11 +967,12 @@ class CarrotServ:
       self.xSpdType = self.navType = self.xTurnInfo = self.xTurnInfoNext = -1
       self.nSdiType = self.nSdiBlockType = self.nSdiPlusBlockType = -1
       self.nTBTTurnType = self.nTBTTurnTypeNext = -1
+      self.roadcate = 8
       
     if self.xSpdType < 0 or self.xSpdDist <= 0:
       self.xSpdType = -1
       self.xSpdDist = self.xSpdLimit = 0
-    if self.xTurnInfo < 0 or self.xDistToTurn <= 0:
+    if self.xTurnInfo < 0 or self.xDistToTurn < -50:
       self.xDistToTurn = 0
       self.xTurnInfo = -1
       self.xDistToTurnNext = 0
@@ -992,8 +993,10 @@ class CarrotServ:
     atc_desired, self.atcType, self.atcSpeed, self.atcDist = self.update_auto_turn(v_ego*3.6, sm, self.xTurnInfo, self.xDistToTurn)
     atc_desired_next, _, _, _ = self.update_auto_turn(v_ego*3.6, sm, self.xTurnInfoNext, self.xDistToTurnNext)
 
-    if self.xTurnInfo >= 0:      
+    if self.xTurnInfo >= 0 or self.active > 0:      
       self.debugText = f"Atc:{atc_desired:.1f},{self.xTurnInfo}:{self.xDistToTurn:.1f}, I({self.nTBTNextRoadWidth},{self.roadcate}) Atc2:{atc_desired_next:.1f},{self.xTurnInfoNext},{self.xDistToTurnNext:.1f}"
+    else:
+      self.debugText = ""
       
     if self.autoTurnControl not in [2, 3]:    # auto turn speed control
       atc_desired = atc_desired_next = 250
