@@ -91,7 +91,7 @@ class Controls:
 
     CC = car.CarControl.new_message()
     CC.enabled = self.sm['selfdriveState'].enabled
-    CC.steerRatio = sr
+    #CC.steerRatio = sr
 
   	#carrot
     gear = car.CarState.GearShifter
