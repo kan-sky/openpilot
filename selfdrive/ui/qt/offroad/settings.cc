@@ -192,38 +192,6 @@ DevicePanel::DevicePanel(SettingsWindow *parent) : ListWidget(parent) {
   addItem(new LabelControl(tr("Dongle ID"), getDongleId().value_or(tr("N/A"))));
   addItem(new LabelControl(tr("Serial"), params.get("HardwareSerial").c_str()));
 
-  // on_road button
-  QHBoxLayout *on_road_button_layout = new QHBoxLayout();
-  on_road_button_layout->setSpacing(30);
-
-  QPushButton *reboot_button = new QPushButton(tr("Reboot"));
-  reboot_button->setObjectName("reboot_button");
-  on_road_button_layout->addWidget(reboot_button);
-  QObject::connect(reboot_button, &QPushButton::clicked, this, &DevicePanel::reboot);
-
-  QPushButton *poweroff_button = new QPushButton(tr("Power Off"));
-  poweroff_button->setObjectName("poweroff_button");
-  on_road_button_layout->addWidget(poweroff_button);
-  QObject::connect(poweroff_button, &QPushButton::clicked, this, &DevicePanel::poweroff);
-
-  setStyleSheet(R"(
-    #reboot_button { height: 120px; border-radius: 15px; background-color: #393939; }
-    #reboot_button:pressed { background-color: #4a4a4a; }
-    #poweroff_button { height: 120px; border-radius: 15px; background-color: #E22C2C; }
-    #poweroff_button:pressed { background-color: #FF2424; }
-  )");
-  addItem(on_road_button_layout);
-
-
-  auto PowerOffBtn = new ButtonControl(tr("Powwer Off"), tr("SHUTDOWN"), "");
-  PowerOffBtn->setStyleSheet("height: 120px; border-radius: 15px; background-color: #E22C2C;");
-  connect(PowerOffBtn, &ButtonControl::clicked, [&]() {
-    if (ConfirmationDialog::confirm(tr("Are you sure you want to power off?"), tr("Shutdown"), this)) {
-      params.putBool("DoShutdown", true);
-    }
-  });
-  addItem(PowerOffBtn);
-
   pair_device = new ButtonControl(tr("Pair Device"), tr("PAIR"),
                                   tr("Pair your device with comma connect (connect.comma.ai) and claim your comma prime offer."));
   connect(pair_device, &ButtonControl::clicked, [=]() {
@@ -285,7 +253,7 @@ DevicePanel::DevicePanel(SettingsWindow *parent) : ListWidget(parent) {
   QObject::connect(uiState(), &UIState::offroadTransition, [=](bool offroad) {
     for (auto btn : findChildren<ButtonControl *>()) {
       if (btn != pair_device) {
-        btn->setEnabled(true);
+        btn->setEnabled(offroad);
       }
     }
   });
@@ -332,7 +300,6 @@ DevicePanel::DevicePanel(SettingsWindow *parent) : ListWidget(parent) {
       process.setWorkingDirectory("/data/openpilot/selfdrive");
       process.start("/bin/sh", QStringList{ "-c", QString("python ./apilot_default.py ./%1").arg(setting.jsonFile) });
       process.waitForFinished();
-        //Hardware::reboot();
       });
     addItem(button);
   }
