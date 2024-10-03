@@ -56,9 +56,20 @@ class CarController(CarControllerBase):
     self.accel_g = 0.0
 
   def update(self, CC, CS, now_nanos):
-    params = Params()
-    self.long_pitch = params.get_bool("LongPitch")
-    self.use_ev_tables = params.get_bool("EVTable")
+
+    if self.frame % 50 == 0:
+      params = Params()
+      steerMax = params.get_int("CustomSteerMax")
+      steerDeltaUp = params.get_int("CustomSteerDeltaUp")
+      steerDeltaDown = params.get_int("CustomSteerDeltaDown")
+      if steerMax > 0:
+        self.params.STEER_MAX = steerMax
+      if steerDeltaUp > 0:
+        self.params.STEER_DELTA_UP = steerDeltaUp
+      if steerDeltaDown > 0:
+        self.params.STEER_DELTA_DOWN = steerDeltaDown
+    self.long_pitch = Params().get_bool("LongPitch")
+    self.use_ev_tables = Params().get_bool("EVTable")
 
     actuators = CC.actuators
     accel = brake_accel = actuators.accel
@@ -68,12 +79,6 @@ class CarController(CarControllerBase):
     if hud_v_cruise > 70:
       hud_v_cruise = 0
 
-    steerMax = int(params.get("CustomSteerMax"))
-    steerDeltaUp = int(params.get("CustomSteerDeltaUp"))
-    steerDeltaDown = int(params.get("CustomSteerDeltaDown"))
-    self.params.STEER_MAX = self.params.STEER_MAX if steerMax <= 0 else steerMax
-    self.params.STEER_DELTA_UP = self.params.STEER_DELTA_UP if steerDeltaUp <= 0 else steerDeltaUp
-    self.params.STEER_DELTA_DOWN = self.params.STEER_DELTA_DOWN if steerDeltaDown <= 0 else steerDeltaDown
 
     # Send CAN commands.
     can_sends = []
