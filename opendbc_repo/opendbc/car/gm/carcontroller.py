@@ -171,7 +171,8 @@ class CarController(CarControllerBase):
           if (actuators.longControlState == LongCtrlState.starting)  and CS.out.vEgo > self.CP.minEnableSpeed:
             for i in range(12):
               can_sends.extend(gmcan.create_gm_cc_spam_command(self.packer_pt, self, CS, actuators))
-              print("accel={}".format(actuators.accel))
+              print("Accel={}".format(actuators.accel))
+              print("Speed={}".format(self.apply_speed))
 
           # GasRegenCmdActive needs to be 1 to avoid cruise faults. It describes the ACC state, not actuation
           can_sends.append(gmcan.create_gas_regen_command(self.packer_pt, CanBus.POWERTRAIN, self.apply_gas, idx, CC.enabled, at_full_stop))
