@@ -206,6 +206,10 @@ DevicePanel::DevicePanel(SettingsWindow *parent) : ListWidget(parent) {
   on_road_button_layout->addWidget(poweroff_button);
   QObject::connect(poweroff_button, &QPushButton::clicked, this, &DevicePanel::poweroff);
 
+  if (Hardware::TICI()) {
+    connect(uiState(), &UIState::offroadTransition, poweroff_button, &QPushButton::setVisible);
+  }
+
   setStyleSheet(R"(
     #reboot_button { height: 120px; border-radius: 15px; background-color: #393939; }
     #reboot_button:pressed { background-color: #4a4a4a; }
