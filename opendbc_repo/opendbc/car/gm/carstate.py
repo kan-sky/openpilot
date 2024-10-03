@@ -181,6 +181,7 @@ class CarState(CarStateBase):
     if self.CP.networkLocation == NetworkLocation.fwdCamera and not self.CP.flags & GMFlags.NO_CAMERA.value:
       if self.CP.carFingerprint not in CC_ONLY_CAR:
         ret.cruiseState.speed = cam_cp.vl["ASCMActiveCruiseControlStatus"]["ACCSpeedSetpoint"] * CV.KPH_TO_MS
+        print("speedSetPoint={}".format(ret.cruiseState.speed * CV.MS_TO_KPH))
       if self.CP.carFingerprint not in SDGM_CAR:
         ret.stockAeb = cam_cp.vl["AEBCmd"]["AEBCmdActive"] != 0
       else:
@@ -202,7 +203,7 @@ class CarState(CarStateBase):
       vEgoClu, aEgoClu = self.update_clu_speed_kf(ret.vEgoCluster)
       if self.CP.carFingerprint in CAR.CHEVROLET_VOLT:
         ret.vCluRatio = (ret.vEgo / vEgoClu) if (vEgoClu > 3. and ret.vEgo > 3.) else 1.0
-        print("vCluRatio={}".format(ret.vCluRatio))
+        #print("vCluRatio={}".format(ret.vCluRatio))
       else:
         ret.vCluRatio = 0.96
 
