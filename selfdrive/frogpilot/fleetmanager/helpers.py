@@ -482,6 +482,7 @@ def get_all_toggle_values():
     "AutoCurveSpeedAggressiveness",
     "AutoTurnControl",
     "AutoLaneChangeSpeed",
+    "AutoTurnControlSpeedLaneChange",
     "AutoTurnControlSpeedTurn",
     "AutoTurnControlTurnEnd",
     "AutoTurnMapChange", 

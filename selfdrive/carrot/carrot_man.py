@@ -307,7 +307,7 @@ class CarrotMan:
     else:
       car_selected = car_selected.decode('utf-8')
 
-    directory = "CR2 " + car_selected + " " + Params().get("DongleId").decode('utf-8')
+    directory = Params().get("GitRemote") + "-" + Params.get("GitBranch") + "-" + car_selected + "-" + Params().get("DongleId").decode('utf-8')
     current_time = datetime.now().strftime("%Y%m%d-%H%M%S")
     filename = tmux_why + "-" + current_time + ".txt"
 
@@ -882,7 +882,7 @@ class CarrotServ:
     
     return new_lat, new_lon
 
-  def update_auto_turn(self, v_ego_kph, sm, x_turn_info, x_dist_to_turn):
+  def update_auto_turn(self, v_ego_kph, sm, x_turn_info, x_dist_to_turn, check_steer=False):
     turn_speed = self.autoTurnControlSpeedTurn
     stop_speed = 1
     turn_dist_for_speed = 5 #50
@@ -916,19 +916,20 @@ class CarrotServ:
     elif atc_type in ["turn left", "turn right"] and x_dist_to_turn > start_turn_dist:
       atc_type = "fork left" if atc_type == "turn left" else "fork right"
 
-    if 0 < x_dist_to_turn < atc_start_dist:
-      if not self.atc_paused:
-        steering_pressed = sm["carState"].steeringPressed
-        steering_torque = sm["carState"].steeringTorque
-        if steering_pressed and steering_torque < 0 and atc_type == "fork left":
-          self.atc_paused = True
-        elif steering_pressed and steering_torque > 0 and atc_type == "fork right":
-          self.atc_paused = True
-    else:
-      self.atc_paused = False
+    if check_steer:
+      if 0 < x_dist_to_turn < atc_start_dist and atc_type in ["fork left", "fork right"]:
+        if not self.atc_paused:
+          steering_pressed = sm["carState"].steeringPressed
+          steering_torque = sm["carState"].steeringTorque
+          if steering_pressed and steering_torque < 0 and atc_type == "fork left":
+            self.atc_paused = True
+          elif steering_pressed and steering_torque > 0 and atc_type == "fork right":
+            self.atc_paused = True
+      else:
+        self.atc_paused = False
 
-    if self.atc_paused:
-      atc_type += " canceled"
+      if self.atc_paused:
+        atc_type += " canceled"
 
     atc_desired = 250    
     if atc_speed > 0 and x_dist_to_turn > 0:
@@ -990,8 +991,8 @@ class CarrotServ:
         self.active = 4
 
     ### TBT 속도제어
-    atc_desired, self.atcType, self.atcSpeed, self.atcDist = self.update_auto_turn(v_ego*3.6, sm, self.xTurnInfo, self.xDistToTurn)
-    atc_desired_next, _, _, _ = self.update_auto_turn(v_ego*3.6, sm, self.xTurnInfoNext, self.xDistToTurnNext)
+    atc_desired, self.atcType, self.atcSpeed, self.atcDist = self.update_auto_turn(v_ego*3.6, sm, self.xTurnInfo, self.xDistToTurn, True)
+    atc_desired_next, _, _, _ = self.update_auto_turn(v_ego*3.6, sm, self.xTurnInfoNext, self.xDistToTurnNext, False)
 
     if self.xTurnInfo >= 0 or self.active > 0:      
       self.debugText = f"Atc:{atc_desired:.1f},{self.xTurnInfo}:{self.xDistToTurn:.1f}, I({self.nTBTNextRoadWidth},{self.roadcate}) Atc2:{atc_desired_next:.1f},{self.xTurnInfoNext},{self.xDistToTurnNext:.1f}"

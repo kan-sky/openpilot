@@ -254,7 +254,7 @@ protected:
             data[0] = a_ego;
             data[1] = lead_radar.getALeadK();
             data[2] = lead_radar.getVRel();
-            sprintf(title, "4.Lead(Y:a_ego, G:a_lead, O:v_lead)");
+            sprintf(title, "4.Lead(Y:a_ego, G:a_lead, O:v_rel)");
             break;
         default:
             data[0] = data[1] = data[2] = 0;
@@ -1728,6 +1728,36 @@ public:
             ui_draw_image(s, { x, y, 240, 54 }, "ic_radartracks", 1.0f);
             x += (120 + 135);
         }
+    }
+    NVGcolor get_tpms_color(float tpms) {
+        if (tpms < 5 || tpms > 60) // N/A
+            return nvgRGBA(255, 255, 255, 220);
+        if (tpms < 31)
+            return nvgRGBA(255, 90, 90, 220);
+        return nvgRGBA(255, 255, 255, 220);
+    }
+
+    const char* get_tpms_text(float tpms) {
+        if (tpms < 5 || tpms > 60) return "  -";
+        static char str[32];
+        snprintf(str, sizeof(str), "%.0f", round(tpms));
+        return str;
+    }
+    void drawTpms(const UIState* s) {
+        SubMaster& sm = *(s->sm);
+        auto car_state = sm["carState"].getCarState();
+
+        int bx = (192 - 24) / 2 + UI_BORDER_SIZE + 10;
+        int by = s->fb_h - 280 / 2 + 10;
+        auto tpms = car_state.getTpms();
+        float fl = tpms.getFl();
+        float fr = tpms.getFr();
+        float rl = tpms.getRl();
+        float rr = tpms.getRr();
+        ui_draw_text(s, bx - 90, by - 55, get_tpms_text(fl), 38, get_tpms_color(fl), BOLD);
+        ui_draw_text(s, bx + 90, by - 55, get_tpms_text(fr), 38, get_tpms_color(fr), BOLD);
+        ui_draw_text(s, bx - 90, by + 80, get_tpms_text(rl), 38, get_tpms_color(rl), BOLD);
+        ui_draw_text(s, bx + 90, by + 80, get_tpms_text(rr), 38, get_tpms_color(rr), BOLD);
     }
 
 };

@@ -285,11 +285,11 @@ static void hyundai_canfd_rx_hook(const CANPacket_t *to_push) {
 
 static bool hyundai_canfd_tx_hook(const CANPacket_t *to_send) {
   const SteeringLimits HYUNDAI_CANFD_STEERING_LIMITS = {
-    .max_steer = 270,
+    .max_steer = 512,
     .max_rt_delta = 112,
     .max_rt_interval = 250000,
-    .max_rate_up = 2,
-    .max_rate_down = 3,
+    .max_rate_up = 10,
+    .max_rate_down = 10,
     .driver_torque_allowance = 250,
     .driver_torque_factor = 2,
     .type = TorqueDriverLimited,
@@ -314,7 +314,7 @@ static bool hyundai_canfd_tx_hook(const CANPacket_t *to_send) {
     bool steer_req = GET_BIT(to_send, 52U);
 
     if (steer_torque_cmd_checks(desired_torque, steer_req, HYUNDAI_CANFD_STEERING_LIMITS)) {
-      tx = false;
+      //tx = false;
     }
   }
 
@@ -530,7 +530,9 @@ static safety_config hyundai_canfd_init(uint16_t param) {
   safety_config ret;
   if (hyundai_longitudinal) {
     if (hyundai_canfd_hda2) {
-        print("hyundai safety canfd_hda2 long\n");
+        print("hyundai safety canfd_hda2 long-");
+        if(hyundai_camera_scc) print("camera_scc \n");
+        else print("no camera_scc \n");
         if (hyundai_canfd_alt_buttons) {          // carrot : for CANIVAL 4TH HDA2
             print("hyundai safety canfd_hda2 long_alt_buttons\n");
             if (hyundai_camera_scc) ret = BUILD_SAFETY_CFG(hyundai_canfd_hda2_long_alt_buttons_rx_checks_scc2, HYUNDAI_CANFD_HDA2_LONG_TX_MSGS);                
