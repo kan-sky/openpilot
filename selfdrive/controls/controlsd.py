@@ -72,7 +72,11 @@ class Controls:
     # Update VehicleModel
     lp = self.sm['liveParameters']
     x = max(lp.stiffnessFactor, 0.1)
-    sr = max(lp.steerRatio, 0.1)
+
+    # carrot
+    steer_ratio = float(self.params.get_int("SteerRatio")) / 10.0
+
+    sr = max(steer_ratio if steer_ratio > 1.0 else lp.steerRatio, 0.1)
     self.VM.update_params(x, sr)
 
     # Update Torque Params
@@ -87,6 +91,7 @@ class Controls:
 
     CC = car.CarControl.new_message()
     CC.enabled = self.sm['selfdriveState'].enabled
+    CC.steerRatio = sr
 
   	#carrot
     gear = car.CarState.GearShifter
@@ -97,7 +102,8 @@ class Controls:
     # Check which actuators can be enabled
     standstill = abs(CS.vEgo) <= max(self.CP.minSteerSpeed, MIN_LATERAL_CONTROL_SPEED) or CS.standstill
     CC.latActive = (self.sm['selfdriveState'].active or lateral_enabled) and not CS.steerFaultTemporary and not CS.steerFaultPermanent and not standstill
-    CC.longActive = CC.enabled and not any(e.overrideLongitudinal for e in self.sm['onroadEvents']) and self.CP.openpilotLongitudinalControl
+    CC.longActive = CC.enabled and not any(e.overrideLongitudinal for e in self.sm['onroadEvents']) and self.CP.openpilotLongitudinalControl \
+                    and CS.cruiseState.enabled
 
     actuators = CC.actuators
     actuators.longControlState = self.LoC.long_control_state

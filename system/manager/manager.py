@@ -34,6 +34,7 @@ def manager_init() -> None:
     # kans
     ("LongPitch", "1"),
     ("EVTable", "1"),
+    ("SteerRatio", "152"),
     ("CompletedTrainingVersion", "0"),
     ("DisengageOnAccelerator", "0"),
     ("GsmMetered", "1"),

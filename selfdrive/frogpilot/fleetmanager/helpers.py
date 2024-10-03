@@ -482,7 +482,6 @@ def get_all_toggle_values():
     "AutoCurveSpeedAggressiveness",
     "AutoTurnControl",
     "AutoLaneChangeSpeed",
-    "AutoTurnControlSpeedLaneChange",
     "AutoTurnControlSpeedTurn",
     "AutoTurnControlTurnEnd",
     "AutoTurnMapChange", 
@@ -567,7 +566,6 @@ def get_all_toggle_values():
     "CustomSteerDeltaDown",
     "SpeedFromPCM",
     "MaxTimeOffroadMin",
-    "MSLCEnabled",
     "NoLogging",
 
     "AlwaysOnLateralEnabled",
@@ -582,9 +580,6 @@ def get_all_toggle_values():
     "LongPitch",
     "EVTable",
     "TSS2Tune",
-    "MTSCAggressiveness",
-    "MTSCCurvatureCheck",
-    "MTSCEnabled",
     "PreferredSchedule",
     "NNFF",
     "NNFFLite"
