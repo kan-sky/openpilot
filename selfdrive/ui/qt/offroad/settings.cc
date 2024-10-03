@@ -192,6 +192,30 @@ DevicePanel::DevicePanel(SettingsWindow *parent) : ListWidget(parent) {
   addItem(new LabelControl(tr("Dongle ID"), getDongleId().value_or(tr("N/A"))));
   addItem(new LabelControl(tr("Serial"), params.get("HardwareSerial").c_str()));
 
+  // on_road button
+  QHBoxLayout *on_road_button_layout = new QHBoxLayout();
+  on_road_button_layout->setSpacing(30);
+
+  QPushButton *reboot_button = new QPushButton(tr("Reboot"));
+  reboot_button->setObjectName("reboot_button");
+  on_road_button_layout->addWidget(reboot_button);
+  QObject::connect(reboot_button, &QPushButton::clicked, this, &DevicePanel::reboot);
+
+  QPushButton *poweroff_button = new QPushButton(tr("Power Off"));
+  poweroff_button->setObjectName("poweroff_button");
+  on_road_button_layout->addWidget(poweroff_button);
+  QObject::connect(poweroff_button, &QPushButton::clicked, this, &DevicePanel::poweroff);
+
+  setStyleSheet(R"(
+    #reboot_button { height: 120px; border-radius: 15px; background-color: #393939; }
+    #reboot_button:pressed { background-color: #4a4a4a; }
+    #poweroff_button { height: 120px; border-radius: 15px; background-color: #E22C2C; }
+    #poweroff_button:pressed { background-color: #FF2424; }
+  )");
+  addItem(on_road_button_layout);
+
+
+
   auto PowerOffBtn = new ButtonControl(tr("Powwer Off"), tr("SHUTDOWN"), "");
   PowerOffBtn->setStyleSheet("height: 120px; border-radius: 15px; background-color: #E22C2C;");
   connect(PowerOffBtn, &ButtonControl::clicked, [&]() {
