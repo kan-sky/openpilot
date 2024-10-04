@@ -99,6 +99,7 @@ def manager_init() -> None:
     ("CustomSteerDeltaDown", "7"),       
     ("SteerActuatorDelay", "45"),       
     ("MaxTimeOffroadMin", "60"),
+    ("CurvatureFactor", "95"),
 
   ]
 

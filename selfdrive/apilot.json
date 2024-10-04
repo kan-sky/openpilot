@@ -106,6 +106,19 @@
       "unit": 1
     },
     {
+      "group": "조향튜닝",
+      "name": "CurvatureFactor",
+      "title": "커브옵셑x0.01(95)",
+      "descr": "오버스티어시 값을 줄여준다",
+      "egroup": "LAT",
+      "etitle": "Curvature offset x0.01(95)",
+      "edescr": "reduce it at oversteering",
+      "min": 80,
+      "max": 150,
+      "default": 95,
+      "unit": 5
+    },
+    {
       "group": "가속설정",
       "name": "CruiseMaxVals1",
       "title": "가속설정1:0km/h(160)",

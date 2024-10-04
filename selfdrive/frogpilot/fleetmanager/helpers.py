@@ -583,7 +583,8 @@ def get_all_toggle_values():
     "TSS2Tune",
     "PreferredSchedule",
     "NNFF",
-    "NNFFLite"
+    "NNFFLite",
+    "CurvatureFactor"
   ]
 
   toggle_values = {}
