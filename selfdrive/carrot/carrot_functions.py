@@ -87,7 +87,6 @@ class CarrotPlanner:
     self.soft_hold_active = 0
     self.events = Events()
     self.left_sec = -1
-    self.autoNaviSpeedDecelRate = 1.2
     self.myDrivingMode = 3
     self.myEcoModeFactor = 0.9
     self.mySafeModeFactor = 0.8
@@ -107,7 +106,7 @@ class CarrotPlanner:
 
     self.trafficState_carrot = 0
 
-    self.eco_over_speed = 2
+    self.eco_over_speed = 4
     self.eco_target_speed = 0
 
   def _params_update(self):
@@ -122,7 +121,6 @@ class CarrotPlanner:
         self.mySafeFactor = self.mySafeModeFactor
 
     if self.params_count == 10:
-      self.autoNaviSpeedDecelRate = float(self.params.get_int("AutoNaviSpeedDecelRate")) * 0.01
       self.myHighModeFactor = 1.2 #float(self.params.get_int("MyHighModeFactor")) / 100.
     elif self.params_count == 20:
       self.tFollowGap1 = self.params.get_float("TFollowGap1") / 100.

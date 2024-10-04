@@ -197,6 +197,7 @@ class Car:
     CS.vCruiseCluster = float(self.v_cruise_helper.v_cruise_cluster_kph)
     CS.softHoldActive = self.v_cruise_helper._soft_hold_active
 
+    self.CI.CS.softHoldActive = CS.softHoldActive
     return CS, RD
 
   def update_events(self, CS: car.CarState, RD: structs.RadarData | None):

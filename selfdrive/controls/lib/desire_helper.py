@@ -67,6 +67,7 @@ class DesireHelper:
           leftBlinker = True if atc_type == "turn left" else False
           rightBlinker = not leftBlinker          
           self.atc_active = 1
+          self.blinker_bypass = False
       elif atc_type in ["fork left", "fork right"]:
         if self.atc_active != 2:
           leftBlinker = True if atc_type == "fork left" else False
@@ -85,8 +86,8 @@ class DesireHelper:
       self.turn_direction = TurnDirection.none
     elif one_blinker and below_lane_change_speed and not carstate.standstill and self.enable_turn_desires:
       self.lane_change_state = LaneChangeState.off
-      self.lane_change_direction = LaneChangeDirection.none
       self.turn_direction = TurnDirection.turnLeft if leftBlinker else TurnDirection.turnRight
+      self.lane_change_direction = self.turn_direction #LaneChangeDirection.none
     else:
       self.turn_direction = TurnDirection.none     
       # LaneChangeState.off
@@ -145,8 +146,8 @@ class DesireHelper:
     steering_pressed = carstate.steeringPressed and \
                      ((carstate.steeringTorque < 0 and self.lane_change_direction == LaneChangeDirection.left) or
                       (carstate.steeringTorque > 0 and self.lane_change_direction == LaneChangeDirection.right))
-    if steering_pressed:
-      self.lane_change_direction = LaneChangeDirection.none
+    if steering_pressed and self.lane_change_state != LaneChangeState.off:
+      #self.lane_change_direction = LaneChangeDirection.none
       self.lane_change_state = LaneChangeState.off
       self.blinker_bypass = True
 

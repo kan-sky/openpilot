@@ -67,6 +67,8 @@ class CarController(CarControllerBase):
     self.blinking_frame = int(1.0 / DT_CTRL)
     #self.soft_hold_mode = 0
 
+    self.suppress_lfa_counter = 0
+
   def update(self, CC, CS, now_nanos):
 
     if self.frame % 50 == 0:
@@ -175,7 +177,7 @@ class CarController(CarControllerBase):
       if self.CP.openpilotLongitudinalControl:
         self.hyundai_jerk.make_jerk(self.CP, CS, accel, actuators, hud_control)
 
-        if not (self.CP.flags & HyundaiFlags.CAMERA_SCC.value):
+        if not camera_scc:
           if hda2:
             can_sends.extend(hyundaicanfd.create_adrv_messages(self.CP, self.packer, self.CAN, self.frame))
           else:

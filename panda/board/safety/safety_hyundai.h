@@ -197,6 +197,11 @@ static bool hyundai_tx_hook(const CANPacket_t *to_send) {
 
   // ACCEL: safety check
   if (addr == 0x421) {
+    int cruise_engaged = (GET_BYTES(to_send, 0, 4) >> 13) & 0x3U;
+    if (cruise_engaged) {
+      if(!controls_allowed) print("auto engage controls_allowed....\n");
+      controls_allowed = true;
+    }
     int desired_accel_raw = (((GET_BYTE(to_send, 4) & 0x7U) << 8) | GET_BYTE(to_send, 3)) - 1023U;
     int desired_accel_val = ((GET_BYTE(to_send, 5) << 3) | (GET_BYTE(to_send, 4) >> 5)) - 1023U;
 

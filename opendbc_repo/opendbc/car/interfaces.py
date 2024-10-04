@@ -299,6 +299,8 @@ class CarStateBase(ABC):
     self.v_ego_kf = KF1D(x0=x0, A=A, C=C[0], K=K)
     self.v_ego_clu_kf = KF1D(x0=x0, A=A, C=C[0], K=K)
 
+    self.softHoldActive = 0
+
   @abstractmethod
   def update(self, cp, cp_cam, cp_adas, cp_body, cp_loopback) -> structs.CarState:
     pass

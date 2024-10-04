@@ -1,6 +1,6 @@
 from opendbc.car import CanBusBase
 from opendbc.car.common.numpy_fast import clip
-from opendbc.car.hyundai.values import HyundaiFlags
+from opendbc.car.hyundai.values import HyundaiFlags, HyundaiExtFlags
 from openpilot.common.params import Params
 
 
@@ -72,7 +72,7 @@ def create_steering_messages(packer, CP, CAN, enabled, lat_active, apply_steer):
     hda2_lkas_msg = "LKAS_ALT" if CP.flags & HyundaiFlags.CANFD_HDA2_ALT_STEERING else "LKAS"
     if CP.openpilotLongitudinalControl: # and not (CP.extFlags & HyundaiExtFlags.ACAN_PANDA.value):
       ret.append(packer.make_can_msg("LFA", CAN.ECAN, values))
-    if not (CP.fFlags & HyundaiFlags.CAMERA_SCC.value) or CP.extFlags & HyundaiExtFlags.ACAN_PANDA.value:
+    if not (CP.flags & HyundaiFlags.CAMERA_SCC.value) or CP.extFlags & HyundaiExtFlags.ACAN_PANDA.value:
       ret.append(packer.make_can_msg(hda2_lkas_msg, CAN.ACAN, values))
   else:
     ret.append(packer.make_can_msg("LFA", CAN.ECAN, values))
@@ -188,7 +188,7 @@ def create_acc_control_scc2(packer, CAN, enabled, accel_last, accel, stopping, g
 
 def create_acc_control(packer, CAN, enabled, accel_last, accel, stopping, gas_override, set_speed, hud_control, jerk_u, jerk_l, CS):
   
-  enabled = enabled or CS.out.softHoldActive > 0
+  enabled = enabled or CS.softHoldActive > 0
   jerk = 5
   jn = jerk / 50
   if not enabled or gas_override:
@@ -200,7 +200,7 @@ def create_acc_control(packer, CAN, enabled, accel_last, accel, stopping, gas_ov
   values = {
     "ACCMode": 0 if not enabled else (2 if gas_override else 1),
     "MainMode_ACC": 1,
-    "StopReq": 1 if stopping or CS.out.softHoldActive > 0 else 0,
+    "StopReq": 1 if stopping or CS.softHoldActive > 0 else 0,
     "aReqValue": a_val,
     "aReqRaw": a_raw,
     "VSetDis": set_speed,

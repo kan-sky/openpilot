@@ -23,8 +23,10 @@ class CarInterface(CarInterfaceBase):
     camera_scc = params.get_int("HyundaiCameraSCC")
     if camera_scc > 0:
       ret.flags |= HyundaiFlags.CAMERA_SCC.value
+      print("$$$CAMERA_SCC toggled...")
     if camera_scc > 1:
       ret.extFlags |= HyundaiExtFlags.ACAN_PANDA.value
+      print("$$$sub PANDA enabled...")
       
 
 
@@ -196,8 +198,7 @@ class CarInterface(CarInterfaceBase):
 
    
     
-    if ret.flags & HyundaiFlags.CAMERA_SCC.value:
-      ret.radarTimeStep = 0.05 if params.get_int("EnableRadarTracks") > 0 else 0.02 # SCC(50Hz), radar tracks(20Hz)
+    ret.radarTimeStep = 0.05 if params.get_int("EnableRadarTracks") > 0 else 0.02 # SCC(50Hz), radar tracks(20Hz)
 
     # Car specific configuration overrides
 

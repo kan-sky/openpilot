@@ -307,9 +307,9 @@ class CarrotMan:
     else:
       car_selected = car_selected.decode('utf-8')
 
-    directory = Params().get("GitRemote") + "-" + Params.get("GitBranch") + "-" + car_selected + "-" + Params().get("DongleId").decode('utf-8')
+    directory = "CR2 " + car_selected + " " + Params().get("DongleId").decode('utf-8')
     current_time = datetime.now().strftime("%Y%m%d-%H%M%S")
-    filename = tmux_why + "-" + current_time + ".txt"
+    filename = tmux_why + "-" + current_time + "-" + Params().get("GitBranch").decode('utf-8') + ".txt"
 
     try:
       ftp.mkd(directory)

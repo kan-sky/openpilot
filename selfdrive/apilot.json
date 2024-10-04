@@ -262,6 +262,19 @@
       "unit": 5
     },
     {
+      "group": "주행튜닝",
+      "name": "RadarDampingFactor",
+      "title": "Radar damping factor (100)%",
+      "descr": "값이 낮아지면 선행차량에 대한 반응이 빨라짐.",
+      "egroup": "LONG",
+      "etitle": "Radar damping factor (100)%",
+      "edescr": "",
+      "min": 0,
+      "max": 200,
+      "default": 0,
+      "unit": 1
+    },
+    {
       "group": "감속제어",
       "name": "AutoCurveSpeedFactor",
       "title": "커브속도 조절비율(100%)",
