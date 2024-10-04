@@ -189,7 +189,7 @@ class CarState(CarStateBase):
       if self.CP.pcmCruise:
         ret.cruiseState.nonAdaptive = cam_cp.vl["ASCMActiveCruiseControlStatus"]["ACCCruiseState"] not in (2, 3)
     if self.CP.networkLocation == NetworkLocation.gateway:
-      if self.CP.carFingerprint in EV_CAR:
+      if self.CP.carFingerprint in CAR.CHEVROLET_VOLT:
         ret.cruiseState.speed = pt_cp.vl["ASCMActiveCruiseControlStatus"]["ACCSpeedSetpoint"] * CV.KPH_TO_MS
         print("speedSetPoint={}".format(ret.cruiseState.speed))
     if self.CP.carFingerprint in CC_ONLY_CAR:
@@ -260,7 +260,9 @@ class CarState(CarStateBase):
       ("EBCMFrictionBrakeStatus", 20),
       ("PSCMSteeringAngle", 100),
       ("ECMAcceleratorPos", 80),
-      ("ASCMActiveCruiseControlStatus", 25),
+      if CP.carFingerprint not in CAR.CHEVROLET_VOLT:
+        messages += [
+          ("ASCMActiveCruiseControlStatus", 25),
     ]
     if CP.flags & GMFlags.SPEED_RELATED_MSG.value:
       messages.append(("SPEED_RELATED", 20))
