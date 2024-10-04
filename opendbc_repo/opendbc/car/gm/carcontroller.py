@@ -174,13 +174,14 @@ class CarController(CarControllerBase):
             at_full_stop = at_full_stop and not resume
 
           if (actuators.longControlState == LongCtrlState.starting)  and CS.out.vEgo > self.CP.minEnableSpeed:
-            for i in range(3):
-              can_sends.extend(gmcan.create_gm_cc_spam_command(self.packer_pt, self, CS, actuators))
-              print("Accel={}".format(actuators.accel))
-              print("Speed={}".format(self.apply_speed))
+            #for i in range(3):
+            can_sends.extend(gmcan.create_gm_cc_spam_command(self.packer_pt, self, CS, actuators))
+            print("Accel={}".format(actuators.accel))
+            print("Speed={}".format(self.apply_speed))
             for i in range(12):
               can_sends.append(gmcan.create_buttons(self.packer_pt, CanBus.POWERTRAIN, CS.buttons_counter, CS.cruise_buttons))
-              can_sends.append(gmcan.create_gas_regen_command(self.packer_pt, CanBus.POWERTRAIN, actuators.accel + 0.2, idx, CC.enabled, at_full_stop))
+              print("Button={}".format(CS.cruise_buttons))
+              can_sends.append(gmcan.create_gas_regen_command(self.packer_pt, CanBus.POWERTRAIN, actuators.accel + 0.3, idx, CC.enabled, at_full_stop))
 
           # GasRegenCmdActive needs to be 1 to avoid cruise faults. It describes the ACC state, not actuation
           can_sends.append(gmcan.create_gas_regen_command(self.packer_pt, CanBus.POWERTRAIN, self.apply_gas, idx, CC.enabled, at_full_stop))
