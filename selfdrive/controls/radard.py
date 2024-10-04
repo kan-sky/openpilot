@@ -64,6 +64,7 @@ class Track:
     self.radar_ts = radar_ts
     self.aLead = 0.0
     self.vLead_last = v_lead
+    self.radar_reaction_factor = Params().get_float("RadarReactionFactor") * 0.01
 
   def update(self, d_rel: float, y_rel: float, v_rel: float, v_lead: float, measured: float):
 
@@ -92,8 +93,8 @@ class Track:
 
     # Learn if constant acceleration
     #if abs(self.aLeadK) < 0.5:
-    if abs(self.aLead) < 0.5:
-      self.aLeadTau = _LEAD_ACCEL_TAU
+    if abs(self.aLead) < 0.5 * self.radar_reaction_factor:
+      self.aLeadTau = _LEAD_ACCEL_TAU * self.radar_reaction_factor
     else:
       self.aLeadTau *= 0.9
 

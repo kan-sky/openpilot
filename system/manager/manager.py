@@ -81,6 +81,7 @@ def manager_init() -> None:
     ("LongTuningKiV", "350"),     
     ("LongTuningKf", "102"),     
     ("LongActuatorDelay", "20"),     
+    ("RadarReactionFactor", "100"),     
     ("EnableRadarTracks", "0"),      
     ("HyundaiCameraSCC", "0"),
     ("CanfdHDA2", "0"),

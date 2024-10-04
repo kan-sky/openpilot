@@ -1549,7 +1549,10 @@ public:
             QString atcType = QString::fromStdString(carrot_man.getAtcType());
             trafficState_carrot = carrot_man.getTrafficState();
 
-            sprintf(carrot_man_debug, "%dkm/h TBT(%d): %dm, CAM(%d): %dkm/h, %dm, ATC(%s), T(%d)",
+            auto meta = sm["modelV2"].getModelV2().getMeta();
+            QString desireLog = QString::fromStdString(meta.getDesireLog());
+            sprintf(carrot_man_debug, "%s, %dkm/h TBT(%d): %dm, CAM(%d): %dkm/h, %dm, ATC(%s), T(%d)",
+                desireLog.toStdString().c_str(),
                 carrot_man.getDesiredSpeed(),
                 carrot_man.getXTurnInfo(),
                 carrot_man.getXDistToTurn(),

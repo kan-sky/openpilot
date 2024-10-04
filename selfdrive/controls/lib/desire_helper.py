@@ -47,6 +47,7 @@ class DesireHelper:
     self.turn_direction = TurnDirection.none
     self.enable_turn_desires = True
     self.atc_active = 0
+    self.desireLog = ""
     
   def update(self, carstate, lateral_active, lane_change_prob, carrotMan):
     v_ego = carstate.vEgo
@@ -144,17 +145,19 @@ class DesireHelper:
 
     self.prev_one_blinker = one_blinker
     steering_pressed = carstate.steeringPressed and \
-                     ((carstate.steeringTorque < 0 and self.lane_change_direction == LaneChangeDirection.left) or
-                      (carstate.steeringTorque > 0 and self.lane_change_direction == LaneChangeDirection.right))
+                     ((carstate.steeringTorque < 0 and leftBlinker) or (carstate.steeringTorque > 0 and rightBlinker))
     if steering_pressed and self.lane_change_state != LaneChangeState.off:
-      #self.lane_change_direction = LaneChangeDirection.none
+      self.lane_change_direction = LaneChangeDirection.none
       self.lane_change_state = LaneChangeState.off
       self.blinker_bypass = True
 
     if self.turn_direction != TurnDirection.none:
       self.desire = TURN_DESIRES[self.turn_direction]
+      self.lane_change_direction = self.turn_direction
     else:
       self.desire = DESIRES[self.lane_change_direction][self.lane_change_state]
+
+    self.desireLog = f"desire = {self.desire}"
       
     # Send keep pulse once per second during LaneChangeStart.preLaneChange
     if self.lane_change_state in (LaneChangeState.off, LaneChangeState.laneChangeStarting):

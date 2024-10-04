@@ -1016,6 +1016,7 @@ struct ModelDataV2 {
     hardBrakePredicted @7 :Bool;
     laneChangeState @8 :LaneChangeState;
     laneChangeDirection @9 :LaneChangeDirection;
+    desireLog @10 : Text;
 
 
     # deprecated
