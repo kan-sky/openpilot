@@ -260,9 +260,10 @@ class CarState(CarStateBase):
       ("EBCMFrictionBrakeStatus", 20),
       ("PSCMSteeringAngle", 100),
       ("ECMAcceleratorPos", 80),
-      if CP.carFingerprint not in CAR.CHEVROLET_VOLT:
-        messages += [
-          ("ASCMActiveCruiseControlStatus", 25),
+    ]
+    if CP.carFingerprint not in CAR.CHEVROLET_VOLT:
+      messages += [
+        ("ASCMActiveCruiseControlStatus", 25),
     ]
     if CP.flags & GMFlags.SPEED_RELATED_MSG.value:
       messages.append(("SPEED_RELATED", 20))
