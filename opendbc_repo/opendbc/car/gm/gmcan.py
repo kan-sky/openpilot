@@ -202,10 +202,10 @@ def create_gm_cc_spam_command(packer, controller, CS, actuators):
   elif accel > 0:
     cruiseBtn = CruiseButtons.RES_ACCEL
     if speedSetPoint < (CS.out.vEgo * _CV) - 3.0:
-      rate = RATE_UP_MAX
+      rate = RATE_UP_MAX + 0.06
     else:
       rate = max(1 / accel, RATE_UP_MAX)
-    controller.apply_speed = speedSetPoint + 1
+    controller.apply_speed = speedSetPoint + 2
   else:
     controller.apply_speed = speedSetPoint
     rate = float('inf')
