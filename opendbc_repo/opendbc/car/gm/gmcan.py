@@ -205,7 +205,7 @@ def create_gm_cc_spam_command(packer, controller, CS, actuators):
       rate = RATE_UP_MAX + 0.06
     else:
       rate = max(1 / accel, RATE_UP_MAX)
-    controller.apply_speed = speedSetPoint + .2
+    controller.apply_speed = speedSetPoint + 1
   else:
     controller.apply_speed = speedSetPoint
     rate = float('inf')
