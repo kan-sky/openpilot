@@ -174,10 +174,10 @@ class CarController(CarControllerBase):
             at_full_stop = at_full_stop and not resume
 
           if (actuators.longControlState == LongCtrlState.starting)  and CS.out.vEgo > self.CP.minEnableSpeed:
-            #for i in range(3):
+            print("vEgo ={}".format(CS.out.vEgo))
             actuators.accel = actuators.accel + 0.1
             can_sends.extend(gmcan.create_gm_cc_spam_command(self.packer_pt, self, CS, actuators))
-            print("Accel={}".format(actuators.accel))
+            print("vEgo 22 ={}".format(CS.out.vEgo))
             print("Speed={}".format(self.apply_speed))
             for i in range(12):
               can_sends.append(gmcan.create_buttons(self.packer_pt, CanBus.POWERTRAIN, CS.buttons_counter, CS.cruise_buttons))
