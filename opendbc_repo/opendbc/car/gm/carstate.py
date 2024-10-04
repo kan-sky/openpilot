@@ -261,7 +261,7 @@ class CarState(CarStateBase):
       ("PSCMSteeringAngle", 100),
       ("ECMAcceleratorPos", 80),
     ]
-    if CP.carFingerprint not in CAR.CHEVROLET_VOLT:
+    if CP.carFingerprint in CAR.CHEVROLET_VOLT:
       messages += [
         ("ASCMActiveCruiseControlStatus", 25),
     ]
