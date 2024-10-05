@@ -121,6 +121,19 @@ def create_acc_dashboard_command(packer, bus, enabled, target_speed_kph, hud_con
   return packer.make_can_msg("ASCMActiveCruiseControlStatus", bus, values)
 
 
+def create_target_speed_command(packer, bus, target_speed_kph):
+  target_speed = min(target_speed_kph, 255)
+
+  values = {
+    "ACCAlwaysOne": 1,
+    "ACCResumeButton": 0,
+    "ACCSpeedSetpoint": target_speed,
+    "ACCAlwaysOne2": 1,
+  }
+
+  return packer.make_can_msg("ASCMActiveCruiseControlStatus", bus, values)
+
+
 def create_adas_time_status(bus, tt, idx):
   dat = [(tt >> 20) & 0xff, (tt >> 12) & 0xff, (tt >> 4) & 0xff,
          ((tt & 0xf) << 4) + (idx << 2)]
