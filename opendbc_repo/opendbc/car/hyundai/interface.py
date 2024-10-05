@@ -3,18 +3,16 @@ from opendbc.car import get_safety_config, structs
 from opendbc.car.hyundai.hyundaicanfd import CanBus
 from opendbc.car.hyundai.values import HyundaiFlags, CAR, DBC, CAMERA_SCC_CAR, CANFD_RADAR_SCC_CAR, \
                                                    CANFD_UNSUPPORTED_LONGITUDINAL_CAR, \
-                                                   UNSUPPORTED_LONGITUDINAL_CAR, HyundaiExtFlags
+                                                   UNSUPPORTED_LONGITUDINAL_CAR, Buttons, HyundaiExtFlags
 from opendbc.car.hyundai.radar_interface import RADAR_START_ADDR
 from opendbc.car.interfaces import CarInterfaceBase
 from opendbc.car.disable_ecu import disable_ecu
 
 from openpilot.common.params import Params
 
-ButtonType = structs.CarState.ButtonEvent.Type
 Ecu = structs.CarParams.Ecu
 
-# Cancel button can sometimes be ACC pause/resume button, main button can also enable on some cars
-ENABLE_BUTTONS = (ButtonType.accelCruise, ButtonType.decelCruise, ButtonType.cancel, ButtonType.mainCruise)
+ENABLE_BUTTONS = (Buttons.RES_ACCEL, Buttons.SET_DECEL, Buttons.CANCEL)
 
 
 class CarInterface(CarInterfaceBase):
@@ -156,6 +154,7 @@ class CarInterface(CarInterfaceBase):
       ret.openpilotLongitudinalControl = True
 
     ret.pcmCruise = not ret.openpilotLongitudinalControl
+    ret.stoppingControl = True
     ret.startingState = False # True  # carrot
     ret.vEgoStarting = 0.1
     ret.startAccel = 1.0

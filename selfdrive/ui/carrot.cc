@@ -40,12 +40,6 @@
 
 #define BOLD "KaiGenGothicKR-Bold"//"Inter-Bold"//"sans-bold"
 
-
-constexpr float MIN_DRAW_DISTANCE = 10.0;
-constexpr float MAX_DRAW_DISTANCE = 100.0;
-
-ModelRenderer* _model = NULL;
-extern  int get_path_length_idx(const cereal::XYZTData::Reader& line, const float path_height);
 int g_fps= 0;
 
 static void ui_draw_text(const UIState* s, float x, float y, const char* string, float size, NVGcolor color, const char* font_name, float borderWidth=3.0, float shadowOffset=0.0, NVGcolor borderColor=COLOR_BLACK, NVGcolor shadowColor=COLOR_BLACK) {
@@ -312,6 +306,7 @@ public:
     }
 };
 
+extern bool calib_frame_to_full_frame(const UIState* s, float in_x, float in_y, float in_z, QPointF* out);
 class ModelDrawer {
 protected:
     template <class T>
@@ -367,8 +362,8 @@ protected:
             // highly negative x positions  are drawn above the frame and cause flickering, clip to zy plane of camera
             if (line_x[i] < 0) continue;
             QPointF left, right;
-            bool l = _model->mapToScreen(line_x[i], line_y[i] - y_off + y_shift, line_z[i] + z_off_left, &left);
-            bool r = _model->mapToScreen(line_x[i], line_y[i] + y_off + y_shift, line_z[i] + z_off_right, &right);
+            bool l = calib_frame_to_full_frame(s, line_x[i], line_y[i] - y_off + y_shift, line_z[i] + z_off_left, &left);
+            bool r = calib_frame_to_full_frame(s, line_x[i], line_y[i] + y_off + y_shift, line_z[i] + z_off_right, &right);
             if (l && r) {
                 // For wider lines the drawn polygon will "invert" when going over a hill and cause artifacts
                 if (!allow_invert && left_points.size() && left.y() > left_points.back().y()) {
@@ -440,8 +435,8 @@ protected:
             radarTrackId = -1;
             radarDist = 0;
         }
-        _model->mapToScreen(max_distance, y - 1.2, z + 1.22, &path_end_left_vertex);
-        _model->mapToScreen(max_distance, y + 1.2, z + 1.22, &path_end_right_vertex);
+        calib_frame_to_full_frame(s, max_distance, y - 1.2, z + 1.22, &path_end_left_vertex);
+        calib_frame_to_full_frame(s, max_distance, y + 1.2, z + 1.22, &path_end_right_vertex);
 
         float lex = path_end_left_vertex.x();
         float ley = path_end_left_vertex.y();
@@ -684,7 +679,7 @@ protected:
             int m_idx[2] = { 0, 1 };
             for (int i = 0; i < 2; i++) {
                 int m = m_idx[i];
-                _model->mapToScreen(road_edges[m].getX()[idx], road_edges[m].getY()[idx], road_edges[m].getZ()[idx], &navi_turn_point[i]);
+                calib_frame_to_full_frame(s, road_edges[m].getX()[idx], road_edges[m].getY()[idx], road_edges[m].getZ()[idx], &navi_turn_point[i]);
             }
 
             float scale = 0.2;
@@ -733,11 +728,11 @@ protected:
 
             if (xSpdDist < 100) {
                 int idx = get_path_length_idx(lane_lines[2], xSpdDist);
-                _model->mapToScreen(lane_lines[2].getX()[idx], lane_lines[2].getY()[idx], lane_lines[2].getZ()[idx], &left_dist_point);
+                calib_frame_to_full_frame(s, lane_lines[2].getX()[idx], lane_lines[2].getY()[idx], lane_lines[2].getZ()[idx], &left_dist_point);
             }
             else {
                 int idx = get_path_length_idx(road_edges[0], xSpdDist);
-                _model->mapToScreen(road_edges[1].getX()[idx], road_edges[1].getY()[idx], road_edges[1].getZ()[idx], &left_dist_point);
+                calib_frame_to_full_frame(s, road_edges[1].getX()[idx], road_edges[1].getY()[idx], road_edges[1].getZ()[idx], &left_dist_point);
             }
 
             float scale = 0.2;
@@ -1044,8 +1039,8 @@ protected:
             y_off *= width_apply;
 
             QPointF left, right;
-            bool l = _model->mapToScreen(line_x[i], line_y[i] - y_off, line_z[i] + z_off, &left);
-            bool r = _model->mapToScreen(line_x[i], line_y[i] + y_off, line_z[i] + z_off, &right);
+            bool l = calib_frame_to_full_frame(s, line_x[i], line_y[i] - y_off, line_z[i] + z_off, &left);
+            bool r = calib_frame_to_full_frame(s, line_x[i], line_y[i] + y_off, line_z[i] + z_off, &right);
             if (l && r) {
                 // For wider lines the drawn polygon will "invert" when going over a hill and cause artifacts
                 if (!allow_invert && left_points.size() && left.y() > left_points.back().y()) {
@@ -1096,8 +1091,8 @@ protected:
             float line_z1 = interp<float>(idx, idxs, line_zs, line_x.size(), false);
 
             QPointF left, right;
-            bool l = _model->mapToScreen(dist, line_y1 - y_off, line_z1 + z_off, &left);
-            bool r = _model->mapToScreen(dist, line_y1 + y_off, line_z1 + z_off, &right);
+            bool l = calib_frame_to_full_frame(s, dist, line_y1 - y_off, line_z1 + z_off, &left);
+            bool r = calib_frame_to_full_frame(s, dist, line_y1 + y_off, line_z1 + z_off, &right);
             if (l && r) {
                 // For wider lines the drawn polygon will "invert" when going over a hill and cause artifacts
                 if (!allow_invert && left_points.size() && left.y() > left_points.back().y()) {
@@ -1210,8 +1205,8 @@ protected:
                 float line_z1 = interp<float>(idx, idxs.data(), line_zs.data(), line_x.size(), false);
 
                 QPointF left, right;
-                bool l = _model->mapToScreen(dist, line_y1 - y_off, line_z1 + z_off, &left);
-                bool r = _model->mapToScreen(dist, line_y1 + y_off, line_z1 + z_off, &right);
+                bool l = calib_frame_to_full_frame(s, dist, line_y1 - y_off, line_z1 + z_off, &left);
+                bool r = calib_frame_to_full_frame(s, dist, line_y1 + y_off, line_z1 + z_off, &right);
                 if (l && r) {
                     left_points.push_back(left);
                     right_points.push_front(right);
@@ -1664,7 +1659,7 @@ public:
         case 1: strcpy(driving_mode_str, tr("ECO").toStdString().c_str()); break;
         case 2: strcpy(driving_mode_str, tr("SAFE").toStdString().c_str()); break;
         case 3: strcpy(driving_mode_str, tr("NORM").toStdString().c_str()); break;
-        case 4: strcpy(driving_mode_str, tr("FAST").toStdString().c_str()); break;
+        case 4: strcpy(driving_mode_str, tr("HIGH").toStdString().c_str()); break;
         default: strcpy(driving_mode_str, tr("ERRM").toStdString().c_str()); break;
         }
         int dx = bx + 50;
@@ -1783,8 +1778,7 @@ TurnInfoDrawer drawTurnInfo;
 OnroadAlerts::Alert alert;
 NVGcolor alert_color;
 
-void ui_draw(UIState *s, ModelRenderer* model_renderer, int w, int h) {
-  _model = model_renderer;
+void ui_draw(UIState *s, int w, int h) {
   if (s->fb_w != w || s->fb_h != h) {
     ui_resize(s, w, h);
   }

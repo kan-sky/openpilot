@@ -1,12 +1,9 @@
 from calendar import c
 import math
 
-from cereal import car, log
+from cereal import car
 from openpilot.common.conversions import Conversions as CV
 from openpilot.common.numpy_fast import clip
-
-from opendbc.car import structs
-GearShifter = structs.CarState.GearShifter
 
 
 # WARNING: this value was determined based on the model's training distribution,
@@ -140,9 +137,10 @@ class VCruiseHelper:
 
 
 
+import json
 from openpilot.common.params import Params
-#from openpilot.selfdrive.selfdrived.events import Events
-#EventName = log.OnroadEvent.EventName
+from openpilot.selfdrive.selfdrived.events import Events
+EventName = car.OnroadEvent.EventName
 
 class VCruiseCarrot:
   def __init__(self, CP):
@@ -176,7 +174,7 @@ class VCruiseCarrot:
     self._cruise_ready = False
     self._cruise_cancel_state = False
     
-    #self.events = []
+    self.events = []
     self.xState = 0
     self.trafficState = 0
     self.nRoadLimitSpeed = 30
@@ -232,7 +230,7 @@ class VCruiseCarrot:
 
     self._cancel_timer = max(0, self._cancel_timer - 1)
 
-    #self.events = []
+    self.events = []
     if CS.cruiseState.available:
       if not self.CP.pcmCruise:
         # if stock cruise is completely disabled, then we can use our own set speed logic
@@ -242,10 +240,10 @@ class VCruiseCarrot:
         v_cruise_kph = self._update_cruise_buttons(CS, CC, self.v_cruise_kph)
 
         if self._activate_cruise > 0:
-          #self.events.append(EventName.buttonEnable)
+          self.events.append(EventName.buttonEnable)
           self._cruise_ready = False
         elif self._activate_cruise < 0:
-          #self.events.append(EventName.buttonCancel)
+          self.events.append(EventName.buttonCancel)
           self._cruise_ready = True if self._activate_cruise == -2 else False
 
         self.v_cruise_kph = v_cruise_kph
@@ -349,7 +347,7 @@ class VCruiseCarrot:
           v_cruise_kph = self.v_ego_kph_set
         else:
           self._cruise_control(-2, -1, "Cruise off (decelCruise)")
-          #self.events.append(EventName.audioPrompt)
+          self.events.append(EventName.audioPrompt)
           
       elif button_type == ButtonType.gapAdjustCruise:
         longitudinalPersonalityMax = self.params.get_int("LongitudinalPersonalityMax")
@@ -413,7 +411,7 @@ class VCruiseCarrot:
         self._cruise_control(1, -1, "Cruise on (soft hold)")
 
     if self._soft_hold_active > 0:
-      #self.events.append(EventName.softHold)
+      self.events.append(EventName.softHold)
       self._cruise_cancel_state = False
 
     if self._gas_tok:
@@ -450,7 +448,7 @@ class VCruiseCarrot:
         self._cruise_control(1, -1, "Cruise on (fcw)")
       elif CS.vEgo > 0.02 and 0 < self.d_rel < 4:
         self._cruise_control(1, -1, "Cruise on (fcw dist)")
-        #self.events.append(EventName.stopStop)
+        self.events.append(EventName.stopStop)
 
     if self._gas_pressed_count > self._gas_tok_timer:
       if CS.aEgo < -0.5:
@@ -477,7 +475,7 @@ class VCruiseCarrot:
     if CS.brakePressed:
       self._cruise_ready = False
       self._brake_pressed_count = max(1, self._brake_pressed_count + 1)
-      self._soft_hold_count = self._soft_hold_count + 1 if CS.vEgo < 0.1 and CS.gearShifter == GearShifter.drive else 0
+      self._soft_hold_count = self._soft_hold_count + 1 if CS.vEgo < 0.1 else 0
       self._soft_hold_active = 1 if self._soft_hold_count > 60 else 0
     else:
       self._soft_hold_count = 0

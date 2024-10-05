@@ -8,7 +8,7 @@ import json
 
 from openpilot.selfdrive.selfdrived.events import Events
 from cereal import car, log
-EventName = log.OnroadEvent.EventName
+EventName = car.OnroadEvent.EventName
 
 class XState(Enum):
   lead = 0

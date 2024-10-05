@@ -2,7 +2,6 @@
 
 #include "selfdrive/ui/ui.h"
 #include "selfdrive/ui/qt/onroad/alerts.h"
-#include "selfdrive/ui/qt/onroad/model.h"
 
 typedef struct Rect1 {
 	int x, y, w, h;
@@ -15,7 +14,7 @@ typedef struct Rect1 {
 	}
 } Rect1;
 
-void ui_draw(UIState *s, ModelRenderer *model, int w, int h);
+void ui_draw(UIState *s, int w, int h);
 void ui_update_alert(const OnroadAlerts::Alert& a);
 void ui_draw_alert(UIState* s);
 void ui_draw_image(const UIState *s, const Rect1 &r, const char *name, float alpha);

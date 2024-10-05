@@ -1,4 +1,4 @@
-#include "selfdrive/ui/qt/onroad/onroad_home.h"
+ï»¿#include "selfdrive/ui/qt/onroad/onroad_home.h"
 
 #include <QPainter>
 #include <QStackedLayout>
@@ -23,19 +23,19 @@ OnroadWindow::OnroadWindow(QWidget *parent) : QWidget(parent) {
   font.setWeight(QFont::DemiBold);
   QHBoxLayout* topLayout = new QHBoxLayout();
   topLeftLabel = new QLabel("", this);
-  topLeftLabel->setFixedHeight(27); // ³ôÀÌ¸¦ 30 ÇÈ¼¿·Î ¼³Á¤
+  topLeftLabel->setFixedHeight(27); // ë†’ì´ë¥¼ 30 í”½ì…€ë¡œ ì„¤ì •
   topLeftLabel->setAlignment(Qt::AlignLeft);
   topLeftLabel->setFont(font);
   topLeftLabel->setStyleSheet("QLabel { color : white; }");
   topLayout->addWidget(topLeftLabel);
   topLabel = new QLabel("", this);
-  topLabel->setFixedHeight(27); // ³ôÀÌ¸¦ 30 ÇÈ¼¿·Î ¼³Á¤
+  topLabel->setFixedHeight(27); // ë†’ì´ë¥¼ 30 í”½ì…€ë¡œ ì„¤ì •
   topLabel->setAlignment(Qt::AlignCenter);
   topLabel->setFont(font);
   topLabel->setStyleSheet("QLabel { color : white; }");
   topLayout->addWidget(topLabel);
   topRightLabel = new QLabel("", this);
-  topRightLabel->setFixedHeight(27); // ³ôÀÌ¸¦ 30 ÇÈ¼¿·Î ¼³Á¤
+  topRightLabel->setFixedHeight(27); // ë†’ì´ë¥¼ 30 í”½ì…€ë¡œ ì„¤ì •
   topRightLabel->setAlignment(Qt::AlignRight);
   topRightLabel->setFont(font);
   topRightLabel->setStyleSheet("QLabel { color : white; }");
@@ -48,19 +48,19 @@ OnroadWindow::OnroadWindow(QWidget *parent) : QWidget(parent) {
 
   QHBoxLayout* bottomLayout = new QHBoxLayout();
   bottomLeftLabel = new QLabel("", this);
-  bottomLeftLabel->setFixedHeight(27); // ³ôÀÌ¸¦ 30 ÇÈ¼¿·Î ¼³Á¤
+  bottomLeftLabel->setFixedHeight(27); // ë†’ì´ë¥¼ 30 í”½ì…€ë¡œ ì„¤ì •
   bottomLeftLabel->setAlignment(Qt::AlignLeft);
   bottomLeftLabel->setFont(font);
   bottomLeftLabel->setStyleSheet("QLabel { color : white; }");
   bottomLayout->addWidget(bottomLeftLabel);
   bottomLabel = new QLabel("", this);
-  bottomLabel->setFixedHeight(27); // ³ôÀÌ¸¦ 30 ÇÈ¼¿·Î ¼³Á¤
+  bottomLabel->setFixedHeight(27); // ë†’ì´ë¥¼ 30 í”½ì…€ë¡œ ì„¤ì •
   bottomLabel->setAlignment(Qt::AlignCenter);
   bottomLabel->setFont(font);
   bottomLabel->setStyleSheet("QLabel { color : white; }");
   bottomLayout->addWidget(bottomLabel);
   bottomRightLabel = new QLabel("", this);
-  bottomRightLabel->setFixedHeight(27); // ³ôÀÌ¸¦ 30 ÇÈ¼¿·Î ¼³Á¤
+  bottomRightLabel->setFixedHeight(27); // ë†’ì´ë¥¼ 30 í”½ì…€ë¡œ ì„¤ì •
   bottomRightLabel->setAlignment(Qt::AlignRight);
   bottomRightLabel->setFont(font);
   bottomRightLabel->setStyleSheet("QLabel { color : white; }");
@@ -213,11 +213,10 @@ void OnroadWindow::updateStateText() {
 
     Params params = Params();
     QString carName = QString::fromStdString(params.get("CarName"));
-    bool longitudinal_control = sm["carParams"].getCarParams().getOpenpilotLongitudinalControl();
     if (params.getInt("HyundaiCameraSCC") > 0) {
 		carName += "(CAMERA SCC)";
 	}
-    else if (longitudinal_control) {
+    else if (s->scene.longitudinal_control) {
 		carName += " - OP Long";
 	}
     topLeftLabel->setText(carName);

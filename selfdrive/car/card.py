@@ -5,7 +5,7 @@ import threading
 
 import cereal.messaging as messaging
 
-from cereal import car, log
+from cereal import car
 
 from panda import ALTERNATIVE_EXPERIENCE
 
@@ -20,11 +20,13 @@ from opendbc.car.car_helpers import get_car, get_radar_interface
 from opendbc.car.interfaces import CarInterfaceBase, RadarInterfaceBase
 from openpilot.selfdrive.pandad import can_capnp_to_list, can_list_to_can_capnp
 from openpilot.selfdrive.car.cruise import VCruiseHelper, VCruiseCarrot
-from openpilot.selfdrive.car.car_specific import MockCarState
+from openpilot.selfdrive.car.car_specific import CarSpecificEvents, MockCarState
+from openpilot.selfdrive.car.helpers import convert_carControl, convert_to_capnp
+from openpilot.selfdrive.selfdrived.events import Events, ET
 
 REPLAY = "REPLAY" in os.environ
 
-EventName = log.OnroadEvent.EventName
+EventName = car.OnroadEvent.EventName
 
 # forward
 carlog.addHandler(ForwardingHandler(cloudlog))
@@ -62,7 +64,8 @@ def can_comm_callbacks(logcan: messaging.SubSocket, sendcan: messaging.PubSocket
 class Car:
   CI: CarInterfaceBase
   RI: RadarInterfaceBase
-  CP: car.CarParams
+  CP: structs.CarParams
+  CP_capnp: car.CarParams
 
   def __init__(self, CI=None, RI=None) -> None:
     self.can_sock = messaging.sub_sock('can', timeout=20)
@@ -96,7 +99,7 @@ class Car:
       cached_params_raw = self.params.get("CarParamsCache")
       if cached_params_raw is not None:
         with car.CarParams.from_bytes(cached_params_raw) as _cached_params:
-          cached_params = _cached_params
+          cached_params = structs.CarParams(carName=_cached_params.carName, carFw=_cached_params.carFw, carVin=_cached_params.carVin)
 
       self.CI = get_car(*self.can_callbacks, obd_callback(self.params), experimental_long_allowed, num_pandas, cached_params)
       self.RI = get_radar_interface(self.CI.CP)
@@ -109,9 +112,9 @@ class Car:
       self.RI = RI
 
     # set alternative experiences from parameters
-    disengage_on_accelerator = self.params.get_bool("DisengageOnAccelerator")
+    self.disengage_on_accelerator = self.params.get_bool("DisengageOnAccelerator")
     self.CP.alternativeExperience = 0
-    if not disengage_on_accelerator:
+    if not self.disengage_on_accelerator:
       self.CP.alternativeExperience |= ALTERNATIVE_EXPERIENCE.DISABLE_DISENGAGE_ON_GAS
 
     openpilot_enabled_toggle = self.params.get_bool("OpenpilotEnabledToggle")
@@ -142,11 +145,16 @@ class Car:
       self.params.put("CarParamsPrevRoute", prev_cp)
 
     # Write CarParams for controls and radard
-    cp_bytes = self.CP.to_bytes()
+    # convert to pycapnp representation for caching and logging
+    self.CP_capnp = convert_to_capnp(self.CP)
+    cp_bytes = self.CP_capnp.to_bytes()
     self.params.put("CarParams", cp_bytes)
     self.params.put_nonblocking("CarParamsCache", cp_bytes)
     self.params.put_nonblocking("CarParamsPersistent", cp_bytes)
 
+    self.events = Events()
+
+    self.car_events = CarSpecificEvents(self.CP)
     self.mock_carstate = MockCarState()
     self.v_cruise_helper = VCruiseCarrot(self.CP) #VCruiseHelper(self.CP)
 
@@ -156,19 +164,19 @@ class Car:
     # card is driven by can recv, expected at 100Hz
     self.rk = Ratekeeper(100, print_delay_threshold=None)
 
-  def state_update(self) -> tuple[car.CarState, structs.RadarDataT | None]:
+  def state_update(self) -> tuple[car.CarState, structs.RadarData | None]:
     """carState update loop, driven by can"""
 
     can_strs = messaging.drain_sock_raw(self.can_sock, wait_for_one=True)
     can_list = can_capnp_to_list(can_strs)
 
     # Update carState from CAN
-    CS = self.CI.update(can_list)
+    CS = convert_to_capnp(self.CI.update(can_list))
     if self.CP.carName == 'mock':
       CS = self.mock_carstate.update(CS)
 
     # Update radar tracks from CAN
-    RD: structs.RadarDataT | None = self.RI.update(can_list)
+    RD: structs.RadarData | None = self.RI.update(can_list)
 
     self.sm.update(0)
 
@@ -188,25 +196,60 @@ class Car:
     CS.vCruise = float(self.v_cruise_helper.v_cruise_kph)
     CS.vCruiseCluster = float(self.v_cruise_helper.v_cruise_cluster_kph)
     CS.softHoldActive = self.v_cruise_helper._soft_hold_active
-    CS.activateCruise = self.v_cruise_helper._activate_cruise
 
     self.CI.CS.softHoldActive = CS.softHoldActive
     return CS, RD
 
-  def state_publish(self, CS: car.CarState, RD: structs.RadarDataT | None):
+  def update_events(self, CS: car.CarState, RD: structs.RadarData | None):
+    self.events.clear()
+
+    #CS.events = self.car_events.update(self.CI.CS, self.CS_prev, self.CC_prev).to_msg()
+    
+    events = self.car_events.update(self.CI.CS, self.CS_prev, self.CC_prev)
+
+    no_entry_events = events.contains(ET.NO_ENTRY)
+    while self.v_cruise_helper.events:
+      event = self.v_cruise_helper.events.pop(0)
+      if event == EventName.buttonEnable and no_entry_events:
+        pass
+      else:
+        events.add(event)
+      
+    CS.events = events.to_msg()
+
+    self.events.add_from_msg(CS.events)
+
+    if self.CP.notCar:
+      # wait for everything to init first
+      if self.sm.frame > int(5. / DT_CTRL) and self.initialized_prev:
+        # body always wants to enable
+        self.events.add(EventName.pcmEnable)
+
+    # Disable on rising edge of accelerator or brake. Also disable on brake when speed > 0
+    if (CS.gasPressed and not self.CS_prev.gasPressed and self.disengage_on_accelerator) or \
+      (CS.brakePressed and (not self.CS_prev.brakePressed or not CS.standstill)) or \
+      (CS.regenBraking and (not self.CS_prev.regenBraking or not CS.standstill)):
+      self.events.add(EventName.pedalPressed)
+
+    if RD is not None and len(RD.errors):
+      self.events.add(EventName.radarFault)
+
+    CS.events = self.events.to_msg()
+
+  def state_publish(self, CS: car.CarState, RD: structs.RadarData | None):
     """carState and carParams publish loop"""
 
     # carParams - logged every 50 seconds (> 1 per segment)
     if self.sm.frame % int(50. / DT_CTRL) == 0:
       cp_send = messaging.new_message('carParams')
       cp_send.valid = True
-      cp_send.carParams = self.CP
+      cp_send.carParams = self.CP_capnp
       self.pm.send('carParams', cp_send)
 
     # publish new carOutput
     co_send = messaging.new_message('carOutput')
     co_send.valid = self.sm.all_checks(['carControl'])
-    co_send.carOutput.actuatorsOutput = self.last_actuators_output
+    co_send.carOutput.actuatorsOutput = convert_to_capnp(self.last_actuators_output)
     self.pm.send('carOutput', co_send)
 
     # kick off controlsd step while we actuate the latest carControl packet
@@ -220,7 +263,7 @@ class Car:
     if RD is not None:
       tracks_msg = messaging.new_message('liveTracks')
       tracks_msg.valid = len(RD.errors) == 0
-      tracks_msg.liveTracks = RD
+      tracks_msg.liveTracks = convert_to_capnp(RD)
       self.pm.send('liveTracks', tracks_msg)
 
   def controls_update(self, CS: car.CarState, CC: car.CarControl):
@@ -236,7 +279,7 @@ class Car:
     if self.sm.all_alive(['carControl']):
       # send car controls over can
       now_nanos = self.can_log_mono_time if REPLAY else int(time.monotonic() * 1e9)
-      self.last_actuators_output, can_sends = self.CI.apply(CC, now_nanos)
+      self.last_actuators_output, can_sends = self.CI.apply(convert_carControl(CC), now_nanos)
       self.pm.send('sendcan', can_list_to_can_capnp(can_sends, msgtype='sendcan', valid=CS.canValid))
 
       self.CC_prev = CC
@@ -244,7 +287,9 @@ class Car:
   def step(self):
     CS, RD = self.state_update()
 
-    if self.sm['carControl'].enabled and not self.CC_prev.enabled:
+    self.update_events(CS, RD)
+
+    if not self.sm['carControl'].enabled and self.events.contains(ET.ENABLE):
       self.v_cruise_helper.initialize_v_cruise(CS, self.experimental_mode)
 
     self.state_publish(CS, RD)

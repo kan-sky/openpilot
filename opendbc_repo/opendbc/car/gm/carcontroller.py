@@ -1,3 +1,4 @@
+import copy
 from openpilot.common.params import Params
 from openpilot.common.filter_simple import FirstOrderFilter
 
@@ -243,7 +244,7 @@ class CarController(CarControllerBase):
       if self.frame % 10 == 0:
         can_sends.append(gmcan.create_pscm_status(self.packer_pt, CanBus.CAMERA, CS.pscm_status))
 
-    new_actuators = actuators.as_builder()
+    new_actuators = copy.copy(actuators)
     new_actuators.accel = accel
     new_actuators.steer = self.apply_steer_last / self.params.STEER_MAX
     new_actuators.steerOutputCan = self.apply_steer_last

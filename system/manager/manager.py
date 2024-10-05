@@ -35,7 +35,6 @@ def manager_init() -> None:
     ("LongPitch", "1"),
     ("EVTable", "1"),
     ("SteerRatio", "152"),
-    ("CurvatureFactor", "95"),
     ("CompletedTrainingVersion", "0"),
     ("DisengageOnAccelerator", "0"),
     ("GsmMetered", "1"),
@@ -101,6 +100,7 @@ def manager_init() -> None:
     ("CustomSteerDeltaDown", "7"),       
     ("SteerActuatorDelay", "45"),       
     ("MaxTimeOffroadMin", "60"),
+    ("CurvatureFactor", "95"),
 
   ]
 
