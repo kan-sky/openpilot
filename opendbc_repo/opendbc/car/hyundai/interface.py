@@ -34,7 +34,7 @@ class CarInterface(CarInterfaceBase):
 
     ret.carName = "hyundai"
 
-    cam_can = CanBus(None, fingerprint).CAM
+    cam_can = CanBus(None, fingerprint).CAM if camera_scc == 0 else 1
     hda2 = 0x50 in fingerprint[cam_can] or 0x110 in fingerprint[cam_can]
     hda2 = hda2 or params.get_bool("CanfdHDA2")
     CAN = CanBus(None, fingerprint, hda2)

@@ -1098,6 +1098,7 @@ class CarrotServ:
       self.goalPosY = float(json.get("goalPosY", self.goalPosY))
       self.szGoalName = json.get("szGoalName", self.szGoalName)
     elif "nRoadLimitSpeed" in json:
+      print(json)
       self.active_sdi_count = self.active_sdi_count_max
       ### roadLimitSpeed
       nRoadLimitSpeed = int(json.get("nRoadLimitSpeed", 20))

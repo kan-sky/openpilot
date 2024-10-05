@@ -506,11 +506,6 @@ class CarState(CarStateBase):
       ("DOORS_SEATBELTS", 4),
     ]
 
-    ## carrot: for EGV70
-    if not (CP.extFlags & HyundaiExtFlags.CANFD_GEARS_NONE):
-      messages += [
-        (self.gear_msg_canfd, 100),
-      ]
 
     if CP.extFlags & HyundaiExtFlags.CANFD_TPMS.value:
       messages += [
@@ -524,7 +519,7 @@ class CarState(CarStateBase):
       ]
     else:
       messages += [
-        #(self.gear_msg_canfd, 100),
+        (self.gear_msg_canfd, 100),
         (self.accelerator_msg_canfd, 100),
       ]
 
