@@ -174,7 +174,6 @@ class CarController(CarControllerBase):
 
           if (actuators.longControlState == LongCtrlState.starting)  and CS.out.vEgo > self.CP.minEnableSpeed:
             print("vEgo ={}".format(CS.out.vEgo))
-            actuators.accel = actuators.accel + 0.1
             can_sends.extend(gmcan.create_gm_cc_spam_command(self.packer_pt, self, CS, actuators))
             print("vEgo 22 ={}".format(CS.out.vEgo))
             can_sends.append(gmcan.create_target_speed_command(self.packer_pt, CanBus.POWERTRAIN, self.apply_speed + 5))
