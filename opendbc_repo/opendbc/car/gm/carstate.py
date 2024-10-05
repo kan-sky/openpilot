@@ -188,11 +188,10 @@ class CarState(CarStateBase):
       # openpilot controls nonAdaptive when not pcmCruise
       if self.CP.pcmCruise:
         ret.cruiseState.nonAdaptive = cam_cp.vl["ASCMActiveCruiseControlStatus"]["ACCCruiseState"] not in (2, 3)
-    if self.CP.carFingerprint in [CC_ONLY_CAR, CAR.CHEVROLET_VOLT]:
+    if self.CP.carFingerprint in CC_ONLY_CAR:
       ret.accFaulted = False
       ret.cruiseState.speed = pt_cp.vl["ECMCruiseControl"]["CruiseSetSpeed"] * CV.KPH_TO_MS
       ret.cruiseState.enabled = pt_cp.vl["ECMCruiseControl"]["CruiseActive"] != 0
-      print("CS_CruiseSetSpeed ={}".format(ret.cruiseState.speed))
 
     if self.CP.flags & GMFlags.SPEED_RELATED_MSG.value:
       # kans: use cluster speed & vCluRatio(longitudialPlanner)
@@ -296,7 +295,7 @@ class CarState(CarStateBase):
         ("EVDriveMode", 0),
       ]
 
-    if CP.carFingerprint in [CC_ONLY_CAR, CAR.CHEVROLET_VOLT]:
+    if CP.carFingerprint in CC_ONLY_CAR:
       messages += [
         ("ECMCruiseControl", 10),
       ]
