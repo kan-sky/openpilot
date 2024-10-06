@@ -681,7 +681,7 @@ class CarrotServ:
           elif color in ["Green Light", "Left turn"]:
             traffic_green += cnf
         elif pcolor in ["Red Light", "Yellow Light"]:
-          if color in ["Green Light"], "Left turn"]:
+          if color in ["Green Light", "Left turn"]:
             traffic_green_trig += cnf
             traffic_green += cnf
           elif color in ["Red Light", "Yellow Light"]:
