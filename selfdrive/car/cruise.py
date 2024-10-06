@@ -403,7 +403,6 @@ class VCruiseCarrot:
       v_cruise_kph += 2
       if v_cruise_kph <= self.nRoadLimitSpeed:
         v_cruise_kph = self.nRoadLimitSpeed
-        break;
       else:
         v_cruise_kph = self.v_ego_kph_set
     return v_cruise_kph
