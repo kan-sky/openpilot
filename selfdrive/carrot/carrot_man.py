@@ -18,7 +18,7 @@ from openpilot.common.params import Params
 import cereal.messaging as messaging
 from cereal import log
 from common.numpy_fast import clip, interp
-#import openpilot.selfdrive.frogpilot.fleetmanager.helpers as fleet
+import openpilot.selfdrive.frogpilot.fleetmanager.helpers as fleet
 from common.filter_simple import StreamingMovingAverage
 
 NetworkType = log.DeviceState.NetworkType
@@ -348,11 +348,10 @@ class CarrotMan:
         time.sleep(1)
 
   def save_toggle_values(self):
-    #toggle_values = fleet.get_all_toggle_values()
-    #file_path = os.path.join('/data', 'toggle_values.json')
-    #with open(file_path, 'w') as file:
-    #  json.dump(toggle_values, file, indent=2) 
-    pass
+    toggle_values = fleet.get_all_toggle_values()
+    file_path = os.path.join('/data', 'toggle_values.json')
+    with open(file_path, 'w') as file:
+      json.dump(toggle_values, file, indent=2) 
 
   def carrot_cmd_zmq(self):
 
@@ -682,7 +681,7 @@ class CarrotServ:
           elif color in ["Green Light", "Left turn"]:
             traffic_green += cnf
         elif pcolor in ["Red Light", "Yellow Light"]:
-          if color in ["Green Light"]: #, "Left turn"]:
+          if color in ["Green Light"], "Left turn"]:
             traffic_green_trig += cnf
             traffic_green += cnf
           elif color in ["Red Light", "Yellow Light"]:

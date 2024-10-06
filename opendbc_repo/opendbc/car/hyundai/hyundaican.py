@@ -150,9 +150,6 @@ def create_acc_commands_scc(packer, enabled, accel, jerk, idx, hud_control, set_
     scc12_acc_mode = 0
     scc14_acc_mode = 0
 
-  if soft_hold_active > 0:
-    print(f"soft_hold_active: {soft_hold_active}, long_enabled: {long_enabled}, stop_req: {stop_req}, scc12_acc_mode: {scc12_acc_mode}, scc14_acc_mode: {scc14_acc_mode}")
-  
   warning_front = False
 
   commands = []

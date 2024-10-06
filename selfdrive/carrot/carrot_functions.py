@@ -205,9 +205,11 @@ class CarrotPlanner:
       if left_sec != self.left_sec:
         max_left_sec = min(10, max(5, int(v_ego_kph/10)))
         if 1 <= left_sec <= max_left_sec:
-          self.events.add(getattr(EventName, f'audio{left_sec}'))
+          #self.events.add(getattr(EventName, f'audio{left_sec}'))
+          self.params_memory.put_int_nonblocking("CarrotCountDownSec", left_sec)
         elif left_sec == 0 and self.left_sec == 1:
-          self.events.add(EventName.audio0)
+          #self.events.add(EventName.audio0)
+          self.params_memory.put_int_nonblocking("CarrotCountDownSec", left_sec)
         self.left_sec = left_sec
 
     return v_cruise_kph
@@ -304,7 +306,7 @@ class CarrotPlanner:
         else:
           self.comfort_brake = self.comfortBrake * 0.9
           #self.comfort_brake = COMFORT_BRAKE
-          self.trafficStopAdjustRatio = interp(v_ego_kph, [0, 100], [1.0, 0.6])
+          self.trafficStopAdjustRatio = interp(v_ego_kph, [0, 100], [1.0, 0.7])
           stop_dist = self.xStop * interp(self.xStop, [0, 100], [1.0, self.trafficStopAdjustRatio])  ##남은거리에 따라 정지거리 비율조정
           if stop_dist > 10.0: ### 10M이상일때만, self.actual_stop_distance를 업데이트함.
             self.actual_stop_distance = stop_dist

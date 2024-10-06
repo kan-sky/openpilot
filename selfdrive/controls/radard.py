@@ -50,7 +50,7 @@ class KalmanParams:
 
 
 class Track:
-  def __init__(self, identifier: int, v_lead: float, kalman_params: KalmanParams, radar_ts: float):
+  def __init__(self, identifier: int, v_lead: float, kalman_params: KalmanParams):
     self.identifier = identifier
     self.cnt = 0
     self.aLeadTau = _LEAD_ACCEL_TAU
@@ -61,14 +61,13 @@ class Track:
 
     self.dRel = 0.0
     self.vRel = 0.0
-    self.radar_ts = radar_ts
     self.aLead = 0.0
     self.vLead_last = v_lead
     self.radar_reaction_factor = Params().get_float("RadarReactionFactor") * 0.01
 
   def update(self, d_rel: float, y_rel: float, v_rel: float, v_lead: float, measured: float):
 
-    if abs(self.dRel - d_rel) > 3.0 or abs(self.vRel - v_rel) > 20.0 * self.radar_ts:
+    if abs(self.dRel - d_rel) > 3.0 or abs(self.vRel - v_rel) > 20.0 * DT_MDL:
       self.cnt = 0
       self.kf = KF1D([[v_lead], [0.0]], self.K_A, self.K_C, self.K_K)
       self.aLead = 0.0
@@ -86,7 +85,7 @@ class Track:
       self.kf.update(self.vLead)
       alpha = 0.15
       dv = 0.0 if abs(self.vLead) < 0.5 else self.vLead - self.vLead_last
-      self.aLead = self.aLead * (1 - alpha) + dv / self.radar_ts * alpha
+      self.aLead = self.aLead * (1 - alpha) + dv / DT_MDL * alpha
 
     self.vLeadK = float(self.kf.x[SPEED][0])
     self.aLeadK = float(self.kf.x[ACCEL][0])
@@ -392,12 +391,11 @@ class VisionTrack:
       self.aLeadTau *= 0.9
 
 class RadarD:
-  def __init__(self, radar_ts: float, delay: float = 0.0):
+  def __init__(self, delay: float = 0.0):
     self.current_time = 0.0
 
     self.tracks: dict[int, Track] = {}
-    #self.kalman_params = KalmanParams(DT_MDL)
-    self.kalman_params = KalmanParams(radar_ts) # DT_MDL -> radar_ts
+    self.kalman_params = KalmanParams(DT_MDL)
 
     self.v_ego = 0.0
     self.v_ego_hist = deque([0.0], maxlen=int(round(delay / DT_MDL))+1)
@@ -408,9 +406,7 @@ class RadarD:
 
     self.ready = False
 
-    self.radar_ts = radar_ts
-
-    self.vision_tracks = [VisionTrack(radar_ts), VisionTrack(radar_ts)]
+    self.vision_tracks = [VisionTrack(DT_MDL), VisionTrack(DT_MDL)]
 
 
   def update(self, sm: messaging.SubMaster, rr: car.RadarData):
@@ -445,7 +441,7 @@ class RadarD:
 
       # create the track if it doesn't exist or it's a new track
       if ids not in self.tracks:
-        self.tracks[ids] = Track(ids, v_lead, self.kalman_params, self.radar_ts)
+        self.tracks[ids] = Track(ids, v_lead, self.kalman_params)
       self.tracks[ids].update(rpt[0], rpt[1], rpt[2], v_lead, rpt[3])
 
     # *** publish radarState ***
@@ -538,6 +534,7 @@ class RadarD:
 
     return lead_dict
 
+import time
 # fuses camera and radar data for best lead detection
 def main() -> None:
   config_realtime_process(5, Priority.CTRL_LOW)
@@ -551,10 +548,21 @@ def main() -> None:
   sm = messaging.SubMaster(['modelV2', 'carState', 'liveTracks'], poll='modelV2')
   pm = messaging.PubMaster(['radarState'])
 
-  RD = RadarD(CP.radarTimeStep, CP.radarDelay)
+  RD = RadarD(CP.radarDelay)
 
+  t = time.monotonic()
+  t_avr = 0.0
+  frame = 0
+  
   while 1:
     sm.update()
+
+    t2 = time.monotonic()
+    t_avr = t_avr * 0.8 + (t2 - t) * 0.2
+    t = t2
+    frame += 1
+    if frame %50 == 0:
+      print("radar time = {:.4f}".format(t_avr))
 
     RD.update(sm, sm['liveTracks'])
     RD.publish(pm)

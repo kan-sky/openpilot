@@ -105,7 +105,9 @@ def linear_resample(samples, original_rate, new_rate):
 class Soundd:
   def __init__(self):
     self.params = Params()
+    self.params_memory = Params("/dev/shm/params")
     self.soundVolumeAdjust = 1.0
+    self.carrot_count_down = 0
 
     self.load_sounds()
 
@@ -180,9 +182,22 @@ class Soundd:
       self.current_alert = new_alert
       self.current_sound_frame = 0
 
+  def update_carrot_alert(self, new_alert):
+    if new_alert == AudibleAlert.none:
+      count_down = self.params_memory.get_int("CarrotCountDownSec")
+      if self.carrot_count_down != count_down:
+        self.carrot_count_down = count_down
+        if count_down == 0:
+          new_alert = AudibleAlert.longDisengaged
+        elif 0 < count_down <= 10:
+          new_alert = getattr(AudibleAlert, f'audio{count_down}')
+          
+    return new_alert
+  
   def get_audible_alert(self, sm):
     if sm.updated['selfdriveState']:
       new_alert = sm['selfdriveState'].alertSound.raw
+      new_alert = self.update_carrot_alert(new_alert)
       self.update_alert(new_alert)
     elif check_selfdrive_timeout_alert(sm):
       self.update_alert(AudibleAlert.warningImmediate)
