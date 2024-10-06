@@ -305,8 +305,8 @@ class CarrotPlanner:
           self.comfort_brake = self.comfortBrake * 0.9
           #self.comfort_brake = COMFORT_BRAKE
           self.trafficStopAdjustRatio = interp(v_ego_kph, [0, 100], [1.0, 0.6])
-          stop_dist = self.xStop * interp(self.xStop, [0, 100], [1.0, self.trafficStopAdjustRatio])  ##�����Ÿ��� ���� �����Ÿ� ��������
-          if stop_dist > 10.0: ### 10M�̻��϶���, self.actual_stop_distance�� ������Ʈ��.
+          stop_dist = self.xStop * interp(self.xStop, [0, 100], [1.0, self.trafficStopAdjustRatio])  ##남은거리에 따라 정지거리 비율조정
+          if stop_dist > 10.0: ### 10M이상일때만, self.actual_stop_distance를 업데이트함.
             self.actual_stop_distance = stop_dist
           stop_model_x = 0
           self.fakeCruiseDistance = 0 if self.actual_stop_distance > 10.0 else 10.0
@@ -345,13 +345,13 @@ class CarrotPlanner:
     self.comfort_brake *= self.mySafeFactor
     self.actual_stop_distance = max(0, self.actual_stop_distance - (v_ego * DT_MDL))
     
-    if stop_model_x == 1000.0: ##  e2eCruise, lead�ΰ��
+    if stop_model_x == 1000.0: ##  e2eCruise, lead인경우
       self.actual_stop_distance = 0.0
-    elif self.actual_stop_distance > 0: ## e2eStop, e2eStopped�ΰ��..
+    elif self.actual_stop_distance > 0: ## e2eStop, e2eStopped인경우..
       stop_model_x = 0.0
       
     #self.debugLongText = "XState({}),stop_x={:.1f},stopDist={:.1f},Traffic={}".format(str(self.xState), stop_x, self.actual_stop_distance, str(self.trafficState))
-    #��ȣ�� �������� self.xState.value
+    #번호를 읽을때는 self.xState.value
       
     stop_dist =  stop_model_x + self.actual_stop_distance
     stop_dist = max(stop_dist, v_ego ** 2 / (self.comfort_brake * 2))
