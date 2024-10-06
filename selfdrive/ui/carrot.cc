@@ -678,6 +678,10 @@ protected:
     void drawTurnInfo(const UIState* s) {
         if (xDistToTurn < 1500 && xDistToTurn > 0) {
             SubMaster& sm = *(s->sm);
+
+            const auto carrot_man = sm["carrotMan"].getCarrotMan();
+            QString szTBTMainText = QString::fromStdString(carrot_man.getSzTBTMainText());
+
             const cereal::ModelDataV2::Reader& model = sm["modelV2"].getModelV2();
             const auto road_edges = model.getRoadEdges();
             int idx = get_path_length_idx(road_edges[0], xDistToTurn);
@@ -714,6 +718,10 @@ protected:
                 ui_draw_image(s, { img_x, img_y, size_x, size_y }, "ic_navi_point", 1.0f);
                 break;
             }
+            char str[128] = "";
+            sprintf(str, "%s", szTBTMainText.toStdString().c_str());
+            float text_scale = (scale>0.5)?scale:0.5;
+            ui_draw_text(s, img_x + size_x / 2, img_y + size_y + 100 * text_scale, str, 100 * text_scale, COLOR_WHITE, BOLD);
         }
         else navi_turn_point_flag = true;
     }

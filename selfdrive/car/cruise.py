@@ -226,6 +226,10 @@ class VCruiseCarrot:
       lead = sm['radarState'].leadOne
       self.d_rel = lead.dRel if lead.status else 0
       self.v_rel = lead.vRel if lead.status else 0
+    if sm.alive['modelV2']:
+      self.model_v_kph = sm['modelV2'].velocity.x[32] * CV.MS_TO_KPH
+    else:
+      self.model_v_kph = 0
       
     self.v_cruise_kph_last = self.v_cruise_kph
     self.is_metric = is_metric
@@ -393,6 +397,11 @@ class VCruiseCarrot:
           v_cruise_kph = speed
           break;
     return v_cruise_kph
+  
+  def _auto_speed_up(self, v_cruise_kph):
+    if self.model_v_kph > v_cruise_kph and v_cruise_kph < self.nRoadLimitSpeed + 10:
+      v_cruise_kph += 2
+    return v_cruise_kph
 
   def _cruise_control(self, enable, cancel_timer, reason):
     if self._cruise_cancel_state and self._soft_hold_active != 2:
@@ -416,11 +425,12 @@ class VCruiseCarrot:
 
     if self._soft_hold_active > 0:
       #self.events.append(EventName.softHold)
-      self._cruise_cancel_state = False
+      #self._cruise_cancel_state = False
+      pass
 
     if self._gas_tok:
       if not CC.enabled:
-        self._cruise_cancel_state = False
+        #self._cruise_cancel_state = False
         self._cruise_control(1, -1, "Cruise on (gas tok)")
         if self.v_ego_kph_set > v_cruise_kph:
           v_cruise_kph = self.v_ego_kph_set
@@ -460,7 +470,7 @@ class VCruiseCarrot:
       if self.v_ego_kph_set > v_cruise_kph:
         v_cruise_kph = self.v_ego_kph_set
       
-    return v_cruise_kph
+    return self._auto_speed_up(v_cruise_kph)
   
   def _prepare_brake_gas(self, CS):
     if CS.gasPressed:

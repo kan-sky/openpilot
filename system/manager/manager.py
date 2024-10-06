@@ -47,8 +47,8 @@ def get_default_params():
     ("SoftHoldMode", "0"),       
 
     ("AutoCurveSpeedLowerLimit", "40"),
-    ("AutoCurveSpeedFactor", "120"),
-    ("AutoCurveSpeedAggressiveness", "110"),
+    ("AutoCurveSpeedFactor", "110"),
+    ("AutoCurveSpeedAggressiveness", "120"),
 
     ("AutoTurnControl", "0"),
     ("AutoTurnControlSpeedTurn", "20"),
@@ -67,10 +67,10 @@ def get_default_params():
     ("CruiseMaxVals4", "40"),
     ("CruiseMaxVals5", "30"),
     ("CruiseMaxVals6", "20"),
-    ("LongTuningKpV", "115"),     
-    ("LongTuningKiV", "350"),     
-    ("LongTuningKf", "102"),     
-    ("LongActuatorDelay", "20"),     
+    ("LongTuningKpV", "100"),     
+    ("LongTuningKiV", "100"),     
+    ("LongTuningKf", "100"),     
+    ("LongActuatorDelay", "27"),     
     ("RadarReactionFactor", "100"),     
     ("EnableRadarTracks", "0"),      
     ("HyundaiCameraSCC", "0"),
@@ -86,9 +86,9 @@ def get_default_params():
     ("LateralTorqueAccelFactor", "2400"),       
     ("LateralTorqueFriction", "70"),
     ("CustomSteerMax", "300"),       
-    ("CustomSteerDeltaUp", "5"),       
-    ("CustomSteerDeltaDown", "7"),       
-    ("SteerActuatorDelay", "45"),       
+    ("CustomSteerDeltaUp", "7"),       
+    ("CustomSteerDeltaDown", "9"),       
+    ("SteerActuatorDelay", "50"),       
     ("MaxTimeOffroadMin", "60"),
   ]
   return default_params

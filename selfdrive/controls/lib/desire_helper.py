@@ -48,6 +48,7 @@ class DesireHelper:
     self.enable_turn_desires = True
     self.atc_active = 0
     self.desireLog = ""
+    self.blinker_bypass = False
     
   def update(self, carstate, lateral_active, lane_change_prob, carrotMan):
     v_ego = carstate.vEgo
