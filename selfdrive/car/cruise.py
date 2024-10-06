@@ -179,7 +179,7 @@ class VCruiseCarrot:
     #self.events = []
     self.xState = 0
     self.trafficState = 0
-    self.nRoadLimitSpeed = 30
+    self.nRoadLimitSpeed = 7
 
     self._cancel_timer = 0
     self.d_rel = 0
@@ -399,8 +399,13 @@ class VCruiseCarrot:
     return v_cruise_kph
   
   def _auto_speed_up(self, v_cruise_kph):
-    if self.model_v_kph > v_cruise_kph and v_cruise_kph < self.nRoadLimitSpeed + 10:
+    if self.model_v_kph > v_cruise_kph and v_cruise_kph < self.nRoadLimitSpeed:
       v_cruise_kph += 2
+      if v_cruise_kph <= self.nRoadLimitSpeed:
+        v_cruise_kph = self.nRoadLimitSpeed
+        break;
+      else:
+        v_cruise_kph = self.v_ego_kph_set
     return v_cruise_kph
 
   def _cruise_control(self, enable, cancel_timer, reason):

@@ -421,11 +421,11 @@ class RadarD:
 
     ar_pts = {}
     for pt in rr.points:
-      #pt_yRel = pt.yRel
+      pt_yRel = pt.yRel
       if pt.trackId == 0 and pt.yRel == 0: # scc radar
         if self.ready and leads_v3[0].prob > 0.5:
-          pt.yRel = -leads_v3[0].y[0]
-      ar_pts[pt.trackId] = [pt.dRel, pt.yRel, pt.vRel, pt.measured]
+          pt_yRel = -leads_v3[0].y[0]
+      ar_pts[pt.trackId] = [pt.dRel, pt_yRel, pt.vRel, pt.measured]
 
     # *** remove missing points from meta data ***
     for ids in list(self.tracks.keys()):
