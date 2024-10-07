@@ -46,6 +46,7 @@ def get_default_params():
     ("AutoCruiseControl", "0"),    
     ("SoftHoldMode", "0"),       
 
+    ("AutoSpeedUptoRoadSpeedLimit", "100"),
     ("AutoCurveSpeedLowerLimit", "40"),
     ("AutoCurveSpeedFactor", "110"),
     ("AutoCurveSpeedAggressiveness", "120"),
