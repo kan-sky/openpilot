@@ -175,11 +175,13 @@ class VCruiseCarrot:
     self._soft_hold_active = 0
     self._cruise_ready = False
     self._cruise_cancel_state = False
+    self._activate_cruise = 0
     
     #self.events = []
     self.xState = 0
     self.trafficState = 0
-    self.nRoadLimitSpeed = 7
+    self.nRoadLimitSpeed = 20
+    self.road_limit_kph = 20
 
     self._cancel_timer = 0
     self.d_rel = 0
@@ -190,6 +192,7 @@ class VCruiseCarrot:
     self.log = ""
 
     self.autoCruiseControl = 0
+    self.AutoSpeedUptoRoadSpeedLimit = 0.0
     
   @property
   def v_cruise_initialized(self):
@@ -209,6 +212,7 @@ class VCruiseCarrot:
   def update_params(self):
     if self.frame % 10 == 0:
       self.autoCruiseControl = self.params.get_int("AutoCruiseControl")
+      self.autoSpeedUptoRoadSpeedLimit = self.params.get_float("AutoSpeedUptoRoadSpeedLimit") * 0.01
       
   def update_v_cruise(self, CS, sm, is_metric):
     self._add_log("")
@@ -389,22 +393,26 @@ class VCruiseCarrot:
   #   nRoadLimitSpeed, vTurnSpeed
   #   gasPressed, brakePressed, standstill
   def _v_cruise_desired(self, CS, v_cruise_kph):
-    if v_cruise_kph < self.nRoadLimitSpeed:
-      v_cruise_kph = self.nRoadLimitSpeed
+    if v_cruise_kph < 20: #self.nRoadLimitSpeed:
+      v_cruise_kph = 20 #self.nRoadLimitSpeed
     else:
-      for speed in range (10, 160, self._cruise_speed_unit):
+      for speed in range (20, 160, self._cruise_speed_unit):
         if v_cruise_kph < speed:
           v_cruise_kph = speed
           break;
     return v_cruise_kph
   
   def _auto_speed_up(self, v_cruise_kph):
-    if self.model_v_kph > v_cruise_kph and v_cruise_kph < self.nRoadLimitSpeed + 10:
+    road_limit_kph = self.nRoadLimitSpeed * self.autoSpeedUptoRoadSpeedLimit
+    if road_limit_kph < 1.0:
+      return v_cruise_kph
+    if road_limit_kph < self.road_limit_kph:
+      if v_cruise_kph > road_limit_kph:
+        v_cruise_kph = road_limit_kph
+    elif self.model_v_kph > v_cruise_kph and v_cruise_kph < road_limit_kph:
       v_cruise_kph += 2
-      if v_cruise_kph <= self.nRoadLimitSpeed:
-        v_cruise_kph = self.nRoadLimitSpeed
-      else:
-        v_cruise_kph = self.v_ego_kph_set
+
+    self.road_limit_kph = road_limit_kph
     return v_cruise_kph
 
   def _cruise_control(self, enable, cancel_timer, reason):

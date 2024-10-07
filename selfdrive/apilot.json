@@ -366,6 +366,19 @@
       "unit": 10
     },
     {
+      "group": "크루즈",
+      "name": "AutoSpeedUptoRoadSpeedLimit",
+      "title": "자동속도증가 (100)%",
+      "descr": "모델에서 제공하는 속도까지 자동속도증가x로드스피드까지 자동속도올림.",
+      "egroup": "CRUISE",
+      "etitle": "AutoSpeedUpx:(100)%",
+      "edescr": "",
+      "min": 0,
+      "max": 200,
+      "default": 0,
+      "unit": 10
+    },
+    {
       "group": "화면",
       "name": "ShowDebugUI",
       "title": "디버그정보 표시",

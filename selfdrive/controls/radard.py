@@ -116,7 +116,8 @@ class Track:
       "vRel": float(self.vRel),
       "vLead": float(self.vLead),
       "vLeadK": float(self.vLeadK),
-      "aLeadK": float(self.aLead), #float(self.aLeadK),    aLead: average filter, aLeadK: kalman filter
+      "aLead": float(self.aLead),
+      "aLeadK": float(self.aLeadK),
       "aLeadTau": float(self.aLeadTau),
       "status": True,
       "fcw": self.is_potential_fcw(model_prob),
@@ -178,6 +179,7 @@ def get_RadarState_from_vision(lead_msg: capnp._DynamicStructReader, v_ego: floa
     "vRel": float(lead_v_rel_pred),
     "vLead": float(v_ego + lead_v_rel_pred),
     "vLeadK": float(v_ego + lead_v_rel_pred),
+    "aLead": float(lead_msg.a[0]),
     "aLeadK": float(lead_msg.a[0]),
     "aLeadTau": 0.3,
     "fcw": False,
@@ -315,6 +317,7 @@ class VisionTrack:
       "vRel": self.vRel,
       "vLead": self.vLead,
       "vLeadK": self.vLeadK,    ## TODO: 아직 vLeadK는 엉망인듯...
+      "aLead": self.aLead,
       "aLeadK": self.aLeadK,
       "aLeadTau": self.aLeadTau,
       "fcw": False,

@@ -262,6 +262,12 @@ protected:
             data[2] = lead_radar.getVRel();
             sprintf(title, "4.Lead(Y:a_ego, G:a_lead, O:v_rel)");
             break;
+        case 5:
+            data[0] = a_ego;
+            data[1] = lead_radar.getALead();
+            data[2] = lead_radar.getALeadK();
+            sprintf(title, "4.Lead(Y:a_ego, G:a_lead, O:a_lead_k)");
+            break;
         default:
             data[0] = data[1] = data[2] = 0;
             sprintf(title, "no data");
