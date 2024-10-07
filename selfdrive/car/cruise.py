@@ -163,7 +163,7 @@ class VCruiseCarrot:
 
     self.v_ego_kph_set = 0
     self._cruise_speed_min, self._cruise_speed_max = 20, 161
-    self._cruise_speed_unit = 10
+    self._cruise_speed_unit = 5
 
     self._gas_pressed_count = 0
     self._gas_pressed_count_last = 0
