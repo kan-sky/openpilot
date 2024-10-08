@@ -273,9 +273,6 @@ std::unordered_map<std::string, uint32_t> keys = {
     {"LongPitch", PERSISTENT},    
     {"SteerRatio", PERSISTENT},
     {"CurvatureFactor", PERSISTENT},
-    {"NNFF", PERSISTENT},
-    {"NNFFLite", PERSISTENT},
-    {"NNFFModelName", PERSISTENT},
 
 };
 

@@ -115,6 +115,7 @@ struct OnroadEventDEPRECATED @0x9b1657f34caf3ad3 {
     espActive @121;
     personalityChanged @122;
     aeb @123;
+    torqueNNLoad @126;
 
     radarCanErrorDEPRECATED @15;
     communityFeatureDisallowedDEPRECATED @62;

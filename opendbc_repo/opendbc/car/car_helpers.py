@@ -205,7 +205,7 @@ def get_car(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_multip
 
   print("Carrot GitBranch = {}, {}".format(Params().get("GitBranch"), Params().get("GitCommitDate")))
 
-  return get_car_interface(CP), CP
+  return get_car_interface(CP)
 
 
 def get_demo_car_params():
