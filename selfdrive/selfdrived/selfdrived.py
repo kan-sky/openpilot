@@ -356,8 +356,8 @@ class SelfdriveD:
       if not gps_ok and self.sm['livePose'].inputsOK and (self.distance_traveled > 1500):
         if self.distance_traveled < 1600:
           self.events.add(EventName.noGps)
-      if gps_ok:
-        self.distance_traveled = 0
+      #if gps_ok:
+      #  self.distance_traveled = 0
       self.distance_traveled += abs(CS.vEgo) * DT_CTRL
 
       if self.sm['modelV2'].frameDropPerc > 20:

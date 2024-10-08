@@ -288,14 +288,14 @@ class HyundaiJerk:
     
   def cal_jerk(self, accel, actuators):
     if actuators.longControlState == LongCtrlState.off:
-      accel_diff = 0.0
+      _jerk = 0.0
     elif actuators.longControlState == LongCtrlState.stopping:# or hud_control.softHold > 0:
-      accel_diff = 0.0
+      _jerk = 0.0
     else:
-      accel_diff = accel - self.accel_last
+      _jerk = accel - self.accel_last
 
-    accel_diff /= DT_CTRL
-    self.jerk = self.jerk * 0.9 + accel_diff * 0.1
+    _jerk /= DT_CTRL
+    self.jerk = self.jerk * 0.9 + _jerk * 0.1
     self.accel_last = accel
     return self.jerk
 

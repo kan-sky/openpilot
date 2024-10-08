@@ -345,12 +345,14 @@ class VCruiseCarrot:
 
     if not long_pressed:
       if button_type == ButtonType.accelCruise:
+        self._cruise_cancel_state = False
         if self._soft_hold_active > 0:
           self._soft_hold_active = 0
         else:
           v_cruise_kph = self._v_cruise_desired(CS, v_cruise_kph)
 
       elif button_type == ButtonType.decelCruise:
+        self._cruise_cancel_state = False
         if self._soft_hold_active > 0:
           self._cruise_control(-1, -1, "Cruise off,softhold mode (decelCruise)")
         elif v_cruise_kph > self.v_ego_kph_set:
@@ -368,7 +370,7 @@ class VCruiseCarrot:
         print("lfaButton")
         pass
       elif button_type == ButtonType.cancel:
-        print("cancel")
+        self._cruise_cancel_state = True
         pass
     else:
       if button_type == ButtonType.accelCruise:
@@ -490,6 +492,8 @@ class VCruiseCarrot:
       self._gas_pressed_count_last = self._gas_pressed_count
       self._gas_pressed_value = max(CS.gas, self._gas_pressed_value) if self._gas_pressed_count > 1 else CS.gas
       self._gas_tok = False
+      if self._cruise_cancel_state and self._soft_hold_active == 2:
+        self._cruise_control(-1, -1, "Cruise off,softhold mode (gasPressed)")
       self._soft_hold_active = 0
     else:      
       self._gas_tok = True if 0 < self._gas_pressed_count < self._gas_tok_timer else False
