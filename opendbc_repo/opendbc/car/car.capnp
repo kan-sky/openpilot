@@ -242,6 +242,7 @@ struct CarState {
   logCarrot @59 :Text;
   softHoldActive @60 :Int16;    #0: not active, 1: active ready, 2: activated
   activateCruise @61 :Int16;
+  latEnabled @62 :Bool;
 
   struct Tpms {
     fl @0 :Float32;
@@ -383,6 +384,8 @@ struct CarControl {
     brake @1: Float32; # [0.0, 1.0]
     steerOutputCan @8: Float32;   # value sent over can to the car
     speed @6: Float32;  # m/s
+
+    jerk @9: Float32;  # m/s^3
 
     enum LongControlState @0xe40f3a917d908282{
       off @0;

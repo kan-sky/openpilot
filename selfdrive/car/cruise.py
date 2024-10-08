@@ -176,6 +176,7 @@ class VCruiseCarrot:
     self._cruise_ready = False
     self._cruise_cancel_state = False
     self._activate_cruise = 0
+    self._lat_enabled = True
     
     #self.events = []
     self.xState = 0
@@ -346,6 +347,7 @@ class VCruiseCarrot:
     if not long_pressed:
       if button_type == ButtonType.accelCruise:
         self._cruise_cancel_state = False
+        self._lat_enabled = True
         if self._soft_hold_active > 0:
           self._soft_hold_active = 0
         else:
@@ -353,6 +355,7 @@ class VCruiseCarrot:
 
       elif button_type == ButtonType.decelCruise:
         self._cruise_cancel_state = False
+        self._lat_enabled = True
         if self._soft_hold_active > 0:
           self._cruise_control(-1, -1, "Cruise off,softhold mode (decelCruise)")
         elif v_cruise_kph > self.v_ego_kph_set:
@@ -367,9 +370,14 @@ class VCruiseCarrot:
         self.params.put_int_nonblocking('LongitudinalPersonality', personality)
         #self.events.append(EventName.personalityChanged)
       elif button_type == ButtonType.lfaButton:
+        self._lat_enabled = not self._lat_enabled
+        self._add_log("Lateral " + "enabled" if self._lat_enabled else "disabled")
         print("lfaButton")
         pass
       elif button_type == ButtonType.cancel:
+        if self._cruise_cancel_state:
+          self._lat_enabled = not self._lat_enabled
+          self._add_log("Lateral " + "enabled" if self._lat_enabled else "disabled")
         self._cruise_cancel_state = True
         pass
     else:
@@ -385,6 +393,7 @@ class VCruiseCarrot:
         pass
       elif button_type == ButtonType.cancel:
         self._cruise_cancel_state = True
+        self._lat_enabled = False
 
     v_cruise_kph = self._update_cruise_state(CS, CC, v_cruise_kph)
     return v_cruise_kph

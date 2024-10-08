@@ -214,9 +214,9 @@ class CarController(CarControllerBase):
         # TODO: unclear if this is needed
         jerk = 3.0 if actuators.longControlState == LongCtrlState.pid else 1.0
         use_fca = self.CP.flags & HyundaiFlags.USE_FCA.value
-        can_sends.extend(hyundaican.create_acc_commands(self.packer, CC.enabled, accel, jerk, int(self.frame / 2),
+        can_sends.extend(hyundaican.create_acc_commands(self.packer, CC.enabled, accel, self.hyundai_jerk, int(self.frame / 2),
                                                         hud_control, set_speed_in_units, stopping,
-                                                        CC.cruiseControl.override, use_fca))
+                                                        CC.cruiseControl.override, use_fca, CS))
 
       # 20 Hz LFA MFA message
       if self.frame % 5 == 0 and self.CP.flags & HyundaiFlags.SEND_LFA.value:
@@ -300,9 +300,10 @@ class HyundaiJerk:
     return self.jerk
 
   def make_jerk(self, CP, CS, accel, actuators, hud_control):
-    jerk = self.cal_jerk(accel, actuators)
+    #jerk = self.cal_jerk(accel, actuators)
+    jerk = actuators.jerk if actuators.longControlState == LongCtrlState.pid else 0.0
     a_error = accel - CS.out.aEgo
-    jerk = jerk + (a_error * 2.0)
+    jerk = jerk + (a_error * 1.0) #2.0
 
     jerkLimit = 5.0
     self.jerk_u = self.jerk_l = jerkLimit

@@ -213,7 +213,28 @@ def create_acc_commands_scc(packer, enabled, accel, jerk, idx, hud_control, set_
 def create_acc_opt_copy(CS, packer):
   return packer.make_can_msg("SCC13", 0, CS.scc13)
 
-def create_acc_commands(packer, enabled, accel, upper_jerk, idx, hud_control, set_speed, stopping, long_override, use_fca):
+def create_acc_commands(packer, enabled, accel, jerk, idx, hud_control, set_speed, stopping, long_override, use_fca, CS):
+  from opendbc.car.hyundai.carcontroller import HyundaiJerk
+  soft_hold_active = CS.softHoldActive
+  soft_hold_info = soft_hold_active > 1 and enabled
+  soft_hold_mode = 2 ## some cars can't enable while braking
+  long_enabled = enabled or (soft_hold_active > 0 and soft_hold_mode == 2)
+  stop_req = 1 if stopping or (soft_hold_active > 0 and soft_hold_mode == 2) else 0
+  if long_enabled:
+    scc12_acc_mode = 2 if long_override else 1
+    scc14_acc_mode = 4 if long_override else 1
+    if CS.out.brakeHoldActive:
+      scc12_acc_mode = 0
+      scc14_acc_mode = 0
+    elif CS.out.brakePressed:
+      scc12_acc_mode = 1
+      scc14_acc_mode = 1
+  else:
+    scc12_acc_mode = 0
+    scc14_acc_mode = 0
+
+  warning_front = False
+
   commands = []
 
   scc11_values = {
@@ -221,17 +242,19 @@ def create_acc_commands(packer, enabled, accel, upper_jerk, idx, hud_control, se
     "TauGapSet": hud_control.leadDistanceBars,
     "VSetDis": set_speed if enabled else 0,
     "AliveCounterACC": idx % 0x10,
+    "SCCInfoDisplay": 3 if warning_front else 4 if soft_hold_info else 0 if enabled else 0,   
     "ObjValid": 1, # close lead makes controls tighter
     "ACC_ObjStatus": 1, # close lead makes controls tighter
     "ACC_ObjLatPos": 0,
     "ACC_ObjRelSpd": 0,
     "ACC_ObjDist": 1, # close lead makes controls tighter
+    "DriverAlertDisplay": 0,
     }
   commands.append(packer.make_can_msg("SCC11", 0, scc11_values))
 
   scc12_values = {
-    "ACCMode": 2 if enabled and long_override else 1 if enabled else 0,
-    "StopReq": 1 if stopping else 0,
+    "ACCMode": scc12_acc_mode,
+    "StopReq": stop_req,
     "aReqRaw": accel,
     "aReqValue": accel,  # stock ramps up and down respecting jerk limit until it reaches aReqRaw
     "CR_VSM_Alive": idx % 0xF,
@@ -249,11 +272,11 @@ def create_acc_commands(packer, enabled, accel, upper_jerk, idx, hud_control, se
   commands.append(packer.make_can_msg("SCC12", 0, scc12_values))
 
   scc14_values = {
-    "ComfortBandUpper": 0.0, # stock usually is 0 but sometimes uses higher values
-    "ComfortBandLower": 0.0, # stock usually is 0 but sometimes uses higher values
-    "JerkUpperLimit": upper_jerk, # stock usually is 1.0 but sometimes uses higher values
-    "JerkLowerLimit": 5.0, # stock usually is 0.5 but sometimes uses higher values
-    "ACCMode": 2 if enabled and long_override else 1 if enabled else 4, # stock will always be 4 instead of 0 after first disengage
+    "ComfortBandUpper": jerk.cb_upper, # stock usually is 0 but sometimes uses higher values
+    "ComfortBandLower": jerk.cb_lower, # stock usually is 0 but sometimes uses higher values
+    "JerkUpperLimit": jerk.jerk_u, # stock usually is 1.0 but sometimes uses higher values
+    "JerkLowerLimit": jerk.jerk_l, # stock usually is 0.5 but sometimes uses higher values
+    "ACCMode": scc14_acc_mode, # if enabled and long_override else 1 if enabled else 4, # stock will always be 4 instead of 0 after first disengage
     "ObjGap": 2 if hud_control.leadVisible else 0, # 5: >30, m, 4: 25-30 m, 3: 20-25 m, 2: < 20 m, 0: no lead
   }
   commands.append(packer.make_can_msg("SCC14", 0, scc14_values))

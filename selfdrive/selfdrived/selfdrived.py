@@ -190,6 +190,9 @@ class SelfdriveD:
         (CS.regenBraking and (not self.CS_prev.regenBraking or not CS.standstill)):
         self.events.add(EventName.pedalPressed)
 
+      if CS.latEnabled != self.CS_prev.latEnabled:
+        self.events.add(EventName.audioPrompt)
+
     # Create events for temperature, disk space, and memory
     if self.sm['deviceState'].thermalStatus >= ThermalStatus.red:
       self.events.add(EventName.overheat)

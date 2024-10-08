@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 import json
 import os
 from math import exp
@@ -31,6 +31,20 @@ class CarInterface(CarInterfaceBase):
   @staticmethod
   def get_pid_accel_limits(CP, current_speed, cruise_speed):
     return CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX
+
+  """ 아래 두 함수는 Volt용. nnff적용으로 지움.
+  # Determined by iteratively plotting and minimizing error for f(angle, speed) = steer.
+  @staticmethod
+  def get_steer_feedforward_volt(desired_angle, v_ego):
+    desired_angle *= 0.02904609
+    sigmoid = desired_angle / (1 + fabs(desired_angle))
+    return 0.10006696 * sigmoid * (v_ego + 3.12485927)
+
+  def get_steer_feedforward_function(self):
+    if self.CP.carFingerprint in (CAR.CHEVROLET_VOLT, CAR.CHEVROLET_VOLT_CC):
+      return self.get_steer_feedforward_volt
+    else:
+      return CarInterfaceBase.get_steer_feedforward_default """
 
   def torque_from_lateral_accel_siglin(self, latcontrol_inputs: LatControlInputs, torque_params: structs.CarParams.LateralTorqueTuning,
                                        lateral_accel_error: float, lateral_accel_deadzone: float, friction_compensation: bool, gravity_adjusted: bool) -> float:
