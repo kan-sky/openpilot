@@ -38,6 +38,26 @@ void AnnotatedCameraWidget::updateState(const UIState &s) {
   // update engageability/experimental mode button
   experimental_btn->updateState(s);
   dmon.updateState(s);
+
+  Params	params_memory{ "/dev/shm/params" };
+  QString command = QString::fromStdString(params_memory.get("CarrotManCommand"));
+  if (command.startsWith("RECORD ")) {
+      QString recording = command.mid(7);
+      if (recording == "START") {
+          recorder->start();
+          printf("Start recording\n");
+      }
+      else if (recording == "STOP") {
+          recorder->stop();
+          printf("Stop recording\n");
+      }
+      else if (recording == "TOGGLE") {
+          recorder->toggle();
+          printf("Toggle recording\n");
+      }
+      params_memory.putNonBlocking("CarrotManCommand", "");
+  }
+
 }
 
 void AnnotatedCameraWidget::initializeGL() {
@@ -161,7 +181,7 @@ void AnnotatedCameraWidget::paintEvent(QPaintEvent *event) {
   double dt = cur_draw_t - prev_draw_t;
   double fps = fps_filter.update(1. / dt * 1000);
   if (fps < 15) {
-    LOGW("slow frame rate: %.2f fps", fps);
+    //LOGW("slow frame rate: %.2f fps", fps);
   }
   prev_draw_t = cur_draw_t;
 

@@ -302,7 +302,7 @@ class HyundaiJerk:
   def make_jerk(self, CP, CS, accel, actuators, hud_control):
     #jerk = self.cal_jerk(accel, actuators)
     jerk = actuators.jerk if actuators.longControlState == LongCtrlState.pid else 0.0
-    a_error = accel - CS.out.aEgo
+    a_error = actuators.aTargetNow - CS.out.aEgo
     jerk = jerk + (a_error * 1.0) #2.0
 
     jerkLimit = 5.0

@@ -127,4 +127,4 @@ class LongControl:
                                      feedforward=a_target)
 
     self.last_output_accel = clip(output_accel, accel_limits[0], accel_limits[1])
-    return self.last_output_accel, j_target_now # j_target_now(for HKG)
+    return self.last_output_accel, a_target_now, j_target_now # a_target_now, j_target_now(for HKG)

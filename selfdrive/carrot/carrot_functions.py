@@ -80,7 +80,7 @@ class CarrotPlanner:
       self.mySafeFactor = self.mySafeModeFactor
 
     self.stop_distance = 6.0
-    self.trafficStopDistanceAdjust = 1.3 #params.get_float("TrafficStopDistanceAdjust") / 100.
+    self.trafficStopDistanceAdjust = 1.5 #params.get_float("TrafficStopDistanceAdjust") / 100.
     self.comfortBrake = 2.4 #params.get_float("ComfortBrake") / 100.
     self.comfort_brake = self.comfortBrake
 

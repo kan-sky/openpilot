@@ -614,38 +614,20 @@ class CarrotServ:
       self.traffic_state = 0
 
   def _handle_speed_command(self, xArg):
-    if xArg == "UP":
-      pass
-    elif xArg == "DOWN":
-      pass
-    else:
-      try:
-        #return clip(int(xArg), self.cruiseSpeedMin, self.cruiseSpeedMax)
-        pass
-      except ValueError:
-        pass
+    self.params_memory.put_nonblocking("CarrotManCommand", "SPEED " + xArg)
 
   def _handle_cruise_command(self, xArg):
-    if xArg == "ON":
-      pass
-    elif xArg == "OFF":
-      pass
-    elif xArg == "GO":
-      pass
-    elif xArg == "STOP":
-      pass
+    self.params_memory.put_nonblocking("CarrotManCommand", "CRUISE " + xArg)
 
   def _handle_lane_change(self, xArg):
-    if xArg == "RIGHT":
-      pass
-    elif xArg == "LEFT":
-      pass
+    self.params_memory.put_nonblocking("CarrotManCommand", "LANECHANGE " + xArg)
+    #if xArg == "RIGHT":
+    #  pass
+    #elif xArg == "LEFT":
+    #  pass
 
   def _handle_record_command(self, xArg):
-    record_commands = {"START": "1", "STOP": "2", "TOGGLE": "3"}
-    command = record_commands.get(xArg)
-    if command:
-      pass
+    self.params_memory.put_nonblocking("CarrotManCommand", "RECORD " + xArg)
 
   def _handle_display_command(self, xArg):
     display_commands = {"MAP": "3", "FULLMAP": "4", "DEFAULT": "1", "ROAD": "2", "TOGGLE": "5"}
@@ -1060,7 +1042,7 @@ class CarrotServ:
 
     if self.nSdiType  >= 0: # or self.active > 0:      
       #self.debugText = f"Atc:{atc_desired:.1f},{self.xTurnInfo}:{self.xDistToTurn:.1f}, I({self.nTBTNextRoadWidth},{self.roadcate}) Atc2:{atc_desired_next:.1f},{self.xTurnInfoNext},{self.xDistToTurnNext:.1f}"
-      self.debugText = f"{self._get_sdi_descr(self.nSdiType)}:{self.nSdiType}/{self.nSdiSpeedLimit}/{self.nSdiDist},BLOCK:{self.nSdiBlockType}/{self.nSdiBlockSpeed}/{self.nSdiBlockDist}, PLUS:{self.nSdiPlusType}/{self.nSdiPlusSpeedLimit}/{self.nSdiPlusDist}"
+      self.debugText = f" {self._get_sdi_descr(self.nSdiType)}:{self.nSdiType}/{self.nSdiSpeedLimit}/{self.nSdiDist},BLOCK:{self.nSdiBlockType}/{self.nSdiBlockSpeed}/{self.nSdiBlockDist}, PLUS:{self.nSdiPlusType}/{self.nSdiPlusSpeedLimit}/{self.nSdiPlusDist}"
     elif self.nGoPosDist > 0 and self.active > 1:
       self.debugText = " 목적지:{:.1f}km/{:.1f}분 남음".format(self.nGoPosDist/1000., self.nGoPosTime / 60)
     else:
