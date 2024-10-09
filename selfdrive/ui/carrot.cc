@@ -1567,10 +1567,12 @@ public:
             szPosRoadName = QString::fromStdString(carrot_man.getSzPosRoadName());
             QString atcType = QString::fromStdString(carrot_man.getAtcType());
             trafficState_carrot = carrot_man.getTrafficState();
+            const auto velocity = model.getVelocity();
 
             auto meta = sm["modelV2"].getModelV2().getMeta();
             QString desireLog = QString::fromStdString(meta.getDesireLog());
-            sprintf(carrot_man_debug, "%s, %dkm/h TBT(%d): %dm, CAM(%d): %dkm/h, %dm, ATC(%s), T(%d)",
+            sprintf(carrot_man_debug, "model_kph= %d, %s, %dkm/h TBT(%d): %dm, CAM(%d): %dkm/h, %dm, ATC(%s), T(%d)",
+                (int)(velocity.getX()[32] * 3.6),
                 desireLog.toStdString().c_str(),
                 carrot_man.getDesiredSpeed(),
                 carrot_man.getXTurnInfo(),
