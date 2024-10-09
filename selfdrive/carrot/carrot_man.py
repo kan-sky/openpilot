@@ -428,7 +428,7 @@ class CarrotMan:
     self.carrot_curve_speed_params()
 
     ## 국가법령정보센터: 도로설계기준
-    V_CURVE_LOOKUP_BP = [0., 1./800., 1./670., 1./560., 1./440., 1./360., 1./265., 1./190., 1./135., 1./85., 1./55., 1./30., 1./15.]
+    V_CURVE_LOOKUP_BP = [0., .00125, .00149, .00179, .00227, .00278, .00377, .00526, .00740, 0.01176, .01818, .03333, .06666]
     #V_CRUVE_LOOKUP_VALS = [300, 150, 120, 110, 100, 90, 80, 70, 60, 50, 40, 30, 20]
     V_CRUVE_LOOKUP_VALS = [300, 150, 120, 110, 100, 90, 80, 70, 60, 50, 45, 35, 30]
 
@@ -443,7 +443,7 @@ class CarrotMan:
     v_ego = sm['carState'].vEgo
     # 회전속도를 선속도 나누면 : 곡률이 됨. [12:20]은 약 1.4~3.5초 앞의 곡률을 계산함.
     orientationRates = np.array(sm['modelV2'].orientationRate.z, dtype=np.float32)
-    speed = min(self.turn_speed_last / 3.6, clip(v_ego, 0.5, 100.0))
+    speed = min(self.turn_speed_last / 3.6, clip(v_ego, 0.3, 100.0))
     
     # 절대값이 가장 큰 요소의 인덱스를 찾습니다.
     max_index = np.argmax(np.abs(orientationRates[12:20]))
