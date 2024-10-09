@@ -295,8 +295,10 @@ class CarrotPlanner:
       v_cruise = 0
     elif self.xState == XState.e2eStop:
       self.stopping_count = 0
-      if carstate.gasPressed:
-        self.xState = XState.e2ePrepare
+      if carstate.gasPressed:  # Stop detecting traffic signal for 10 seconds
+        #self.xState = XState.e2ePrepare
+        self.xState = XState.e2eCruise
+        self.traffic_starting_count = 10.0 / DT_MDL
       elif radar_detected and (radarstate.leadOne.dRel - stop_model_x) < 2.0:
         self.xState = XState.lead
       else:
