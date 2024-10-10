@@ -20,6 +20,8 @@ from openpilot.selfdrive.controls.lib.vehicle_model import VehicleModel
 from openpilot.selfdrive.locationd.helpers import PoseCalibrator, Pose
 
 from openpilot.common.realtime import DT_CTRL
+from openpilot.selfdrive.selfdrived.events import Events, ET
+EventName = log.OnroadEvent.EventName
 
 State = log.SelfdriveState.OpenpilotState
 LaneChangeState = log.LaneChangeState
@@ -66,6 +68,9 @@ class Controls:
       device_pose = Pose.from_live_pose(self.sm['livePose'])
       self.calibrated_pose = self.pose_calibrator.build_calibrated_pose(device_pose)
 
+    if self.sm.frame == 900 and self.CP.lateralTuning.which() == 'torque' and self.CI.use_nnff:
+      Events().add(EventName.torqueNNLoad)
+      print("NNFF display....")
   def state_control(self):
     CS = self.sm['carState']
 
@@ -125,7 +130,8 @@ class Controls:
     actuators.curvature = self.desired_curvature
     actuators.steer, actuators.steeringAngleDeg, lac_log = self.LaC.update(CC.latActive, CS, self.VM, lp,
                                                                             self.steer_limited, self.desired_curvature,
-                                                                            self.calibrated_pose) # TODO what if not available
+                                                                            self.sm['livePose'],
+                                                                            model_data=self.sm['modelV2'])
 
     # Ensure no NaNs/Infs
     for p in ACTUATOR_FIELDS:

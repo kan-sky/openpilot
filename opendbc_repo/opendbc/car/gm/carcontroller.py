@@ -26,8 +26,9 @@ BRAKE_PITCH_FACTOR_BP = [5., 10.] # [m/s] smoothly revert to planned accel at lo
 BRAKE_PITCH_FACTOR_V = [0., 1.] # [unitless in [0,1]]; don't touch
 
 class CarController(CarControllerBase):
-  def __init__(self, dbc_name, CP):
-    super().__init__(dbc_name, CP)
+  def __init__(self, dbc_name, CP, VM):
+    super().__init__(dbc_name, CP, VM)
+    self.CP = CP
     self.start_time = 0.
     self.apply_steer_last = 0
     self.apply_gas = 0

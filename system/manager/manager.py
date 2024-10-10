@@ -25,6 +25,8 @@ def get_default_params():
     ("EVTable", "1"),
     ("SteerRatio", "152"),
     ("CurvatureFactor", "95"),
+    ("NNFF", "1"),
+    ("NNFFLite", "1"),
     ("CompletedTrainingVersion", "0"),
     ("DisengageOnAccelerator", "0"),
     ("GsmMetered", "1"),
