@@ -467,7 +467,7 @@ class VCruiseCarrot:
     return v_cruise_kph
 
   def _cruise_control(self, enable, cancel_timer, reason):
-    if self._cruise_cancel_state and self._soft_hold_active != 2:
+    if self._cruise_cancel_state: # and self._soft_hold_active != 2:
       self._add_log(reason + " > Cancel state")
     elif enable > 0 and self._cancel_timer > 0 and cancel_timer >= 0:
       enable = 0
@@ -541,8 +541,8 @@ class VCruiseCarrot:
       self._gas_pressed_count_last = self._gas_pressed_count
       self._gas_pressed_value = max(CS.gas, self._gas_pressed_value) if self._gas_pressed_count > 1 else CS.gas
       self._gas_tok = False
-      if self._cruise_cancel_state and self._soft_hold_active == 2:
-        self._cruise_control(-1, -1, "Cruise off,softhold mode (gasPressed)")
+      #if self._cruise_cancel_state and self._soft_hold_active == 2:
+      #  self._cruise_control(-1, -1, "Cruise off,softhold mode (gasPressed)")
       self._soft_hold_active = 0
     else:      
       self._gas_tok = True if 0 < self._gas_pressed_count < self._gas_tok_timer else False

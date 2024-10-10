@@ -70,6 +70,72 @@ static void ui_draw_text(const UIState* s, float x, float y, const char* string,
     nvgFillColor(s->vg, color);
     nvgText(s->vg, x, y, string, NULL);
 }
+static void ui_draw_text_vg(NVGcontext* vg, float x, float y, const char* string, float size, NVGcolor color, const char* font_name, float borderWidth = 3.0, float shadowOffset = 0.0, NVGcolor borderColor = COLOR_BLACK, NVGcolor shadowColor = COLOR_BLACK) {
+    //y += 6;
+    nvgFontFace(vg, font_name);
+    nvgFontSize(vg, size);
+    if (borderWidth > 0.0) {
+        //NVGcolor borderColor = COLOR_BLACK;
+        nvgFillColor(vg, borderColor);
+        for (int i = 0; i < 360; i += 45) {
+            float angle = i * NVG_PI / 180.0f;
+            float offsetX = borderWidth * cos(angle);
+            float offsetY = borderWidth * sin(angle);
+            nvgText(vg, x + offsetX, y + offsetY, string, NULL);
+        }
+    }
+    if (shadowOffset != 0.0) {
+        //NVGcolor shadowColor = COLOR_BLACK;
+        nvgFillColor(vg, shadowColor);
+        nvgText(vg, x + shadowOffset, y + shadowOffset, string, NULL);
+    }
+    nvgFillColor(vg, color);
+    nvgText(vg, x, y, string, NULL);
+}
+void ui_draw_line_vg(NVGcontext* vg, const QPolygonF& vd, NVGcolor* color, NVGpaint* paint, float stroke = 0.0, NVGcolor strokeColor = COLOR_WHITE) {
+    if (vd.size() == 0) return;
+
+    nvgBeginPath(vg);
+    nvgMoveTo(vg, vd.at(0).x(), vd.at(0).y());
+    for (int i = 1; i < vd.size(); i++) {
+        nvgLineTo(vg, vd.at(i).x(), vd.at(i).y());
+    }
+    nvgClosePath(vg);
+    if (color) {
+        nvgFillColor(vg, *color);
+    }
+    else if (paint) {
+        nvgFillPaint(vg, *paint);
+    }
+    nvgFill(vg);
+    if (stroke > 0.0) {
+        nvgStrokeColor(vg, strokeColor);
+        nvgStrokeWidth(vg, stroke);
+        nvgStroke(vg);
+    }
+}
+void ui_draw_line2_vg(NVGcontext* vg, float x[], float y[], int size, NVGcolor* color, NVGpaint* paint, float stroke = 0.0, NVGcolor strokeColor = COLOR_WHITE) {
+
+    nvgBeginPath(vg);
+    nvgMoveTo(vg, x[0], y[0]);
+    for (int i = 1; i < size; i++) {
+        nvgLineTo(vg, x[i], y[i]);
+    }
+    nvgClosePath(vg);
+    if (color) {
+        nvgFillColor(vg, *color);
+    }
+    else if (paint) {
+        nvgFillPaint(vg, *paint);
+    }
+    nvgFill(vg);
+
+    if (stroke > 0.0) {
+        nvgStrokeColor(vg, strokeColor);
+        nvgStrokeWidth(vg, stroke);
+        nvgStroke(vg);
+    }
+}
 
 void ui_draw_image(const UIState* s, const Rect1& r, const char* name, float alpha) {
     nvgBeginPath(s->vg);
@@ -1720,9 +1786,11 @@ public:
                 ui_draw_text(s, 170, y + 70, str, 60, COLOR_WHITE, BOLD, 3.0f, 8.0f);
                 nav_y += 70;
             }
-            nvgTextAlign(s->vg, NVG_ALIGN_LEFT | NVG_ALIGN_BOTTOM);
-            ui_draw_text(s, 50, nav_y, szPosRoadName.toStdString().c_str(), 35, COLOR_WHITE, BOLD, 3.0f, 8.0f);
-            nvgTextAlign(s->vg, NVG_ALIGN_CENTER | NVG_ALIGN_BOTTOM);
+            if (szPosRoadName.size() > 0) {
+                nvgTextAlign(s->vg, NVG_ALIGN_LEFT | NVG_ALIGN_BOTTOM);
+                ui_draw_text(s, 50, nav_y, szPosRoadName.toStdString().c_str(), 35, COLOR_WHITE, BOLD, 3.0f, 8.0f);
+                nvgTextAlign(s->vg, NVG_ALIGN_CENTER | NVG_ALIGN_BOTTOM);
+            }
         }
     }
     void drawConnInfo(const UIState* s) {
@@ -1844,6 +1912,137 @@ void ui_draw(UIState *s, ModelRenderer* model_renderer, int w, int h) {
   nvgResetScissor(s->vg);
   nvgEndFrame(s->vg);
   glDisable(GL_BLEND);
+}
+
+class BorderDrawer {
+protected:
+    float   a_ego_width = 0.0;
+    float steering_angle_pos = 0.0;
+public:
+    void draw(UIState *s, int w, int h, NVGcolor bg, NVGcolor bg_long) {
+        NVGcontext* vg = s->vg_border;
+
+        ui_fill_rect(vg, { 0,0, w, h / 2 }, bg, 0);
+        ui_fill_rect(vg, { 0, h / 2, w, h }, bg_long, 0);
+
+        const SubMaster& sm = *(s->sm);
+        auto car_state = sm["carState"].getCarState();
+        float a_ego = car_state.getAEgo();
+
+        a_ego_width = a_ego_width * 0.5 + (w * std::abs(a_ego) / 4.0) * 0.5;
+        ui_fill_rect(vg, { w/2 - (int)a_ego_width, h - 30, (int)a_ego_width * 2, 30 }, (a_ego >= 0)? COLOR_YELLOW : COLOR_RED, 15);
+
+        steering_angle_pos = steering_angle_pos * 0.5 + (w / 2. - w / 2. * car_state.getSteeringAngleDeg() / 180) * 0.5;
+        int x_st = (int)steering_angle_pos - 50;
+        int x_ed = (int)steering_angle_pos + 50;
+        if (x_st < 0) x_st = 0;
+        if (x_ed < 50) x_ed = 50;
+        if (x_st > w - 50) x_st = w - 50;
+        if (x_ed > w) x_ed = w;
+        ui_fill_rect(vg, { x_st, 0, x_ed - x_st, 30 }, COLOR_BLUE, 15);
+
+
+        char top[256] = "", top_left[256] = "", top_right[256] = "";
+        char bottom[256] = "", bottom_left[256] = "", bottom_right[256] = "";
+
+        QString str;
+
+        // top
+        str = QString::fromStdString(car_state.getLogCarrot());
+        sprintf(top, "%s", str.toStdString().c_str());
+        // top_right
+        auto deviceState = sm["deviceState"].getDeviceState();
+        const auto freeSpace = deviceState.getFreeSpacePercent();
+        const auto memoryUsage = deviceState.getMemoryUsagePercent();
+        const auto cpuTempC = deviceState.getCpuTempC();
+        float cpuTemp = 0.0f;
+        int   size = sizeof(cpuTempC) / sizeof(cpuTempC[0]);
+        if (size > 0) {
+            for (int i = 0; i < size; i++) {
+                cpuTemp += cpuTempC[i];
+            }
+            cpuTemp /= static_cast<float>(size);
+        }
+        const auto live_torque_params = sm["liveTorqueParameters"].getLiveTorqueParameters();
+        str.sprintf("LT[%.0f]:%s (%.4f/%.4f) MEM: %d%% DISK: %.0f%% CPU: %.0f\u00B0C",
+            live_torque_params.getTotalBucketPoints(), live_torque_params.getLiveValid() ? "ON" : "OFF", live_torque_params.getLatAccelFactorFiltered(), live_torque_params.getFrictionCoefficientFiltered(),
+            memoryUsage, freeSpace, cpuTemp);
+        sprintf(top_right, "%s", str.toStdString().c_str());
+
+        //top_left
+        Params params = Params();
+        QString carName = QString::fromStdString(params.get("CarName"));
+        bool longitudinal_control = sm["carParams"].getCarParams().getOpenpilotLongitudinalControl();
+        if (params.getInt("HyundaiCameraSCC") > 0) {
+            carName += "(CAMERA SCC)";
+        }
+        else if (longitudinal_control) {
+            carName += " - OP Long";
+        }
+        sprintf(top_left, "%s", carName.toStdString().c_str());
+
+        //const auto lat_plan = sm["lateralPlan"].getLateralPlan();
+        //bottomLabel->setText(lat_plan.getLatDebugText().cStr());
+
+        // bottom_left
+        QString gitBranch = QString::fromStdString(params.get("GitBranch"));
+        sprintf(bottom_left, "%s", gitBranch.toStdString().c_str());
+
+        // bottom_right
+        Params params_memory = Params("/dev/shm/params");
+        QString ipAddress = QString::fromStdString(params_memory.get("NetworkAddress"));
+        //extern QString gitBranch;
+        sprintf(bottom_right, "%s", ipAddress.toStdString().c_str());
+
+
+        // top
+        nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_TOP);
+        ui_draw_text_vg(vg, w / 2, 0, top, 30, COLOR_WHITE, BOLD);
+        // top left
+        nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
+        ui_draw_text_vg(vg, 0, 0, top_left, 30, COLOR_WHITE, BOLD);
+        // top right
+        nvgTextAlign(vg, NVG_ALIGN_RIGHT | NVG_ALIGN_TOP);
+        ui_draw_text_vg(vg, w, 0, top_right, 30, COLOR_WHITE, BOLD);
+        // bottom
+        nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_BOTTOM);
+        ui_draw_text_vg(vg, w / 2, h, bottom, 30, COLOR_WHITE, BOLD);
+        // bottom left
+        nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_BOTTOM);
+        ui_draw_text_vg(vg, 0, h, bottom_left, 30, COLOR_WHITE, BOLD);
+        // bottom right
+        nvgTextAlign(vg, NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM);
+        ui_draw_text_vg(vg, w, h, bottom_right, 30, COLOR_WHITE, BOLD);
+
+    }
+};
+NVGcolor QColorToNVGcolor(const QColor& color) {
+    return nvgRGBAf(color.redF(), color.greenF(), color.blueF(), color.alphaF());
+}
+BorderDrawer borderDrawer;
+void ui_draw_border(UIState* s, int w, int h, QColor bg, QColor bg_long) {
+
+    if (s->vg_border == nullptr) {
+        s->vg_border = nvgCreate(NVG_ANTIALIAS | NVG_STENCIL_STROKES | NVG_DEBUG);
+        std::pair<const char*, const char*> fonts[] = {
+            {"KaiGenGothicKR-Bold", "../assets/addon/font/KaiGenGothicKR-Bold.ttf"},
+        };
+        for (auto [name, file] : fonts) {
+            int font_id = nvgCreateFont(s->vg_border, name, file);
+            assert(font_id >= 0);
+        }
+    }
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glViewport(0, 0, w, h);
+    nvgBeginFrame(s->vg_border, w, h, 1.0f);
+	nvgScissor(s->vg_border, 0, 0, w, h);
+
+    borderDrawer.draw(s, w, h, QColorToNVGcolor(bg), QColorToNVGcolor(bg_long));
+
+    nvgResetScissor(s->vg_border);
+    nvgEndFrame(s->vg_border);
+    glDisable(GL_BLEND);
 }
 void ui_draw_alert(UIState* s) {
     if (alert.size != cereal::SelfdriveState::AlertSize::NONE) {
