@@ -54,8 +54,6 @@ class CarController(CarControllerBase):
 
     self.pitch = FirstOrderFilter(0., 0.09 * 4, DT_CTRL * 4)  # runs at 25 Hz
     self.accel_g = 0.0
-    # test jerk
-    self.test_jerk = GmJerk()
 
   @staticmethod
   def calc_pedal_command(accel: float, long_active: bool) -> float:
@@ -133,8 +131,6 @@ class CarController(CarControllerBase):
       can_sends.append(gmcan.create_steering_control(self.packer_pt, CanBus.POWERTRAIN, apply_steer, idx, CC.latActive))
 
     if self.CP.openpilotLongitudinalControl:
-      # test jerk
-      self.test_jerk.make_jerk(self.CP, CS, accel, actuators, hud_control)
       # Gas/regen, brakes, and UI commands - all at 25Hz
       if self.frame % 4 == 0:
         stopping = actuators.longControlState == LongCtrlState.stopping
@@ -275,24 +271,3 @@ class CarController(CarControllerBase):
 
     self.frame += 1
     return new_actuators, can_sends
-
-class GmJerk:
-  def __init__(self):
-    self.jerk = 0.0
-    self.accel_last = 0
-    self.jerk_u = self.jerk_l = 0.0
-    self.cb_upper = self.cb_lower = 0.0
-
-  def make_jerk(self, CP, CS, accel, actuators, hud_control):
-    jerk = actuators.jerk if actuators.longControlState == LongCtrlState.pid else 0.0
-    a_error = actuators.aTargetNow - CS.out.aEgo
-    jerk = jerk + (a_error * 1.0) #2.0
-
-    jerkLimit = 5.0
-    self.jerk_u = self.jerk_l = jerkLimit
-    self.cb_upper = self.cb_lower = 0.0
-
-    jerk_max = jerkLimit
-    if actuators.longControlState == LongCtrlState.off:
-      self.jerk_u = jerkLimit
-      self.jerk_l = jerkLimit          
