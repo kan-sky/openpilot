@@ -585,6 +585,7 @@ class CarrotServ:
     self.autoNaviSpeedCtrlEnd = float(self.params.get_int("AutoNaviSpeedCtrlEnd"))
     self.autoNaviSpeedSafetyFactor = float(self.params.get_int("AutoNaviSpeedSafetyFactor")) * 0.01
     self.autoNaviSpeedDecelRate = float(self.params.get_int("AutoNaviSpeedDecelRate")) * 0.01
+    self.autoNaviCountDownMode = self.params.get_int("AutoNaviCountDownMode")
 
     self.autoTurnControlSpeedTurn = self.params.get_int("AutoTurnControlSpeedTurn")
     #self.autoTurnMapChange = self.params.get_int("AutoTurnMapChange")
@@ -1065,11 +1066,16 @@ class CarrotServ:
     desired_speed, source = min(speed_n_sources, key=lambda x: x[0])
 
     left_spd_sec = 100
-    if self.xSpdDist > 0:
-      left_spd_sec = int(max(self.xSpdDist - v_ego, 1) / max(1, v_ego))
     left_tbt_sec = 100
-    if self.xDistToTurn > 0:
-      left_tbt_sec = int(max(self.xDistToTurn - v_ego, 1) / max(1, v_ego))
+    if self.autoNaviCountDownMode > 0:
+      if self.xSpdType == 22 and self.autoNaviCountDownMode == 1: # speed bump
+        pass
+      else:
+        if self.xSpdDist > 0:
+          left_spd_sec = int(max(self.xSpdDist - v_ego, 1) / max(1, v_ego))
+          
+      if self.xDistToTurn > 0:
+        left_tbt_sec = int(max(self.xDistToTurn - v_ego, 1) / max(1, v_ego))
 
     self._update_cmd()
     if False:

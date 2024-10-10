@@ -85,6 +85,9 @@ public:
   PrimeState *prime_state;
 
   float max_distance = 0.0;
+  float show_brightness_ratio = 1.0;
+  int show_brightness_timer = 20;
+
 
 signals:
   void uiUpdate(const UIState &s);

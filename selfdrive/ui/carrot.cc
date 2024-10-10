@@ -943,6 +943,8 @@ public:
         drawSpeedLimit(s);
     }
 };
+bool _right_blinker = false;
+bool _left_blinker = false;
 class DesireDrawer : ModelDrawer {
 protected:
     int icon_size = 256;
@@ -1003,9 +1005,15 @@ public:
         bool right_blinker = car_state.getRightBlinker() || atc_type=="fork right" || atc_type =="turn right";
 
         if (blinker_timer <= 8) {
-            if (right_blinker) ui_draw_image(s, { x - icon_size / 2, y - icon_size / 2, icon_size, icon_size }, "ic_blinker_r", 1.0f);
-            if (left_blinker) ui_draw_image(s, { x - icon_size / 2, y - icon_size / 2, icon_size, icon_size }, "ic_blinker_l", 1.0f);
+            if (right_blinker) {
+                ui_draw_image(s, { x - icon_size / 2, y - icon_size / 2, icon_size, icon_size }, "ic_blinker_r", 1.0f);
+            }
+            if (left_blinker) {
+                ui_draw_image(s, { x - icon_size / 2, y - icon_size / 2, icon_size, icon_size }, "ic_blinker_l", 1.0f);
+            }
         }
+        _right_blinker = right_blinker;
+        _left_blinker = left_blinker;
     }
 };
 
@@ -1922,15 +1930,18 @@ public:
     void draw(UIState *s, int w, int h, NVGcolor bg, NVGcolor bg_long) {
         NVGcontext* vg = s->vg_border;
 
-        ui_fill_rect(vg, { 0,0, w, h / 2 }, bg, 0);
-        ui_fill_rect(vg, { 0, h / 2, w, h }, bg_long, 0);
+        ui_fill_rect(vg, { 0,0, w, h / 2  - 100}, bg, 15);
+        ui_fill_rect(vg, { 0, h / 2 + 100, w, h }, bg_long, 15);
+
+        ui_fill_rect(vg, {w - 50, h/2 - 95, 50, 190}, (_right_blinker)?COLOR_ORANGE:COLOR_BLACK, 15);
+        ui_fill_rect(vg, {0, h/2 - 95, 50, 190}, (_left_blinker)?COLOR_ORANGE:COLOR_BLACK, 15);
 
         const SubMaster& sm = *(s->sm);
         auto car_state = sm["carState"].getCarState();
         float a_ego = car_state.getAEgo();
 
         a_ego_width = a_ego_width * 0.5 + (w * std::abs(a_ego) / 4.0) * 0.5;
-        ui_fill_rect(vg, { w/2 - (int)a_ego_width, h - 30, (int)a_ego_width * 2, 30 }, (a_ego >= 0)? COLOR_YELLOW : COLOR_RED, 15);
+        ui_fill_rect(vg, { w/2 - (int)(a_ego_width / 2), h - 30, (int)a_ego_width, 30 }, (a_ego >= 0)? COLOR_YELLOW : COLOR_RED, 15);
 
         steering_angle_pos = steering_angle_pos * 0.5 + (w / 2. - w / 2. * car_state.getSteeringAngleDeg() / 180) * 0.5;
         int x_st = (int)steering_angle_pos - 50;
@@ -1939,7 +1950,7 @@ public:
         if (x_ed < 50) x_ed = 50;
         if (x_st > w - 50) x_st = w - 50;
         if (x_ed > w) x_ed = w;
-        ui_fill_rect(vg, { x_st, 0, x_ed - x_st, 30 }, COLOR_BLUE, 15);
+        ui_fill_rect(vg, { x_st, 0, x_ed - x_st, 30 }, COLOR_GREEN, 15);
 
 
         char top[256] = "", top_left[256] = "", top_right[256] = "";

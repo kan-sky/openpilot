@@ -65,6 +65,7 @@ static void update_state(UIState *s) {
 void ui_update_params(UIState *s) {
   auto params = Params();
   s->scene.is_metric = params.getBool("IsMetric");
+  s->show_brightness_ratio = std::atof(params.get("ShowCustomBrightness").c_str()) / 100.;
 }
 
 void UIState::updateStatus() {
@@ -159,6 +160,13 @@ void Device::updateBrightness(const UIState &s) {
 
     // Scale back to 10% to 100%
     clipped_brightness = std::clamp(100.0f * clipped_brightness, 10.0f, 100.0f);
+
+    if (s.show_brightness_timer > 0) {
+        UIState* s1 = uiState();
+        s1->show_brightness_timer--;
+    }
+    else clipped_brightness *= s.show_brightness_ratio;
+
   }
 
   int brightness = brightness_filter.update(clipped_brightness);
