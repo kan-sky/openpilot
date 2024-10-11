@@ -1112,11 +1112,14 @@ private:
     int     show_path_color = 14;
     int     show_path_mode_normal = 13;
     int     show_path_color_normal = 14;
+    int     show_path_mode_lane = 13;
+    int     show_path_color_lane = 14;
     int     show_path_mode_cruise_off = 13;
     int     show_path_color_cruise_off = 14;
     float   show_path_width = 1.0;
     Params  params;
     int     params_count = 0;
+    bool    active_lane_line = false;
 
 protected:
     void update_line_data2(const UIState* s, const cereal::XYZTData::Reader& line,
@@ -1319,6 +1322,7 @@ protected:
 		SubMaster& sm = *(s->sm);
 		if (!sm.alive("modelV2") || !sm.alive("carState")) return false;
         const cereal::ModelDataV2::Reader& model = sm["modelV2"].getModelV2();
+        active_lane_line = sm["controlsState"].getControlsState().getActiveLaneLine();
         auto model_position = model.getPosition();
         float max_distance = s->max_distance;
         max_distance -= 2.0;
@@ -1331,8 +1335,14 @@ protected:
             show_path_color = show_path_color_cruise_off;
         }
         else {
-			show_path_mode = show_path_mode_normal;
-			show_path_color = show_path_color_normal;
+			if (active_lane_line) {
+				show_path_mode = show_path_mode_lane;
+				show_path_color = show_path_color_lane;
+			}
+            else {
+                show_path_mode = show_path_mode_normal;
+                show_path_color = show_path_color_normal;
+            }
         }
 
         if (show_path_mode == 0) {
@@ -1352,6 +1362,8 @@ public:
         if (params_count == 0) {
             show_path_mode_normal = params.getInt("ShowPathMode");
             show_path_color_normal = params.getInt("ShowPathColor");
+            show_path_mode_lane = params.getInt("ShowPathModeLane");
+            show_path_color_lane = params.getInt("ShowPathColorLane");
             show_path_mode_cruise_off = params.getInt("ShowPathModeCruiseOff");
             show_path_color_cruise_off = params.getInt("ShowPathColorCruiseOff");
         }

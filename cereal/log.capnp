@@ -883,6 +883,8 @@ struct ControlsState @0x97ff69c53601abf1 {
   desiredCurvature @61 :Float32;  # lag adjusted curvatures used by lateral controllers
   forceDecel @51 :Bool;
 
+  activeLaneLine @67 : Bool;
+
   lateralControlState :union {
     indiState @52 :LateralINDIState;
     pidState @53 :LateralPIDState;
@@ -1109,7 +1111,7 @@ struct ModelDataV2 {
   gpuExecutionTimeDEPRECATED @17 :Float32;
   navEnabledDEPRECATED @22 :Bool;
   locationMonoTimeDEPRECATED @24 :UInt64;
-  lateralPlannerSolutionDEPRECATED @25: LateralPlannerSolution;
+  lateralPlannerSolution @25: LateralPlannerSolution;
 
   struct LeadDataV2 {
     prob @0 :Float32; # probability that car is your lead at time t
@@ -1149,7 +1151,13 @@ struct ModelDataV2 {
     hardBrakePredicted @7 :Bool;
     laneChangeState @8 :LaneChangeState;
     laneChangeDirection @9 :LaneChangeDirection;
-    desireLog @10 : Text;
+    laneWidthLeft @10 :Float32;
+    laneWidthRight @11 :Float32;
+    distanceToRoadEdgeLeft @12 :Float32;
+    distanceToRoadEdgeRight @13 :Float32;
+    desire @14 :Desire;
+    laneChangeProb @15 :Float32;
+    desireLog @16 : Text;
 
 
     # deprecated
@@ -1325,7 +1333,7 @@ struct UiPlan {
 
 struct LateralPlan @0xe1e9318e2ae8b51e {
   modelMonoTime @31 :UInt64;
-  laneWidthDEPRECATED @0 :Float32;
+  laneWidth @0 :Float32;
   lProbDEPRECATED @5 :Float32;
   rProbDEPRECATED @7 :Float32;
   dPathPoints @20 :List(Float32);
@@ -1345,6 +1353,8 @@ struct LateralPlan @0xe1e9318e2ae8b51e {
   solverExecutionTime @30 :Float32;
   solverCost @32 :Float32;
   solverState @33 :SolverState;
+
+  latDebugText @34 :Text;
 
   struct SolverState {
     x @0 :List(List(Float32));
@@ -2630,7 +2640,7 @@ struct Event {
     pandaStateDEPRECATED @12 :PandaState;
     driverStateDEPRECATED @59 :DriverStateDEPRECATED;
     sensorEventsDEPRECATED @11 :List(SensorEventData);
-    lateralPlanDEPRECATED @64 :LateralPlan;
+    lateralPlan @64 :LateralPlan;
     navModelDEPRECATED @104 :NavModelData;
     uiPlanDEPRECATED @106 :UiPlan;
     liveLocationKalmanDEPRECATED @72 :LiveLocationKalman;

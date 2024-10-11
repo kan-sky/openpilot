@@ -445,7 +445,7 @@ class CarrotMan:
     v_ego = sm['carState'].vEgo
     # 회전속도를 선속도 나누면 : 곡률이 됨. [12:20]은 약 1.4~3.5초 앞의 곡률을 계산함.
     orientationRates = np.array(sm['modelV2'].orientationRate.z, dtype=np.float32)
-    speed = min(self.turn_speed_last / 3.6, clip(v_ego, 0.3, 100.0))
+    speed = min(self.turn_speed_last / 3.6, clip(v_ego, 0.5, 100.0))
     
     # 절대값이 가장 큰 요소의 인덱스를 찾습니다.
     max_index = np.argmax(np.abs(orientationRates[12:20]))
@@ -1146,7 +1146,20 @@ class CarrotServ:
         print(f"Setting system time to: {formatted_time}")
         os.system(f'sudo date -s "{formatted_time}"')
 
-    
+  def set_time(self, epoch_time):
+    import datetime
+    new_time = datetime.datetime.utcfromtimestamp(epoch_time)
+    diff = datetime.datetime.utcnow() - new_time
+    if abs(diff) < datetime.timedelta(seconds=10):
+      print(f"Time diff too small: {diff}")
+      return
+
+    print(f"Setting time to {new_time}, diff={diff}")
+    try:
+      subprocess.run(f"TZ=UTC date -s '{new_time}'", shell=True, check=True)
+    except subprocess.CalledProcessError:
+      print("timed.failed_setting_time")
+
   def update(self, json):
     if json == None:
       return
@@ -1154,8 +1167,12 @@ class CarrotServ:
       self.carrotIndex = int(json.get("carrotIndex"))
 
     if self.carrotIndex % 10 == 0 and "epochTime" in json:
+      # op는 ntp를 사용하기때문에... 필요없는 루틴으로 보임.
       timezone_remote = json.get("timezone", "Asia/Seoul")
-      self._update_system_time(int(json.get("epochTime")), timezone_remote)
+      
+      self.set_time(int(json.get("epochTime")))
+                                                    
+      #self._update_system_time(int(json.get("epochTime")), timezone_remote)
 
     if "carrotCmd" in json:
       print(json.get("carrotCmd"), json.get("carrotArg"))

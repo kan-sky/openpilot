@@ -96,7 +96,7 @@ UIState::UIState(QObject *parent) : QObject(parent) {
     "pandaStates", "carParams", "driverMonitoringState", "carState", "driverStateV2",
     "wideRoadCameraState", "managerState", "selfdriveState",
     "longitudinalPlan",
-    "carControl", "carrotMan", "liveTorqueParameters",
+    "carControl", "carrotMan", "liveTorqueParameters", "lateralPlan",
   });
   prime_state = new PrimeState(this);
   language = QString::fromStdString(Params().get("LanguageSetting"));
