@@ -1,4 +1,4 @@
-import json
+ï»¿import json
 import os
 import numpy as np
 import time
@@ -159,7 +159,7 @@ class CarInterfaceBase(ABC):
   def init(CP: structs.CarParams, can_recv: CanRecvCallable, can_send: CanSendCallable):
     pass
 
-  """@staticmethod # ¾Æ·¡ µÎ ÇÔ¼ö´Â Volt¿ë. nnffÀû¿ëÀ¸·Î Áö¿ò
+  """@staticmethod # ì•„ë˜ ë‘ í•¨ìˆ˜ëŠ” Voltìš©. nnffì ìš©ìœ¼ë¡œ ì§€ì›€
   def get_steer_feedforward_default(desired_angle, v_ego):
     # Proportional to realigning tire momentum: lateral acceleration.
     return desired_angle * (v_ego**2)
