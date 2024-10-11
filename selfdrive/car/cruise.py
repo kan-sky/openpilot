@@ -163,7 +163,7 @@ class VCruiseCarrot:
 
     self.v_ego_kph_set = 0
     self._cruise_speed_min, self._cruise_speed_max = 20, 161
-    self._cruise_speed_unit = 10
+    self._cruise_speed_unit = 5
 
     self._gas_pressed_count = 0
     self._gas_pressed_count_last = 0
@@ -181,8 +181,8 @@ class VCruiseCarrot:
     #self.events = []
     self.xState = 0
     self.trafficState = 0
-    self.nRoadLimitSpeed = 30
-    self.road_limit_kph = 30
+    self.nRoadLimitSpeed = 20
+    self.road_limit_kph = 20
 
     self._cancel_timer = 0
     self.d_rel = 0
@@ -318,7 +318,7 @@ class VCruiseCarrot:
         self.button_cnt = 0
     if self.button_cnt > self.button_long_time:
       self.long_pressed = True
-      V_CRUISE_DELTA = 10
+      V_CRUISE_DELTA = 5
       if self.button_prev == ButtonType.cancel:
         button_type = ButtonType.cancel
         self.button_cnt = 0          
@@ -444,10 +444,10 @@ class VCruiseCarrot:
   #   nRoadLimitSpeed, vTurnSpeed
   #   gasPressed, brakePressed, standstill
   def _v_cruise_desired(self, CS, v_cruise_kph):
-    if v_cruise_kph < 30: #self.nRoadLimitSpeed:
-      v_cruise_kph = 30 #self.nRoadLimitSpeed
+    if v_cruise_kph < 20: #self.nRoadLimitSpeed:
+      v_cruise_kph = 20 #self.nRoadLimitSpeed
     else:
-      for speed in range (40, 160, self._cruise_speed_unit):
+      for speed in range (20, 160, self._cruise_speed_unit):
         if v_cruise_kph < speed:
           v_cruise_kph = speed
           break;

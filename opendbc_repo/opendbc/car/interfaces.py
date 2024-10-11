@@ -159,13 +159,13 @@ class CarInterfaceBase(ABC):
   def init(CP: structs.CarParams, can_recv: CanRecvCallable, can_send: CanSendCallable):
     pass
 
-  @staticmethod
+  """@staticmethod # 아래 두 함수는 Volt용. nnff적용으로 지움
   def get_steer_feedforward_default(desired_angle, v_ego):
     # Proportional to realigning tire momentum: lateral acceleration.
     return desired_angle * (v_ego**2)
 
   def get_steer_feedforward_function(self):
-    return self.get_steer_feedforward_default
+    return self.get_steer_feedforward_default """
 
   def torque_from_lateral_accel_linear(self, latcontrol_inputs: LatControlInputs, torque_params: structs.CarParams.LateralTorqueTuning,
                                        lateral_accel_error: float, lateral_accel_deadzone: float, friction_compensation: bool, gravity_adjusted: bool) -> float:
