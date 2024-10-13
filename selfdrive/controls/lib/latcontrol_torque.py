@@ -144,7 +144,7 @@ class LatControlTorque(LatControl):
     self.torque_params.latAccelOffset = latAccelOffset
     self.torque_params.friction = friction
 
-  def update(self, active, CS, VM, params, steer_limited, desired_curvature, model_data=None):
+  def update(self, active, CS, VM, params, steer_limited, desired_curvature, calibrated_pose, model_data=None):
     #self.sm.update(0)
     #if self.sm.updated["liveCalibration"]:
     #  self.pose_calibrator.feed_live_calib(self.sm['liveCalibration'])
