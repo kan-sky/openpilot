@@ -115,6 +115,7 @@ class Controls:
     # accel PID loop
     pid_accel_limits = self.CI.get_pid_accel_limits(self.CP, CS.vEgo, CS.vCruise * CV.KPH_TO_MS)
     t_since_plan = (self.sm.frame - self.sm.recv_frame['longitudinalPlan']) * DT_CTRL
+    # aTargetNow, actuators.jerk (for HKG)
     actuators.accel, actuators.aTargetNow, actuators.jerk = self.LoC.update(CC.longActive, CS, long_plan, pid_accel_limits, t_since_plan)
 
     # Steering PID loop and lateral MPC
@@ -122,7 +123,8 @@ class Controls:
     actuators.curvature = self.desired_curvature
     actuators.steer, actuators.steeringAngleDeg, lac_log = self.LaC.update(CC.latActive, CS, self.VM, lp,
                                                                             self.steer_limited, self.desired_curvature,
-                                                                            self.calibrated_pose) # TODO what if not available
+                                                                            self.calibrated_pose,
+                                                                            model_data=self.sm['modelV2'])
 
     # Ensure no NaNs/Infs
     for p in ACTUATOR_FIELDS:

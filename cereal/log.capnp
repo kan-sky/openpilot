@@ -149,7 +149,7 @@ struct OnroadEvent @0xc4fa6047f024e718 {
     audio9 @112;
     audio10 @113;
     audio0 @114;
-
+    torqueNNLoad @115;
   }
 }
 
@@ -937,6 +937,7 @@ struct ControlsState @0x97ff69c53601abf1 {
     saturated @7 :Bool;
     actualLateralAccel @9 :Float32;
     desiredLateralAccel @10 :Float32;
+    nnLog @11 :List(Float32); # kans
    }
 
   struct LateralLQRState {

@@ -11,13 +11,13 @@ class LatControlPID(LatControl):
     self.pid = PIDController((CP.lateralTuning.pid.kpBP, CP.lateralTuning.pid.kpV),
                              (CP.lateralTuning.pid.kiBP, CP.lateralTuning.pid.kiV),
                              k_f=CP.lateralTuning.pid.kf, pos_limit=self.steer_max, neg_limit=-self.steer_max)
-    #self.get_steer_feedforward = CI.get_steer_feedforward_function() # kans: volt용 Feedfowad. nnff적용하므로 삭제
+    self.get_steer_feedforward = CI.get_steer_feedforward_function()
 
   def reset(self):
     super().reset()
     self.pid.reset()
 
-  def update(self, active, CS, VM, params, steer_limited, desired_curvature, calibrated_pose):
+  def update(self, active, CS, VM, params, steer_limited, desired_curvature, calibrated_pose, model_data=None):
     pid_log = log.ControlsState.LateralPIDState.new_message()
     pid_log.steeringAngleDeg = float(CS.steeringAngleDeg)
     pid_log.steeringRateDeg = float(CS.steeringRateDeg)
@@ -34,10 +34,8 @@ class LatControlPID(LatControl):
       self.pid.reset()
     else:
       # offset does not contribute to resistive torque
-      # volt용 feedforward. nnff적용하므로 삭제
-      #steer_feedforward = self.get_steer_feedforward(angle_steers_des_no_offset, CS.vEgo)
+      steer_feedforward = self.get_steer_feedforward(angle_steers_des_no_offset, CS.vEgo)
 
-      steer_feedforward = angle_steers_des_no_offset * (CS.vEgo ** 2)
       output_steer = self.pid.update(error, override=CS.steeringPressed,
                                      feedforward=steer_feedforward, speed=CS.vEgo)
       pid_log.active = True
