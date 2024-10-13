@@ -144,7 +144,7 @@ class LatControlTorque(LatControl):
     self.torque_params.latAccelOffset = latAccelOffset
     self.torque_params.friction = friction
 
-  def update(self, active, CS, VM, params, steer_limited, desired_curvature, llk, model_data=None):
+  def update(self, active, CS, VM, params, steer_limited, desired_curvature, model_data=None):
     #self.sm.update(0)
     #if self.sm.updated["liveCalibration"]:
     #  self.pose_calibrator.feed_live_calib(self.sm['liveCalibration'])
@@ -175,11 +175,11 @@ class LatControlTorque(LatControl):
           actual_curvature_rate = -VM.calc_curvature(math.radians(CS.steeringRateDeg), CS.vEgo, 0.0)
           actual_lateral_jerk = actual_curvature_rate * CS.vEgo ** 2
       else:
-        actual_curvature_llk = llk.angularVelocityCalibrated.value[2] / CS.vEgo
-        actual_curvature = interp(CS.vEgo, [2.0, 5.0], [actual_curvature_vm, actual_curvature_llk])
-        #assert calibrated_pose is not None
-        #actual_curvature_pose = calibrated_pose.angular_velocity.yaw / CS.vEgo
-        #actual_curvature = interp(CS.vEgo, [2.0, 5.0], [actual_curvature_vm, actual_curvature_pose])
+        #actual_curvature_llk = llk.angularVelocityCalibrated.value[2] / CS.vEgo
+        #actual_curvature = interp(CS.vEgo, [2.0, 5.0], [actual_curvature_vm, actual_curvature_llk])
+        assert calibrated_pose is not None
+        actual_curvature_pose = calibrated_pose.angular_velocity.yaw / CS.vEgo
+        actual_curvature = interp(CS.vEgo, [2.0, 5.0], [actual_curvature_vm, actual_curvature_pose])
         curvature_deadzone = 0.0
         actual_lateral_jerk = 0.0
       desired_lateral_accel = desired_curvature * CS.vEgo ** 2
@@ -220,7 +220,7 @@ class LatControlTorque(LatControl):
       if self.use_nnff and model_good:
         # update past data
         roll = params.roll
-        pitch = self.pitch.update(llk.calibratedOrientationNED.value[1]) if len(llk.calibratedOrientationNED.value) > 1 else 0.0
+        pitch = self.pitch.update(calibrated_pose.pitch[1]) if len(calibrated_pose.pitch) > 1 else 0.0
         roll = roll_pitch_adjust(roll, pitch)
         self.roll_deque.append(roll)
         self.lateral_accel_desired_deque.append(desired_lateral_accel)
