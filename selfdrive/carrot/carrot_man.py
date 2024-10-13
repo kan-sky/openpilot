@@ -876,12 +876,12 @@ class CarrotServ:
       self.xSpdDist = 0
 
   def _update_gps(self, v_ego, sm):
-    if not sm.updated['carState'] or not sm.updated['liveLocationKalman']:
+    if not sm.updated['carState'] or not sm.updated['liveLocationKalmanDEPRECATED']:
       return 0.0
     CS = sm['carState']
-    location = sm['liveLocationKalman']
+    location = sm['liveLocationKalmanDEPRECATED']
     bearing = math.degrees(location.calibratedOrientationNED.value[2])
-    if (location.status == log.LiveLocationKalman.Status.valid) and location.positionGeodetic.valid and location.gpsOK:            
+    if (location.status == log.liveLocationKalmanDEPRECATED.Status.valid) and location.positionGeodetic.valid and location.gpsOK:            
       location_valid = True
       self.bearing_offset = 0.0
     else:

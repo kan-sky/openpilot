@@ -175,7 +175,7 @@ class LatControlTorque(LatControl):
           actual_curvature_rate = -VM.calc_curvature(math.radians(CS.steeringRateDeg), CS.vEgo, 0.0)
           actual_lateral_jerk = actual_curvature_rate * CS.vEgo ** 2
       else:
-        actual_curvature_llk = llk.angularVelocityDevice.xyz / CS.vEgo
+        actual_curvature_llk = llk.angularVelocityCalibrated.value[2] / CS.vEgo
         actual_curvature = interp(CS.vEgo, [2.0, 5.0], [actual_curvature_vm, actual_curvature_llk])
         #assert calibrated_pose is not None
         #actual_curvature_pose = calibrated_pose.angular_velocity.yaw / CS.vEgo
@@ -220,7 +220,7 @@ class LatControlTorque(LatControl):
       if self.use_nnff and model_good:
         # update past data
         roll = params.roll
-        pitch = self.pitch.update(llk.orientationNED.xyz) if len(llk.orientationNED.xyz) > 1 else 0.0
+        pitch = self.pitch.update(llk.calibratedOrientationNED.value[1]) if len(llk.calibratedOrientationNED.value) > 1 else 0.0
         roll = roll_pitch_adjust(roll, pitch)
         self.roll_deque.append(roll)
         self.lateral_accel_desired_deque.append(desired_lateral_accel)
