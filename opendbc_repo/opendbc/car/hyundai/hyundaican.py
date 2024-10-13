@@ -130,11 +130,11 @@ def create_lfahda_mfc(packer, CC, blinking_signal):
   }
   return packer.make_can_msg("LFAHDA_MFC", 0, values)
 
-def create_acc_commands_scc(packer, enabled, accel, jerk, idx, hud_control, set_speed, stopping, long_override, use_fca, CS):
+def create_acc_commands_scc(packer, enabled, accel, jerk, idx, hud_control, set_speed, stopping, long_override, use_fca, CS, soft_hold_mode):
   from opendbc.car.hyundai.carcontroller import HyundaiJerk
   soft_hold_active = CS.softHoldActive
   soft_hold_info = soft_hold_active > 1 and enabled
-  soft_hold_mode = 2 ## some cars can't enable while braking
+  #soft_hold_mode = 2 ## some cars can't enable while braking
   long_enabled = enabled or (soft_hold_active > 0 and soft_hold_mode == 2)
   stop_req = 1 if stopping or (soft_hold_active > 0 and soft_hold_mode == 2) else 0
   if long_enabled:
@@ -213,11 +213,11 @@ def create_acc_commands_scc(packer, enabled, accel, jerk, idx, hud_control, set_
 def create_acc_opt_copy(CS, packer):
   return packer.make_can_msg("SCC13", 0, CS.scc13)
 
-def create_acc_commands(packer, enabled, accel, jerk, idx, hud_control, set_speed, stopping, long_override, use_fca, CS):
+def create_acc_commands(packer, enabled, accel, jerk, idx, hud_control, set_speed, stopping, long_override, use_fca, CS, soft_hold_mode):
   from opendbc.car.hyundai.carcontroller import HyundaiJerk
   soft_hold_active = CS.softHoldActive
   soft_hold_info = soft_hold_active > 1 and enabled
-  soft_hold_mode = 2 ## some cars can't enable while braking
+  #soft_hold_mode = 2 ## some cars can't enable while braking
   long_enabled = enabled or (soft_hold_active > 0 and soft_hold_mode == 2)
   stop_req = 1 if stopping or (soft_hold_active > 0 and soft_hold_mode == 2) else 0
   if long_enabled:

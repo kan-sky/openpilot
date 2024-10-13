@@ -72,6 +72,9 @@ void OnroadWindow::updateState(const UIState &s) {
   else if (car_control.getLatActive()) {
       bgColor = bg_colors[STATUS_ENGAGED];
   }
+  else if (car_state.getLatEnabled()) {
+      bgColor = bg_colors[STATUS_ACTIVE];
+  }
   else
       bgColor = bg_colors[STATUS_DISENGAGED];
 
@@ -80,6 +83,9 @@ void OnroadWindow::updateState(const UIState &s) {
   }
   else if (car_control.getLongActive()) {
       bgColor_long = bg_colors[STATUS_ENGAGED];
+  }
+  else if (car_state.getCruiseState().getAvailable()) {
+	  bgColor_long = bg_colors[STATUS_ACTIVE];
   }
   else
       bgColor_long = bg_colors[STATUS_DISENGAGED];

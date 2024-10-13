@@ -177,7 +177,7 @@ const int HYUNDAI_PARAM_CANFD_HDA2_ALT_STEERING = 128;
 const int HYUNDAI_PARAM_ACAN_PANDA = 512;
 bool hyundai_canfd_alt_buttons = false;
 bool hyundai_canfd_hda2_alt_steering = false;
-bool hyundai_acan_panda = false;
+//bool hyundai_acan_panda = false;
 
 int canfd_tx_addr[32] = { 80, 81, 272, 282, 298, 352, 353, 354, 442, 485, 416, 437, 506, 474, 480, 490, 512, 676, 866, 837, 1402, 908, 1848, 0, };
 uint32_t canfd_tx_time[32] = { 0, };

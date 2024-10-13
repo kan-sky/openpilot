@@ -176,7 +176,7 @@ class VCruiseCarrot:
     self._cruise_ready = False
     self._cruise_cancel_state = False
     self._activate_cruise = 0
-    self._lat_enabled = True
+    self._lat_enabled = self.params.get_int("AutoEngage") > 0
     
     #self.events = []
     self.xState = 0

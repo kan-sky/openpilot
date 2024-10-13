@@ -188,6 +188,15 @@ void ui_draw_line2(const UIState* s, float x[], float y[], int size, NVGcolor* c
         nvgStroke(s->vg);
     }
 }
+#if 0
+void ui_draw_rect(NVGcontext* vg, const Rect1& r, NVGcolor color, int width, float radius) {
+    nvgBeginPath(vg);
+    radius > 0 ? nvgRoundedRect(vg, r.x, r.y, r.w, r.h, radius) : nvgRect(vg, r.x, r.y, r.w, r.h);
+    nvgStrokeColor(vg, color);
+    nvgStrokeWidth(vg, width);
+    nvgStroke(vg);
+}
+#endif
 
 static inline void fill_rect(NVGcontext* vg, const Rect1& r, const NVGcolor* color, const NVGpaint* paint, float radius) {
     nvgBeginPath(vg);
@@ -572,6 +581,9 @@ public:
                     sprintf(str, "%s", (trafficState >= 1000) ? "신호오류" : "신호대기");
                     ui_draw_text(s, x, disp_y, str, disp_size, COLOR_WHITE, BOLD);
                 }
+                else {
+                    ui_draw_text(s, x, disp_y, "신호감속중", disp_size, COLOR_WHITE, BOLD);
+                }
 #if 0
                 else if (getStopDist() > 0.5) {
                     float dist = getStopDist() * (s->scene.is_metric ? 1 : METER_TO_FOOT);
@@ -742,6 +754,11 @@ private:
     int nRoadLimitSpeed = 20;
     int active_carrot = 0;
 
+    int nGoPosDist = 0;
+    int nGoPosTime = 0;
+
+    QString szSdiDescr = "";
+
 protected:
     QPointF navi_turn_point[2];
     float navi_turn_point_x[2] = { 0.0, };
@@ -872,11 +889,59 @@ protected:
             }
         }
 	}
+    void drawTurnInfoHud(const UIState* s) {
+#if 0
+        active_carrot = 2;
+        nGoPosDist = 500000;
+        nGoPosTime = 4 * 60 * 60;
+        szSdiDescr = "어린이 보호구역(스쿨존 시작 구간)";
+        xTurnInfo = 1;
+        xDistToTurn = 1000;
+#endif
+
+        if (active_carrot <= 0) return;
+        if (xDistToTurn <= 0 || nGoPosDist <= 0) return;
+        char str[128] = "";
+
+        int tbt_x = s->fb_w - 800;
+        int tbt_y = s->fb_h - 300;
+        ui_fill_rect(s->vg, { tbt_x, tbt_y, 790, 240 }, COLOR_BLACK_ALPHA(120), 30);
+
+        if(xTurnInfo > 0) {
+            int bx = tbt_x + 100;
+            int by = tbt_y + 80;
+            switch (xTurnInfo) {
+            case 1: ui_draw_image(s, { bx - icon_size / 2, by - icon_size / 2, icon_size, icon_size }, "ic_turn_l", 1.0f); break;
+            case 2: ui_draw_image(s, { bx - icon_size / 2, by - icon_size / 2, icon_size, icon_size }, "ic_turn_r", 1.0f); break;
+            case 3: ui_draw_image(s, { bx - icon_size / 2, by - icon_size / 2, icon_size, icon_size }, "ic_lane_change_l", 1.0f); break;
+            case 4: ui_draw_image(s, { bx - icon_size / 2, by - icon_size / 2, icon_size, icon_size }, "ic_lane_change_r", 1.0f); break;
+            case 7: ui_draw_image(s, { bx - icon_size / 2, by - icon_size / 2, icon_size, icon_size }, "ic_turn_u", 1.0f); break;
+            case 6: ui_draw_text(s, bx, by + 20, "TG", 35, COLOR_WHITE, BOLD); break;
+            case 8: ui_draw_text(s, bx, by + 20, "arrived", 35, COLOR_WHITE, BOLD); break;
+            default:
+                sprintf(str, "unknown(%d)", xTurnInfo);
+                ui_draw_text(s, bx, by + 20, str, 35, COLOR_WHITE, BOLD, 0.0f, 0.0f);
+                break;
+            }
+            if (xDistToTurn < 1000) sprintf(str, "%d m", xDistToTurn);
+            else  sprintf(str, "%.1f km", xDistToTurn / 1000.f);
+            ui_draw_text(s, bx, by + 120, str, 40, COLOR_WHITE, BOLD);
+        }
+        nvgTextAlign(s->vg, NVG_ALIGN_LEFT | NVG_ALIGN_BOTTOM);
+        ui_draw_text(s, tbt_x + 190, tbt_y + 180, szSdiDescr.toStdString().c_str(), 40, COLOR_WHITE, BOLD);
+        if (nGoPosDist > 0 && nGoPosTime > 0) {
+            sprintf(str, "도착: %.1fkm, %.1f분", nGoPosDist / 1000., (float)nGoPosTime / 60.);
+            ui_draw_text(s, tbt_x + 190, tbt_y + 100, str, 50, COLOR_WHITE, BOLD);
+        }
+    }
 public:
     void draw(const UIState* s) {
         nvgTextAlign(s->vg, NVG_ALIGN_CENTER | NVG_ALIGN_BOTTOM);
         SubMaster& sm = *(s->sm);
-        if (!sm.alive("modelV2") || !sm.alive("carrotMan") || !sm.alive("carState")) return;
+        if (!sm.alive("modelV2") || !sm.alive("carrotMan") || !sm.alive("carState")) {
+            active_carrot = -1;
+            return;
+        }
         const auto carrot_man = sm["carrotMan"].getCarrotMan();
         //const auto car_state = sm["carState"].getCarState();
         xSpdLimit = carrot_man.getXSpdLimit();
@@ -886,6 +951,10 @@ public:
         xDistToTurn = carrot_man.getXDistToTurn();
         nRoadLimitSpeed = carrot_man.getNRoadLimitSpeed();
         active_carrot = carrot_man.getActive();
+
+        nGoPosDist = carrot_man.getNGoPosDist();
+        nGoPosTime = carrot_man.getNGoPosTime();
+        szSdiDescr = QString::fromStdString(carrot_man.getSzSdiDescr());
 
         int bx = 150;
         int by = 410;
@@ -915,7 +984,7 @@ public:
             else  sprintf(str, "%.1f km", xSpdDist / 1000.f);
             ui_draw_text(s, bx, by + 120, str, 40, COLOR_WHITE, BOLD);
         }
-        else if(xTurnInfo > 0) {
+        else if(false && xTurnInfo > 0) {
             switch (xTurnInfo) {
             case 1: ui_draw_image(s, { bx - icon_size / 2, by - icon_size / 2, icon_size, icon_size }, "ic_turn_l", 1.0f); break;
             case 2: ui_draw_image(s, { bx - icon_size / 2, by - icon_size / 2, icon_size, icon_size }, "ic_turn_r", 1.0f); break;
@@ -939,8 +1008,11 @@ public:
             ui_draw_text(s, bx, by + 75, str, 50, COLOR_BLACK, BOLD, 0.0f, 0.0f);
         }
 
+        drawTurnInfoHud(s);
+
         drawTurnInfo(s);
         drawSpeedLimit(s);
+
     }
 };
 bool _right_blinker = false;
@@ -1691,8 +1763,10 @@ public:
         }
 	}
     void drawDebug(UIState* s) {
-        //nvgTextAlign(s->vg, NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM);
-        //ui_draw_text(s, s->fb_w, s->fb_h, carrot_man_debug, 35, COLOR_WHITE, BOLD, 1.0f, 1.0f);
+        if (params.getInt("ShowDebugUI") > 0) {
+            nvgTextAlign(s->vg, NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM);
+            ui_draw_text(s, s->fb_w, s->fb_h - 10, carrot_man_debug, 35, COLOR_WHITE, BOLD, 1.0f, 1.0f);
+        }
     }
     char    cruise_speed_last[32] = "";
     char    driving_mode_str_last[32] = "";
@@ -1980,6 +2054,7 @@ public:
         const auto freeSpace = deviceState.getFreeSpacePercent();
         const auto memoryUsage = deviceState.getMemoryUsagePercent();
         const auto cpuTempC = deviceState.getCpuTempC();
+        const auto cpuUsagePercent = deviceState.getCpuUsagePercent();
         float cpuTemp = 0.0f;
         int   size = sizeof(cpuTempC) / sizeof(cpuTempC[0]);
         if (size > 0) {
@@ -1988,11 +2063,23 @@ public:
             }
             cpuTemp /= static_cast<float>(size);
         }
+        float cpuUsage = 0.0f;
+        size = sizeof(cpuUsagePercent) / sizeof(cpuUsagePercent[0]);
+        if (size > 0) {
+            int cpu_size = 0;
+            for (cpu_size = 0; cpu_size < size; cpu_size++) {
+                if (cpuUsagePercent[cpu_size] <= 0) break;
+                cpuUsage += cpuUsagePercent[cpu_size];
+            }
+            if (cpu_size > 0) cpuUsage /= cpu_size;
+        }
         const auto live_torque_params = sm["liveTorqueParameters"].getLiveTorqueParameters();
-        str.sprintf("LT[%.0f]:%s (%.4f/%.4f) MEM: %d%% DISK: %.0f%% CPU: %.0f\u00B0C",
+        str.sprintf("LT[%.0f]:%s (%.4f/%.4f) MEM:%d%% DISK:%.0f%% CPU:%.0f%%,%.0f\u00B0C",
             live_torque_params.getTotalBucketPoints(), live_torque_params.getLiveValid() ? "ON" : "OFF", live_torque_params.getLatAccelFactorFiltered(), live_torque_params.getFrictionCoefficientFiltered(),
-            memoryUsage, freeSpace, cpuTemp);
+            memoryUsage, freeSpace, cpuUsage, cpuTemp);
         sprintf(top_right, "%s", str.toStdString().c_str());
+        //printf("%s\n", top_right);
+        NVGcolor top_right_color = (cpuTemp>85.0 || memoryUsage > 85.0) ? COLOR_ORANGE : COLOR_WHITE;
 
         //top_left
         Params params = Params();
@@ -2006,8 +2093,10 @@ public:
         }
         sprintf(top_left, "%s", carName.toStdString().c_str());
 
-        //const auto lat_plan = sm["lateralPlan"].getLateralPlan();
-        //bottomLabel->setText(lat_plan.getLatDebugText().cStr());
+        // bottom
+        const auto lat_plan = sm["lateralPlan"].getLateralPlan();
+        str = lat_plan.getLatDebugText().cStr();
+        strcpy(bottom, str.toStdString().c_str());
 
         // bottom_left
         QString gitBranch = QString::fromStdString(params.get("GitBranch"));
@@ -2015,7 +2104,7 @@ public:
 
         // bottom_right
         Params params_memory = Params("/dev/shm/params");
-        if (carrot_man_debug[0] != 0 && params.getInt("ShowDebugUI") > 0) {
+        if (false && carrot_man_debug[0] != 0 && params.getInt("ShowDebugUI") > 0) {
             strcpy(bottom_right, carrot_man_debug);
         }
         else {
@@ -2024,24 +2113,25 @@ public:
             sprintf(bottom_right, "%s", ipAddress.toStdString().c_str());
         }
 
+        int text_margin = 30;
         // top
         nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_TOP);
         ui_draw_text_vg(vg, w / 2, 0, top, 30, COLOR_WHITE, BOLD);
         // top left
         nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
-        ui_draw_text_vg(vg, 0, 0, top_left, 30, COLOR_WHITE, BOLD);
+        ui_draw_text_vg(vg, text_margin, 0, top_left, 30, COLOR_WHITE, BOLD);
         // top right
         nvgTextAlign(vg, NVG_ALIGN_RIGHT | NVG_ALIGN_TOP);
-        ui_draw_text_vg(vg, w, 0, top_right, 30, COLOR_WHITE, BOLD);
+        ui_draw_text_vg(vg, w - text_margin, 0, top_right, 30, top_right_color, BOLD);
         // bottom
         nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_BOTTOM);
         ui_draw_text_vg(vg, w / 2, h, bottom, 30, COLOR_WHITE, BOLD);
         // bottom left
         nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_BOTTOM);
-        ui_draw_text_vg(vg, 0, h, bottom_left, 30, COLOR_WHITE, BOLD);
+        ui_draw_text_vg(vg, text_margin, h, bottom_left, 30, COLOR_WHITE, BOLD);
         // bottom right
         nvgTextAlign(vg, NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM);
-        ui_draw_text_vg(vg, w, h, bottom_right, 30, COLOR_WHITE, BOLD);
+        ui_draw_text_vg(vg, w- text_margin, h, bottom_right, 30, COLOR_WHITE, BOLD);
 
     }
 };

@@ -280,6 +280,7 @@ class CarInterface(CarInterfaceBase):
 
     elif candidate == CAR.CHEVROLET_TRAX:
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
+      ret.stoppingDecelRate = 0.3
     elif candidate == CAR.CHEVROLET_TRAVERSE:
       ret.steerActuatorDelay = 0.2
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)

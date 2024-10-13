@@ -353,7 +353,8 @@ class CarrotMan:
     toggle_values = fleet.get_all_toggle_values()
     file_path = os.path.join('/data', 'toggle_values.json')
     with open(file_path, 'w') as file:
-      json.dump(toggle_values, file, indent=2) 
+      json.dump(toggle_values, file, indent=2)
+    pass
 
   def carrot_cmd_zmq(self):
 
@@ -1018,6 +1019,7 @@ class CarrotServ:
       self.nSdiType = self.nSdiBlockType = self.nSdiPlusBlockType = -1
       self.nTBTTurnType = self.nTBTTurnTypeNext = -1
       self.roadcate = 8
+      self.nGoPosDist = 0
       
     if self.xSpdType < 0 or self.xSpdDist <= 0:
       self.xSpdType = -1
@@ -1046,8 +1048,8 @@ class CarrotServ:
     if self.nSdiType  >= 0: # or self.active > 0:      
       #self.debugText = f"Atc:{atc_desired:.1f},{self.xTurnInfo}:{self.xDistToTurn:.1f}, I({self.nTBTNextRoadWidth},{self.roadcate}) Atc2:{atc_desired_next:.1f},{self.xTurnInfoNext},{self.xDistToTurnNext:.1f}"
       self.debugText = f" {self._get_sdi_descr(self.nSdiType)}:{self.nSdiType}/{self.nSdiSpeedLimit}/{self.nSdiDist},BLOCK:{self.nSdiBlockType}/{self.nSdiBlockSpeed}/{self.nSdiBlockDist}, PLUS:{self.nSdiPlusType}/{self.nSdiPlusSpeedLimit}/{self.nSdiPlusDist}"
-    elif self.nGoPosDist > 0 and self.active > 1:
-      self.debugText = " 목적지:{:.1f}km/{:.1f}분 남음".format(self.nGoPosDist/1000., self.nGoPosTime / 60)
+    #elif self.nGoPosDist > 0 and self.active > 1:
+    #  self.debugText = " 목적지:{:.1f}km/{:.1f}분 남음".format(self.nGoPosDist/1000., self.nGoPosTime / 60)
     else:
       self.debugText = ""
       
@@ -1133,6 +1135,10 @@ class CarrotServ:
     msg.carrotMan.xPosLat = float(self.vpPosPointLat)
     msg.carrotMan.xPosLon = float(self.vpPosPointLon)
 
+    msg.carrotMan.nGoPosDist = self.nGoPosDist
+    msg.carrotMan.nGoPosTime = self.nGoPosTime
+    msg.carrotMan.szSdiDescr = self._get_sdi_descr(self.nSdiType)
+
     pm.send('carrotMan', msg)
     
   def _update_system_time(self, epoch_time_remote, timezone_remote):
@@ -1146,17 +1152,34 @@ class CarrotServ:
         print(f"Setting system time to: {formatted_time}")
         os.system(f'sudo date -s "{formatted_time}"')
 
-  def set_time(self, epoch_time):
+  def set_time(self, epoch_time, timezone):
     import datetime
     new_time = datetime.datetime.utcfromtimestamp(epoch_time)
     diff = datetime.datetime.utcnow() - new_time
     if abs(diff) < datetime.timedelta(seconds=10):
-      print(f"Time diff too small: {diff}")
+      #print(f"Time diff too small: {diff}")
       return
 
     print(f"Setting time to {new_time}, diff={diff}")
+    zoneinfo_path = f"/usr/share/zoneinfo/{timezone}"
+    localtime_path = "/data/etc/localtime"
+    if os.path.exists(localtime_path) or os.path.islink(localtime_path):
+        try:
+            subprocess.run(["sudo", "rm", "-f", localtime_path], check=True)
+            print(f"Removed existing file or link: {localtime_path}")
+        except subprocess.CalledProcessError as e:
+            print(f"Error removing {localtime_path}: {e}")
+            return
+    try:
+        subprocess.run(["sudo", "ln", "-s", zoneinfo_path, localtime_path], check=True)
+        print(f"Timezone successfully set to: {timezone}")
+    except subprocess.CalledProcessError as e:
+        print(f"Failed to set timezone to {timezone}: {e}")
+      
+
     try:
       subprocess.run(f"TZ=UTC date -s '{new_time}'", shell=True, check=True)
+      #subprocess.run()
     except subprocess.CalledProcessError:
       print("timed.failed_setting_time")
 
@@ -1166,11 +1189,11 @@ class CarrotServ:
     if "carrotIndex" in json:
       self.carrotIndex = int(json.get("carrotIndex"))
 
-    if self.carrotIndex % 10 == 0 and "epochTime" in json:
+    if self.carrotIndex % 60 == 0 and "epochTime" in json:
       # op는 ntp를 사용하기때문에... 필요없는 루틴으로 보임.
       timezone_remote = json.get("timezone", "Asia/Seoul")
       
-      self.set_time(int(json.get("epochTime")))
+      self.set_time(int(json.get("epochTime")), timezone_remote)
                                                     
       #self._update_system_time(int(json.get("epochTime")), timezone_remote)
 

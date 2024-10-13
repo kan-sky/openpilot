@@ -623,6 +623,8 @@ CarrotPanel::CarrotPanel(QWidget* parent) : QWidget(parent) {
     startToggles->addItem(new ParamControl("EnableRadarTracks", "Enable RadarTrack", "", "../assets/offroad/icon_shell.png", this));
     startToggles->addItem(new ParamControl("CanfdHDA2", "CANFD: HDA2 mode", "", "../assets/offroad/icon_shell.png", this));
     startToggles->addItem(new CValueControl("AutoCruiseControl", "Auto Cruise control", "Softhold, Auto Cruise ON/OFF control", "../assets/offroad/icon_road.png", 0, 3, 1));
+    startToggles->addItem(new CValueControl("AutoEngage", "Auto Engage control on start", "1:SteerEnable, 2:Steer/Cruise Engage", "../assets/offroad/icon_road.png", 0, 2, 1));
+
 
 
     startToggles->addItem(new CValueControl("SoundVolumeAdjust", "Adjust Sound Volume(100%)", "", "../assets/offroad/icon_shell.png", 5, 200, 5));

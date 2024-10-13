@@ -537,7 +537,6 @@ class RadarD:
 
     return lead_dict
 
-import time
 # fuses camera and radar data for best lead detection
 def main() -> None:
   config_realtime_process(5, Priority.CTRL_LOW)
@@ -553,19 +552,8 @@ def main() -> None:
 
   RD = RadarD(CP.radarDelay)
 
-  t = time.monotonic()
-  t_avr = 0.0
-  frame = 0
-  
   while 1:
     sm.update()
-
-    t2 = time.monotonic()
-    t_avr = t_avr * 0.8 + (t2 - t) * 0.2
-    t = t2
-    frame += 1
-    if frame %50 == 0:
-      print("radar time = {:.4f}".format(t_avr))
 
     RD.update(sm, sm['liveTracks'])
     RD.publish(pm)

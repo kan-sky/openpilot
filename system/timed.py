@@ -15,11 +15,9 @@ def set_time(new_time):
   diff = datetime.datetime.now() - new_time
   if diff < datetime.timedelta(seconds=10):
     cloudlog.debug(f"Time diff too small: {diff}")
-    print(f"Time diff too small: {diff}")
     return
 
   cloudlog.debug(f"Setting time to {new_time}")
-  print(f"Setting time to {new_time}, diff={diff}")
   try:
     subprocess.run(f"TZ=UTC date -s '{new_time}'", shell=True, check=True)
   except subprocess.CalledProcessError:

@@ -317,12 +317,25 @@
       "group": "시작",
       "name": "AutoCruiseControl",
       "title": "오토크루즈제어(HKG only)",
-      "descr": "1:SOFTHOLD, Auto Cruise, 2:거리, 3:일시정지없음",
+      "descr": "1:SOFTHOLD, Auto Cruise, 2:SoftHold오류시",
       "egroup": "START",
       "etitle": "Auto Cruise control(HKG only)",
       "edescr": "Softhold, Auto Cruise ON/OFF control",
       "min": 0,
       "max": 3,
+      "default": 0,
+      "unit": 1
+    },
+    {
+      "group": "시작",
+      "name": "AutoEngage",
+      "title": "오토인게이지",
+      "descr": "1:SteerEnable, 2:Steer,Cruise Enable",
+      "egroup": "START",
+      "etitle": "Auto Engage on onroad",
+      "edescr": "1:SteerEnable, 2:Steer, Cruise Enable",
+      "min": 0,
+      "max": 2,
       "default": 0,
       "unit": 1
     },
@@ -597,6 +610,19 @@
       "min": 0,
       "max": 50,
       "default": 13,
+      "unit": 1
+    },
+    {
+      "group": "시작",
+      "name": "HapticFeedbackWhenSpeedCamera",
+      "title": "핸들햅틱기능사용(0)",
+      "descr": "0:사용안함,1:진동,2:계기판,3:HUD표시",
+      "egroup": "START",
+      "etitle": "HapticFeedbackSpeedCamera(0)",
+      "edescr": "",
+      "min": 0,
+      "max": 3,
+      "default": 0,
       "unit": 1
     },
     {

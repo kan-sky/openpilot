@@ -64,7 +64,7 @@ class CarController(CarControllerBase):
     self.max_angle_frames = MAX_ANGLE_FRAMES
     self.blinking_signal = False # 1Hz
     self.blinking_frame = int(1.0 / DT_CTRL)
-    #self.soft_hold_mode = 0
+    self.soft_hold_mode = 2
 
     self.suppress_lfa_counter = 0
 
@@ -82,7 +82,8 @@ class CarController(CarControllerBase):
         self.params.STEER_DELTA_UP = steerDeltaUp
       if steerDeltaDown > 0:
         self.params.STEER_DELTA_DOWN = steerDeltaDown
-      #self.soft_hold_mode = 2 if params.get_int("AutoCruiseControl") > 0 else 0
+      self.soft_hold_mode = 1 if params.get_int("AutoCruiseControl") > 1 else 2
+      self.hapticFeedbackWhenSpeedCamera = int(params.get_int("HapticFeedbackWhenSpeedCamera"))
 
     actuators = CC.actuators
     hud_control = CC.hudControl
@@ -209,14 +210,15 @@ class CarController(CarControllerBase):
         use_fca = self.CP.flags & HyundaiFlags.USE_FCA.value
         can_sends.extend(hyundaican.create_acc_commands_scc(self.packer, CC.enabled, accel, self.hyundai_jerk, int(self.frame / 2),
                                                         hud_control, set_speed_in_units, stopping,
-                                                        CC.cruiseControl.override, use_fca, CS))
+                                                        CC.cruiseControl.override, use_fca, CS, self.soft_hold_mode))
       elif self.frame % 2 == 0 and self.CP.openpilotLongitudinalControl:
+        self.hyundai_jerk.make_jerk(self.CP, CS, accel, actuators, hud_control)
         # TODO: unclear if this is needed
         jerk = 3.0 if actuators.longControlState == LongCtrlState.pid else 1.0
         use_fca = self.CP.flags & HyundaiFlags.USE_FCA.value
         can_sends.extend(hyundaican.create_acc_commands(self.packer, CC.enabled, accel, self.hyundai_jerk, int(self.frame / 2),
                                                         hud_control, set_speed_in_units, stopping,
-                                                        CC.cruiseControl.override, use_fca, CS))
+                                                        CC.cruiseControl.override, use_fca, CS, self.soft_hold_mode))
 
       # 20 Hz LFA MFA message
       if self.frame % 5 == 0 and self.CP.flags & HyundaiFlags.SEND_LFA.value:

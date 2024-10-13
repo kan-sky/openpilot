@@ -10,7 +10,7 @@ from openpilot.common.realtime import config_realtime_process, Priority, Ratekee
 from openpilot.common.swaglog import cloudlog
 
 from opendbc.car.car_helpers import get_car_interface
-from openpilot.selfdrive.controls.lib.drive_helpers import clip_curvature
+from openpilot.selfdrive.controls.lib.drive_helpers import clip_curvature, get_lag_adjusted_curvature
 from openpilot.selfdrive.controls.lib.latcontrol import LatControl, MIN_LATERAL_CONTROL_SPEED
 from openpilot.selfdrive.controls.lib.latcontrol_pid import LatControlPID
 from openpilot.selfdrive.controls.lib.latcontrol_angle import LatControlAngle, STEER_ANGLE_SATURATION_THRESHOLD
@@ -38,7 +38,7 @@ class Controls:
 
     self.sm = messaging.SubMaster(['liveParameters', 'liveTorqueParameters', 'modelV2', 'selfdriveState',
                                    'liveCalibration', 'livePose', 'longitudinalPlan', 'carState', 'carOutput',
-                                   'carrotMan',
+                                   'carrotMan', 'lateralPlan',
                                    'driverMonitoringState', 'onroadEvents', 'driverAssistance'], poll='selfdriveState')
     self.pm = messaging.PubMaster(['carControl', 'controlsState'])
 
@@ -119,7 +119,15 @@ class Controls:
     actuators.accel, actuators.aTargetNow, actuators.jerk = self.LoC.update(CC.longActive, CS, long_plan, pid_accel_limits, t_since_plan)
 
     # Steering PID loop and lateral MPC
-    self.desired_curvature = clip_curvature(CS.vEgo, self.desired_curvature, model_v2.action.desiredCurvature)
+    lat_plan = self.sm['lateralPlan']
+    curve_speed_abs = abs(self.sm['carrotMan'].vTurnSpeed)
+    self.lanefull_mode_enabled = lat_plan.useLaneLines and self.params.get_int("UseLaneLineSpeedApply") > 0 and curve_speed_abs > self.params.get_int("UseLaneLineCurveSpeed")
+    steer_actuator_delay = self.params.get_float("SteerActuatorDelay") * 0.01
+    if self.lanefull_mode_enabled:
+      desired_curvature = get_lag_adjusted_curvature(self.CP, CS.vEgo, lat_plan.psis, lat_plan.curvatures, steer_actuator_delay)
+      self.desired_curvature = clip_curvature(CS.vEgo, self.desired_curvature, desired_curvature)
+    else:
+      self.desired_curvature = clip_curvature(CS.vEgo, self.desired_curvature, model_v2.action.desiredCurvature)
     actuators.curvature = self.desired_curvature
     actuators.steer, actuators.steeringAngleDeg, lac_log = self.LaC.update(CC.latActive, CS, self.VM, lp,
                                                                             self.steer_limited, self.desired_curvature,
@@ -214,6 +222,7 @@ class Controls:
     elif lat_tuning == 'torque':
       cs.lateralControlState.torqueState = lac_log
 
+    cs.activeLaneLine = self.lanefull_mode_enabled
     self.pm.send('controlsState', dat)
 
     # carControl
