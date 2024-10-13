@@ -1004,16 +1004,18 @@ public:
         bool left_blinker = car_state.getLeftBlinker() || atc_type=="fork left" || atc_type =="turn left";
         bool right_blinker = car_state.getRightBlinker() || atc_type=="fork right" || atc_type =="turn right";
 
+        _right_blinker = false;
+        _left_blinker = false;
         if (blinker_timer <= 8) {
             if (right_blinker) {
+		_right_blinker = true;
                 ui_draw_image(s, { x - icon_size / 2, y - icon_size / 2, icon_size, icon_size }, "ic_blinker_r", 1.0f);
             }
             if (left_blinker) {
+		_left_blinker = true;
                 ui_draw_image(s, { x - icon_size / 2, y - icon_size / 2, icon_size, icon_size }, "ic_blinker_l", 1.0f);
             }
         }
-        _right_blinker = right_blinker;
-        _left_blinker = left_blinker;
     }
 };
 
@@ -1110,11 +1112,14 @@ private:
     int     show_path_color = 14;
     int     show_path_mode_normal = 13;
     int     show_path_color_normal = 14;
+    int     show_path_mode_lane = 13;
+    int     show_path_color_lane = 14;
     int     show_path_mode_cruise_off = 13;
     int     show_path_color_cruise_off = 14;
     float   show_path_width = 1.0;
     Params  params;
     int     params_count = 0;
+    bool    active_lane_line = false;
 
 protected:
     void update_line_data2(const UIState* s, const cereal::XYZTData::Reader& line,
@@ -1317,6 +1322,7 @@ protected:
 		SubMaster& sm = *(s->sm);
 		if (!sm.alive("modelV2") || !sm.alive("carState")) return false;
         const cereal::ModelDataV2::Reader& model = sm["modelV2"].getModelV2();
+        active_lane_line = sm["controlsState"].getControlsState().getActiveLaneLine();
         auto model_position = model.getPosition();
         float max_distance = s->max_distance;
         max_distance -= 2.0;
@@ -1329,8 +1335,14 @@ protected:
             show_path_color = show_path_color_cruise_off;
         }
         else {
-			show_path_mode = show_path_mode_normal;
-			show_path_color = show_path_color_normal;
+			if (active_lane_line) {
+				show_path_mode = show_path_mode_lane;
+				show_path_color = show_path_color_lane;
+			}
+            else {
+                show_path_mode = show_path_mode_normal;
+                show_path_color = show_path_color_normal;
+            }
         }
 
         if (show_path_mode == 0) {
@@ -1350,6 +1362,8 @@ public:
         if (params_count == 0) {
             show_path_mode_normal = params.getInt("ShowPathMode");
             show_path_color_normal = params.getInt("ShowPathColor");
+            show_path_mode_lane = params.getInt("ShowPathModeLane");
+            show_path_color_lane = params.getInt("ShowPathColorLane");
             show_path_mode_cruise_off = params.getInt("ShowPathModeCruiseOff");
             show_path_color_cruise_off = params.getInt("ShowPathColorCruiseOff");
         }
@@ -1586,6 +1600,7 @@ private:
 #include <QJsonValue>
 #include <QJsonArray>
 
+char    carrot_man_debug[128] = "";
 class DrawCarrot : public QObject {
     Q_OBJECT
 
@@ -1606,7 +1621,6 @@ public:
     int     trafficState = 0;
     int     trafficState_carrot = 0;
     int     active_carrot = 0;
-    char    carrot_man_debug[128] = "";
     float   xTarget = 0.0;
 
     QString szPosRoadName = "";
@@ -1677,8 +1691,8 @@ public:
         }
 	}
     void drawDebug(UIState* s) {
-        nvgTextAlign(s->vg, NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM);
-        ui_draw_text(s, s->fb_w, s->fb_h, carrot_man_debug, 35, COLOR_WHITE, BOLD, 1.0f, 1.0f);
+        //nvgTextAlign(s->vg, NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM);
+        //ui_draw_text(s, s->fb_w, s->fb_h, carrot_man_debug, 35, COLOR_WHITE, BOLD, 1.0f, 1.0f);
     }
     char    cruise_speed_last[32] = "";
     char    driving_mode_str_last[32] = "";
@@ -1950,7 +1964,7 @@ public:
         if (x_ed < 50) x_ed = 50;
         if (x_st > w - 50) x_st = w - 50;
         if (x_ed > w) x_ed = w;
-        ui_fill_rect(vg, { x_st, 0, x_ed - x_st, 30 }, COLOR_GREEN, 15);
+        ui_fill_rect(vg, { x_st, 0, x_ed - x_st, 30 }, COLOR_ORANGE, 15);
 
 
         char top[256] = "", top_left[256] = "", top_right[256] = "";
@@ -2001,10 +2015,14 @@ public:
 
         // bottom_right
         Params params_memory = Params("/dev/shm/params");
-        QString ipAddress = QString::fromStdString(params_memory.get("NetworkAddress"));
-        //extern QString gitBranch;
-        sprintf(bottom_right, "%s", ipAddress.toStdString().c_str());
-
+        if (carrot_man_debug[0] != 0 && params.getInt("ShowDebugUI") > 0) {
+            strcpy(bottom_right, carrot_man_debug);
+        }
+        else {
+            QString ipAddress = QString::fromStdString(params_memory.get("NetworkAddress"));
+            //extern QString gitBranch;
+            sprintf(bottom_right, "%s", ipAddress.toStdString().c_str());
+        }
 
         // top
         nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_TOP);

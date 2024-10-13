@@ -194,6 +194,10 @@ class VCruiseCarrot:
 
     self.autoCruiseControl = 0
     self.AutoSpeedUptoRoadSpeedLimit = 0.0
+
+    self.useLaneLineSpeed = self.params.get_int("UseLaneLineSpeed")
+    self.params.put_int("UseLaneLineSpeedApply", self.useLaneLineSpeed)
+
     
   @property
   def v_cruise_initialized(self):
@@ -214,6 +218,11 @@ class VCruiseCarrot:
     if self.frame % 10 == 0:
       self.autoCruiseControl = self.params.get_int("AutoCruiseControl")
       self.autoSpeedUptoRoadSpeedLimit = self.params.get_float("AutoSpeedUptoRoadSpeedLimit") * 0.01
+      useLaneLineSpeed = self.params.get_int("UseLaneLineSpeed")
+      if self.useLaneLineSpeed != useLaneLineSpeed:
+        self.params.put_int_nonblocking("UseLaneLineSpeedApply", useLaneLineSpeed)
+      self.useLaneLineSpeed = useLaneLineSpeed
+
       
   def update_v_cruise(self, CS, sm, is_metric):
     self._add_log("")
@@ -430,7 +439,9 @@ class VCruiseCarrot:
       elif button_type == ButtonType.gapAdjustCruise:
         self.params.put_int_nonblocking("MyDrivingMode", self.params.get_int("MyDrivingMode") % 4 + 1) # 1,2,3,4 (1:eco, 2:safe, 3:normal, 4:high speed)
       elif button_type == ButtonType.lfaButton:
-        pass
+        useLaneLineSpeed = max(1, self.useLaneLineSpeed)
+        self.params.put_int_nonblocking("UseLaneLineSpeedApply", useLaneLineSpeed if self.params.get_int("UseLaneLineSpeedApply") == 0 else 0)
+
       elif button_type == ButtonType.cancel:
         self._cruise_cancel_state = True
         self._lat_enabled = False

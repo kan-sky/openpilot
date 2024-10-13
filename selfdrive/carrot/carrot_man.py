@@ -1072,10 +1072,10 @@ class CarrotServ:
         pass
       else:
         if self.xSpdDist > 0:
-          left_spd_sec = int(max(self.xSpdDist - v_ego, 1) / max(1, v_ego))
+          left_spd_sec = int(max(self.xSpdDist - v_ego, 1) / max(1, v_ego) + 0.5)
           
       if self.xDistToTurn > 0:
-        left_tbt_sec = int(max(self.xDistToTurn - v_ego, 1) / max(1, v_ego))
+        left_tbt_sec = int(max(self.xDistToTurn - v_ego, 1) / max(1, v_ego) + 0.5)
 
     self._update_cmd()
     if False:
@@ -1146,7 +1146,20 @@ class CarrotServ:
         print(f"Setting system time to: {formatted_time}")
         os.system(f'sudo date -s "{formatted_time}"')
 
-    
+  def set_time(self, epoch_time):
+    import datetime
+    new_time = datetime.datetime.utcfromtimestamp(epoch_time)
+    diff = datetime.datetime.utcnow() - new_time
+    if abs(diff) < datetime.timedelta(seconds=10):
+      print(f"Time diff too small: {diff}")
+      return
+
+    print(f"Setting time to {new_time}, diff={diff}")
+    try:
+      subprocess.run(f"TZ=UTC date -s '{new_time}'", shell=True, check=True)
+    except subprocess.CalledProcessError:
+      print("timed.failed_setting_time")
+
   def update(self, json):
     if json == None:
       return
@@ -1154,8 +1167,12 @@ class CarrotServ:
       self.carrotIndex = int(json.get("carrotIndex"))
 
     if self.carrotIndex % 10 == 0 and "epochTime" in json:
+      # op는 ntp를 사용하기때문에... 필요없는 루틴으로 보임.
       timezone_remote = json.get("timezone", "Asia/Seoul")
-      self._update_system_time(int(json.get("epochTime")), timezone_remote)
+      
+      self.set_time(int(json.get("epochTime")))
+                                                    
+      #self._update_system_time(int(json.get("epochTime")), timezone_remote)
 
     if "carrotCmd" in json:
       print(json.get("carrotCmd"), json.get("carrotArg"))
@@ -1215,6 +1232,8 @@ class CarrotServ:
       self.nGoPosDist = int(json.get("nGoPosDist", 0))
       self.nGoPosTime = int(json.get("nGoPosTime", 0))
       self.szPosRoadName = json.get("szPosRoadName", "")
+      if self.szPosRoadName == "null":
+        self.szPosRoadName = ""
 
       self.vpPosPointLat = float(json.get("vpPosPointLat", self.vpPosPointLat))
       self.vpPosPointLon = float(json.get("vpPosPointLon", self.vpPosPointLon))

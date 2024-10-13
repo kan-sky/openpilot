@@ -293,12 +293,19 @@ def main(demo=False):
       l_lane_change_prob = desire_state[log.Desire.laneChangeLeft]
       r_lane_change_prob = desire_state[log.Desire.laneChangeRight]
       lane_change_prob = l_lane_change_prob + r_lane_change_prob
-      DH.update(sm['carState'], sm['carControl'].latActive, lane_change_prob, sm['carrotMan'])
+      DH.update(sm['carState'], modelv2_send.modelV2, sm['carControl'].latActive, lane_change_prob, sm['carrotMan'])
       modelv2_send.modelV2.meta.laneChangeState = DH.lane_change_state
       modelv2_send.modelV2.meta.laneChangeDirection = DH.lane_change_direction
       modelv2_send.modelV2.meta.desireLog = DH.desireLog #carrot
       drivingdata_send.drivingModelData.meta.laneChangeState = DH.lane_change_state
       drivingdata_send.drivingModelData.meta.laneChangeDirection = DH.lane_change_direction
+
+      modelv2_send.modelV2.meta.laneWidthLeft = float(DH.lane_width_left)
+      modelv2_send.modelV2.meta.laneWidthRight = float(DH.lane_width_right)
+      modelv2_send.modelV2.meta.distanceToRoadEdgeLeft = float(DH.distance_to_road_edge_left)
+      modelv2_send.modelV2.meta.distanceToRoadEdgeRight = float(DH.distance_to_road_edge_right)
+      modelv2_send.modelV2.meta.desire = DH.desire
+      modelv2_send.modelV2.meta.laneChangeProb = DH.lane_change_ll_prob
 
       fill_pose_msg(posenet_send, model_output, meta_main.frame_id, vipc_dropped_frames, meta_main.timestamp_eof, live_calib_seen)
       pm.send('modelV2', modelv2_send)
