@@ -106,19 +106,6 @@
       "unit": 1
     },
     {
-      "group": "조향튜닝",
-      "name": "CurvatureFactor",
-      "title": "커브옵셑x0.01(95)",
-      "descr": "오버스티어시 값을 줄여준다",
-      "egroup": "LAT",
-      "etitle": "Curvature offset x0.01(95)",
-      "edescr": "reduce it at oversteering",
-      "min": 80,
-      "max": 150,
-      "default": 95,
-      "unit": 5
-    },
-    {
       "group": "가속설정",
       "name": "CruiseMaxVals1",
       "title": "가속설정1:0km/h(160)",
@@ -432,19 +419,6 @@
     },
     {
       "group": "화면",
-      "name": "ShowCustomBrightness",
-      "title": "화면밝기비율",
-      "descr": "",
-      "egroup": "DISP",
-      "etitle": "ScreenBrightness ratio",
-      "edescr": "",
-      "min": 0,
-      "max": 100,
-      "default": 100,
-      "unit": 1
-    },
-    {
-      "group": "화면",
       "name": "ShowLaneInfo",
       "title": "차선정보",
       "descr": "-1:없음, 0:패스만, 1:레인, 2:로드엣지",
@@ -525,10 +499,10 @@
       "group": "화면",
       "name": "ShowPlotMode",
       "title": "디버그플롯(0)",
-      "descr": "1:가속도,2:속도+가속도,3:모델,4:Lead,5:Lead2",
+      "descr": "1:가속도,2:가속도출력",
       "egroup": "DISP",
       "etitle": "Show Debug plot(0)",
-      "edescr": "1:Accel,2:Accel+vel,3:Model,4:Lead,5:Lead2",
+      "edescr": "0:None,1:Accel,2:Accel out",
       "min": 0,
       "max": 10,
       "default": 0,
@@ -728,19 +702,6 @@
       "max": 300,
       "default": 200,
       "unit": 10
-    },
-    {
-      "group": "감속제어",
-      "name": "AutoNaviCountDownMode",
-      "title": "네비알림 카운트다운 방법",
-      "descr": "0: 알림없음, 1: 턴지점+속도, 2: 턴지점+속도+방지턱",
-      "egroup": "SPEED",
-      "etitle": "NaviCountDownMode",
-      "edescr": "",
-      "min": 0,
-      "max": 2,
-      "default": 2,
-      "unit": 1
     },
     {
       "group": "감속제어",
