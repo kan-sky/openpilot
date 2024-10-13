@@ -59,8 +59,6 @@ class Controls:
       self.LaC = LatControlPID(self.CP, self.CI)
     elif self.CP.lateralTuning.which() == 'torque':
       self.LaC = LatControlTorque(self.CP, self.CI)
-      if self.sm.frame == 900 and self.CI.use_nnff:
-        Events().add(EventName.torqueNNLoad)
 
   def update(self):
     self.sm.update(15)
@@ -70,6 +68,9 @@ class Controls:
       device_pose = Pose.from_live_pose(self.sm['livePose'])
       self.calibrated_pose = self.pose_calibrator.build_calibrated_pose(device_pose)
 
+    if self.sm.frame == 900 and self.CP.lateralTuning.which() == 'torque' and self.CI.use_nnff:
+      Events().add(EventName.torqueNNLoad)
+      print("NNFF display....")
   def state_control(self):
     CS = self.sm['carState']
 

@@ -220,7 +220,7 @@ class LatControlTorque(LatControl):
       if self.use_nnff and model_good:
         # update past data
         roll = params.roll
-        pitch = self.pitch.update(calibrated_pose.pitch[1]) if len(calibrated_pose.pitch) > 1 else 0.0
+        pitch = self.pitch.update(calibrated_pose.orientation.pitch[1]) if len(calibrated_pose.orientation.pitch) > 1 else 0.0
         roll = roll_pitch_adjust(roll, pitch)
         self.roll_deque.append(roll)
         self.lateral_accel_desired_deque.append(desired_lateral_accel)

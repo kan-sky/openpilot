@@ -236,7 +236,7 @@ class CarInterfaceBase(ABC):
 
   def check_comma_nn_ff_support(self, car):
     try:
-      with open("../car/torque_data/neural_ff_weights.json", "r") as file:
+      with open(NEURAL_PARAMS_PATH, "r") as file:
         data = json.load(file)
       return car in data
 
