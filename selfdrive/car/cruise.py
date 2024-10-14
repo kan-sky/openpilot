@@ -15,7 +15,7 @@ GearShifter = structs.CarState.GearShifter
 V_CRUISE_MIN = 8
 V_CRUISE_MAX = 145
 V_CRUISE_UNSET = 255
-V_CRUISE_INITIAL = 40
+V_CRUISE_INITIAL = 30
 V_CRUISE_INITIAL_EXPERIMENTAL_MODE = 105
 IMPERIAL_INCREMENT = round(CV.MPH_TO_KPH, 1)  # round here to avoid rounding errors incrementing set speed
 
@@ -163,7 +163,7 @@ class VCruiseCarrot:
 
     self.v_ego_kph_set = 0
     self._cruise_speed_min, self._cruise_speed_max = 20, 161
-    self._cruise_speed_unit = 10
+    self._cruise_speed_unit = 5
 
     self._gas_pressed_count = 0
     self._gas_pressed_count_last = 0
@@ -327,7 +327,7 @@ class VCruiseCarrot:
         self.button_cnt = 0
     if self.button_cnt > self.button_long_time:
       self.long_pressed = True
-      V_CRUISE_DELTA = 10
+      V_CRUISE_DELTA = 5
       if self.button_prev == ButtonType.cancel:
         button_type = ButtonType.cancel
         self.button_cnt = 0          
@@ -458,7 +458,7 @@ class VCruiseCarrot:
     if v_cruise_kph < 30: #self.nRoadLimitSpeed:
       v_cruise_kph = 30 #self.nRoadLimitSpeed
     else:
-      for speed in range (40, 160, self._cruise_speed_unit):
+      for speed in range (10, 160, self._cruise_speed_unit):
         if v_cruise_kph < speed:
           v_cruise_kph = speed
           break;

@@ -194,7 +194,7 @@ def main(demo=False):
   DH = DesireHelper()
 
   while True:
-    steer_delay = params.get_float("SteerActuatorDelay") * 0.01 #CP.steerActuatorDelay + .2
+    steer_delay = params.get_float("SteerActuatorDelay") * 0.01 + .2 #CP.steerActuatorDelay + .2
     
     # Keep receiving frames until we are at least 1 frame ahead of previous extra frame
     while meta_main.timestamp_sof < meta_extra.timestamp_sof + 25000000:
