@@ -2,11 +2,11 @@ from openpilot.common.params import Params
 from openpilot.common.filter_simple import FirstOrderFilter
 
 from opendbc.can.packer import CANPacker
-from opendbc.car import DT_CTRL, apply_driver_steer_torque_limits, structs
+from opendbc.car import DT_CTRL, apply_driver_steer_torque_limits, structs, create_gas_interceptor_command
 from opendbc.car.gm import gmcan
 from opendbc.car.common.conversions import Conversions as CV
-from opendbc.car.gm.values import DBC, CanBus, CarControllerParams, CruiseButtons, EV_CAR
-from opendbc.car.common.numpy_fast import interp
+from opendbc.car.gm.values import DBC, CanBus, CarControllerParams, CruiseButtons, GMFlags, CC_ONLY_CAR, SDGM_CAR, EV_CAR, AccState
+from opendbc.car.common.numpy_fast import interp, clip
 from opendbc.car.interfaces import CarControllerBase
 from openpilot.selfdrive.controls.lib.drive_helpers import apply_deadzone
 from openpilot.selfdrive.controls.lib.vehicle_model import ACCELERATION_DUE_TO_GRAVITY
@@ -32,14 +32,18 @@ class CarController(CarControllerBase):
     self.apply_steer_last = 0
     self.apply_gas = 0
     self.apply_brake = 0
+    self.apply_speed = 0 # kans: button spam
+    self.frame = 0
     self.last_steer_frame = 0
     self.last_button_frame = 0
     self.cancel_counter = 0
+    self.pedal_steady = 0.
 
     self.lka_steering_cmd_counter = 0
     self.lka_icon_status_last = (False, False)
 
     self.params = CarControllerParams(self.CP)
+    self.params_ = Params() # kans: button spam
 
     self.packer_pt = CANPacker(DBC[self.CP.carFingerprint]['pt'])
     self.packer_obj = CANPacker(DBC[self.CP.carFingerprint]['radar'])
@@ -50,6 +54,21 @@ class CarController(CarControllerBase):
 
     self.pitch = FirstOrderFilter(0., 0.09 * 4, DT_CTRL * 4)  # runs at 25 Hz
     self.accel_g = 0.0
+
+  @staticmethod
+  def calc_pedal_command(accel: float, long_active: bool) -> float:
+    if not long_active: return 0.
+
+    zero = 0.15625  # 40/256
+    if accel > 0.:
+      # Scales the accel from 0-1 to 0.156-1
+      pedal_gas = clip(((1 - zero) * accel + zero), 0., 1.)
+    else:
+      # if accel is negative, -0.1 -> 0.015625
+      pedal_gas = clip(zero + accel, 0., zero)  # Make brake the same size as gas, but clip to regen
+
+    return pedal_gas
+
   def update(self, CC, CS, now_nanos):
 
     if self.frame % 50 == 0:
@@ -146,27 +165,55 @@ class CarController(CarControllerBase):
           # FIXME: brakes aren't applied immediately when enabling at a stop
           if stopping:
             self.apply_gas = self.params.INACTIVE_REGEN
+          if self.CP.carFingerprint in CC_ONLY_CAR:
+            # gas interceptor only used for full long control on cars without ACC
+            interceptor_gas_cmd = self.calc_pedal_command(actuators.accel, CC.longActive)
+
+        if self.CP.enableGasInterceptorDEPRECATED and self.apply_gas > self.params.INACTIVE_REGEN and CS.out.cruiseState.standstill:
+          # "Tap" the accelerator pedal to re-engage ACC
+          interceptor_gas_cmd = self.params.SNG_INTERCEPTOR_GAS
+          self.apply_brake = 0
+          self.apply_gas = self.params.INACTIVE_REGEN
 
         idx = (self.frame // 4) % 4
 
-        at_full_stop = CC.longActive and CS.out.standstill
-        near_stop = CC.longActive and (abs(CS.out.vEgo) < self.params.NEAR_STOP_BRAKE_PHASE)
-        friction_brake_bus = CanBus.CHASSIS
-        # GM Camera exceptions
-        # TODO: can we always check the longControlState?
-        if self.CP.networkLocation == NetworkLocation.fwdCamera:
-          at_full_stop = at_full_stop and stopping
-          friction_brake_bus = CanBus.POWERTRAIN
+        if self.CP.flags & GMFlags.CC_LONG.value:
+          if CC.longActive and CS.out.vEgo > self.CP.minEnableSpeed:
+            # Using extend instead of append since the message is only sent intermittently
+            can_sends.extend(gmcan.create_gm_cc_spam_command(self.packer_pt, self, CS, actuators))
+        if self.CP.enableGasInterceptorDEPRECATED:
+          can_sends.append(create_gas_interceptor_command(self.packer_pt, interceptor_gas_cmd, idx))
+        if self.CP.carFingerprint not in CC_ONLY_CAR:
+          friction_brake_bus = CanBus.CHASSIS
+          # GM Camera exceptions
+          # TODO: can we always check the longControlState?
+          if self.CP.networkLocation == NetworkLocation.fwdCamera and self.CP.carFingerprint not in CC_ONLY_CAR:
+            at_full_stop = at_full_stop and stopping
+            friction_brake_bus = CanBus.POWERTRAIN
 
-        # GasRegenCmdActive needs to be 1 to avoid cruise faults. It describes the ACC state, not actuation
-        can_sends.append(gmcan.create_gas_regen_command(self.packer_pt, CanBus.POWERTRAIN, self.apply_gas, idx, CC.enabled, at_full_stop))
-        can_sends.append(gmcan.create_friction_brake_command(self.packer_ch, friction_brake_bus, self.apply_brake,
-                                                             idx, CC.enabled, near_stop, at_full_stop, self.CP))
+          if self.CP.autoResumeSng:
+            resume = actuators.longControlState != LongCtrlState.starting or CC.cruiseControl.resume
+            at_full_stop = at_full_stop and not resume
 
-        # Send dashboard UI commands (ACC status)
-        send_fcw = hud_alert == VisualAlert.fcw
-        can_sends.append(gmcan.create_acc_dashboard_command(self.packer_pt, CanBus.POWERTRAIN, CC.enabled,
-                                                            hud_v_cruise * CV.MS_TO_KPH, hud_control, send_fcw))
+          if CC.cruiseControl.resume and CS.pcm_acc_status == AccState.STANDSTILL:
+            acc_engaged = False
+          else:
+            acc_engaged = CC.enabled
+
+          if actuators.longControlState == LongCtrlState.starting:
+            if (self.frame - self.last_button_frame) * DT_CTRL > 0.2:
+              self.last_button_frame = self.frame
+              for i in range(12):
+                can_sends.append(gmcan.create_buttons(self.packer_pt, CanBus.POWERTRAIN, CS.buttons_counter, CruiseButtons.RES_ACCEL))
+          # GasRegenCmdActive needs to be 1 to avoid cruise faults. It describes the ACC state, not actuation
+          can_sends.append(gmcan.create_gas_regen_command(self.packer_pt, CanBus.POWERTRAIN, self.apply_gas, idx, acc_engaged, at_full_stop))
+          can_sends.append(gmcan.create_friction_brake_command(self.packer_ch, friction_brake_bus, self.apply_brake,
+                                                               idx, CC.enabled, near_stop, at_full_stop, self.CP))
+
+          # Send dashboard UI commands (ACC status)
+          send_fcw = hud_alert == VisualAlert.fcw
+          can_sends.append(gmcan.create_acc_dashboard_command(self.packer_pt, CanBus.POWERTRAIN, CC.enabled,
+                                                              hud_v_cruise * CV.MS_TO_KPH, hud_control, send_fcw))
       else:
         # to keep accel steady for logs when not sending gas
         accel += self.accel_g
@@ -190,6 +237,13 @@ class CarController(CarControllerBase):
       if self.CP.networkLocation == NetworkLocation.gateway and self.frame % self.params.ADAS_KEEPALIVE_STEP == 0:
         can_sends += gmcan.create_adas_keepalive(CanBus.POWERTRAIN)
 
+      # TODO: integrate this with the code block below?
+      if ((self.CP.flags & GMFlags.PEDAL_LONG.value)  # Always cancel stock CC when using pedal interceptor
+      ) and CS.out.cruiseState.enabled:
+        if (self.frame - self.last_button_frame) * DT_CTRL > 0.04:
+          self.last_button_frame = self.frame
+          can_sends.append(gmcan.create_buttons(self.packer_pt, CanBus.POWERTRAIN, (CS.buttons_counter + 1) % 4, CruiseButtons.CANCEL))
+
     else:
       # While car is braking, cancel button causes ECM to enter a soft disable state with a fault status.
       # A delayed cancellation allows camera to cancel and avoids a fault when user depresses brake quickly
@@ -212,6 +266,7 @@ class CarController(CarControllerBase):
     new_actuators.steerOutputCan = self.apply_steer_last
     new_actuators.gas = self.apply_gas
     new_actuators.brake = self.apply_brake
+    new_actuators.speed = self.apply_speed # kans: button spam
 
     self.frame += 1
     return new_actuators, can_sends
