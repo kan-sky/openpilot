@@ -251,10 +251,10 @@
     {
       "group": "주행튜닝",
       "name": "RadarReactionFactor",
-      "title": "Radar reaction factor (100)%",
+      "title": "Radar reaction factor (10)%",
       "descr": "값이 낮아지면 선행차량에 대한 반응이 빨라짐.",
       "egroup": "LONG",
-      "etitle": "Radar reaction factor (100)%",
+      "etitle": "Radar reaction factor (10)%",
       "edescr": "",
       "min": 0,
       "max": 200,
@@ -766,6 +766,19 @@
       "min": 10,
       "max": 200,
       "default": 30,
+      "unit": 10
+    },
+    {
+      "group": "주행튜닝",
+      "name": "StoppingAccel",
+      "title": "정지시작가속도x0.01(0)",
+      "descr": "정지시작가속도 조정, 0으로 하면 기존방식",
+      "egroup": "LONG",
+      "etitle": "StoppingStartAccelx0.01(0)",
+      "edescr": "",
+      "min": -100,
+      "max": 0,
+      "default": 0,
       "unit": 10
     },
     {

@@ -12,7 +12,7 @@ LongCtrlState = car.CarControl.Actuators.LongControlState
 
 
 def long_control_state_trans(CP, active, long_control_state, v_ego,
-                             should_stop, brake_pressed, cruise_standstill, a_target):
+                             should_stop, brake_pressed, cruise_standstill, a_target, stopping_accel):
   stopping_condition = should_stop
   starting_condition = (not should_stop and
                         not cruise_standstill and
@@ -40,7 +40,7 @@ def long_control_state_trans(CP, active, long_control_state, v_ego,
 
     elif long_control_state in [LongCtrlState.starting, LongCtrlState.pid]:
       if stopping_condition:
-        if long_control_state == LongCtrlState.starting or (a_target > -0.5 and v_ego < 1.0): # carrot
+        if long_control_state == LongCtrlState.starting or (a_target > stopping_accel and v_ego < 1.0): # carrot
           long_control_state = LongCtrlState.stopping
       elif started_condition:
         long_control_state = LongCtrlState.pid
@@ -58,7 +58,7 @@ class LongControl:
     
     self.params = Params()
     self.readParamCount = 0
-    self.longitudinalTuningApi = False
+    self.stopping_accel = 0
 
   def reset(self):
     self.pid.reset()
@@ -81,6 +81,7 @@ class LongControl:
     self.readParamCount += 1
     if self.readParamCount >= 100:
       self.readParamCount = 0
+      self.stopping_accel = self.params.get_float("StoppingAccel") * 0.01
     elif self.readParamCount == 10:
       if len(self.CP.longitudinalTuning.kpBP) == 1 and len(self.CP.longitudinalTuning.kiBP)==1:
         longitudinalTuningKpV = self.params.get_float("LongTuningKpV") * 0.01
@@ -96,7 +97,7 @@ class LongControl:
 
     self.long_control_state = long_control_state_trans(self.CP, active, self.long_control_state, CS.vEgo,
                                                        should_stop, CS.brakePressed,
-                                                       CS.cruiseState.standstill, a_target)
+                                                       CS.cruiseState.standstill, a_target, self.stopping_accel if self.stopping_accel < 0.0 else -0.5)
     if active and soft_hold_active:
       self.long_control_state = LongCtrlState.stopping
       
@@ -109,8 +110,9 @@ class LongControl:
       
       if soft_hold_active:
         output_accel = self.CP.stopAccel
-        
-      if output_accel > self.CP.stopAccel:
+
+      stopAccel = self.stopping_accel if self.stopping_accel < 0.0 else self.CP.stopAccel
+      if output_accel > stopAccel:
         output_accel = min(output_accel, 0.0)
         output_accel -= self.CP.stoppingDecelRate * DT_CTRL
       self.reset()
