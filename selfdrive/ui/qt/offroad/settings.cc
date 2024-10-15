@@ -647,10 +647,10 @@ CarrotPanel::CarrotPanel(QWidget* parent) : QWidget(parent) {
     speedToggles->addItem(new CValueControl("AutoNaviSpeedBumpTime", "SpeedBumpTimeDistance(1s)", "", ".. / assets / offroad / icon_road.png", 1, 50, 1));
     speedToggles->addItem(new CValueControl("AutoNaviSpeedBumpSpeed", "SpeedBumpSpeed(35Km/h)", "", ".. / assets / offroad / icon_road.png", 10, 100, 5));
     speedToggles->addItem(new CValueControl("AutoNaviCountDownMode", "NaviCountDown mode(2)", "0: off, 1:tbt+camera, 2:tbt+camera+bump", ".. / assets / offroad / icon_road.png", 0, 2, 1));
-    speedToggles->addItem(new CValueControl("AutoTurnControl", "NOO Helper(0)", "0:없음,1:차선변경,2:차선변경+속도,3:속도", "../assets/offroad/icon_road.png", 0, 3, 1));
-    speedToggles->addItem(new CValueControl("AutoTurnControlSpeedTurn", "NOO Helper Turn Speed (20)", "0:없음, 턴속도", "../assets/offroad/icon_road.png", 0, 100, 5));
-    speedToggles->addItem(new CValueControl("AutoTurnControlTurnEnd", "NOO Helper Turn CtrlDistTime (6)", "dist=speed*time", "../assets/offroad/icon_road.png", 0, 30, 1));
-    speedToggles->addItem(new CValueControl("AutoTurnMapChange", "NOO Helper Auto Map Change(0)", "", "../assets/offroad/icon_road.png", 0, 2, 1));
+    speedToggles->addItem(new CValueControl("AutoTurnControl", "ATC: Auto turn control(0)", "0:없음,1:차선변경,2:차선변경+속도,3:속도", "../assets/offroad/icon_road.png", 0, 3, 1));
+    speedToggles->addItem(new CValueControl("AutoTurnControlSpeedTurn", "ATC: Turn Speed (20)", "0:없음, 턴속도", "../assets/offroad/icon_road.png", 0, 100, 5));
+    speedToggles->addItem(new CValueControl("AutoTurnControlTurnEnd", "ATC: Turn CtrlDistTime (6)", "dist=speed*time", "../assets/offroad/icon_road.png", 0, 30, 1));
+    //speedToggles->addItem(new CValueControl("AutoTurnMapChange", "NOO Helper Auto Map Change(0)", "", "../assets/offroad/icon_road.png", 0, 2, 1));
 
     toggles_layout->addWidget(cruiseToggles);
     toggles_layout->addWidget(latLongToggles);

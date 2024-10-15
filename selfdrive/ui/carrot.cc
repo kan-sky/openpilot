@@ -758,6 +758,7 @@ private:
     int nGoPosTime = 0;
 
     QString szSdiDescr = "";
+    QString atc_type;
 
 protected:
     QPointF navi_turn_point[2];
@@ -801,11 +802,13 @@ protected:
                 img_x = (int)navi_turn_point_x[0] - size_x / 2;
                 img_y = (int)navi_turn_point_y[0] - size_y;
                 ui_draw_image(s, { img_x, img_y, size_x, size_y }, "ic_navi_point", 1.0f);
+                nvgTextAlign(s->vg, NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM);
                 break;
             case 2: case 4:
                 img_x = (int)navi_turn_point_x[1] - size_x / 2;
                 img_y = (int)navi_turn_point_y[1] - size_y;
                 ui_draw_image(s, { img_x, img_y, size_x, size_y }, "ic_navi_point", 1.0f);
+                nvgTextAlign(s->vg, NVG_ALIGN_LEFT | NVG_ALIGN_BOTTOM);
                 break;
             }
             char str[128] = "";
@@ -911,7 +914,10 @@ protected:
 
         if(xTurnInfo > 0) {
             int bx = tbt_x + 100;
-            int by = tbt_y + 80;
+            int by = tbt_y + 85;
+            if (atc_type.length() > 0 && !atc_type.contains("prepare")) {
+                ui_fill_rect(s->vg, { bx - 80, by - 65, 160, 210 }, COLOR_GREEN_ALPHA(100), 15);
+            }
             switch (xTurnInfo) {
             case 1: ui_draw_image(s, { bx - icon_size / 2, by - icon_size / 2, icon_size, icon_size }, "ic_turn_l", 1.0f); break;
             case 2: ui_draw_image(s, { bx - icon_size / 2, by - icon_size / 2, icon_size, icon_size }, "ic_turn_r", 1.0f); break;
@@ -921,7 +927,7 @@ protected:
             case 6: ui_draw_text(s, bx, by + 20, "TG", 35, COLOR_WHITE, BOLD); break;
             case 8: ui_draw_text(s, bx, by + 20, "목적지", 35, COLOR_WHITE, BOLD); break;
             default:
-                sprintf(str, "unknown(%d)", xTurnInfo);
+                sprintf(str, "감속:%d", xTurnInfo);
                 ui_draw_text(s, bx, by + 20, str, 35, COLOR_WHITE, BOLD, 0.0f, 0.0f);
                 break;
             }
@@ -933,11 +939,11 @@ protected:
         if (szSdiDescr.length() > 0) {
             float bounds[4];  // [xmin, ymin, xmax, ymax]를 저장하는 배열
             nvgFontSize(s->vg, 40);
-            nvgTextBounds(s->vg, tbt_x + 190, tbt_y + 190, szSdiDescr.toStdString().c_str(), NULL, bounds);
+            nvgTextBounds(s->vg, tbt_x + 200, tbt_y + 200, szSdiDescr.toStdString().c_str(), NULL, bounds);
             float text_width = bounds[2] - bounds[0];
             float text_height = bounds[3] - bounds[1];
             ui_fill_rect(s->vg, { (int)bounds[0] - 10, (int)bounds[1] - 2, (int)text_width + 20, (int)text_height + 13 }, COLOR_GREEN, 10);
-            ui_draw_text(s, tbt_x + 190, tbt_y + 190, szSdiDescr.toStdString().c_str(), 40, COLOR_WHITE, BOLD);
+            ui_draw_text(s, tbt_x + 200, tbt_y + 200, szSdiDescr.toStdString().c_str(), 40, COLOR_WHITE, BOLD);
         }
         if (nGoPosDist > 0 && nGoPosTime > 0) {
             time_t now = time(NULL);  // 현재 시간 얻기
@@ -945,10 +951,10 @@ protected:
             int remaining_minutes = (int)nGoPosTime / 60;
             local->tm_min += remaining_minutes;
             mktime(local);
-            sprintf(str, "도착: %.1f km", nGoPosDist / 1000.);
+            sprintf(str, "도착: %.1f분(%02d:%02d)", (float)nGoPosTime / 60., local->tm_hour, local->tm_min);
             ui_draw_text(s, tbt_x + 190, tbt_y + 80, str, 50, COLOR_WHITE, BOLD);
-            sprintf(str, "%.1f분 (%02d:%02d)", (float)nGoPosTime / 60., local->tm_hour, local->tm_min);
-            ui_draw_text(s, tbt_x +190 + 120, tbt_y + 130, str, 50, COLOR_WHITE, BOLD);
+            sprintf(str, "%.1fkm", nGoPosDist / 1000.);
+            ui_draw_text(s, tbt_x + 190 + 120, tbt_y + 130, str, 50, COLOR_WHITE, BOLD);
         }
     }
 public:
@@ -968,6 +974,7 @@ public:
         xDistToTurn = carrot_man.getXDistToTurn();
         nRoadLimitSpeed = carrot_man.getNRoadLimitSpeed();
         active_carrot = carrot_man.getActive();
+        atc_type = QString::fromStdString(carrot_man.getAtcType());
 
         nGoPosDist = carrot_man.getNGoPosDist();
         nGoPosTime = carrot_man.getNGoPosTime();
@@ -1947,6 +1954,7 @@ public:
         return str;
     }
     void drawTpms(const UIState* s) {
+        nvgTextAlign(s->vg, NVG_ALIGN_CENTER | NVG_ALIGN_BOTTOM);
         SubMaster& sm = *(s->sm);
         auto car_state = sm["carState"].getCarState();
 
@@ -1961,6 +1969,37 @@ public:
         ui_draw_text(s, bx + 90, by - 55, get_tpms_text(fr), 38, get_tpms_color(fr), BOLD);
         ui_draw_text(s, bx - 90, by + 80, get_tpms_text(rl), 38, get_tpms_color(rl), BOLD);
         ui_draw_text(s, bx + 90, by + 80, get_tpms_text(rr), 38, get_tpms_color(rr), BOLD);
+    }
+    void drawDeviceInfo(const UIState* s) {
+        nvgTextAlign(s->vg, NVG_ALIGN_RIGHT | NVG_ALIGN_TOP);
+        SubMaster& sm = *(s->sm);
+        auto deviceState = sm["deviceState"].getDeviceState();
+        const auto freeSpace = deviceState.getFreeSpacePercent();
+        const auto memoryUsage = deviceState.getMemoryUsagePercent();
+        const auto cpuTempC = deviceState.getCpuTempC();
+        const auto cpuUsagePercent = deviceState.getCpuUsagePercent();
+        float cpuTemp = 0.0f;
+        QString str = "";
+        int   size = sizeof(cpuTempC) / sizeof(cpuTempC[0]);
+        if (size > 0) {
+            for (int i = 0; i < size; i++) {
+                cpuTemp += cpuTempC[i];
+            }
+            cpuTemp /= static_cast<float>(size);
+        }
+        float cpuUsage = 0.0f;
+        size = sizeof(cpuUsagePercent) / sizeof(cpuUsagePercent[0]);
+        if (size > 0) {
+            int cpu_size = 0;
+            for (cpu_size = 0; cpu_size < size; cpu_size++) {
+                if (cpuUsagePercent[cpu_size] <= 0) break;
+                cpuUsage += cpuUsagePercent[cpu_size];
+            }
+            if (cpu_size > 0) cpuUsage /= cpu_size;
+        }
+        str.sprintf("MEM:%d%% DISK:%.0f%% CPU:%.0f%%,%.0f\u00B0C", memoryUsage, freeSpace, cpuUsage, cpuTemp);
+        NVGcolor top_right_color = (cpuTemp > 85.0 || memoryUsage > 85.0) ? COLOR_ORANGE : COLOR_WHITE;
+		ui_draw_text(s, s->fb_w - 10, 2, str.toStdString().c_str(), 30, top_right_color, BOLD, 1.0f, 1.0f);
     }
 
 };
@@ -2013,6 +2052,7 @@ void ui_draw(UIState *s, ModelRenderer* model_renderer, int w, int h) {
   drawCarrot.drawDebug(s);
   drawCarrot.drawDateTime(s);
   drawCarrot.drawConnInfo(s);
+  drawCarrot.drawDeviceInfo(s);
   drawCarrot.drawTpms(s);
 
   drawTurnInfo.draw(s);
@@ -2065,36 +2105,10 @@ public:
         str = QString::fromStdString(car_state.getLogCarrot());
         sprintf(top, "%s", str.toStdString().c_str());
         // top_right
-        auto deviceState = sm["deviceState"].getDeviceState();
-        const auto freeSpace = deviceState.getFreeSpacePercent();
-        const auto memoryUsage = deviceState.getMemoryUsagePercent();
-        const auto cpuTempC = deviceState.getCpuTempC();
-        const auto cpuUsagePercent = deviceState.getCpuUsagePercent();
-        float cpuTemp = 0.0f;
-        int   size = sizeof(cpuTempC) / sizeof(cpuTempC[0]);
-        if (size > 0) {
-            for (int i = 0; i < size; i++) {
-                cpuTemp += cpuTempC[i];
-            }
-            cpuTemp /= static_cast<float>(size);
-        }
-        float cpuUsage = 0.0f;
-        size = sizeof(cpuUsagePercent) / sizeof(cpuUsagePercent[0]);
-        if (size > 0) {
-            int cpu_size = 0;
-            for (cpu_size = 0; cpu_size < size; cpu_size++) {
-                if (cpuUsagePercent[cpu_size] <= 0) break;
-                cpuUsage += cpuUsagePercent[cpu_size];
-            }
-            if (cpu_size > 0) cpuUsage /= cpu_size;
-        }
         const auto live_torque_params = sm["liveTorqueParameters"].getLiveTorqueParameters();
-        str.sprintf("LT[%.0f]:%s (%.4f/%.4f) MEM:%d%% DISK:%.0f%% CPU:%.0f%%,%.0f\u00B0C",
-            live_torque_params.getTotalBucketPoints(), live_torque_params.getLiveValid() ? "ON" : "OFF", live_torque_params.getLatAccelFactorFiltered(), live_torque_params.getFrictionCoefficientFiltered(),
-            memoryUsage, freeSpace, cpuUsage, cpuTemp);
+        str.sprintf("LT[%.0f]:%s (%.4f/%.4f)",
+            live_torque_params.getTotalBucketPoints(), live_torque_params.getLiveValid() ? "ON" : "OFF", live_torque_params.getLatAccelFactorFiltered(), live_torque_params.getFrictionCoefficientFiltered());
         sprintf(top_right, "%s", str.toStdString().c_str());
-        //printf("%s\n", top_right);
-        NVGcolor top_right_color = (cpuTemp>85.0 || memoryUsage > 85.0) ? COLOR_ORANGE : COLOR_WHITE;
 
         //top_left
         Params params = Params();
@@ -2137,7 +2151,7 @@ public:
         ui_draw_text_vg(vg, text_margin, 0, top_left, 30, COLOR_WHITE, BOLD);
         // top right
         nvgTextAlign(vg, NVG_ALIGN_RIGHT | NVG_ALIGN_TOP);
-        ui_draw_text_vg(vg, w - text_margin, 0, top_right, 30, top_right_color, BOLD);
+        ui_draw_text_vg(vg, w - text_margin, 0, top_right, 30, COLOR_WHITE, BOLD);
         // bottom
         nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_BOTTOM);
         ui_draw_text_vg(vg, w / 2, h, bottom, 30, COLOR_WHITE, BOLD);

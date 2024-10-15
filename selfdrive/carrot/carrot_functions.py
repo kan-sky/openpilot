@@ -163,7 +163,7 @@ class CarrotPlanner:
     return stop_x
 
 
-  def check_model_stopping(self, v, v_ego, model_x, y):
+  def check_model_stopping(self, v, v_ego, model_x, y, d_rel):
     v_ego_kph = v_ego * CV.MS_TO_KPH
     model_v = self.vFilter.process(v[-1])
     startSign = model_v > 5.0 or model_v > (v[0]+2)
@@ -171,7 +171,7 @@ class CarrotPlanner:
     if v_ego_kph < 1.0:
       stopSign = model_x < 20.0 and model_v < 10.0
     elif v_ego_kph < 82.0:
-      stopSign = model_x < interp(v[0], [60/3.6, 80/3.6], [120.0, 150]) and ((model_v < 3.0) or (model_v < v[0]*0.7))  and abs(y[-1]) < 5.0
+      stopSign = model_x < d_rel and model_x < interp(v[0], [60/3.6, 80/3.6], [120.0, 150]) and ((model_v < 3.0) or (model_v < v[0]*0.7))  and abs(y[-1]) < 5.0
     else:
       stopSign = False
 
@@ -272,7 +272,7 @@ class CarrotPlanner:
     stop_model_x = self.xStop
 
     #self.check_model_stopping(v, v_ego, self.xStop, y)
-    self.check_model_stopping(v, v_ego, x[-1], y)
+    self.check_model_stopping(v, v_ego, x[-1], y, radarstate.leadOne.dRel if radarstate.leadOne.status else 1000)
 
     if self.myDrivingMode == 4:
       self.trafficState = TrafficState.off

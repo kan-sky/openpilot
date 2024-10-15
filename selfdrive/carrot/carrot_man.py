@@ -503,7 +503,7 @@ class CarrotServ:
     
     self.nRoadLimitSpeed = 30
 
-    self.active = 0     ## 1: CarrotMan Active, 2: sdi active , 3: speed decel active, 4: section active
+    self.active = 0     ## 1: CarrotMan Active, 2: sdi active , 3: speed decel active, 4: section active, 5: bump active
     self.active_count = 0
     self.active_sdi_count = 0
     self.active_sdi_count_max = 80
@@ -933,10 +933,10 @@ class CarrotServ:
 
   def update_auto_turn(self, v_ego_kph, sm, x_turn_info, x_dist_to_turn, check_steer=False):
     turn_speed = self.autoTurnControlSpeedTurn
-    stop_speed = 1
-    turn_dist_for_speed = 5 #50
-    fork_dist_for_speed = 5 #20
     fork_speed = self.nRoadLimitSpeed
+    stop_speed = 1
+    turn_dist_for_speed = self.autoTurnControlTurnEnd * turn_speed / 3.6 # 5
+    fork_dist_for_speed = self.autoTurnControlTurnEnd * fork_speed / 3.6 # 5
     stop_dist_for_speed = 5
     start_fork_dist = interp(self.nRoadLimitSpeed, [30, 50, 100], [160, 200, 350])
     start_turn_dist = interp(self.nTBTNextRoadWidth, [5, 10], [43, 60])
@@ -1036,7 +1036,7 @@ class CarrotServ:
       safe_sec = self.autoNaviSpeedBumpTime if self.xSpdType == 22 else self.autoNaviSpeedCtrlEnd
       decel = self.autoNaviSpeedDecelRate
       sdi_speed = min(sdi_speed, self.calculate_current_speed(self.xSpdDist, self.xSpdLimit, safe_sec, decel))
-      self.active = 3
+      self.active = 5 if self.xSpdType == 22 else 3
       if self.xSpdType == 4:
         sdi_speed = self.xSpdLimit
         self.active = 4
@@ -1047,7 +1047,7 @@ class CarrotServ:
 
     if self.nSdiType  >= 0: # or self.active > 0:      
       #self.debugText = f"Atc:{atc_desired:.1f},{self.xTurnInfo}:{self.xDistToTurn:.1f}, I({self.nTBTNextRoadWidth},{self.roadcate}) Atc2:{atc_desired_next:.1f},{self.xTurnInfoNext},{self.xDistToTurnNext:.1f}"
-      self.debugText = f" {self._get_sdi_descr(self.nSdiType)}:{self.nSdiType}/{self.nSdiSpeedLimit}/{self.nSdiDist},BLOCK:{self.nSdiBlockType}/{self.nSdiBlockSpeed}/{self.nSdiBlockDist}, PLUS:{self.nSdiPlusType}/{self.nSdiPlusSpeedLimit}/{self.nSdiPlusDist}"
+      self.debugText = f" {self.nSdiType}/{self.nSdiSpeedLimit}/{self.nSdiDist},BLOCK:{self.nSdiBlockType}/{self.nSdiBlockSpeed}/{self.nSdiBlockDist}, PLUS:{self.nSdiPlusType}/{self.nSdiPlusSpeedLimit}/{self.nSdiPlusDist}"
     #elif self.nGoPosDist > 0 and self.active > 1:
     #  self.debugText = " 목적지:{:.1f}km/{:.1f}분 남음".format(self.nGoPosDist/1000., self.nGoPosTime / 60)
     else:

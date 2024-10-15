@@ -137,6 +137,10 @@ def create_acc_commands_scc(packer, enabled, accel, jerk, idx, hud_control, set_
   #soft_hold_mode = 2 ## some cars can't enable while braking
   long_enabled = enabled or (soft_hold_active > 0 and soft_hold_mode == 2)
   stop_req = 1 if stopping or (soft_hold_active > 0 and soft_hold_mode == 2) else 0
+  d = hud_control.leadDistance
+  objGap = 0 if d == 0 else 2 if d < 25 else 3 if d < 40 else 4 if d < 70 else 5 
+  objGap2 = 0 if objGap == 0 else 2 if hud_control.leadRelSpeed < -0.2 else 1
+
   if long_enabled:
     scc12_acc_mode = 2 if long_override else 1
     scc14_acc_mode = 4 if long_override else 1
@@ -160,11 +164,11 @@ def create_acc_commands_scc(packer, enabled, accel, jerk, idx, hud_control, set_
     values["VSetDis"] = set_speed if enabled else 0
     values["AliveCounterACC"] = idx % 0x10
     values["SCCInfoDisplay"] = 3 if warning_front else 4 if soft_hold_info else 0 if enabled else 0   #2: 크루즈 선택, 3: 전방상황주의, 4: 출발준비
-    values["ObjValid"] = 1
-    #values["ACC_ObjStatus"] = 1
-    #values["ACC_ObjLatPos"] = 0
-    #values["ACC_ObjRelSpd"] = hud_control.objRelSpd
-    #values["ACC_ObjDist"] = hud_control.objDist
+    values["ObjValid"] = 1 if hud_control.leadVisible else 0
+    values["ACC_ObjStatus"] = 1 if hud_control.leadVisible else 0
+    values["ACC_ObjLatPos"] = 0
+    values["ACC_ObjRelSpd"] = hud_control.leadRelSpeed
+    values["ACC_ObjDist"] = int(hud_control.leadDistance)
     values["DriverAlertDisplay"] = 0
     commands.append(packer.make_can_msg("SCC11", 0, values))
     
@@ -190,8 +194,8 @@ def create_acc_commands_scc(packer, enabled, accel, jerk, idx, hud_control, set_
     values["JerkUpperLimit"] = jerk.jerk_u
     values["JerkLowerLimit"] = jerk.jerk_l
     values["ACCMode"] = scc14_acc_mode #2 if enabled and long_override else 1 if long_enabled else 4 # stock will always be 4 instead of 0 after first disengage
-    values["ObjGap"] = 2 if hud_control.leadVisible else 0 # 5: >30, m, 4: 25-30 m, 3: 20-25 m, 2: < 20 m, 0: no lead
-    #values["ObjGap2"] = 1
+    values["ObjGap"] = objGap #2 if hud_control.leadVisible else 0 # 5: >30, m, 4: 25-30 m, 3: 20-25 m, 2: < 20 m, 0: no lead
+    values["ObjGap2"] = objGap2
     commands.append(packer.make_can_msg("SCC14", 0, values))
 
   # Only send FCA11 on cars where it exists on the bus
@@ -220,6 +224,10 @@ def create_acc_commands(packer, enabled, accel, jerk, idx, hud_control, set_spee
   #soft_hold_mode = 2 ## some cars can't enable while braking
   long_enabled = enabled or (soft_hold_active > 0 and soft_hold_mode == 2)
   stop_req = 1 if stopping or (soft_hold_active > 0 and soft_hold_mode == 2) else 0
+  d = hud_control.leadDistance
+  objGap = 0 if d == 0 else 2 if d < 25 else 3 if d < 40 else 4 if d < 70 else 5 
+  objGap2 = 0 if objGap == 0 else 2 if hud_control.leadRelSpeed < -0.2 else 1
+
   if long_enabled:
     scc12_acc_mode = 2 if long_override else 1
     scc14_acc_mode = 4 if long_override else 1
@@ -243,11 +251,11 @@ def create_acc_commands(packer, enabled, accel, jerk, idx, hud_control, set_spee
     "VSetDis": set_speed if enabled else 0,
     "AliveCounterACC": idx % 0x10,
     "SCCInfoDisplay": 3 if warning_front else 4 if soft_hold_info else 0 if enabled else 0,   
-    "ObjValid": 1, # close lead makes controls tighter
-    "ACC_ObjStatus": 1, # close lead makes controls tighter
+    "ObjValid": 1 if hud_control.leadVisible else 0, # close lead makes controls tighter
+    "ACC_ObjStatus": 1 if hud_control.leadVisible else 0, # close lead makes controls tighter
     "ACC_ObjLatPos": 0,
-    "ACC_ObjRelSpd": 0,
-    "ACC_ObjDist": 1, # close lead makes controls tighter
+    "ACC_ObjRelSpd": hud_control.leadRelSpeed,
+    "ACC_ObjDist": int(hud_control.leadDistance), # close lead makes controls tighter
     "DriverAlertDisplay": 0,
     }
   commands.append(packer.make_can_msg("SCC11", 0, scc11_values))
@@ -277,7 +285,8 @@ def create_acc_commands(packer, enabled, accel, jerk, idx, hud_control, set_spee
     "JerkUpperLimit": jerk.jerk_u, # stock usually is 1.0 but sometimes uses higher values
     "JerkLowerLimit": jerk.jerk_l, # stock usually is 0.5 but sometimes uses higher values
     "ACCMode": scc14_acc_mode, # if enabled and long_override else 1 if enabled else 4, # stock will always be 4 instead of 0 after first disengage
-    "ObjGap": 2 if hud_control.leadVisible else 0, # 5: >30, m, 4: 25-30 m, 3: 20-25 m, 2: < 20 m, 0: no lead
+    "ObjGap": objGap, #2 if hud_control.leadVisible else 0, # 5: >30, m, 4: 25-30 m, 3: 20-25 m, 2: < 20 m, 0: no lead
+    "ObjGap2": objGap2,
   }
   commands.append(packer.make_can_msg("SCC14", 0, scc14_values))
 
