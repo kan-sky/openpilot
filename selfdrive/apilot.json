@@ -3,14 +3,14 @@
   "params": [
     {
       "group": "조향일반",
-      "name": "PathOffset",
+      "name": "cameraOffset",
       "title": "레인모드: 좌우보정(0)",
       "descr": "(-)좌측,(+)우측",
       "egroup": "LAT",
-      "etitle": "PathOffset (0)",
+      "etitle": "cameraOffset (0)",
       "edescr": "(-)Left,(+)Right, works useLaneLineMode>0",
-      "min": -200,
-      "max": 200,
+      "min": -20,
+      "max": 20,
       "default": 0,
       "unit": 1
     },
