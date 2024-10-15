@@ -60,7 +60,7 @@ class LateralPlanner:
     self.lanelines_active_tmp = False
 
     self.useLaneLineSpeedApply = self.params.get_int("UseLaneLineSpeedApply")
-    self.pathOffset = 0.0 #float(self.params.get_int("PathOffset")) * 0.01
+    self.pathOffset = float(self.params.get_int("PathOffset")) * 0.01
     self.useLaneLineMode = False
     self.plan_yaw = np.zeros((TRAJECTORY_SIZE,))
     self.plan_yaw_rate = np.zeros((TRAJECTORY_SIZE,))
@@ -83,7 +83,7 @@ class LateralPlanner:
     if self.readParams <= 0:
       self.readParams = 100
       self.useLaneLineSpeedApply = self.params.get_int("UseLaneLineSpeedApply")
-      self.pathOffset = 0.0 #float(self.params.get_int("PathOffset")) * 0.01
+      self.pathOffset = float(self.params.get_int("PathOffset")) * 0.01
 
     # clip speed , lateral planning is not possible at 0 speed
     measured_curvature = sm['controlsState'].curvature

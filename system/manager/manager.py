@@ -92,6 +92,7 @@ def get_default_params():
     ("AdjustLaneOffset", "0"),    
     ("AdjustCurveOffset", "0"),    
     ("AdjustLaneTime", "0"),    
+    ("PathOffset", "0"),  
     ("MaxAngleFrames", "89"),       
     ("LateralTorqueCustom", "0"),       
     ("LateralTorqueAccelFactor", "1596"),       
