@@ -23,6 +23,8 @@ def get_default_params():
     # kans
     ("LongPitch", "1"),
     ("EVTable", "1"),
+    ("NNFF", "1"),
+    ("NNFFLite", "1"),
     ("CompletedTrainingVersion", "0"),
     ("DisengageOnAccelerator", "0"),
     ("GsmMetered", "1"),
