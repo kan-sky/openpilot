@@ -1267,7 +1267,7 @@ protected:
         float   dist = 2.0;// , dist_dt = 1.;
         bool    exit = false;
         //printf("\ndist = ");
-        for (int i = 0; !exit; i++, dist = dist + dist * 0.15) {
+        for (; !exit; dist = dist + dist * 0.15) {
             //dist_dt += (i*0.05);
             if (dist >= max_dist) {
                 dist = max_dist;

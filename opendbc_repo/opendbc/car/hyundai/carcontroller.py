@@ -123,7 +123,9 @@ class CarController(CarControllerBase):
     if self.frame < self.speedCameraHapticEndFrame and self.hapticFeedbackWhenSpeedCamera>0:
       haptic_stop = (self.speedCameraHapticEndFrame - (5.0/DT_CTRL)) < self.frame < (self.speedCameraHapticEndFrame - (3.0/DT_CTRL))
       if not haptic_stop:
-         left_lane_warning = right_lane_warning = self.hapticFeedbackWhenSpeedCamera 
+         left_lane_warning = right_lane_warning = self.hapticFeedbackWhenSpeedCamera
+      if self.speedCameraHapticEndFrame < self.frame:
+        self.speedCameraHapticEndFrame = -1
      
     if self.frame % self.blinking_frame == 0:
       self.blinking_signal = True

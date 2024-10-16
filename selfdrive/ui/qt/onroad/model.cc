@@ -15,10 +15,6 @@ int get_path_length_idx(const cereal::XYZTData::Reader &line, const float path_h
 
 void ModelRenderer::draw(QPainter &painter, const QRect &surface_rect) {
   auto &sm = *(uiState()->sm);
-  if (sm.updated("carParams")) {
-    longitudinal_control = sm["carParams"].getCarParams().getOpenpilotLongitudinalControl();
-  }
-
   // Check if data is up-to-date
   if (!(sm.alive("liveCalibration") && sm.alive("modelV2"))) {
     return;
@@ -26,6 +22,7 @@ void ModelRenderer::draw(QPainter &painter, const QRect &surface_rect) {
 
   clip_region = surface_rect.adjusted(-CLIP_MARGIN, -CLIP_MARGIN, CLIP_MARGIN, CLIP_MARGIN);
   experimental_mode = sm["selfdriveState"].getSelfdriveState().getExperimentalMode();
+  longitudinal_control = sm["carParams"].getCarParams().getOpenpilotLongitudinalControl();
 
   return;
   painter.save();
@@ -159,7 +156,7 @@ void ModelRenderer::updatePathGradient(QLinearGradient &bg) {
   constexpr float transition_speed = 0.1f;
 
   // Start transition if throttle state changes
-  bool allow_throttle = (*uiState()->sm)["longitudinalPlan"].getLongitudinalPlan().getAllowThrottle();
+  bool allow_throttle = (*uiState()->sm)["longitudinalPlan"].getLongitudinalPlan().getAllowThrottle() || !longitudinal_control;
   if (allow_throttle != prev_allow_throttle) {
     prev_allow_throttle = allow_throttle;
     // Invert blend factor for a smooth transition when the state changes mid-animation
