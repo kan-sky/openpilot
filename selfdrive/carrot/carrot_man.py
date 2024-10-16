@@ -1155,14 +1155,21 @@ class CarrotServ:
   def set_time(self, epoch_time, timezone):
     import datetime
     new_time = datetime.datetime.utcfromtimestamp(epoch_time)
+    localtime_path = "/data/etc/localtime"
+    no_timezone = False
+    try:
+      if os.path.getsize(localtime_path) == 0:
+        no_timezone = True  
+    except:
+      no_timezone = True
+
     diff = datetime.datetime.utcnow() - new_time
-    if abs(diff) < datetime.timedelta(seconds=10):
+    if abs(diff) < datetime.timedelta(seconds=10) and not no_timezone:
       #print(f"Time diff too small: {diff}")
       return
 
     print(f"Setting time to {new_time}, diff={diff}")
     zoneinfo_path = f"/usr/share/zoneinfo/{timezone}"
-    localtime_path = "/data/etc/localtime"
     if os.path.exists(localtime_path) or os.path.islink(localtime_path):
         try:
             subprocess.run(["sudo", "rm", "-f", localtime_path], check=True)
