@@ -20,7 +20,7 @@ from openpilot.common.params import Params
 import cereal.messaging as messaging
 from cereal import log
 from common.numpy_fast import clip, interp
-#import openpilot.selfdrive.frogpilot.fleetmanager.helpers as fleet
+import openpilot.selfdrive.frogpilot.fleetmanager.helpers as fleet
 from common.filter_simple import StreamingMovingAverage
 
 NetworkType = log.DeviceState.NetworkType
