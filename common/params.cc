@@ -269,7 +269,6 @@ std::unordered_map<std::string, uint32_t> keys = {
     { "AdjustLaneOffset", PERSISTENT },
     { "AdjustCurveOffset", PERSISTENT },
     { "AdjustLaneTime", PERSISTENT },
-    { "cameraOffset", PERSISTENT },
     { "MaxAngleFrames", PERSISTENT },
     { "SoftHoldMode", PERSISTENT },
     { "LateralTorqueCustom", PERSISTENT },
@@ -291,7 +290,8 @@ std::unordered_map<std::string, uint32_t> keys = {
     {"NNFF", PERSISTENT},
     {"NNFFLite", PERSISTENT},
     {"NNFFModelName", PERSISTENT},
-
+    { "cameraOffset", PERSISTENT },
+    {"CurvatureFactor", PERSISTENT},
 };
 
 } // namespace

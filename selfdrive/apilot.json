@@ -3,6 +3,31 @@
   "params": [
     {
       "group": "Á¶ÇâÆ©´×",
+      "name": "cameraOffset",
+      "title": "Ä«¸Þ¶ó ÁÂ¿ìº¸Á¤(0)",
+      "descr": "(-)ÁÂÃø,(+)¿ìÃø",
+      "egroup": "LAT",
+      "etitle": "cameraOffset (0)",
+      "edescr": "(-)Left,(+)Right, works useLaneLineMode>0",
+      "min": -20,
+      "max": 20,
+      "default": 0,
+      "unit": 1
+    },
+      "group": "Á¶ÇâÆ©´×",
+      "name": "CurvatureFactor",
+      "title": "Ä¿ºê¿Éoffset x0.01(95)",
+      "descr": "¿À¹ö½ºÆ¼¾î½Ã °ªÀ» ÁÙ¿©ÁØ´Ù",
+      "egroup": "LAT",
+      "etitle": "Curvature offset x0.01(95)",
+      "edescr": "reduce it at oversteering",
+      "min": 80,
+      "max": 120,
+      "default": 95,
+      "unit": 5
+    },
+    {
+      "group": "Á¶ÇâÆ©´×",
       "name": "LateralTorqueCustom",
       "title": "_LateralTorqueCustom(0)",
       "descr": "0:LiveTorque, 1:CustomTorque",

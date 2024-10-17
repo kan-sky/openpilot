@@ -2,6 +2,7 @@ from cereal import log
 from openpilot.common.numpy_fast import clip, interp
 from openpilot.common.realtime import DT_CTRL, DT_MDL
 from openpilot.selfdrive.modeld.constants import ModelConstants
+from openpilot.common.params import Params
 
 MIN_SPEED = 1.0
 CONTROL_N = 17
@@ -45,9 +46,10 @@ def get_lag_adjusted_curvature(CP, v_ego, psis, curvatures, steer_actuator_delay
   return safe_desired_curvature
 
 def clip_curvature(v_ego, prev_curvature, new_curvature):
+  params = Params()
   v_ego = max(MIN_SPEED, v_ego)
   max_curvature_rate = MAX_LATERAL_JERK / (v_ego**2) # inexact calculation, check https://github.com/commaai/openpilot/pull/24755
-  safe_desired_curvature = clip(new_curvature,
+  safe_desired_curvature = clip(new_curvature * (params.get_float("CurvatureFactor") * 0.01),
                                 prev_curvature - max_curvature_rate * DT_CTRL,
                                 prev_curvature + max_curvature_rate * DT_CTRL)
 
