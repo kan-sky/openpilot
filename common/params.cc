@@ -290,8 +290,9 @@ std::unordered_map<std::string, uint32_t> keys = {
     {"NNFF", PERSISTENT},
     {"NNFFLite", PERSISTENT},
     {"NNFFModelName", PERSISTENT},
-    { "cameraOffset", PERSISTENT },
+    {"CameraOffset", PERSISTENT },
     {"CurvatureFactor", PERSISTENT},
+    {"TrafficStopDistanceAdjust", PERSISTENT},
 };
 
 } // namespace
