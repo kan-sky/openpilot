@@ -5,7 +5,7 @@
       "group": "褻щぅ棚",
       "name": "cameraOffset",
       "title": "蘋詭塭 謝辦爾薑(0)",
-      "descr": "(-)謝難,(+)辦難",
+      "descr": "(+)謝難,(-)辦難",
       "egroup": "LAT",
       "etitle": "cameraOffset (0)",
       "edescr": "(-)Left,(+)Right, works useLaneLineMode>0",
