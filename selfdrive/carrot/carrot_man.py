@@ -20,7 +20,6 @@ from openpilot.common.params import Params
 import cereal.messaging as messaging
 from cereal import log
 from common.numpy_fast import clip, interp
-import openpilot.selfdrive.frogpilot.fleetmanager.helpers as fleet
 from common.filter_simple import StreamingMovingAverage
 
 NetworkType = log.DeviceState.NetworkType
@@ -350,11 +349,15 @@ class CarrotMan:
         time.sleep(1)
 
   def save_toggle_values(self):
-    toggle_values = fleet.get_all_toggle_values()
-    file_path = os.path.join('/data', 'toggle_values.json')
-    with open(file_path, 'w') as file:
-      json.dump(toggle_values, file, indent=2)
-    pass
+    try:
+      import openpilot.selfdrive.frogpilot.fleetmanager.helpers as fleet
+
+      toggle_values = fleet.get_all_toggle_values()
+      file_path = os.path.join('/data', 'toggle_values.json')
+      with open(file_path, 'w') as file:
+        json.dump(toggle_values, file, indent=2)
+    except Exception as e:
+      print(f"save_toggle_values error: {e}")
 
   def carrot_cmd_zmq(self):
 
