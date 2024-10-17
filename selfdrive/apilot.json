@@ -22,9 +22,9 @@
       "egroup": "LAT",
       "etitle": "Curvature offset x0.01(95)",
       "edescr": "reduce it at oversteering",
-      "min": 80,
+      "min": 30,
       "max": 120,
-      "default": 95,
+      "default": 80,
       "unit": 5
     },
     {
