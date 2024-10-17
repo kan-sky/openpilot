@@ -46,8 +46,8 @@ class LanePlanner:
     self.rll_y = np.zeros((TRAJECTORY_SIZE,))
     self.le_y = np.zeros((TRAJECTORY_SIZE,))
     self.re_y = np.zeros((TRAJECTORY_SIZE,))
-    self.lane_width_estimate = FirstOrderFilter(3.7, 9.95, DT_MDL)
-    self.lane_width = 3.7
+    self.lane_width_estimate = FirstOrderFilter(3.5, 9.95, DT_MDL)
+    self.lane_width = 3.5
     self.lane_change_multiplier = 1
     self.lane_width_updated_count = 0
 
