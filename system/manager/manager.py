@@ -98,12 +98,12 @@ def get_default_params():
     ("cameraOffset", "0"),  
     ("MaxAngleFrames", "89"),       
     ("LateralTorqueCustom", "0"),       
-    ("LateralTorqueAccelFactor", "1596"),       
+    ("LateralTorqueAccelFactor", "1600"),       
     ("LateralTorqueFriction", "157"),
-    ("CustomSteerMax", "300"),       
+    ("CustomSteerMax", "295"),       
     ("CustomSteerDeltaUp", "10"),       
     ("CustomSteerDeltaDown", "15"),       
-    ("SteerActuatorDelay", "18"),       
+    ("SteerActuatorDelay", "26"),       
     ("MaxTimeOffroadMin", "60"),
   ]
   return default_params

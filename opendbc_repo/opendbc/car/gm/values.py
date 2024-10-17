@@ -12,14 +12,14 @@ Ecu = CarParams.Ecu
 
 class CarControllerParams:
   STEER_MAX = 300  # GM limit is 3Nm. Used by carcontroller to generate LKA output
-  STEER_STEP = 3  # Active control frames per command (~33hz)
+  STEER_STEP = 4  # Active control frames per command (~33hz)
   INACTIVE_STEER_STEP = 10  # Inactive control frames per command (10hz)
   STEER_DELTA_UP = 10  # Delta rates require review due to observed EPS weakness
   STEER_DELTA_DOWN = 15
   STEER_DRIVER_ALLOWANCE = 65
   STEER_DRIVER_MULTIPLIER = 4
   STEER_DRIVER_FACTOR = 100
-  NEAR_STOP_BRAKE_PHASE = 0.5  # m/s
+  NEAR_STOP_BRAKE_PHASE = 0.2  # m/s
   SNG_INTERCEPTOR_GAS = 18. / 255.
   SNG_TIME = 30  # frames until the above is reached
 
@@ -38,7 +38,7 @@ class CarControllerParams:
   def __init__(self, CP):
     # Gas/brake lookups
     self.ZERO_GAS = 2048  # Coasting
-    self.MAX_BRAKE = 400  # ~ -4.0 m/s^2 with regen
+    self.MAX_BRAKE = 350  # ~ -4.0 m/s^2 with regen
 
     if CP.carFingerprint in (CAMERA_ACC_CAR | SDGM_CAR):
       self.MAX_GAS = 3400
