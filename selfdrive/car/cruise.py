@@ -241,7 +241,7 @@ class VCruiseCarrot:
       self.d_rel = lead.dRel if lead.status else 0
       self.v_rel = lead.vRel if lead.status else 0
     if sm.alive['modelV2']:
-      self.model_v_kph = sm['modelV2'].velocity.x[32] * CV.MS_TO_KPH
+      self.model_v_kph = max(sm['modelV2'].velocity.x[0], sm['modelV2'].velocity.x[-1]) * CV.MS_TO_KPH
     else:
       self.model_v_kph = 0
       

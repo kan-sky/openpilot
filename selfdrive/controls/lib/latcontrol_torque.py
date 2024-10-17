@@ -80,7 +80,9 @@ class LatControlTorque(LatControl):
     self.frame = 0
     self.params = Params()
     self.lateralTorqueCustom = self.params.get_int("LateralTorqueCustom")
-
+    self.latAccelFactor_default = self.torque_params.latAccelFactor
+    self.latAccelOffset_default = self.torque_params.latAccelOffset
+    self.friction_default = self.torque_params.friction
     # NNFF
     self.use_nnff = CI.use_nnff
     self.use_nnff_lite = CI.use_nnff_lite
@@ -139,10 +141,16 @@ class LatControlTorque(LatControl):
   def update(self, active, CS, VM, params, steer_limited, desired_curvature, calibrated_pose, model_data=None):
     self.frame += 1
     if self.frame % 10 == 0:
-      self.lateralTorqueCustom = self.params.get_int("LateralTorqueCustom")
-      if self.lateralTorqueCustom > 0:
+      lateralTorqueCustom = self.params.get_int("LateralTorqueCustom")
+      if lateralTorqueCustom > 0:
         self.torque_params.latAccelFactor = self.params.get_float("LateralTorqueAccelFactor")*0.001
         self.torque_params.friction = self.params.get_float("LateralTorqueFriction")*0.001
+        self.torque_params.latAccelOffset = self.latAccelOffset_default
+      elif self.lateralTorqueCustom > 1:  # 1 -> 0, reset to default
+        self.torque_params.latAccelFactor = self.latAccelFactor_default
+        self.torque_params.friction = self.friction_default
+        self.torque_params.latAccelOffset = self.latAccelOffset_default
+      self.lateralTorqueCustom = lateralTorqueCustom
      
     pid_log = log.ControlsState.LateralTorqueState.new_message()
     nn_log = None
