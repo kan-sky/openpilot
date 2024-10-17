@@ -49,9 +49,9 @@ def calculate_lane_width_frog(lane, current_lane, road_edge):
   return min(distance_to_lane, distance_to_road_edge), distance_to_road_edge
 
 def calculate_lane_width(lane, lane_prob, current_lane, road_edge):
-  index = 10 #�� 1�� ���� ����..
+  index = 10 #약 1초 앞의 차선
   distance_to_lane = abs(current_lane.y[index] - lane.y[index])
-  #if lane_prob < 0.3: # ������ ������ ���°����� ���ֽ�Ŵ.
+  #if lane_prob < 0.3: #  차선이 없으면 없는것으로 간주시킴.
   #  distance_to_lane = min(2.0, distance_to_lane)
   distance_to_road_edge = abs(current_lane.y[index] - road_edge.y[index]);
   return min(distance_to_lane, distance_to_road_edge), distance_to_road_edge, lane_prob > 0.5
