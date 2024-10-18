@@ -175,6 +175,7 @@ class VCruiseCarrot:
     self._soft_hold_active = 0
     self._cruise_ready = False
     self._cruise_cancel_state = False
+    self._pause_auto_speed_up = False
     self._activate_cruise = 0
     self._lat_enabled = self.params.get_int("AutoEngage") > 0
     
@@ -397,6 +398,7 @@ class VCruiseCarrot:
       if button_type == ButtonType.accelCruise:
         self._cruise_cancel_state = False
         self._lat_enabled = True
+        self._pause_auto_speed_up = False
         if self._soft_hold_active > 0:
           self._soft_hold_active = 0
         else:
@@ -405,6 +407,7 @@ class VCruiseCarrot:
       elif button_type == ButtonType.decelCruise:
         self._cruise_cancel_state = False
         self._lat_enabled = True
+        self._pause_auto_speed_up = True
         if self._soft_hold_active > 0:
           self._cruise_control(-1, -1, "Cruise off,softhold mode (decelCruise)")
         elif v_cruise_kph > self.v_ego_kph_set:
@@ -465,10 +468,13 @@ class VCruiseCarrot:
     return v_cruise_kph
   
   def _auto_speed_up(self, v_cruise_kph):
+    if self._pause_auto_speed_up:
+      return v_cruise_kph
+       
     road_limit_kph = self.nRoadLimitSpeed * self.autoSpeedUptoRoadSpeedLimit
     if road_limit_kph < 1.0:
       return v_cruise_kph
-    if road_limit_kph < self.road_limit_kph:
+    if road_limit_kph < self.road_limit_kph and False:  # TODO: road_limit speed 자동 속도 다운.. 삭제..
       if v_cruise_kph > road_limit_kph:
         v_cruise_kph = road_limit_kph
     elif self.model_v_kph > v_cruise_kph and v_cruise_kph < road_limit_kph:
@@ -526,6 +532,7 @@ class VCruiseCarrot:
         v_cruise_kph = self.v_ego_kph_set
         self._cruise_control(1, 0, "Cruise on (speed)")
       elif self.xState in [3, 5]:
+        v_cruise_kph = self.v_ego_kph_set
         self._cruise_control(1, 0, "Cruise on (traffic sign)")
       elif 0 < self.d_rel < 20:
         v_cruise_kph = self.v_ego_kph_set
@@ -543,6 +550,8 @@ class VCruiseCarrot:
         self._cruise_control(-1, 5.0, "Cruise off (gas pressed while braking)")
       if self.v_ego_kph_set > v_cruise_kph:
         v_cruise_kph = self.v_ego_kph_set
+        self._pause_auto_speed_up = False
+
       
     return self._auto_speed_up(v_cruise_kph)
   
