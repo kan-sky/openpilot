@@ -108,14 +108,14 @@
     {
       "group": "조향튜닝",
       "name": "SteerActuatorDelay",
-      "title": "SteerActuatorDelay(25)",
+      "title": "SteerActuatorDelay(27)",
       "descr": "값이크면 조향을 좀더 미리함(일반,10msec)",
       "egroup": "LAT",
-      "etitle": "SteerActuatorDelay(50)",
+      "etitle": "SteerActuatorDelay(27)",
       "edescr": "",
       "min": 1,
       "max": 100,
-      "default": 25,
+      "default": 27,
       "unit": 1
     },
     {
@@ -147,14 +147,14 @@
     {
       "group": "가속설정",
       "name": "CruiseMaxVals3",
-      "title": "가속설정3:60km/h(50)",
+      "title": "가속설정3:60km/h(45)",
       "descr": "Normal mode only (x0.01m/s^2)",
       "egroup": "ACCEL",
-      "etitle": "AccelSet3:60km/h(50)",
+      "etitle": "AccelSet3:60km/h(45)",
       "edescr": "Normal mode only (x0.01m/s^2)",
       "min": 1,
       "max": 250,
-      "default": 50,
+      "default": 45,
       "unit": 5
     },
     {
@@ -173,27 +173,27 @@
     {
       "group": "가속설정",
       "name": "CruiseMaxVals5",
-      "title": "가속설정5:110km/h(30)",
+      "title": "가속설정5:110km/h(25)",
       "descr": "Normal mode only (x0.01m/s^2)",
       "egroup": "ACCEL",
-      "etitle": "AccelSet5:110km/h(30)",
+      "etitle": "AccelSet5:110km/h(25)",
       "edescr": "Normal mode only (x0.01m/s^2)",
       "min": 1,
       "max": 250,
-      "default": 30,
+      "default": 25,
       "unit": 5
     },
     {
       "group": "가속설정",
       "name": "CruiseMaxVals6",
-      "title": "가속설정6:140km/h(20)",
+      "title": "가속설정6:140km/h(25)",
       "descr": "Normal mode only (x0.01m/s^2)",
       "egroup": "ACCEL",
-      "etitle": "AccelSet6:140km/h(20)",
+      "etitle": "AccelSet6:140km/h(15)",
       "edescr": "(x0.01m/s^2)",
       "min": 1,
       "max": 250,
-      "default": 20,
+      "default": 15,
       "unit": 5
     },
     {
@@ -353,6 +353,45 @@
       "unit": 1
     },
     {
+      "group": "버튼설정",
+      "name": "CruiseButtonTest1",
+      "title": "크루즈버튼스팸쏘기(8)",
+      "descr": "속도버튼신호 발송제한시간,비롱컨에서 사용",
+      "egroup": "BUTN",
+      "etitle": "Cruise Button spam1(8)",
+      "edescr": "",
+      "min": 1,
+      "max": 20,
+      "default": 0,
+      "unit": 1
+    },
+    {
+      "group": "버튼설정",
+      "name": "CruiseButtonTest2",
+      "title": "크루즈버튼스팸쉬기(30)",
+      "descr": "속도버튼신호 발송 휴지시간, 비롱컨에서 사용",
+      "egroup": "BUTN",
+      "etitle": "Cruise Button spam2(30)",
+      "edescr": "",
+      "min": 1,
+      "max": 200,
+      "default": 0,
+      "unit": 1
+    },
+    {
+      "group": "버튼설정",
+      "name": "CruiseButtonTest3",
+      "title": "크루즈버튼스팸연속쏘기(1)",
+      "descr": "속도버튼신호 연속회수, 비롱컨에서 사용",
+      "egroup": "BUTN",
+      "etitle": "Cruise Button spam3(1)",
+      "edescr": "",
+      "min": 1,
+      "max": 20,
+      "default": 0,
+      "unit": 1
+    },
+    {
       "group": "시작",
       "name": "AutoCruiseControl",
       "title": "오토크루즈제어(HKG only)",
@@ -373,6 +412,19 @@
       "egroup": "START",
       "etitle": "Auto Engage on onroad",
       "edescr": "1:SteerEnable, 2:Steer, Cruise Enable",
+      "min": 0,
+      "max": 2,
+      "default": 0,
+      "unit": 1
+    },
+    {
+      "group": "시작",
+      "name": "SpeedFromPCM",
+      "title": "PCM차량속도제어(순정SCC)",
+      "descr": "1:버튼스패밍안함(차량속도), 0: 커브/카메라 감속 + OPLong, 2: 커브/카메라 감속",
+      "egroup": "START",
+      "etitle": "Speed from PCM(StockSCC)",
+      "edescr": "1: Cruise speed control from Car, 0,2: Speed OP",
       "min": 0,
       "max": 2,
       "default": 0,
@@ -648,7 +700,7 @@
       "edescr": "LaneLine controller delay compensation",
       "min": 0,
       "max": 50,
-      "default": 3,
+      "default": 13,
       "unit": 1
     },
     {

@@ -15,7 +15,7 @@ GearShifter = structs.CarState.GearShifter
 V_CRUISE_MIN = 8
 V_CRUISE_MAX = 145
 V_CRUISE_UNSET = 255
-V_CRUISE_INITIAL = 30
+V_CRUISE_INITIAL = 20
 V_CRUISE_INITIAL_EXPERIMENTAL_MODE = 105
 IMPERIAL_INCREMENT = round(CV.MPH_TO_KPH, 1)  # round here to avoid rounding errors incrementing set speed
 
@@ -162,7 +162,7 @@ class VCruiseCarrot:
     self.is_metric = True
 
     self.v_ego_kph_set = 0
-    self._cruise_speed_min, self._cruise_speed_max = 20, 161
+    self._cruise_speed_min, self._cruise_speed_max = 0, 161
     self._cruise_speed_unit = 5
 
     self._gas_pressed_count = 0
@@ -223,7 +223,7 @@ class VCruiseCarrot:
       if self.useLaneLineSpeed != useLaneLineSpeed:
         self.params.put_int_nonblocking("UseLaneLineSpeedApply", useLaneLineSpeed)
       self.useLaneLineSpeed = useLaneLineSpeed
-
+      self.speed_from_pcm = self.params.get_int("SpeedFromPCM")
       
   def update_v_cruise(self, CS, sm, is_metric):
     self._add_log("")
@@ -241,8 +241,9 @@ class VCruiseCarrot:
       lead = sm['radarState'].leadOne
       self.d_rel = lead.dRel if lead.status else 0
       self.v_rel = lead.vRel if lead.status else 0
+      self.v_lead_kph = lead.vLeadK * CV.MS_TO_KPH if lead.status else 0
     if sm.alive['modelV2']:
-      self.model_v_kph = max(sm['modelV2'].velocity.x[0], sm['modelV2'].velocity.x[-1]) * CV.MS_TO_KPH
+      self.model_v_kph = sm['modelV2'].velocity.x[0] * CV.MS_TO_KPH
     else:
       self.model_v_kph = 0
       
@@ -252,33 +253,37 @@ class VCruiseCarrot:
     self._cancel_timer = max(0, self._cancel_timer - 1)
 
     #self.events = []
+    self.v_ego_kph_set = int(CS.vEgoCluster * CV.MS_TO_KPH + 0.5)
+    self._activate_cruise = 0
+    self._prepare_brake_gas(CS)
+    v_cruise_kph = self._update_cruise_buttons(CS, CC, self.v_cruise_kph)
+
+    if self._activate_cruise > 0:
+      #self.events.append(EventName.buttonEnable)
+      self._cruise_ready = False
+    elif self._activate_cruise < 0:
+      #self.events.append(EventName.buttonCancel)
+      self._cruise_ready = True if self._activate_cruise == -2 else False
+
     if CS.cruiseState.available:
       if not self.CP.pcmCruise:
         # if stock cruise is completely disabled, then we can use our own set speed logic
-        self.v_ego_kph_set = int(CS.vEgoCluster * CV.MS_TO_KPH + 0.5)
-        self._activate_cruise = 0
-        self._prepare_brake_gas(CS)
-        v_cruise_kph = self._update_cruise_buttons(CS, CC, self.v_cruise_kph)
-
-        if self._activate_cruise > 0:
-          #self.events.append(EventName.buttonEnable)
-          self._cruise_ready = False
-        elif self._activate_cruise < 0:
-          #self.events.append(EventName.buttonCancel)
-          self._cruise_ready = True if self._activate_cruise == -2 else False
-
-        self.v_cruise_kph = v_cruise_kph
+        self.v_cruise_kph = clip(v_cruise_kph, self._cruise_speed_min, self._cruise_speed_max)
         self.v_cruise_cluster_kph = self.v_cruise_kph
       else:
-        self.v_cruise_kph = CS.cruiseState.speed * CV.MS_TO_KPH
-        self.v_cruise_cluster_kph = CS.cruiseState.speedCluster * CV.MS_TO_KPH
+        if self.speed_from_pcm == 1:
+          self.v_cruise_kph = CS.cruiseState.speed * CV.MS_TO_KPH
+          self.v_cruise_cluster_kph = CS.cruiseState.speedCluster * CV.MS_TO_KPH
+        else:
+          self.v_cruise_kph = clip(v_cruise_kph, 20, self._cruise_speed_max)
+          self.v_cruise_cluster_kph = self.v_cruise_kph
     else:
       self.v_cruise_kph = 20 #V_CRUISE_UNSET
       self.v_cruise_cluster_kph = 20 #V_CRUISE_UNSET
 
   def initialize_v_cruise(self, CS, experimental_mode: bool) -> None:
     # initializing is handled by the PCM
-    if self.CP.pcmCruise:
+    if self.CP.pcmCruise and self.speed_from_pcm == 1:
       return
 
     initial = V_CRUISE_INITIAL_EXPERIMENTAL_MODE if experimental_mode else CS.vEgo * CV.MS_TO_KPH
@@ -418,7 +423,10 @@ class VCruiseCarrot:
           
       elif button_type == ButtonType.gapAdjustCruise:
         longitudinalPersonalityMax = self.params.get_int("LongitudinalPersonalityMax")
-        personality = (self.params.get_int('LongitudinalPersonality') - 1) % longitudinalPersonalityMax
+        if CS.pcmCruiseGap == 0:
+          personality = (self.params.get_int('LongitudinalPersonality') - 1) % longitudinalPersonalityMax
+        else:
+          personality = clip(CS.pcmCruiseGap - 1, 0, longitudinalPersonalityMax)
         self.params.put_int_nonblocking('LongitudinalPersonality', personality)
         #self.events.append(EventName.personalityChanged)
       elif button_type == ButtonType.lfaButton:
@@ -437,6 +445,7 @@ class VCruiseCarrot:
         v_cruise_kph = button_kph
         self._cruise_cancel_state = False
       elif button_type == ButtonType.decelCruise:
+        self._pause_auto_speed_up = True
         v_cruise_kph = button_kph
         self._cruise_cancel_state = False
       elif button_type == ButtonType.gapAdjustCruise:
@@ -474,9 +483,11 @@ class VCruiseCarrot:
     road_limit_kph = self.nRoadLimitSpeed * self.autoSpeedUptoRoadSpeedLimit
     if road_limit_kph < 1.0:
       return v_cruise_kph
-    if road_limit_kph < self.road_limit_kph and False:  # TODO: road_limit speed ÀÚµ¿ ¼Óµµ ´Ù¿î.. »èÁ¦..
+    if road_limit_kph < self.road_limit_kph and False:  # TODO: road_limit speed ìžë™ ì†ë„ ë‹¤ìš´.. ì‚­ì œ..
       if v_cruise_kph > road_limit_kph:
         v_cruise_kph = road_limit_kph
+    elif self.v_lead_kph > v_cruise_kph and v_cruise_kph < road_limit_kph and self.d_rel < 50:
+      v_cruise_kph += 2
     elif self.model_v_kph > v_cruise_kph and v_cruise_kph < road_limit_kph:
       v_cruise_kph += 2
 
@@ -575,7 +586,10 @@ class VCruiseCarrot:
       self._cruise_ready = False
       self._brake_pressed_count = max(1, self._brake_pressed_count + 1)
       self._soft_hold_count = self._soft_hold_count + 1 if CS.vEgo < 0.1 and CS.gearShifter == GearShifter.drive else 0
-      self._soft_hold_active = 1 if self._soft_hold_count > 60 else 0
+      if self.autoCruiseControl == 0 or self.CP.pcmCruise:
+        self._soft_hold_active = 0
+      else:
+        self._soft_hold_active = 1 if self._soft_hold_count > 60 else 0
     else:
       self._soft_hold_count = 0
       self._brake_pressed_count = min(-1, self._brake_pressed_count - 1)

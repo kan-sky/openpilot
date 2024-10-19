@@ -143,16 +143,16 @@ def create_acc_commands_scc(packer, enabled, accel, jerk, idx, hud_control, set_
 
   if long_enabled:
     scc12_acc_mode = 2 if long_override else 1
-    scc14_acc_mode = 4 if long_override else 1
+    scc14_acc_mode = 2 if long_override else 1
     if CS.out.brakeHoldActive:
       scc12_acc_mode = 0
-      scc14_acc_mode = 0
+      scc14_acc_mode = 4
     elif CS.out.brakePressed:
       scc12_acc_mode = 1
       scc14_acc_mode = 1
   else:
     scc12_acc_mode = 0
-    scc14_acc_mode = 0
+    scc14_acc_mode = 4
 
   warning_front = False
 
@@ -230,16 +230,16 @@ def create_acc_commands(packer, enabled, accel, jerk, idx, hud_control, set_spee
 
   if long_enabled:
     scc12_acc_mode = 2 if long_override else 1
-    scc14_acc_mode = 4 if long_override else 1
+    scc14_acc_mode = 2 if long_override else 1
     if CS.out.brakeHoldActive:
       scc12_acc_mode = 0
-      scc14_acc_mode = 0
+      scc14_acc_mode = 4
     elif CS.out.brakePressed:
       scc12_acc_mode = 1
       scc14_acc_mode = 1
   else:
     scc12_acc_mode = 0
-    scc14_acc_mode = 0
+    scc14_acc_mode = 4
 
   warning_front = False
 
@@ -330,6 +330,16 @@ def create_frt_radar_opt(packer):
     "CF_FCA_Equip_Front_Radar": 1,
   }
   return packer.make_can_msg("FRT_RADAR11", 0, frt_radar11_values)
+
+def create_clu11_button(packer, frame, clu11, button, CP):
+  values = clu11
+  values["CF_Clu_CruiseSwState"] = button
+  #values["CF_Clu_AliveCnt1"] = frame % 0x10
+  values["CF_Clu_AliveCnt1"] = (values["CF_Clu_AliveCnt1"] + 1) % 0x10
+  # send buttons to camera on camera-scc based cars
+  bus = 2 if CP.flags & HyundaiFlags.CAMERA_SCC else 0
+  return packer.make_can_msg("CLU11", bus, values)
+
 def create_mdps12(packer, frame, mdps12):
   values = mdps12
   values["CF_Mdps_ToiActive"] = 0
