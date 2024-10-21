@@ -407,6 +407,7 @@ class CarController(CarControllerBase):
       self.button_spamming_count = 0
     return 0
 
+from openpilot.common.filter_simple import StreamingMovingAverage
 class HyundaiJerk:
   def __init__(self):
     self.jerk = 0.0
@@ -416,6 +417,7 @@ class HyundaiJerk:
     self.stopping_count_max = 0.5 / DT_CTRL
     self.stopping_count = self.stopping_count_max
     self.jerk_u_min = 0.5
+    self.jerk_filter = StreamingMovingAverage(int(0.5/DT_CTRL))
     
   def cal_jerk(self, accel, actuators):
     if actuators.longControlState == LongCtrlState.off:
@@ -450,14 +452,14 @@ class HyundaiJerk:
       self.stopping_count = self.stopping_count_max
       #self.jerk_count = 0
     elif actuators.longControlState == LongCtrlState.stopping or actuators.stopRequest:
-      u_jerk_offset = 0.0
-      if self.stopping_count > self.stopping_count_max / 2:
-        u_jerk_offset = 0.2
-      elif self.stopping_count > 0:
-        u_jerk_offset = 0.1
+      jerk_u = self.jerk_u_min
+      if self.stopping_count == self.stopping_count_max:
+        jerk_u = self.jerk_filter.set(self.jerk_u + 0.2)
+      else:
+        jerk_u = self.jerk_filter.process(jerk_u)
       self.stopping_count -= 1
 
-      self.jerk_u = self.jerk_u_min + u_jerk_offset
+      self.jerk_u = jerk_u
       self.jerk_l = 0.5
       self.cb_upper = self.cb_lower = 0.0
     else:
