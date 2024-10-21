@@ -417,6 +417,7 @@ class HyundaiJerk:
     self.stopping_count_max = 0.5 / DT_CTRL
     self.stopping_count = self.stopping_count_max
     self.jerk_u_min = 0.5
+    self.jerk_u_last = 0.5
     self.jerk_filter = StreamingMovingAverage(int(0.5/DT_CTRL))
     
   def cal_jerk(self, accel, actuators):
