@@ -596,7 +596,7 @@ public:
                 }
 #endif
             }
-            else if (xState == 0) {     //XState.lead
+            else if (xState == 0 || xState == 1 || xState == 2) {     //XState.lead
                 draw_dist = true;
             }
         }
@@ -608,18 +608,19 @@ public:
             //ui_draw_text(s, x, disp_y, str, disp_size, COLOR_WHITE, BOLD);
             int wStr = 0, w = 80;
             float dist = radarDist * (s->scene.is_metric ? 1 : METER_TO_FOOT);
+            NVGcolor text_color = (xState==0) ? COLOR_WHITE : (xState==1) ? COLOR_GREY : COLOR_GREEN;
             if (dist > 0.0) {
                 sprintf(str, "%.1f", dist);
                 wStr = 32 * (strlen(str) + 0);
                 ui_fill_rect(s->vg, { (int)(x - w - wStr / 2), (int)(disp_y - 35), wStr, 42 }, isLeadSCC() ? COLOR_RED : COLOR_ORANGE, 15);
-                ui_draw_text(s, x - w, disp_y, str, 40, COLOR_WHITE, BOLD);
+                ui_draw_text(s, x - w, disp_y, str, 40, text_color, BOLD);
             }
             dist = visionDist * (s->scene.is_metric ? 1 : METER_TO_FOOT);
             if (dist > 0.0) {
                 sprintf(str, "%.1f", dist);
                 wStr = 32 * (strlen(str) + 0);
                 ui_fill_rect(s->vg, { (int)(x + w - wStr / 2), (int)(disp_y - 35), wStr, 42 }, COLOR_BLUE, 15);
-                ui_draw_text(s, x + w, disp_y, str, 40, COLOR_WHITE, BOLD);
+                ui_draw_text(s, x + w, disp_y, str, 40, text_color, BOLD);
             }
         }
 
