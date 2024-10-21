@@ -58,7 +58,7 @@ void HomeWindow::updateState(const UIState &s) {
   }
 
   if(s.scene.started) {
-	showDriverView(s.scene.driver_view, s.scene.started);
+	showDriverView(s.scene.driver_view_count > 10, s.scene.started);
   }
 }
 

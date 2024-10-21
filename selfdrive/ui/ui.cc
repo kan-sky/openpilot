@@ -62,10 +62,11 @@ static void update_state(UIState *s) {
 
   if (sm.updated("carState")) {
 	auto carState = sm["carState"].getCarState();
-	scene.driver_view = carState.getGearShifter() == cereal::CarState::GearShifter::REVERSE;
+    if (carState.getGearShifter() == cereal::CarState::GearShifter::REVERSE) scene.driver_view_count ++;
+	else scene.driver_view_count = 0;
   }
   else {
-      scene.driver_view = false;
+      scene.driver_view_count = 0;
   }
   scene.started = sm["deviceState"].getDeviceState().getStarted() && scene.ignition;
 }
