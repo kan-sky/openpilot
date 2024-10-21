@@ -65,7 +65,7 @@ typedef struct UIScene {
   bool started, ignition, is_metric;
   uint64_t started_frame;
 
-  bool driver_view_count = 0;
+  int  driver_view_count = 0;
 
 } UIScene;
 
