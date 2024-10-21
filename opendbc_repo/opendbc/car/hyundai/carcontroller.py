@@ -452,11 +452,19 @@ class HyundaiJerk:
       self.stopping_count = self.stopping_count_max
       #self.jerk_count = 0
     elif actuators.longControlState == LongCtrlState.stopping or actuators.stopRequest:
-      jerk_u = self.jerk_u_min
+      #jerk_u = self.jerk_u_min
+      #if self.stopping_count == self.stopping_count_max:
+      #  jerk_u = self.jerk_filter.set(self.jerk_u + 0.2)
+      #else:
+      #  jerk_u = self.jerk_filter.process(jerk_u)
+
       if self.stopping_count == self.stopping_count_max:
-        jerk_u = self.jerk_filter.set(self.jerk_u + 0.2)
+        jerk_u = self.jerk_u_last = self.jerk_u
+      elif self.stopping_count > 0:
+        jerk_u = self.jerk_u_last
       else:
-        jerk_u = self.jerk_filter.process(jerk_u)
+        jerk_u = self.jerk_u_min
+
       self.stopping_count -= 1
 
       self.jerk_u = jerk_u
