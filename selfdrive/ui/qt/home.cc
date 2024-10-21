@@ -79,15 +79,16 @@ void HomeWindow::showDriverView(bool show, bool started) {
   if (show) {
     emit closeSettings();
     slayout->setCurrentWidget(driver_view);
+    sidebar->setVisible(show == false);
   } else {
     if (started) {
 	  slayout->setCurrentWidget(onroad);
     }
     else {
       slayout->setCurrentWidget(home);
+      sidebar->setVisible(show == false);
     }
   }
-  sidebar->setVisible(show == false);
 }
 
 void HomeWindow::mousePressEvent(QMouseEvent* e) {
