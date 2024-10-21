@@ -459,7 +459,7 @@ class HyundaiJerk:
       #  jerk_u = self.jerk_filter.process(jerk_u)
 
       if self.stopping_count == self.stopping_count_max:
-        jerk_u = self.jerk_u_last = self.jerk_u
+        jerk_u = self.jerk_u_last = max(self.jerk_u, self.jerk_u_min + 0.3)
       elif self.stopping_count > 0 or CS.out.vEgo > 0.02:
         jerk_u = self.jerk_u_last
       else:
