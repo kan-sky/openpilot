@@ -179,7 +179,7 @@ def create_acc_commands_scc(packer, enabled, accel, jerk, idx, hud_control, set_
     values = CS.scc12
     values["ACCMode"] = scc12_acc_mode #2 if enabled and long_override else 1 if long_enabled else 0
     values["StopReq"] = stop_req
-    values["aReqRaw"] = accel
+    values["aReqRaw"] = 0 if stop_req else accel
     values["aReqValue"] = accel
     values["ACCFailInfo"] = 0
 
@@ -227,9 +227,6 @@ def create_acc_commands(packer, enabled, accel, jerk, idx, hud_control, set_spee
   #soft_hold_mode = 2 ## some cars can't enable while braking
   long_enabled = enabled or (soft_hold_active > 0 and soft_hold_mode == 2)
   stop_req = 1 if stopping or (soft_hold_active > 0 and soft_hold_mode == 2) else 0
-
-  accel = 0 if stop_req else accel
-
   d = hud_control.leadDistance
   objGap = 0 if d == 0 else 2 if d < 25 else 3 if d < 40 else 4 if d < 70 else 5 
   objGap2 = 0 if objGap == 0 else 2 if hud_control.leadRelSpeed < -0.2 else 1
@@ -269,7 +266,7 @@ def create_acc_commands(packer, enabled, accel, jerk, idx, hud_control, set_spee
   scc12_values = {
     "ACCMode": scc12_acc_mode,
     "StopReq": stop_req,
-    "aReqRaw": accel,
+    "aReqRaw": 0 if stop_req else accel,
     "aReqValue": accel,  # stock ramps up and down respecting jerk limit until it reaches aReqRaw
     "CR_VSM_Alive": idx % 0xF,
   }

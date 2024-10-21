@@ -165,7 +165,7 @@ def create_acc_control_scc2(packer, CAN, enabled, accel_last, accel, stopping, g
 
   stop_req = 1 if stopping or hud_control.softHold > 0 else 0
 
-  a_val, araw = (0, 0) if stop_req else (a_val, a_raw)
+  a_raw = 0 if stop_req else a_raw
 
   values = cruise_info_copy
   values["ACCMode"] = 0 if not enabled else (2 if gas_override else 1)
