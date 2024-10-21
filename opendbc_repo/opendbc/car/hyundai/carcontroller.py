@@ -461,7 +461,7 @@ class HyundaiJerk:
 
       if self.stopping_count == self.stopping_count_max:
         jerk_u = self.jerk_u_last = self.jerk_u
-      elif self.stopping_count > 0 or abs(CS.aEgo) > 0.1:
+      elif self.stopping_count > 0 or abs(CS.out.aEgo) > 0.1:
         jerk_u = self.jerk_u_last
       else:
         jerk_u = self.jerk_u_min
