@@ -137,6 +137,9 @@ def create_acc_commands_scc(packer, enabled, accel, jerk, idx, hud_control, set_
   #soft_hold_mode = 2 ## some cars can't enable while braking
   long_enabled = enabled or (soft_hold_active > 0 and soft_hold_mode == 2)
   stop_req = 1 if stopping or (soft_hold_active > 0 and soft_hold_mode == 2) else 0
+
+  accel = 0 if stop_req else accel
+
   d = hud_control.leadDistance
   objGap = 0 if d == 0 else 2 if d < 25 else 3 if d < 40 else 4 if d < 70 else 5 
   objGap2 = 0 if objGap == 0 else 2 if hud_control.leadRelSpeed < -0.2 else 1
@@ -224,6 +227,9 @@ def create_acc_commands(packer, enabled, accel, jerk, idx, hud_control, set_spee
   #soft_hold_mode = 2 ## some cars can't enable while braking
   long_enabled = enabled or (soft_hold_active > 0 and soft_hold_mode == 2)
   stop_req = 1 if stopping or (soft_hold_active > 0 and soft_hold_mode == 2) else 0
+
+  accel = 0 if stop_req else accel
+
   d = hud_control.leadDistance
   objGap = 0 if d == 0 else 2 if d < 25 else 3 if d < 40 else 4 if d < 70 else 5 
   objGap2 = 0 if objGap == 0 else 2 if hud_control.leadRelSpeed < -0.2 else 1
