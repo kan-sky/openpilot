@@ -55,9 +55,6 @@ class CarController(CarControllerBase):
     self.pitch = FirstOrderFilter(0., 0.09 * 4, DT_CTRL * 4)  # runs at 25 Hz
     self.accel_g = 0.0
 
-    # test
-    self.jerk = 0
-
   @staticmethod
   def calc_pedal_command(accel: float, long_active: bool) -> float:
     if not long_active: return 0.
@@ -206,10 +203,8 @@ class CarController(CarControllerBase):
           if actuators.longControlState == LongCtrlState.starting:
             if (self.frame - self.last_button_frame) * DT_CTRL > 0.2:
               self.last_button_frame = self.frame
-              self.jerk += 1
               for i in range(12):
-                #can_sends.append(gmcan.create_buttons(self.packer_pt, CanBus.POWERTRAIN, CS.buttons_counter, CruiseButtons.RES_ACCEL))
-                can_sends.append(gmcan.gas_regen_command(self.packer_pt, CanBus.POWERTRAIN, self.apply_gas, idx, acc_engaged, at_full_stop, self.jerk))
+                can_sends.append(gmcan.create_buttons(self.packer_pt, CanBus.POWERTRAIN, CS.buttons_counter, CruiseButtons.RES_ACCEL))
           # GasRegenCmdActive needs to be 1 to avoid cruise faults. It describes the ACC state, not actuation
           can_sends.append(gmcan.create_gas_regen_command(self.packer_pt, CanBus.POWERTRAIN, self.apply_gas, idx, acc_engaged, at_full_stop))
           can_sends.append(gmcan.create_friction_brake_command(self.packer_ch, friction_brake_bus, self.apply_brake,
