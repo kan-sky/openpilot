@@ -440,8 +440,6 @@ class HyundaiJerk:
     jerk = jerk + (a_error * 1.0) #2.0
 
     jerkLimit = 5.0
-    self.jerk_u = self.jerk_l = jerkLimit
-    self.cb_upper = self.cb_lower = 0.0
 
     #startingJerk = 0.5 #self.jerkStartLimit
     #self.jerk_count += DT_CTRL
@@ -451,6 +449,7 @@ class HyundaiJerk:
       self.jerk_u = jerkLimit
       self.jerk_l = jerkLimit
       self.stopping_count = self.stopping_count_max
+      self.cb_upper = self.cb_lower = 0.0
       #self.jerk_count = 0
     elif actuators.longControlState == LongCtrlState.stopping or actuators.stopRequest:
       #jerk_u = self.jerk_u_min
@@ -476,6 +475,7 @@ class HyundaiJerk:
       if CP.flags & HyundaiFlags.CANFD:
         self.jerk_u = min(max(self.jerk_u_min, jerk * 2.0), jerk_max)
         self.jerk_l = min(max(1.0, -jerk * 3.0), jerkLimit)
+        self.cb_upper = self.cb_lower = 0.0
       else:
         self.jerk_u = min(max(self.jerk_u_min, jerk * 2.0), jerk_max)
         self.jerk_l = min(max(0.5, -jerk * 2.0), jerkLimit)
