@@ -58,7 +58,7 @@ void HomeWindow::updateState(const UIState &s) {
   }
 
   if(s.scene.started) {
-	showDriverView(s.scene.driver_view);
+	showDriverView(s.scene.driver_view, s.scene.started);
   }
 }
 
@@ -75,12 +75,17 @@ void HomeWindow::offroadTransition(bool offroad) {
   }
 }
 
-void HomeWindow::showDriverView(bool show) {
+void HomeWindow::showDriverView(bool show, bool started) {
   if (show) {
     emit closeSettings();
     slayout->setCurrentWidget(driver_view);
   } else {
-    slayout->setCurrentWidget(home);
+    if (started) {
+	  slayout->setCurrentWidget(onroad);
+    }
+    else {
+      slayout->setCurrentWidget(home);
+    }
   }
   sidebar->setVisible(show == false);
 }
