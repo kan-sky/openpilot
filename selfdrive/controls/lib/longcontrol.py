@@ -12,7 +12,7 @@ LongCtrlState = car.CarControl.Actuators.LongControlState
 
 
 def long_control_state_trans(CP, active, long_control_state, v_ego,
-                             should_stop, brake_pressed, cruise_standstill, a_ego, stopping_accel):
+                             should_stop, brake_pressed, cruise_standstill, a_ego, j_target):
   stopping_condition = should_stop
   starting_condition = (not should_stop and
                         not cruise_standstill and
@@ -44,7 +44,7 @@ def long_control_state_trans(CP, active, long_control_state, v_ego,
     elif long_control_state in [LongCtrlState.starting, LongCtrlState.pid]:
       if stopping_condition:
         #if a_ego > stopping_accel and v_ego < 1.0:
-        if v_ego < 1.0:
+        if v_ego < 1.0 and abs(j_target) < 0.2:
           stop_request = True
         if long_control_state == LongCtrlState.starting:
           long_control_state = LongCtrlState.stopping
@@ -103,7 +103,7 @@ class LongControl:
 
     self.long_control_state, stop_request = long_control_state_trans(self.CP, active, self.long_control_state, CS.vEgo,
                                                        should_stop, CS.brakePressed,
-                                                       CS.cruiseState.standstill, CS.aEgo, self.stopping_accel if self.stopping_accel < 0.0 else -0.5)
+                                                       CS.cruiseState.standstill, CS.aEgo, j_target_now)
     if active and soft_hold_active:
       self.long_control_state = LongCtrlState.stopping
       
