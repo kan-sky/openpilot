@@ -206,7 +206,7 @@ DevicePanel::DevicePanel(SettingsWindow *parent) : ListWidget(parent) {
   power_layout->addWidget(poweroff_btn);
   QObject::connect(poweroff_btn, &QPushButton::clicked, this, &DevicePanel::poweroff);
 
-  if (!Hardware::PC()) {
+  if (true || !Hardware::PC()) {
       connect(uiState(), &UIState::offroadTransition, poweroff_btn, &QPushButton::setVisible);
   }
 
