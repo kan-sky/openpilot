@@ -731,6 +731,19 @@
     },
     {
       "group": "시작",
+      "name": "HotspotOnBoot",
+      "title": "부팅시 핫스팟켜기",
+      "descr": "COMMA에 USIM을 장착한경우 핫스팟을 자동으로 켜주는 기능",
+      "egroup": "START",
+      "etitle": "Enable HotSpot(0)",
+      "edescr": "",
+      "min": 0,
+      "max": 1,
+      "default": 0,
+      "unit": 1
+    },
+    {
+      "group": "시작",
       "name": "SoundVolumeAdjust",
       "title": "사운드볼륨조절(100%)",
       "descr": "",
