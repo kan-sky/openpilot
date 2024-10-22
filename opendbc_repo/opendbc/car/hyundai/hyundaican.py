@@ -171,7 +171,7 @@ def create_acc_commands_scc(packer, enabled, accel, jerk, idx, hud_control, set_
     values = CS.scc12
     values["ACCMode"] = scc12_acc_mode #2 if enabled and long_override else 1 if long_enabled else 0
     values["StopReq"] = stop_req
-    values["aReqRaw"] = 0 if stop_req else accel
+    values["aReqRaw"] = accel
     values["aReqValue"] = accel
     values["ACCFailInfo"] = 0
 
@@ -258,7 +258,7 @@ def create_acc_commands(packer, enabled, accel, jerk, idx, hud_control, set_spee
   scc12_values = {
     "ACCMode": scc12_acc_mode,
     "StopReq": stop_req,
-    "aReqRaw": 0 if stop_req else accel,
+    "aReqRaw": accel,
     "aReqValue": accel,  # stock ramps up and down respecting jerk limit until it reaches aReqRaw
     "CR_VSM_Alive": idx % 0xF,
   }
