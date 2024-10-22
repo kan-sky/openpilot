@@ -112,6 +112,7 @@ def get_default_params():
     ("SpeedFromPCM", "2"),       
     ("SteerActuatorDelay", "26"),       
     ("MaxTimeOffroadMin", "180"),
+    ("HotspotOnBoot", "0"),
   ]
   return default_params
 

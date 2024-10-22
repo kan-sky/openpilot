@@ -258,6 +258,7 @@ std::unordered_map<std::string, uint32_t> keys = {
     { "RadarReactionFactor", PERSISTENT },
     { "EnableRadarTracks", PERSISTENT },
     { "EnableRadarTracksResult", PERSISTENT | CLEAR_ON_MANAGER_START },
+    { "HotspotOnBoot", PERSISTENT },
     { "HyundaiCameraSCC", PERSISTENT },
     { "CanfdHDA2", PERSISTENT },
     { "SoundVolumeAdjust", PERSISTENT },
