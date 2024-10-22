@@ -74,15 +74,15 @@ class LongControl:
     soft_hold_active = CS.softHoldActive > 0
     a_target = long_plan.aTarget
     v_target = long_plan.vTarget
+    j_target = long_plan.jTarget
     should_stop = long_plan.shouldStop
 
     speeds = long_plan.speeds
     if len(speeds) == CONTROL_N:
       v_target_now = interp(t_since_plan, ModelConstants.T_IDXS[:CONTROL_N], long_plan.speeds)
       a_target_now = interp(t_since_plan, ModelConstants.T_IDXS[:CONTROL_N], long_plan.accels)
-      j_target_now = interp(t_since_plan, ModelConstants.T_IDXS[:CONTROL_N], long_plan.jerks)
     else:
-      v_target_now = a_target_now = j_target_now = 0.0
+      v_target_now = a_target_now = 0.0
  
     self.readParamCount += 1
     if self.readParamCount >= 100:
@@ -103,7 +103,7 @@ class LongControl:
 
     self.long_control_state, stop_request = long_control_state_trans(self.CP, active, self.long_control_state, CS.vEgo,
                                                        should_stop, CS.brakePressed,
-                                                       CS.cruiseState.standstill, CS.aEgo, j_target_now)
+                                                       CS.cruiseState.standstill, CS.aEgo, j_target)
     if active and soft_hold_active:
       self.long_control_state = LongCtrlState.stopping
       
@@ -134,4 +134,4 @@ class LongControl:
                                      feedforward=a_target)
 
     self.last_output_accel = clip(output_accel, accel_limits[0], accel_limits[1])
-    return self.last_output_accel, a_target_now, j_target_now, stop_request
+    return self.last_output_accel, a_target_now, j_target, stop_request

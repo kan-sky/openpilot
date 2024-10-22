@@ -57,23 +57,25 @@ def limit_accel_in_turns(v_ego, angle_steers, a_target, CP):
   return [a_target[0], min(a_target[1], a_x_allowed)]
 
 from openpilot.common.params import Params
-def get_accel_from_plan(CP, speeds, accels):
+def get_accel_from_plan(CP, speeds, accels, jerks):
   longitudinalActuatorDelay = Params().get_float("LongActuatorDelay")*0.01
   if len(speeds) == CONTROL_N:
     v_target_now = interp(DT_MDL, CONTROL_N_T_IDX, speeds)
     a_target_now = interp(DT_MDL, CONTROL_N_T_IDX, accels)
 
     v_target = interp(longitudinalActuatorDelay + DT_MDL, CONTROL_N_T_IDX, speeds)
+    j_target = interp(longitudinalActuatorDelay + DT_MDL, CONTROL_N_T_IDX, jerks)
     a_target = 2 * (v_target - v_target_now) / longitudinalActuatorDelay - a_target_now
 
     v_target_1sec = interp(longitudinalActuatorDelay + DT_MDL + 1.0, CONTROL_N_T_IDX, speeds)
   else:
     v_target = 0.0
+    j_target = 0.0
     v_target_1sec = 0.0
     a_target = 0.0
   should_stop = (v_target < CP.vEgoStopping and
                  v_target_1sec < CP.vEgoStopping)
-  return a_target, should_stop, v_target
+  return a_target, should_stop, v_target, j_target
 
 
 class LongitudinalPlanner:
@@ -226,13 +228,14 @@ class LongitudinalPlanner:
     longitudinalPlan.longitudinalPlanSource = self.mpc.source
     longitudinalPlan.fcw = self.fcw
         
-    a_target, should_stop, v_target = get_accel_from_plan(self.CP, longitudinalPlan.speeds, longitudinalPlan.accels)
+    a_target, should_stop, v_target, j_target = get_accel_from_plan(self.CP, longitudinalPlan.speeds, longitudinalPlan.accels, longitudinalPlan.jerks)
     longitudinalPlan.aTarget = a_target
     longitudinalPlan.shouldStop = should_stop
     longitudinalPlan.allowBrake = True
     longitudinalPlan.allowThrottle = self.allow_throttle
 
     longitudinalPlan.vTarget = v_target
+    longitudinalPlan.jTarget = j_target
     longitudinalPlan.xState = self.carrot.xState.value
     longitudinalPlan.trafficState = self.carrot.trafficState.value
     longitudinalPlan.xTarget = self.v_cruise_kph
