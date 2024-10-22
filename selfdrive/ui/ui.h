@@ -93,6 +93,8 @@ public:
   float show_brightness_ratio = 1.0;
   int show_brightness_timer = 20;
 
+  bool reverse_driver_view = false;
+
 
 signals:
   void uiUpdate(const UIState &s);

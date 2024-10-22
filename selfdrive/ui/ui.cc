@@ -62,7 +62,7 @@ static void update_state(UIState *s) {
 
   if (sm.updated("carState")) {
 	auto carState = sm["carState"].getCarState();
-    if (carState.getGearShifter() == cereal::CarState::GearShifter::REVERSE) scene.driver_view_count ++;
+    if (s->reverse_driver_view && carState.getGearShifter() == cereal::CarState::GearShifter::REVERSE) scene.driver_view_count ++;
 	else scene.driver_view_count = 0;
   }
   else {
@@ -75,6 +75,7 @@ void ui_update_params(UIState *s) {
   auto params = Params();
   s->scene.is_metric = params.getBool("IsMetric");
   s->show_brightness_ratio = params.getFloat("ShowCustomBrightness") / 100.;
+  s->reverse_driver_view = params.getBool("ReverseDriverView");
 }
 
 void UIState::updateStatus() {

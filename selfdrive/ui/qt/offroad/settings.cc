@@ -581,6 +581,7 @@ CarrotPanel::CarrotPanel(QWidget* parent) : QWidget(parent) {
     dispToggles->addItem(new CValueControl("ShowRadarInfo", "DISP:Radar Info", "0:None,1:Display,2:RelPos,3:Stopped Car", "../assets/offroad/icon_shell.png", 0, 3, 1));
     dispToggles->addItem(new CValueControl("ShowPlotMode", "DISP:Debug plot", "", "../assets/offroad/icon_shell.png", 0, 10, 1));
     dispToggles->addItem(new CValueControl("ShowCustomBrightness", "Brightness ratio", "", "../assets/offroad/icon_shell.png", 0, 100, 10));
+    dispToggles->addItem(new CValueControl("ReverseDriverView", "DISP:Reverse driver view", "", "../assets/offroad/icon_shell.png", 0, 1, 1));
 
 
     pathToggles = new ListWidget(this);
