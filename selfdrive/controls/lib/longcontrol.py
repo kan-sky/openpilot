@@ -12,14 +12,12 @@ LongCtrlState = car.CarControl.Actuators.LongControlState
 
 
 def long_control_state_trans(CP, active, long_control_state, v_ego,
-                             should_stop, brake_pressed, cruise_standstill, a_ego, j_target, stop_request_last, stopping_accel):
+                             should_stop, brake_pressed, cruise_standstill, a_ego, stopping_accel):
   stopping_condition = should_stop
   starting_condition = (not should_stop and
                         not cruise_standstill and
                         not brake_pressed)
   started_condition = v_ego > CP.vEgoStarting
-
-  stop_request = False
 
   if not active:
     long_control_state = LongCtrlState.off
@@ -35,7 +33,6 @@ def long_control_state_trans(CP, active, long_control_state, v_ego,
           long_control_state = LongCtrlState.pid
 
     elif long_control_state == LongCtrlState.stopping:
-      stop_request = True
       if starting_condition and CP.startingState:
         long_control_state = LongCtrlState.starting
       elif starting_condition:
@@ -43,17 +40,13 @@ def long_control_state_trans(CP, active, long_control_state, v_ego,
 
     elif long_control_state in [LongCtrlState.starting, LongCtrlState.pid]:
       if stopping_condition:
-        #if a_ego > stopping_accel and v_ego < 1.0:
-        stop_req_accel = min(stopping_accel, -0.5)
-        if (v_ego < 1.5 and a_ego > stop_req_accel) or stop_request_last:
-          stop_request = True
-        if v_ego < 0.2 and a_ego > stopping_accel:
+        if a_ego > stopping_accel and v_ego < 1.0:
           long_control_state = LongCtrlState.stopping
         if long_control_state == LongCtrlState.starting:
           long_control_state = LongCtrlState.stopping
       elif started_condition:
         long_control_state = LongCtrlState.pid
-  return long_control_state, stop_request
+  return long_control_state
 
 class LongControl:
   def __init__(self, CP):
@@ -68,8 +61,6 @@ class LongControl:
     self.params = Params()
     self.readParamCount = 0
     self.stopping_accel = 0
-
-    self.stop_request_last = False
 
   def reset(self):
     self.pid.reset()
@@ -106,10 +97,9 @@ class LongControl:
     self.pid.neg_limit = accel_limits[0]
     self.pid.pos_limit = accel_limits[1]
 
-    self.long_control_state, stop_request = long_control_state_trans(self.CP, active, self.long_control_state, CS.vEgo,
+    self.long_control_state = long_control_state_trans(self.CP, active, self.long_control_state, CS.vEgo,
                                                        should_stop, CS.brakePressed,
-                                                       CS.cruiseState.standstill, CS.aEgo, j_target, self.stop_request_last, self.stopping_accel)
-    self.stop_request_last = stop_request
+                                                       CS.cruiseState.standstill, CS.aEgo, self.stopping_accel)
     if active and soft_hold_active:
       self.long_control_state = LongCtrlState.stopping
       
@@ -140,4 +130,4 @@ class LongControl:
                                      feedforward=a_target)
 
     self.last_output_accel = clip(output_accel, accel_limits[0], accel_limits[1])
-    return self.last_output_accel, a_target_now, j_target, stop_request
+    return self.last_output_accel, a_target_now, j_target
