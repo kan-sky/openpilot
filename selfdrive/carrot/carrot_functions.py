@@ -193,7 +193,7 @@ class CarrotPlanner:
       carrot_man = sm['carrotMan']
       atc_turn_left = carrot_man.atcType == "turn left"
       trigger_start = self.carrot_staty_stop = False
-      if atc_turn_left:
+      if atc_turn_left or sm['carState'].leftBlinker:
         if self.trafficState_carrot == 1 and carrot_man.trafficState == 3: # red -> left triggered
           trigger_start = True
         elif carrot_man.trafficState in [1, 2]:
@@ -302,7 +302,7 @@ class CarrotPlanner:
       elif radar_detected and (radarstate.leadOne.dRel - stop_model_x) < 2.0:
         self.xState = XState.lead
       elif self.stopping_count == 0:
-        if self.trafficState == TrafficState.green and not self.carrot_stay_stop:
+        if self.trafficState == TrafficState.green and not self.carrot_stay_stop and not carstate.leftBlinker:
           self.xState = XState.e2ePrepare
       self.stopping_count = max(0, self.stopping_count - 1)
       v_cruise = 0
