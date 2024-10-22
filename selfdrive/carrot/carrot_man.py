@@ -658,8 +658,10 @@ class CarrotServ:
   def traffic_light(self, x, y, color, cnf):    
     traffic_red = 0
     traffic_green = 0
+    traffic_left = 0
     traffic_red_trig = 0
     traffic_green_trig = 0
+    traffic_left_trig = 0
     for pdata in self.traffic_light_q:
       px, py, pcolor,pcnf = pdata
       if abs(x - px) < 0.2 and abs(y - py) < 0.2:
@@ -673,6 +675,9 @@ class CarrotServ:
           if color in ["Green Light"]: #, "Left turn"]:
             traffic_green_trig += cnf
             traffic_green += cnf
+          elif color in ["Left turn"]:
+            traffic_left_trig += cnf
+            traffic_left += cnf
           elif color in ["Red Light", "Yellow Light"]:
             traffic_red += cnf
 
@@ -685,6 +690,8 @@ class CarrotServ:
       self.traffic_state = 2
       #self._add_log("Green light triggered")
       #print("Green light triggered")
+    elif traffic_left_trig > 0:
+      self.traffic_state = 3
     elif traffic_red > 0:
       self.traffic_state = 1
       #self._add_log("Red light continued")
