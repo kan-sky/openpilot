@@ -198,7 +198,7 @@ class CarrotPlanner:
           trigger_start = True
         elif carrot_man.trafficState in [1, 2]:
           self.carrot_stay_stop = True
-      else self.trafficState_carrot == 1 and carrot_man.trafficState == 2:  # red -> green triggered
+      elif self.trafficState_carrot == 1 and carrot_man.trafficState == 2:  # red -> green triggered
         trigger_start = True
       else:
         trigger_start = False
