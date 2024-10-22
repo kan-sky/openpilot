@@ -44,7 +44,7 @@ def long_control_state_trans(CP, active, long_control_state, v_ego,
     elif long_control_state in [LongCtrlState.starting, LongCtrlState.pid]:
       if stopping_condition:
         #if a_ego > stopping_accel and v_ego < 1.0:
-        if v_ego < 1.0 and abs(j_target) < 0.5:
+        if v_ego < 1.0 and abs(j_target) < 0.2 and abs(a_ego) < 0.2:
           stop_request = True
         if v_ego < 0.2 and abs(a_ego) < 0.1:
           long_control_state = LongCtrlState.stopping
