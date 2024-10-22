@@ -1,5 +1,16 @@
 #!/usr/bin/env bash
 
+if [ "$(getprop persist.sys.locale)" != "ko-KR" ]; then
+  mount -o rw, remount /system
+  setprop persist.sys.locale ko-KR
+  setprop persist.sys.language ko
+  setprop persist.sys.country KR
+  setprop persist.sys.timezone Asia/Seoul
+  mount -o ro, remount /system
+  sleep 2
+  reboot
+fi
+
 if [ -z "$BASEDIR" ]; then
   BASEDIR="/data/openpilot"
 fi
@@ -80,7 +91,12 @@ function launch {
 
   # write tmux scrollback to a file
   tmux capture-pane -pq -S-1000 > /tmp/launch_log
-
+  if python -c "import flask" > /dev/null 2>&1; then
+    echo "Flask already installed."
+  else
+    echo "Flask installing."
+    pip install flask
+fi
   # start manager
   cd system/manager
   if [ ! -f $DIR/prebuilt ]; then

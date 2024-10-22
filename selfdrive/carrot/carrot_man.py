@@ -20,7 +20,6 @@ from openpilot.common.params import Params
 import cereal.messaging as messaging
 from cereal import log
 from common.numpy_fast import clip, interp
-import openpilot.selfdrive.frogpilot.fleetmanager.helpers as fleet
 from common.filter_simple import StreamingMovingAverage
 
 NetworkType = log.DeviceState.NetworkType
@@ -350,11 +349,15 @@ class CarrotMan:
         time.sleep(1)
 
   def save_toggle_values(self):
-    toggle_values = fleet.get_all_toggle_values()
-    file_path = os.path.join('/data', 'toggle_values.json')
-    with open(file_path, 'w') as file:
-      json.dump(toggle_values, file, indent=2)
-    pass
+    try:
+      import openpilot.selfdrive.frogpilot.fleetmanager.helpers as fleet
+
+      toggle_values = fleet.get_all_toggle_values()
+      file_path = os.path.join('/data', 'toggle_values.json')
+      with open(file_path, 'w') as file:
+        json.dump(toggle_values, file, indent=2)
+    except Exception as e:
+      print(f"save_toggle_values error: {e}")
 
   def carrot_cmd_zmq(self):
 
@@ -433,7 +436,7 @@ class CarrotMan:
     ## 국가법령정보센터: 도로설계기준
     V_CURVE_LOOKUP_BP = [0., 1./800., 1./670., 1./560., 1./440., 1./360., 1./265., 1./190., 1./135., 1./85., 1./55., 1./30., 1./15.]
     #V_CRUVE_LOOKUP_VALS = [300, 150, 120, 110, 100, 90, 80, 70, 60, 50, 40, 30, 20]
-    V_CRUVE_LOOKUP_VALS = [300, 150, 120, 110, 100, 90, 80, 70, 60, 50, 45, 35, 30]
+    V_CRUVE_LOOKUP_VALS = [280, 130, 115, 110, 100, 90, 80, 70, 60, 40, 35, 25, 20]
 
     if not sm.alive['carState'] and not sm.alive['modelV2']:
         return 250
@@ -446,7 +449,7 @@ class CarrotMan:
     v_ego = sm['carState'].vEgo
     # 회전속도를 선속도 나누면 : 곡률이 됨. [12:20]은 약 1.4~3.5초 앞의 곡률을 계산함.
     orientationRates = np.array(sm['modelV2'].orientationRate.z, dtype=np.float32)
-    speed = min(self.turn_speed_last / 3.6, clip(v_ego, 0.5, 100.0))
+    speed = min(self.turn_speed_last / 3.6, clip(v_ego, 0.3, 100.0))
     
     # 절대값이 가장 큰 요소의 인덱스를 찾습니다.
     max_index = np.argmax(np.abs(orientationRates[12:20]))
@@ -1156,6 +1159,7 @@ class CarrotServ:
     import datetime
     new_time = datetime.datetime.utcfromtimestamp(epoch_time)
     localtime_path = "/data/etc/localtime"
+
     no_timezone = False
     try:
       if os.path.getsize(localtime_path) == 0:

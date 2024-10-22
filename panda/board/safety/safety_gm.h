@@ -16,7 +16,7 @@ enum {
 typedef enum {
   GM_ASCM,
   GM_CAM,
-  GM_SDGM // 대형트럭 차량용?
+  GM_SDGM // 대형차량용?(SUV등)
 } GmHardware;
 static GmHardware gm_hw = GM_ASCM;
 static bool gm_cam_long = false;
@@ -30,7 +30,7 @@ static bool gm_force_ascm = false;
 static void gm_rx_hook(const CANPacket_t *to_push) {
 
   const int GM_STANDSTILL_THRSLD = 10;  // 0.311kph
-  //페달 롱컨 차량을 위한 gas_interceptor, 이하 enable_gas_interceptor 변수로 추가.
+  //페달 롱컨 차량: 주로 enable_gas_interceptor 변수.
   // panda interceptor threshold needs to be equivalent to openpilot threshold to avoid controls mismatches
   // If thresholds are mismatched then it is possible for panda to see the gas fall and rise while openpilot is in the pre-enabled state
   const int GM_GAS_INTERCEPTOR_THRESHOLD = 515; // (675 + 355) / 2 ratio between offset and gain from dbc file

@@ -42,7 +42,7 @@ int get_alternative_experience(void){
 bool get_relay_malfunction(void){
   return relay_malfunction;
 }
-
+// gm
 int get_gas_interceptor_prev(void){
   return gas_interceptor_prev;
 }

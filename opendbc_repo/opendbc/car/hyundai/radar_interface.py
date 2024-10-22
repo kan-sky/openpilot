@@ -25,10 +25,12 @@ def get_radar_can_parser(CP, radar_tracks):
 def get_radar_can_parser_scc(CP):
   if CP.flags & HyundaiFlags.CANFD:
     messages = [("SCC_CONTROL", 50)]
+    bus = 1 if CP.flags & HyundaiFlags.CANFD_HDA2 else 0
   else:
     messages = [("SCC11", 50)]
+    bus = 0
     
-  bus = 2 if CP.flags & HyundaiFlags.CAMERA_SCC else 0
+  bus = 2 if CP.flags & HyundaiFlags.CAMERA_SCC else bus
   return CANParser(DBC[CP.carFingerprint]['pt'], messages, bus)
 
 class RadarInterface(RadarInterfaceBase):

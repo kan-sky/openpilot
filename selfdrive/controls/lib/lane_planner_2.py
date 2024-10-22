@@ -10,7 +10,7 @@ from common.params import Params
 
 TRAJECTORY_SIZE = 33
 # positive numbers go right
-CAMERA_OFFSET = float(Params().get_int("cameraOffset")) * 0.01 # 0.08
+CAMERA_OFFSET = Params().get_float("CameraOffset") * 0.01 # 0.08
 MIN_LANE_DISTANCE = 2.6
 MAX_LANE_DISTANCE = 3.7
 MAX_LANE_CENTERING_AWAY = 1.85
@@ -46,8 +46,8 @@ class LanePlanner:
     self.rll_y = np.zeros((TRAJECTORY_SIZE,))
     self.le_y = np.zeros((TRAJECTORY_SIZE,))
     self.re_y = np.zeros((TRAJECTORY_SIZE,))
-    self.lane_width_estimate = FirstOrderFilter(3.2, 9.95, DT_MDL)
-    self.lane_width = 3.2
+    self.lane_width_estimate = FirstOrderFilter(3.5, 9.95, DT_MDL)
+    self.lane_width = 3.5
     self.lane_change_multiplier = 1
     self.lane_width_updated_count = 0
 
@@ -81,8 +81,8 @@ class LanePlanner:
       self.ll_t = (np.array(lane_lines[1].t) + np.array(lane_lines[2].t))/2
       # left and right ll x is the same
       self.ll_x = lane_lines[1].x
-      self.lll_y = np.array(lane_lines[1].y)
-      self.rll_y = np.array(lane_lines[2].y)
+      self.lll_y = np.array(lane_lines[1].y) + CAMERA_OFFSET
+      self.rll_y = np.array(lane_lines[2].y) + CAMERA_OFFSET
       self.lll_prob = md.laneLineProbs[1]
       self.rll_prob = md.laneLineProbs[2]
       self.lll_std = md.laneLineStds[1]

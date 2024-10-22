@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+ï»¿#!/usr/bin/env python3
 import json
 import os
 from math import fabs, exp
@@ -15,10 +15,10 @@ TransmissionType = structs.CarParams.TransmissionType
 NetworkLocation = structs.CarParams.NetworkLocation
 
 
-PEDAL_MSG = 0x201 # 513: pedal_interceptor ÁÖ¼Ò 
+PEDAL_MSG = 0x201 # 513: pedal_interceptor ì£¼ì†Œ 
 CAM_MSG = 0x320  # AEBCmd
                  # TODO: Is this always linked to camera presence?
-ACCELERATOR_POS_MSG = 0xbe # 190: regen_paddle ÁÖ¼Ò
+ACCELERATOR_POS_MSG = 0xbe # 190: regen_paddle ì£¼ì†Œ
 
 NON_LINEAR_TORQUE_PARAMS = {
   CAR.CHEVROLET_BOLT_EUV: [2.6531724862969748, 1.0, 0.1919764879840985, 0.009054123646805178],

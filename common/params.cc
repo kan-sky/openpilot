@@ -239,6 +239,9 @@ std::unordered_map<std::string, uint32_t> keys = {
     { "StoppingAccel", PERSISTENT },
     { "AutoSpeedUptoRoadSpeedLimit", PERSISTENT },
     { "StopDistanceCarrot", PERSISTENT },
+    { "CruiseButtonTest1", PERSISTENT },
+    { "CruiseButtonTest2", PERSISTENT },
+    { "CruiseButtonTest3", PERSISTENT },
     { "MyDrivingMode", PERSISTENT },
     { "SteerActuatorDelay", PERSISTENT },
     { "CruiseMaxVals1", PERSISTENT },
@@ -269,7 +272,6 @@ std::unordered_map<std::string, uint32_t> keys = {
     { "AdjustLaneOffset", PERSISTENT },
     { "AdjustCurveOffset", PERSISTENT },
     { "AdjustLaneTime", PERSISTENT },
-    { "cameraOffset", PERSISTENT },
     { "MaxAngleFrames", PERSISTENT },
     { "SoftHoldMode", PERSISTENT },
     { "LateralTorqueCustom", PERSISTENT },
@@ -278,6 +280,7 @@ std::unordered_map<std::string, uint32_t> keys = {
     { "CustomSteerMax", PERSISTENT },
     { "CustomSteerDeltaUp", PERSISTENT },
     { "CustomSteerDeltaDown", PERSISTENT },
+    { "SpeedFromPCM", PERSISTENT },
     { "MaxTimeOffroadMin", PERSISTENT },
 
 
@@ -291,7 +294,9 @@ std::unordered_map<std::string, uint32_t> keys = {
     {"NNFF", PERSISTENT},
     {"NNFFLite", PERSISTENT},
     {"NNFFModelName", PERSISTENT},
-
+    {"CameraOffset", PERSISTENT },
+    {"CurvatureFactor", PERSISTENT},
+    {"TrafficStopDistanceAdjust", PERSISTENT},
 };
 
 } // namespace
