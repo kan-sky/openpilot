@@ -123,7 +123,7 @@ class CarController(CarControllerBase):
 
     # accel + longitudinal
     accel = clip(actuators.accel, CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX)
-    stopping = actuators.longControlState == LongCtrlState.stopping
+    stopping = actuators.stopRequest #actuators.longControlState == LongCtrlState.stopping
     set_speed_in_units = hud_control.setSpeed * (CV.MS_TO_KPH if CS.is_metric else CV.MS_TO_MPH)
 
     # HUD messages
@@ -407,12 +407,18 @@ class CarController(CarControllerBase):
       self.button_spamming_count = 0
     return 0
 
+from openpilot.common.filter_simple import StreamingMovingAverage
 class HyundaiJerk:
   def __init__(self):
     self.jerk = 0.0
     self.accel_last = 0
     self.jerk_u = self.jerk_l = 0.0
     self.cb_upper = self.cb_lower = 0.0
+    self.stopping_count_max = 0.5 / DT_CTRL
+    self.stopping_count = self.stopping_count_max
+    self.jerk_u_min = 0.5
+    self.jerk_u_last = 0.5
+    self.jerk_filter = StreamingMovingAverage(int(0.5/DT_CTRL))
     
   def cal_jerk(self, accel, actuators):
     if actuators.longControlState == LongCtrlState.off:
@@ -434,8 +440,6 @@ class HyundaiJerk:
     jerk = jerk + (a_error * 1.0) #2.0
 
     jerkLimit = 5.0
-    self.jerk_u = self.jerk_l = jerkLimit
-    self.cb_upper = self.cb_lower = 0.0
 
     #startingJerk = 0.5 #self.jerkStartLimit
     #self.jerk_count += DT_CTRL
@@ -443,14 +447,37 @@ class HyundaiJerk:
     jerk_max = jerkLimit
     if actuators.longControlState == LongCtrlState.off:
       self.jerk_u = jerkLimit
-      self.jerk_l = jerkLimit          
+      self.jerk_l = jerkLimit
+      self.stopping_count = self.stopping_count_max
+      self.cb_upper = self.cb_lower = 0.0
       #self.jerk_count = 0
-    else:
-      if CP.flags & HyundaiFlags.CANFD:
-        self.jerk_u = min(max(0.5, jerk * 2.0), jerk_max)
-        self.jerk_l = min(max(1.0, -jerk * 3.0), jerkLimit)
+    elif False: #actuators.longControlState == LongCtrlState.stopping or actuators.stopRequest:
+      #jerk_u = self.jerk_u_min
+      #if self.stopping_count == self.stopping_count_max:
+      #  jerk_u = self.jerk_filter.set(self.jerk_u + 0.2)
+      #else:
+      #  jerk_u = self.jerk_filter.process(jerk_u)
+
+      if self.stopping_count == self.stopping_count_max:
+        jerk_u = self.jerk_u_last = max(self.jerk_u, self.jerk_u_min + 0.3)
+      elif self.stopping_count > 0 or CS.out.vEgo > 0.02:
+        jerk_u = self.jerk_u_last
       else:
-        self.jerk_u = min(max(0.5, jerk * 2.0), jerk_max)
+        jerk_u = self.jerk_u_min
+
+      self.stopping_count -= 1
+
+      self.jerk_u = jerk_u
+      self.jerk_l = 0.5
+      self.cb_upper = self.cb_lower = 0.0
+    else:
+      self.stopping_count = self.stopping_count_max
+      if CP.flags & HyundaiFlags.CANFD:
+        self.jerk_u = min(max(self.jerk_u_min, jerk * 2.0), jerk_max)
+        self.jerk_l = min(max(1.0, -jerk * 3.0), jerkLimit)
+        self.cb_upper = self.cb_lower = 0.0
+      else:
+        self.jerk_u = min(max(self.jerk_u_min, jerk * 2.0), jerk_max)
         self.jerk_l = min(max(0.5, -jerk * 2.0), jerkLimit)
         self.cb_upper = clip(0.9 + accel * 0.2, 0, 1.2)
         self.cb_lower = clip(0.8 + accel * 0.2, 0, 1.2)

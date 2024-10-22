@@ -64,6 +64,9 @@ typedef struct UIScene {
   float light_sensor = -1;
   bool started, ignition, is_metric;
   uint64_t started_frame;
+
+  int  driver_view_count = 0;
+
 } UIScene;
 
 class UIState : public QObject {
@@ -89,6 +92,8 @@ public:
   float max_distance = 0.0;
   float show_brightness_ratio = 1.0;
   int show_brightness_timer = 20;
+
+  bool reverse_driver_view = false;
 
 
 signals:

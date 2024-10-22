@@ -4,7 +4,7 @@ import math
 
 from opendbc.can.parser import CANParser
 from opendbc.can.can_define import CANDefine
-from opendbc.car import create_button_events, structs
+from opendbc.car import create_button_events, structs, DT_CTRL
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.hyundai.hyundaicanfd import CanBus
 from opendbc.car.hyundai.values import HyundaiFlags, CAR, DBC, Buttons, CarControllerParams, CAMERA_SCC_CAR, HyundaiExtFlags
@@ -57,8 +57,6 @@ class CarState(CarStateBase):
     self.cruise_info = {}
     self.lfa_info = {}
 
-    self.pcmCruiseGap = 0
-
     self.cruise_buttons_msg = None
     self.hda2_lfa_block_msg = None
 
@@ -70,6 +68,10 @@ class CarState(CarStateBase):
 
     self.main_enabled = True if Params().get_int("AutoEngage") == 2 else False
     self.gear_shifter = GearShifter.drive # Gear_init for Nexo ?? unknown 21.02.23.LSW
+    
+    self.totalDistance = 0.0
+    self.speedLimitDistance = 0
+    self.pcmCruiseGap = 0
 
   def update(self, cp, cp_cam, *_) -> structs.CarState:
     if self.CP.flags & HyundaiFlags.CANFD:
@@ -245,8 +247,27 @@ class CarState(CarStateBase):
     vEgoClu, aEgoClu = self.update_clu_speed_kf(ret.vEgoCluster)
     ret.vCluRatio = (ret.vEgo / vEgoClu) if (vEgoClu > 3. and ret.vEgo > 3.) else 1.0
 
+    self.totalDistance += ret.vEgo * DT_CTRL 
+    #ret.totalDistance = self.totalDistance
+
+    if self.CP.extFlags & HyundaiExtFlags.NAVI_CLUSTER.value:
+      speedLimit = cp.vl["Navi_HU"]["SpeedLim_Nav_Clu"]
+      speedLimitCam = cp.vl["Navi_HU"]["SpeedLim_Nav_Cam"]
+      ret.speedLimit = speedLimit if speedLimit < 255 and speedLimitCam == 1 else 0
+      if ret.speedLimit>0 and not ret.gasPressed:
+        if self.speedLimitDistance <= self.totalDistance:
+          self.speedLimitDistance = self.totalDistance + ret.speedLimit * 6  
+        self.speedLimitDistance = max(self.totalDistance+1, self.speedLimitDistance) 
+      else:
+        self.speedLimitDistance = self.totalDistance
+      ret.speedLimitDistance = self.speedLimitDistance - self.totalDistance
+    else:
+      ret.speedLimit = 0
+      ret.speedLimitDistance = 0
+
     if prev_main_buttons == 0 and self.main_buttons[-1] != 0:
       self.main_enabled = not self.main_enabled
+
     return ret
 
   def update_canfd(self, cp, cp_cam) -> structs.CarState:
@@ -444,6 +465,9 @@ class CarState(CarStateBase):
       
     if CP.extFlags & HyundaiExtFlags.HAS_LFA_BUTTON.value:
       messages.append(("BCM_PO_11", 50))
+
+    if CP.extFlags & HyundaiExtFlags.NAVI_CLUSTER.value:
+      messages.append(("Navi_HU", 5))
 
     return CANParser(DBC[CP.carFingerprint]["pt"], messages, 0)
 

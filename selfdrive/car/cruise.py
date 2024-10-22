@@ -257,7 +257,7 @@ class VCruiseCarrot:
     #self.events = []
     self.v_ego_kph_set = int(CS.vEgoCluster * CV.MS_TO_KPH + 0.5)
     self._activate_cruise = 0
-    self._prepare_brake_gas(CS)
+    self._prepare_brake_gas(CS, CC)
     v_cruise_kph = self._update_cruise_buttons(CS, CC, self.v_cruise_kph)
 
     if self._activate_cruise > 0:
@@ -495,7 +495,7 @@ class VCruiseCarrot:
     if road_limit_kph < self.road_limit_kph and False:  # TODO: road_limit speed 자동 속도 다운.. 삭제..
       if v_cruise_kph > road_limit_kph:
         v_cruise_kph = road_limit_kph
-    elif self.v_lead_kph > v_cruise_kph and v_cruise_kph < road_limit_kph and self.d_rel < 50:
+    elif self.v_lead_kph + 3 > v_cruise_kph and v_cruise_kph < road_limit_kph and self.d_rel < 60:
       v_cruise_kph += 2
     elif self.model_v_kph > v_cruise_kph and v_cruise_kph < road_limit_kph:
       v_cruise_kph += 2
@@ -575,7 +575,7 @@ class VCruiseCarrot:
       
     return self._auto_speed_up(v_cruise_kph)
   
-  def _prepare_brake_gas(self, CS):
+  def _prepare_brake_gas(self, CS, CC):
     if CS.gasPressed:
       self._gas_pressed_count = max(1, self._gas_pressed_count + 1)
       self._gas_pressed_count_last = self._gas_pressed_count
@@ -594,7 +594,7 @@ class VCruiseCarrot:
     if CS.brakePressed:
       self._cruise_ready = False
       self._brake_pressed_count = max(1, self._brake_pressed_count + 1)
-      if self._brake_pressed_count == 1:
+      if self._brake_pressed_count == 1 and CC.enabled:
         self._v_cruise_kph_at_brake = self.v_cruise_kph
       self._soft_hold_count = self._soft_hold_count + 1 if CS.vEgo < 0.1 and CS.gearShifter == GearShifter.drive else 0
       if self.autoCruiseControl == 0 or self.CP.pcmCruise:

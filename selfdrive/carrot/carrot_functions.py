@@ -104,9 +104,11 @@ class CarrotPlanner:
 
 
     self.trafficState_carrot = 0
+    self.carrot_stay_stop = False
 
     self.eco_over_speed = 4
     self.eco_target_speed = 0
+
 
   def _params_update(self):
     self.frame += 1
@@ -171,7 +173,7 @@ class CarrotPlanner:
     if v_ego_kph < 1.0:
       stopSign = model_x < 20.0 and model_v < 10.0
     elif v_ego_kph < 82.0:
-      stopSign = model_x < d_rel and model_x < interp(v[0], [60/3.6, 80/3.6], [120.0, 150]) and ((model_v < 3.0) or (model_v < v[0]*0.7))  and abs(y[-1]) < 5.0
+      stopSign = model_x < d_rel - 3.0 and model_x < interp(v[0], [60/3.6, 80/3.6], [120.0, 150]) and ((model_v < 3.0) or (model_v < v[0]*0.7))  and abs(y[-1]) < 5.0
     else:
       stopSign = False
 
@@ -189,13 +191,25 @@ class CarrotPlanner:
   def _update_carrot_man(self, sm, v_ego_kph, v_cruise_kph):
     if sm.alive['carrotMan']:
       carrot_man = sm['carrotMan']
-      if self.trafficState_carrot == 1 and carrot_man.trafficState == 2:
+      atc_turn_left = carrot_man.atcType == "turn left"
+      trigger_start = self.carrot_staty_stop = False
+      if atc_turn_left or sm['carState'].leftBlinker:
+        if self.trafficState_carrot == 1 and carrot_man.trafficState == 3: # red -> left triggered
+          trigger_start = True
+        elif carrot_man.trafficState in [1, 2]:
+          self.carrot_stay_stop = True
+      elif self.trafficState_carrot == 1 and carrot_man.trafficState == 2:  # red -> green triggered
+        trigger_start = True
+      else:
+        trigger_start = False
+      self.trafficState_carrot = carrot_man.trafficState
+
+      if trigger_start:
         if self.soft_hold_active > 0:
           self.events.add(EventName.trafficSignChanged)
         elif self.xState in [XState.e2eStop, XState.e2eStopped]:
           self.xState = XState.e2eCruise
           self.traffic_starting_count = 10.0 / DT_MDL
-      self.trafficState_carrot = carrot_man.trafficState
       
       v_cruise_kph = min(v_cruise_kph, carrot_man.desiredSpeed)
       xSpdCountDown = carrot_man.xSpdCountDown if carrot_man.xSpdDist > 0 else 100
@@ -288,7 +302,7 @@ class CarrotPlanner:
       elif radar_detected and (radarstate.leadOne.dRel - stop_model_x) < 2.0:
         self.xState = XState.lead
       elif self.stopping_count == 0:
-        if self.trafficState == TrafficState.green:
+        if self.trafficState == TrafficState.green and not self.carrot_stay_stop and not carstate.leftBlinker:
           self.xState = XState.e2ePrepare
       self.stopping_count = max(0, self.stopping_count - 1)
       v_cruise = 0

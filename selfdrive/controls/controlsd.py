@@ -115,7 +115,7 @@ class Controls:
     # accel PID loop
     pid_accel_limits = self.CI.get_pid_accel_limits(self.CP, CS.vEgo, CS.vCruise * CV.KPH_TO_MS)
     t_since_plan = (self.sm.frame - self.sm.recv_frame['longitudinalPlan']) * DT_CTRL
-    actuators.accel, actuators.aTargetNow, actuators.jerk = self.LoC.update(CC.longActive, CS, long_plan, pid_accel_limits, t_since_plan)
+    actuators.accel, actuators.aTargetNow, actuators.jerk, actuators.stopRequest = self.LoC.update(CC.longActive, CS, long_plan, pid_accel_limits, t_since_plan)
 
     # Steering PID loop and lateral MPC
     lat_plan = self.sm['lateralPlan']
@@ -172,10 +172,12 @@ class Controls:
     lp = self.sm['longitudinalPlan']
     if self.CP.pcmCruise:
       speed_from_pcm = self.params.get_int("SpeedFromPCM")
-      if speed_from_pcm == 1:
+      if speed_from_pcm == 1: #toyota
         hudControl.setSpeed = float(CS.vCruiseCluster * CV.KPH_TO_MS)
       elif speed_from_pcm == 2:
         hudControl.setSpeed = float(max(30/3.6, desired_kph * CV.KPH_TO_MS))
+      elif speed_from_pcm == 3: # honda
+        hudControl.setSpeed = setSpeed if lp.xState == 3 else float(desired_kph * CV.KPH_TO_MS)
       else:
         hudControl.setSpeed = float(max(30/3.6, setSpeed))
     else:
