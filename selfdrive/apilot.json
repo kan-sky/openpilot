@@ -731,6 +731,19 @@
     },
     {
       "group": "시작",
+      "name": "HyundaiCameraSCC",
+      "title": "HYUNDAI: CAMERA SCC",
+      "descr": "SCC배선 개조시 1로 설정, 레판추가시 2로 설정",
+      "egroup": "START",
+      "etitle": "HYUNDAI: CAMERA SCC(0)",
+      "edescr": "",
+      "min": 0,
+      "max": 2,
+      "default": 0,
+      "unit": 1
+    },
+    {
+      "group": "시작",
       "name": "CanfdHDA2",
       "title": "CANFD HDA2지원(0)",
       "descr": "HDA2 강제인식, 일부CANFD차량 오류발생시 켜야함.",
