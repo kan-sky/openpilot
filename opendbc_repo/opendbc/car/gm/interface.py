@@ -94,7 +94,7 @@ class CarInterface(CarInterfaceBase):
     ret.carName = "gm"
     ret.safetyConfigs = [get_safety_config(structs.CarParams.SafetyModel.gm)]
     ret.autoResumeSng = False
-    ret.enableBsm = 0x142 in fingerprint[CanBus.POWERTRAIN]
+    ret.enableBsm = True #0x142 in fingerprint[CanBus.POWERTRAIN]
 
     useEVTables = Params().get_bool("EVTable")
 
