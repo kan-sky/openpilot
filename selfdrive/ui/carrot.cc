@@ -987,10 +987,10 @@ public:
         nGoPosTime = carrot_man.getNGoPosTime();
         szSdiDescr = QString::fromStdString(carrot_man.getSzSdiDescr());
 
-        active_carrot = 2;
-        xSpdLimit = 110;
-        xSpdDist = 12345;
-        nRoadLimitSpeed = 110;
+        //active_carrot = 2;
+        //xSpdLimit = 110;
+        //xSpdDist = 12345;
+        //nRoadLimitSpeed = 110;
 
         int bx = 350;// 150;
         int by = s->fb_h - 150; // 410;
