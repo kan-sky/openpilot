@@ -164,6 +164,7 @@ class VCruiseCarrot:
     self.v_ego_kph_set = 0
     self._cruise_speed_min, self._cruise_speed_max = 5, 161
     self._cruise_speed_unit = 10
+    self._cruise_button_mode = 2
 
     self._gas_pressed_count = 0
     self._gas_pressed_count_last = 0
@@ -226,6 +227,8 @@ class VCruiseCarrot:
         self.params.put_int_nonblocking("UseLaneLineSpeedApply", useLaneLineSpeed)
       self.useLaneLineSpeed = useLaneLineSpeed
       self.speed_from_pcm = self.params.get_int("SpeedFromPCM")
+      self._cruise_speed_unit = self.params.get_int("CruiseSpeedUnit")
+      self._cruise_button_mode = self.params.get_int("CruiseButtonMode")
       
   def update_v_cruise(self, CS, sm, is_metric):
     self._add_log("")
@@ -303,7 +306,7 @@ class VCruiseCarrot:
     button_kph = v_cruise_kph
     buttonEvents = CS.buttonEvents
     button_speed_up_diff = 1
-    button_speed_dn_diff = 1
+    button_speed_dn_diff = self._cruise_speed_unit if self._cruise_button_mode in [1, 2, 3] else 1
 
     button_type = 0
     long_pressed = False
@@ -411,6 +414,8 @@ class VCruiseCarrot:
         elif self._v_cruise_kph_at_brake > 0 and v_cruise_kph < self._v_cruise_kph_at_brake:
           v_cruise_kph = self._v_cruise_kph_at_brake
           self._v_cruise_kph_at_brake = 0
+        elif self._cruise_button_mode == 0:
+          v_cruise_kph = button_kph
         else:
           v_cruise_kph = self._v_cruise_desired(CS, v_cruise_kph)
 
@@ -422,6 +427,8 @@ class VCruiseCarrot:
           self._cruise_control(-1, -1, "Cruise off,softhold mode (decelCruise)")
         elif v_cruise_kph > self.v_ego_kph_set:
           v_cruise_kph = self.v_ego_kph_set
+        elif self._cruise_button_mode in [0, 1]:
+          v_cruise_kph = button_kph
         else:
           self._cruise_control(-2, -1, "Cruise off (decelCruise)")
           #self.events.append(EventName.audioPrompt)
