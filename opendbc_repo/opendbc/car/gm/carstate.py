@@ -171,6 +171,11 @@ class CarState(CarStateBase):
       ret.leftBlindspot = pt_cp.vl["BCMBlindSpotMonitor"]["LeftBSM"] == 1
       ret.rightBlindspot = pt_cp.vl["BCMBlindSpotMonitor"]["RightBSM"] == 1
 
+    ret.tpms.fl = .86 * pt_cp.vl["TPMS"]["PRESSURE_FL"]
+    ret.tpms.fr = .86 * pt_cp.vl["TPMS"]["PRESSURE_FR"]
+    ret.tpms.rl = .86 * pt_cp.vl["TPMS"]["PRESSURE_RL"]
+    ret.tpms.rr = .86 * pt_cp.vl["TPMS"]["PRESSURE_RR"]
+
     if self.CP.flags & GMFlags.SPEED_RELATED_MSG.value:
       # kans: use cluster speed & vCluRatio(longitudialPlanner)
       self.is_metric = Params().get_bool("IsMetric")
@@ -232,6 +237,7 @@ class CarState(CarStateBase):
       ("ECMEngineStatus", 100),
       ("PSCMSteeringAngle", 100),
       ("ECMAcceleratorPos", 80),
+      ("TPMS", 0),
     ]
     if CP.flags & GMFlags.SPEED_RELATED_MSG.value:
       messages.append(("SPEED_RELATED", 20))
