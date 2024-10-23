@@ -257,7 +257,7 @@ protected:
     float   plotMin = 0.;
     float   plotMax = 0.;
     float   plotShift = 0.0;
-    float   plotX = 400.0;// 300.0;
+    float   plotX = 100.0;// 300.0;
     float   plotWidth = 1000;
     float   plotY = 30.0;
     float   plotHeight = 300.0;
@@ -389,7 +389,7 @@ public:
         for (int i = 0; i < 3; i++) {
             drawPlotting(s, i, plotIndex, plotX, plotQueue[i], plotSize, &color[i], 3.0f);
         }
-        ui_draw_text(s, s->fb_w / 2, 20, title, 25, COLOR_WHITE, BOLD);
+        ui_draw_text(s, 400, 20, title, 25, COLOR_WHITE, BOLD);
     }
 };
 
