@@ -257,7 +257,7 @@ protected:
     float   plotMin = 0.;
     float   plotMax = 0.;
     float   plotShift = 0.0;
-    float   plotX = 400.0;// 300.0;
+    float   plotX = 100.0;// 300.0;
     float   plotWidth = 1000;
     float   plotY = 30.0;
     float   plotHeight = 300.0;
@@ -389,7 +389,7 @@ public:
         for (int i = 0; i < 3; i++) {
             drawPlotting(s, i, plotIndex, plotX, plotQueue[i], plotSize, &color[i], 3.0f);
         }
-        ui_draw_text(s, s->fb_w / 2, 20, title, 25, COLOR_WHITE, BOLD);
+        ui_draw_text(s, 400, 20, title, 25, COLOR_WHITE, BOLD);
     }
 };
 
@@ -987,8 +987,13 @@ public:
         nGoPosTime = carrot_man.getNGoPosTime();
         szSdiDescr = QString::fromStdString(carrot_man.getSzSdiDescr());
 
-        int bx = 150;
-        int by = 410;
+        //active_carrot = 2;
+        //xSpdLimit = 110;
+        //xSpdDist = 12345;
+        //nRoadLimitSpeed = 110;
+
+        int bx = s->fb_w - 120;// 350;// 150;
+        int by = 300;// s->fb_h - 150; // 410;
         char str[128] = "";
 
         if (xSpdLimit > 0) {
@@ -1804,8 +1809,8 @@ public:
     void drawHud(UIState* s) {
         nvgTextAlign(s->vg, NVG_ALIGN_CENTER | NVG_ALIGN_BOTTOM);
 
-        int x = 120;
-        int y = 410;
+        int x = 150;// 120;
+        int y = s->fb_h - 420;// 300;// 410;
 
         int bx = x;
         int by = y + 270;
@@ -1898,24 +1903,24 @@ public:
             time_t now = time(nullptr);
             struct tm* local = localtime(&now);
 
-            int y = 190;
+            int x = s->fb_w - 250;
+            int y = 150;
             int nav_y = y + 50;
 
-            nvgTextAlign(s->vg, NVG_ALIGN_CENTER | NVG_ALIGN_BOTTOM);
+            nvgTextAlign(s->vg, NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM);
             if (show_datetime == 1 || show_datetime == 2) {
                 strftime(str, sizeof(str), "%H:%M", local);
-                ui_draw_text(s, 170, y, str, 100, COLOR_WHITE, BOLD, 3.0f, 8.0f);
+                ui_draw_text(s, x, y, str, 100, COLOR_WHITE, BOLD, 3.0f, 8.0f);
 
             }
             if (show_datetime == 1 || show_datetime == 3) {
                 strftime(str, sizeof(str), "%m-%d-%a", local);
-                ui_draw_text(s, 170, y + 70, str, 60, COLOR_WHITE, BOLD, 3.0f, 8.0f);
+                ui_draw_text(s, x, y + 70, str, 60, COLOR_WHITE, BOLD, 3.0f, 8.0f);
                 nav_y += 70;
             }
             if (szPosRoadName.size() > 0) {
-                nvgTextAlign(s->vg, NVG_ALIGN_LEFT | NVG_ALIGN_BOTTOM);
-                ui_draw_text(s, 50, nav_y, szPosRoadName.toStdString().c_str(), 35, COLOR_WHITE, BOLD, 3.0f, 8.0f);
-                nvgTextAlign(s->vg, NVG_ALIGN_CENTER | NVG_ALIGN_BOTTOM);
+                nvgTextAlign(s->vg, NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM);
+                ui_draw_text(s, x, nav_y, szPosRoadName.toStdString().c_str(), 35, COLOR_WHITE, BOLD, 3.0f, 8.0f);
             }
         }
     }
@@ -2061,7 +2066,7 @@ void ui_draw(UIState *s, ModelRenderer* model_renderer, int w, int h) {
   drawCarrot.drawDateTime(s);
   drawCarrot.drawConnInfo(s);
   drawCarrot.drawDeviceInfo(s);
-  drawCarrot.drawTpms(s);
+  //drawCarrot.drawTpms(s);
 
   drawTurnInfo.draw(s);
 
@@ -2077,7 +2082,39 @@ class BorderDrawer {
 protected:
     float   a_ego_width = 0.0;
     float steering_angle_pos = 0.0;
+    NVGcolor get_tpms_color(float tpms) {
+        if (tpms < 5 || tpms > 60) // N/A
+            return nvgRGBA(255, 255, 255, 220);
+        if (tpms < 31)
+            return nvgRGBA(255, 90, 90, 220);
+        return nvgRGBA(255, 255, 255, 220);
+    }
+
+    const char* get_tpms_text(float tpms) {
+        if (tpms < 5 || tpms > 60) return "-";
+        static char str[32];
+        snprintf(str, sizeof(str), "%.0f", round(tpms));
+        return str;
+    }
 public:
+    void drawTpms(UIState* s, int w, int h) {
+        NVGcontext* vg = s->vg_border;
+        nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_BOTTOM);
+        SubMaster& sm = *(s->sm);
+        if (!sm.alive("carState")) return;
+        auto car_state = sm["carState"].getCarState();
+
+        auto tpms = car_state.getTpms();
+        float fl = tpms.getFl();
+        float fr = tpms.getFr();
+        float rl = tpms.getRl();
+        float rr = tpms.getRr();
+
+        ui_draw_text_vg(vg, 15, h/2 - 115, get_tpms_text(fl), 20, get_tpms_color(fl), BOLD, 1);
+        ui_draw_text_vg(vg, w - 15, h/2 - 115, get_tpms_text(fr), 20, get_tpms_color(fr), BOLD, 1);
+        ui_draw_text_vg(vg, 15, h/2 + 135, get_tpms_text(rl), 20, get_tpms_color(rl), BOLD, 1);
+        ui_draw_text_vg(vg, w - 15, h/2 + 135, get_tpms_text(rr), 20, get_tpms_color(rr), BOLD, 1);
+    }
     void draw(UIState *s, int w, int h, NVGcolor bg, NVGcolor bg_long) {
         NVGcontext* vg = s->vg_border;
 
@@ -2170,6 +2207,7 @@ public:
         nvgTextAlign(vg, NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM);
         ui_draw_text_vg(vg, w- text_margin, h, bottom_right, 30, COLOR_WHITE, BOLD);
 
+        drawTpms(s, w, h);
     }
 };
 NVGcolor QColorToNVGcolor(const QColor& color) {

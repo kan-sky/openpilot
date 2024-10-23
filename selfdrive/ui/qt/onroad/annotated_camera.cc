@@ -173,7 +173,7 @@ void AnnotatedCameraWidget::paintEvent(QPaintEvent *event) {
   painter.beginNativePainting();
   ui_draw(s, &model, width(), height());
   painter.endNativePainting();
-  dmon.draw(painter, rect());
+  //dmon.draw(painter, rect());
   //hud.updateState(*s);
   //hud.draw(painter, rect());
 
