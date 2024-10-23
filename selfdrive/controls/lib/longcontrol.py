@@ -77,8 +77,9 @@ class LongControl:
     if len(speeds) == CONTROL_N:
       v_target_now = interp(t_since_plan, ModelConstants.T_IDXS[:CONTROL_N], long_plan.speeds)
       a_target_now = interp(t_since_plan, ModelConstants.T_IDXS[:CONTROL_N], long_plan.accels)
+      j_target_now = interp(t_since_plan, ModelConstants.T_IDXS[:CONTROL_N], long_plan.jerks)
     else:
-      v_target_now = a_target_now = 0.0
+      v_target_now = a_target_now = j_target_now = 0.0
  
     self.readParamCount += 1
     if self.readParamCount >= 100:
@@ -130,4 +131,4 @@ class LongControl:
                                      feedforward=a_target)
 
     self.last_output_accel = clip(output_accel, accel_limits[0], accel_limits[1])
-    return self.last_output_accel, a_target_now, j_target
+    return self.last_output_accel, a_target_now, j_target_now
