@@ -987,8 +987,13 @@ public:
         nGoPosTime = carrot_man.getNGoPosTime();
         szSdiDescr = QString::fromStdString(carrot_man.getSzSdiDescr());
 
-        int bx = 150;
-        int by = 410;
+        active_carrot = 2;
+        xSpdLimit = 110;
+        xSpdDist = 12345;
+        nRoadLimitSpeed = 110;
+
+        int bx = 350;// 150;
+        int by = s->fb_h - 150; // 410;
         char str[128] = "";
 
         if (xSpdLimit > 0) {
@@ -1805,7 +1810,7 @@ public:
         nvgTextAlign(s->vg, NVG_ALIGN_CENTER | NVG_ALIGN_BOTTOM);
 
         int x = 120;
-        int y = 410;
+        int y = 300;// 410;
 
         int bx = x;
         int by = y + 270;
@@ -1898,24 +1903,24 @@ public:
             time_t now = time(nullptr);
             struct tm* local = localtime(&now);
 
-            int y = 190;
+            int x = s->fb_w - 250;
+            int y = 150;
             int nav_y = y + 50;
 
-            nvgTextAlign(s->vg, NVG_ALIGN_CENTER | NVG_ALIGN_BOTTOM);
+            nvgTextAlign(s->vg, NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM);
             if (show_datetime == 1 || show_datetime == 2) {
                 strftime(str, sizeof(str), "%H:%M", local);
-                ui_draw_text(s, 170, y, str, 100, COLOR_WHITE, BOLD, 3.0f, 8.0f);
+                ui_draw_text(s, x, y, str, 100, COLOR_WHITE, BOLD, 3.0f, 8.0f);
 
             }
             if (show_datetime == 1 || show_datetime == 3) {
                 strftime(str, sizeof(str), "%m-%d-%a", local);
-                ui_draw_text(s, 170, y + 70, str, 60, COLOR_WHITE, BOLD, 3.0f, 8.0f);
+                ui_draw_text(s, x, y + 70, str, 60, COLOR_WHITE, BOLD, 3.0f, 8.0f);
                 nav_y += 70;
             }
             if (szPosRoadName.size() > 0) {
-                nvgTextAlign(s->vg, NVG_ALIGN_LEFT | NVG_ALIGN_BOTTOM);
-                ui_draw_text(s, 50, nav_y, szPosRoadName.toStdString().c_str(), 35, COLOR_WHITE, BOLD, 3.0f, 8.0f);
-                nvgTextAlign(s->vg, NVG_ALIGN_CENTER | NVG_ALIGN_BOTTOM);
+                nvgTextAlign(s->vg, NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM);
+                ui_draw_text(s, x, nav_y, szPosRoadName.toStdString().c_str(), 35, COLOR_WHITE, BOLD, 3.0f, 8.0f);
             }
         }
     }
