@@ -96,6 +96,7 @@ class DesireHelper:
           self.blinker_bypass = False
       elif atc_type in ["fork left", "fork right"]:
         if self.atc_active != 2:
+          below_lane_change_speed = False
           leftBlinker = True if atc_type == "fork left" else False
           rightBlinker = not leftBlinker
           self.atc_active = 1

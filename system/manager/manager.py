@@ -71,6 +71,7 @@ def get_default_params():
     ("AutoNaviCountDownMode", "2"),
     ("StoppingAccel", "-50"),
     ("StopDistanceCarrot", "600"), 
+    ("ComfortBrake", "240"), 
     ("CruiseButtonMode", "2"),      
     ("CruiseButtonTest1", "8"),      
     ("CruiseButtonTest2", "30"),      

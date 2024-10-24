@@ -65,7 +65,10 @@ def get_accel_from_plan(CP, speeds, accels, jerks):
 
     v_target = interp(longitudinalActuatorDelay + DT_MDL, CONTROL_N_T_IDX, speeds)
     j_target = interp(longitudinalActuatorDelay + DT_MDL, CONTROL_N_T_IDX, jerks)
-    a_target = 2 * (v_target - v_target_now) / longitudinalActuatorDelay - a_target_now
+    if v_target != v_target_now:
+      a_target = 2 * (v_target - v_target_now) / longitudinalActuatorDelay - a_target_now
+    else:
+      a_target = a_target_now
 
     v_target_1sec = interp(longitudinalActuatorDelay + DT_MDL + 1.0, CONTROL_N_T_IDX, speeds)
   else:

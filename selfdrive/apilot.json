@@ -224,6 +224,19 @@
     },
     {
       "group": "주행튜닝",
+      "name": "ComfortBrake",
+      "title": "Comfort Brake(240)",
+      "descr": "x0.01, 값이 크면 급하게 브레이킹",
+      "egroup": "LONG",
+      "etitle": "Comfort Brake(240)",
+      "edescr": "",
+      "min": 200,
+      "max": 300,
+      "default": 240,
+      "unit": 5
+    },
+    {
+      "group": "주행튜닝",
       "name": "LongTuningKpV",
       "title": "Long KpV(100)x0.01",
       "descr": "",
@@ -724,7 +737,7 @@
       "egroup": "LAT",
       "etitle": "LaneLine: AdjustCurveOffset (0)cm",
       "edescr": "",
-      "min": -20,
+      "min": 0,
       "max": 500,
       "default": 0,
       "unit": 1
