@@ -128,7 +128,7 @@ class CarController:
         # GM <<<<
         # Pitch compensated acceleration;
         # TODO: include future pitch (sm['modelDataV2'].orientation.y) to account for long actuator delay
-        if self.long_pitch and len(CC.orientationNED) > 1:
+        if len(CC.orientationNED) > 1:
           self.pitch.update(CC.orientationNED[1] if len(CC.orientationNED) > 1 else 0.)
         self.accel_g = apply_deadzone(self.pitch.x, PITCH_DEADZONE) # driving uphill is positive pitch
         accelPitchCompensated = actuators.accel + ACCELERATION_DUE_TO_GRAVITY * math.sin(self.accel_g)
