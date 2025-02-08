@@ -305,7 +305,7 @@ class CruiseHelper:
           ButtonCnt = 0
       if ButtonCnt > 40:
         LongPressed = True
-        V_CRUISE_DELTA = 10
+        V_CRUISE_DELTA = 5
         if ButtonPrev == ButtonType.cancel:
            self.longActiveUser = 0
            controls.events.add(EventName.buttonCancel)
@@ -502,7 +502,7 @@ class CruiseHelper:
     if v_cruise_kph < roadSpeed:
       v_cruise_kph = roadSpeed
     else:
-      for speed in range (40, MAX_SET_SPEED_KPH, self.cruiseSpeedUnit):
+      for speed in range (0, MAX_SET_SPEED_KPH, self.cruiseSpeedUnit):
         if v_cruise_kph < speed:
           v_cruise_kph = speed
           break
@@ -533,10 +533,10 @@ class CruiseHelper:
     resume_cond = abs(CS.steeringAngleDeg) < 20 # and not CS.steeringPressed
 
     # softHold상태: cruiseOFF: 엑셀로 밟으면 크루즈해제
-    if self.xState == XState.softHold:
-      longActiveUser = -2
+    #if self.xState == XState.softHold:
+    #  longActiveUser = -2
     #  페달을 0.6초이내 뗀경우: 속도증가 autoSyncCruiseSpeedMax까지: 가속페달로 속도를 증가시킴
-    elif self.gasPressedCount * DT_CTRL < 0.6:
+    if self.gasPressedCount * DT_CTRL < 0.6:
       if not CS.gasPressed  and self.preGasPressedMax > 0.03:
         if longActiveUser <= 0:
           if self.autoResumeFromGas > 1:
