@@ -634,6 +634,11 @@ class CruiseHelper:
     # 정지상태, 소프트홀드일때 크루즈 ON
     if self.v_ego_kph < 5.0 and self.xState == XState.softHold and self.auto_cruise_control:
       longActiveUser = 3
+    # AutoResume
+    elif Params().get_bool("ActivateCruiseAfterBrake"):
+      Params().put_bool("ActivateCruiseAfterBrake", False)
+      longActiveUser = 3
+      self.auto_cruise_control = True
     # 브레이크해제 켜지고, 크루즈갭이 5가 아닌경우에만 작동.
     elif self.autoResumeFromBrakeRelease and self.auto_cruise_control: # 브레이크 해제에 대한 크루즈 ON
       gasTime = (self.frame - self.gasPressedFrame)*DT_CTRL

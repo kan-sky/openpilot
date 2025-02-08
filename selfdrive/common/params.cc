@@ -338,6 +338,7 @@ std::unordered_map<std::string, uint32_t> keys = {
     { "CustomSteerDeltaDown", PERSISTENT },
     { "EVTable", PERSISTENT },
     { "LongPitch", PERSISTENT },
+    { "ActivateCruiseAfterBrake", CLEAR_ON_MANAGER_START },   // for GM autoResume
     { "NNFF", PERSISTENT },
 };
 

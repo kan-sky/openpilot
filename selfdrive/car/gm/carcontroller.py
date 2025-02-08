@@ -12,6 +12,7 @@ from selfdrive.car.gm import gmcan
 from selfdrive.car.gm.values import AccState, DBC, CanBus, CarControllerParams, CruiseButtons, EV_CAR, CC_ONLY_CAR, GMFlags, CAR
 from selfdrive.controls.lib.drive_helpers import apply_deadzone
 from selfdrive.controls.lib.vehicle_model import ACCELERATION_DUE_TO_GRAVITY
+from selfdrive.controls.lib.cruise_helper import CruiseHelper
 
 VisualAlert = car.CarControl.HUDControl.VisualAlert
 NetworkLocation = car.CarParams.NetworkLocation
@@ -54,7 +55,10 @@ class CarController:
     self.use_ev_tables = False
 
     self.pitch = FirstOrderFilter(0., 0.09 * 4, DT_CTRL * 4)  # runs at 25 Hz
-    self.accel_g = 0.0 #GM >>>>>
+    self.accel_g = 0.0
+    # AutoResume
+    self.activateCruise_after_brake = False
+    self.cruise_helper = CruiseHelper()
 	
   @staticmethod
   def calc_pedal_command(accel: float, long_active: bool) -> float:
@@ -130,6 +134,26 @@ class CarController:
       can_sends.append(gmcan.create_steering_control(self.packer_pt, CanBus.POWERTRAIN, apply_steer, idx, CC.latActive))
 
     if self.CP.openpilotLongitudinalControl:
+      if self.CP.carFingerprint in CAR.VOLT2018:
+        longActiveUser = self.cruise_helper.longActiveUser
+        auto_cruise_control = self.cruise_helper.auto_cruise_control
+        button_counter = (CS.buttons_counter + 1) % 4
+        # Auto Cruise
+        if (longActiveUser > 0 and auto_cruise_control) and not CS.out.cruiseState.enabled:
+          self.activateCruise_after_brake = False
+          if (self.frame - self.last_button_frame) * DT_CTRL > 0.04: # 25Hz(40ms 버튼주기)
+            self.last_button_frame = self.frame
+            can_sends.append(gmcan.create_buttons(self.packer_pt, CanBus.POWERTRAIN, button_counter, CruiseButtons.DECEL_SET))
+        # AutoResume
+        elif actuators.longControlState == LongCtrlState.starting:
+          if CS.out.cruiseState.enabled and not self.activateCruise_after_brake: #브레이크신호 한번만 보내기 위한 조건.
+            idx = (self.frame // 4) % 4
+            brake_force = -0.5 #롱컨캔슬을 위한 브레이크값(0.0 이하)
+            apply_brake = self.brake_input(brake_force)
+            can_sends.append(gmcan.create_brake_command(self.packer_ch, CanBus.CHASSIS, apply_brake, idx))
+            Params().put_bool("ActivateCruiseAfterBrake", True) # cruise_helpers.py에 브레이크 ON신호 전달
+            self.activateCruise_after_brake = True # 브레이크신호는 한번만 보내고 초기화
+
       # Gas/regen, brakes, and UI commands - all at 25Hz
       if self.frame % 4 == 0:
         stopping = actuators.longControlState == LongCtrlState.stopping
