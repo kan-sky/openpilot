@@ -273,7 +273,7 @@ class CarController:
     ZERO_GAS = 2048
 
     if brake_force > 0.0:
-      raise ValueError("brake_force´Â 0.0ÀÌÇÏ¶ó¾ß µÊ.")
+      raise ValueError("brake_forceëŠ” 0.0ì´í•˜ë¼ì•¼ ë¨.")
 
-    scaled_brake = max(0, min(MAX_BRAKE, int(brake_force * -100)))  # -¸¦ +·Î º¯È¯
+    scaled_brake = max(0, min(MAX_BRAKE, int(brake_force * -100)))  # -ë¥¼ +ë¡œ ë³€í™˜
     return ZERO_GAS - scaled_brake
