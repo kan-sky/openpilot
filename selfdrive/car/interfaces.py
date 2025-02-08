@@ -253,7 +253,6 @@ class CarInterfaceBase(ABC):
   def get_std_params(candidate):
     ret = car.CarParams.new_message()
     ret.carFingerprint = candidate
-    ret.alternativeExperience = 1
 
     # Car docs fields
     ret.maxLateralAccel = get_torque_params(candidate)['MAX_LAT_ACCEL_MEASURED']
@@ -369,6 +368,8 @@ class CarInterfaceBase(ABC):
       events.add(EventName.wrongCarMode)
     if cs_out.espDisabled:
       events.add(EventName.espDisabled)
+    if cs_out.gasPressed:
+      events.add(EventName.gasPressedOverride)
     if cs_out.stockFcw:
       events.add(EventName.stockFcw)
     if cs_out.stockAeb:
@@ -396,8 +397,6 @@ class CarInterfaceBase(ABC):
       if b.type == ButtonType.cancel:
         if self.CP.openpilotLongitudinalControl:
           events.add(EventName.buttonCancel)
-      if b.type == ButtonType.gapAdjustCruise:
-        distance_button_pressed = True
 
     # Handle permanent and temporary steering faults
     # tw: steer warning

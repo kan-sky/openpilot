@@ -75,6 +75,7 @@ class CarInterface(CarInterfaceBase):
     ret.carName = "gm"
     ret.safetyConfigs = [get_safety_config(car.CarParams.SafetyModel.gm)]
     ret.autoResumeSng = False
+    ret.startAccel = 1.0
 
     ret.enableGasInterceptor = 0x201 in fingerprint[0]
     #ret.enableGasInterceptor = 512 in fingerprint[0]
@@ -138,12 +139,17 @@ class CarInterface(CarInterfaceBase):
     # ret.openpilotLongitudinalControl = True
     # Start with a baseline tuning for all GM vehicles. Override tuning as needed in each model section below.
     ret.steerActuatorDelay = 0.2  # Default delay, not measured yet
+    tire_stiffness_factor = 0.444  # not optimized yet
 
-    ret.steerLimitTimer = 0.4
+    ret.steerLimitTimer = 0.6
     ret.radarTimeStep = 0.0667  # GM radar runs at 15Hz instead of standard 20Hz
     ret.longitudinalActuatorDelayLowerBound = 0.42
     ret.longitudinalActuatorDelayUpperBound = 0.5  # large delay to initially start braking
     if candidate == CAR.VOLT2018:
+      ret.stoppingDecelRate = 0.2 # brake_travel/s while trying to stop
+      ret.stopAccel = -0.5
+      ret.startingState = True
+      ret.startAccel = 1.9
       ret.lateralTuning.init('torque')
       ret.minEnableSpeed = -1 * CV.MPH_TO_MS
       ret.mass = 1607. + STD_CARGO_KG
@@ -161,8 +167,6 @@ class CarInterface(CarInterfaceBase):
       ret.stoppingDecelRate = 0.2 # brake_travel/s while trying to stop
       ret.stopAccel = -0.5
       ret.startAccel = 0.8
-      ret.vEgoStarting = 0.25
-      ret.vEgoStopping = 0.25
 
     if ret.enableGasInterceptor:
       ret.flags |= GMFlags.PEDAL_LONG.value
@@ -183,10 +187,10 @@ class CarInterface(CarInterfaceBase):
     elif candidate in CC_ONLY_CAR:
       ret.flags |= GMFlags.CC_LONG.value
       ret.radarUnavailable = True
-      ret.experimentalLongitudinalAvailable = False
+      ret.experimentalLongitudinalAvailable = True
       ret.minEnableSpeed = 24 * CV.MPH_TO_MS
       ret.openpilotLongitudinalControl = True
-      ret.pcmCruise = False
+      ret.pcmCruise = True
 
     # TODO: start from empirically derived lateral slip stiffness for the civic and scale by
     # mass and CG position, so all cars will have approximately similar dyn behaviors

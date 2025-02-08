@@ -36,8 +36,8 @@ const CanMsg GM_CAM_TX_MSGS[] = {{384, 0, 4}, {512, 0, 6}, {481, 0, 7},  // pt b
                                  {481, 2, 7}, {388, 2, 8}};  // camera bus
 
 // Note: TODO: button presses (481) may not be required on bus 2 when OP is handling long
-const CanMsg GM_CAM_LONG_TX_MSGS[] = {{384, 0, 4}, {715, 0, 8}, {880, 0, 6}, {789, 0, 5}, {481, 0, 7},  // pt bus
-                                         {481, 2, 7}, {388, 2, 8}};  // camera bus
+const CanMsg GM_CAM_LONG_TX_MSGS[] = {{384, 0, 4}, {481, 0, 7}, {512, 0, 6}, {715, 0, 8}, {789, 0, 5}, {880, 0, 6}, // pt bus
+                                      {481, 2, 7}, {388, 2, 8}};  // camera bus
 
 // TODO: do checksum and counter checks. Add correct timestep, 0.1s for now.
 AddrCheckStruct gm_addr_checks[] = {
@@ -140,7 +140,7 @@ static int gm_rx_hook(CANPacket_t *to_push) {
     bool stock_ecu_detected = (addr == 384);  // ASCMLKASteeringCmd
 
     // Only check ASCMGasRegenCmd if ASCM, GM_CAM uses stock longitudinal
-    if ((gm_hw == GM_ASCM) && (addr == 715)) {
+    if (!gm_pcm_cruise && (addr == 715)) {
       stock_ecu_detected = true;
     }
     generic_rx_checks(stock_ecu_detected);

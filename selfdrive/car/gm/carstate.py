@@ -103,6 +103,12 @@ class CarState(CarStateBase):
         ret.brake = pt_cp.vl["EBCMBrakePedalPosition"]["BrakePedalPosition"] / 0xd0
     else:
       ret.brake = pt_cp.vl["ECMAcceleratorPos"]["BrakePedalPos"]
+
+    # Regen braking is braking
+    if self.CP.transmissionType == TransmissionType.direct:
+      ret.regenBraking = pt_cp.vl["EBCMRegenPaddle"]["RegenPaddle"] != 0
+      self.regenPaddlePressed = ret.regenBraking
+      self.single_pedal_mode = ret.gearShifter == GearShifter.low or pt_cp.vl["EVDriveMode"]["SinglePedalModeActive"] == 1
     if self.CP.networkLocation == NetworkLocation.fwdCamera:
       ret.brakePressed = pt_cp.vl["ECMEngineStatus"]["BrakePressed"] != 0
     else:
@@ -110,12 +116,8 @@ class CarState(CarStateBase):
       # that the brake is being intermittently pressed without user interaction.
       # To avoid a cruise fault we need to use a conservative brake position threshold
       # https://static.nhtsa.gov/odi/tsbs/2017/MC-10137629-9999.pdf
-      ret.brakePressed = ret.brake >= 10
+      ret.brakePressed = (ret.brake >= 10 or self.regenPaddlePressed)
 
-    # Regen braking is braking
-    if self.CP.transmissionType == TransmissionType.direct:
-      ret.regenBraking = pt_cp.vl["EBCMRegenPaddle"]["RegenPaddle"] != 0
-      self.single_pedal_mode = ret.gearShifter == GearShifter.low or pt_cp.vl["EVDriveMode"]["SinglePedalModeActive"] == 1
 
     cv_unit = 0.7256
     ret.tpms.fl = cv_unit * pt_cp.vl["TPMS"]["PRESSURE_FL"]
@@ -175,7 +177,8 @@ class CarState(CarStateBase):
 
     ret.cruiseState.enabled = pt_cp.vl["AcceleratorPedal2"]["CruiseState"] != AccState.OFF
     ret.cruiseState.standstill = pt_cp.vl["AcceleratorPedal2"]["CruiseState"] == AccState.STANDSTILL
-    if startingState:
+    # kans: avoid to accFault
+    if self.CP.carFingerprint not in CAR.VOLT2018:
       ret.cruiseState.standstill = False
     self.cruiseMain = ret.cruiseState.available
     ret.cruiseMain = self.cruiseMain

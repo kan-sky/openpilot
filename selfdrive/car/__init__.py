@@ -1,10 +1,10 @@
 # functions common among cars
-from typing import Dict, List, Optional
 import capnp
 from collections import namedtuple
 
 from cereal import car
 from common.numpy_fast import clip, interp
+from typing import Dict, List
 
 # kg of standard extra cargo to count for drive, gas, etc...
 STD_CARGO_KG = 136.
