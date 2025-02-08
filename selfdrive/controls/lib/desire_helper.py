@@ -420,7 +420,7 @@ class DesireHelper:
         # fade in laneline over 1s
         self.lane_change_ll_prob = min(self.lane_change_ll_prob + DT_MDL, 1.0) 
 
-        if self.lane_change_ll_prob > 0.99:
+        if self.lane_change_ll_prob > 0.5: # 0.5초로변경함... 0.99: # 차선변경완료 후 1초동안 기다림. (왜?)
           self.lane_change_state = LaneChangeState.off
           self.turnState = 0
           if one_blinker:

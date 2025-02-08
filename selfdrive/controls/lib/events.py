@@ -263,13 +263,13 @@ def torque_nn_load_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubM
       "NN torque controller not loaded",
       "go donate logs to twilsonco to get loaded!",
       AlertStatus.userPrompt, AlertSize.mid,
-      Priority.LOW, VisualAlert.none, AudibleAlert.nnff, 2.2)
+      Priority.LOW, VisualAlert.none, AudibleAlert.prompt, 2.2)
   else:
     return Alert(
       "NN torque controller loaded",
       model_name,
       AlertStatus.userPrompt, AlertSize.mid,
-      Priority.LOW, VisualAlert.none, AudibleAlert.prompt, 6.0)
+      Priority.LOW, VisualAlert.none, AudibleAlert.nnff, 6.0)
 
 # *** debug alerts ***
 

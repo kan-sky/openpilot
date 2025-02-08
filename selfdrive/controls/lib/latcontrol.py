@@ -4,6 +4,7 @@ from common.numpy_fast import clip
 from common.realtime import DT_CTRL
 
 MIN_LATERAL_CONTROL_SPEED = 0.3  # m/s
+MIN_STEER_SPEED = 0.3
 
 
 class LatControl(ABC):

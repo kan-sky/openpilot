@@ -19,7 +19,7 @@ LON_MPC_STEP = 0.2  # first step is 0.2s
 A_CRUISE_MIN = -1.2
 #A_CRUISE_MAX_VALS = [1.6, 1.2, 0.8, 0.6]
 #A_CRUISE_MAX_VALS = [2.0, 1.2, 0.8, 0.6]
-A_CRUISE_MAX_VALS = [1.6, 1.2, 0.8, 0.7, 0.5, 0.4]
+A_CRUISE_MAX_VALS = [1.8, 1.0, 0.5, 0.4, 0.3, 0.2]
 A_CRUISE_MAX_BP = [0., 40 * CV.KPH_TO_MS, 60 * CV.KPH_TO_MS, 80 * CV.KPH_TO_MS, 110 * CV.KPH_TO_MS, 140 * CV.KPH_TO_MS]
 
 # Lookup table for turns

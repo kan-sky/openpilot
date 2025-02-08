@@ -788,8 +788,8 @@ TuningPanel::TuningPanel(QWidget* parent) : QWidget(parent) {
     toggleLayout->addWidget(horizontal_line());
     toggleLayout->addWidget(new CValueControl("SteerActuatorDelay", "LAT:SteerActuatorDelay(30)", "표준", "../assets/offroad/icon_road.png", 0, 100, 1));
     toggleLayout->addWidget(new CValueControl("CustomSteerMax", "LAT: CustomSteerMax(300)", "", "../assets/offroad/icon_road.png", 0, 350, 1));
-    toggleLayout->addWidget(new CValueControl("SteerDeltaUp", "LAT: SteerDeltaUp(5)", "", "../assets/offroad/icon_road.png", 1, 20, 1));
-    toggleLayout->addWidget(new CValueControl("SteerDeltaDown", "LAT: SteerDeltaDown(7)", "", "../assets/offroad/icon_road.png", 1, 20, 1));
+    toggleLayout->addWidget(new CValueControl("CustomSteerDeltaUp", "LAT: SteerDeltaUp(5)", "", "../assets/offroad/icon_road.png", 1, 20, 1));
+    toggleLayout->addWidget(new CValueControl("CustomSteerDeltaDown", "LAT: SteerDeltaDown(7)", "", "../assets/offroad/icon_road.png", 1, 20, 1));
     toggleLayout->addWidget(new CValueControl("SteerRatioApply", "LAT: SteerRatio적용(0x0.1)", "0:사용안함", "../assets/offroad/icon_road.png", 0, 300, 2));
     toggleLayout->addWidget(horizontal_line());
     toggleLayout->addWidget(new CValueControl("JerkStartLimit", "LONG: JERK START(10)x0.1", "Starting Jerk.", "../assets/offroad/icon_road.png", 1, 50, 1));

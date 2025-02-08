@@ -584,7 +584,7 @@ def main():
         dat.roadLimitSpeed.xTurnInfo = int(xTurnInfo)
         dat.roadLimitSpeed.xDistToTurn = int(xDistToTurn)
         dat.roadLimitSpeed.xSpdDist = int(xSpdDist) if xBumpDistance <= 0 else int(xBumpDistance)
-        dat.roadLimitSpeed.xSpdLimit = int(xSpdLimit) if xBumpDistance <= 0 else 35 # 속도는 추후조절해야함. 일단 35
+        dat.roadLimitSpeed.xSpdLimit = int(xSpdLimit) if xBumpDistance <= 0 else 25 # 속도는 추후조절해야함. 일단 Volt=25
         dat.roadLimitSpeed.xSignType = int(xSignType) if xBumpDistance <= 0 else 22
         dat.roadLimitSpeed.xRoadSignType = int(xRoadSignType)
         dat.roadLimitSpeed.xRoadLimitSpeed = int(xRoadLimitSpeed)
@@ -619,7 +619,7 @@ class RoadSpeedLimiter:
     self.autoNaviSpeedCtrlStart = 22
     self.autoNaviSpeedCtrlEnd = 6
     self.autoNaviSpeedBumpDist = 10
-    self.autoNaviSpeedBumpSpeed = 30
+    self.autoNaviSpeedBumpSpeed = 25
     self.autoNaviSpeedSafetyFactor = 1.05
 
   def recv(self):

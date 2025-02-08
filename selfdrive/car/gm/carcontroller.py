@@ -9,7 +9,7 @@ from common.realtime import DT_CTRL
 from opendbc.can.packer import CANPacker
 from selfdrive.car import apply_driver_steer_torque_limits, create_gas_interceptor_command
 from selfdrive.car.gm import gmcan
-from selfdrive.car.gm.values import DBC, CanBus, CarControllerParams, CruiseButtons, EV_CAR, CC_ONLY_CAR, GMFlags
+from selfdrive.car.gm.values import AccState, DBC, CanBus, CarControllerParams, CruiseButtons, EV_CAR, CC_ONLY_CAR, GMFlags, CAR
 from selfdrive.controls.lib.drive_helpers import apply_deadzone
 from selfdrive.controls.lib.vehicle_model import ACCELERATION_DUE_TO_GRAVITY
 
@@ -50,7 +50,9 @@ class CarController:
     self.packer_obj = CANPacker(DBC[self.CP.carFingerprint]['radar'])
     self.packer_ch = CANPacker(DBC[self.CP.carFingerprint]['chassis'])
 
-    #GM <<<
+    self.long_pitch = False
+    self.use_ev_tables = False
+
     self.pitch = FirstOrderFilter(0., 0.09 * 4, DT_CTRL * 4)  # runs at 25 Hz
     self.accel_g = 0.0 #GM >>>>>
 	
@@ -70,6 +72,18 @@ class CarController:
 
 
   def update(self, CC, CS, now_nanos):
+
+    if self.frame % 50 == 0:
+      params = Params()
+      steerMax = int(params.get("CustomSteerMax", encoding="utf8"))
+      steerDeltaUp = int(params.get("CustomSteerDeltaUp", encoding="utf8"))
+      steerDeltaDown = int(params.get("CustomSteerDeltaDown", encoding="utf8"))
+      self.params.STEER_MAX = self.params.STEER_MAX if steerMax <= 0 else steerMax
+      self.params.STEER_DELTA_UP = self.params.STEER_DELTA_UP if steerDeltaUp <= 0 else steerDeltaUp
+      self.params.STEER_DELTA_DOWN = self.params.STEER_DELTA_DOWN if steerDeltaDown <= 0 else steerDeltaDown
+    self.long_pitch = Params().get_bool("LongPitch")
+    self.use_ev_tables = Params().get_bool("EVTable")
+
     actuators = CC.actuators
     accel = brake_accel = actuators.accel
     hud_control = CC.hudControl
@@ -78,12 +92,6 @@ class CarController:
     if hud_v_cruise > 70:
       hud_v_cruise = 0
 
-    steerMax = int(Params().get("CustomSteerMax", encoding="utf8"))
-    steerDeltaUp = int(Params().get("SteerDeltaUp", encoding="utf8"))
-    steerDeltaDown = int(Params().get("SteerDeltaDown", encoding="utf8"))
-    self.params.STEER_MAX = self.params.STEER_MAX if steerMax <= 0 else steerMax
-    self.params.STEER_DELTA_UP = self.params.STEER_DELTA_UP if steerDeltaUp <= 0 else steerDeltaUp
-    self.params.STEER_DELTA_DOWN = self.params.STEER_DELTA_DOWN if steerDeltaDown <= 0 else steerDeltaDown
 
     # Send CAN commands.
     can_sends = []
@@ -125,15 +133,15 @@ class CarController:
       # Gas/regen, brakes, and UI commands - all at 25Hz
       if self.frame % 4 == 0:
         stopping = actuators.longControlState == LongCtrlState.stopping
-        # GM <<<<
+
         # Pitch compensated acceleration;
         # TODO: include future pitch (sm['modelDataV2'].orientation.y) to account for long actuator delay
-        if len(CC.orientationNED) > 1:
-          self.pitch.update(CC.orientationNED[1] if len(CC.orientationNED) > 1 else 0.)
-        self.accel_g = apply_deadzone(self.pitch.x, PITCH_DEADZONE) # driving uphill is positive pitch
-        accelPitchCompensated = actuators.accel + ACCELERATION_DUE_TO_GRAVITY * math.sin(self.accel_g)
-        k = interp(CS.out.vEgo, BRAKE_PITCH_FACTOR_BP, BRAKE_PITCH_FACTOR_V)
-        brake_accel = k * accelPitchCompensated + (1. - k) * actuators.accel
+        if self.long_pitch and len(CC.orientationNED) > 1:
+          self.pitch.update(CC.orientationNED[1])
+          self.accel_g = ACCELERATION_DUE_TO_GRAVITY * apply_deadzone(self.pitch.x, PITCH_DEADZONE) # driving uphill is positive pitch
+          accel += self.accel_g
+          brake_accel = actuators.accel + self.accel_g * interp(CS.out.vEgo, BRAKE_PITCH_FACTOR_BP, BRAKE_PITCH_FACTOR_V)
+
         at_full_stop = CC.longActive and CS.out.standstill
         near_stop = CC.longActive and (CS.out.vEgo < self.params.NEAR_STOP_BRAKE_PHASE)
         interceptor_gas_cmd = 0
@@ -146,14 +154,13 @@ class CarController:
           self.apply_brake = int(min(-100 * self.CP.stopAccel, self.params.MAX_BRAKE))
         else:
           # Normal operation
-          # brake_accel = actuators.accel + self.accel_g * interp(CS.out.vEgo, BRAKE_PITCH_FACTOR_BP, BRAKE_PITCH_FACTOR_V)
-          if self.CP.carFingerprint in EV_CAR:
+          if self.CP.carFingerprint in EV_CAR and self.use_ev_tables:
             self.params.update_ev_gas_brake_threshold(CS.out.vEgo)
-            self.apply_gas = int(round(interp(accelPitchCompensated, self.params.EV_GAS_LOOKUP_BP, self.params.GAS_LOOKUP_V))) #GM
-            self.apply_brake = int(round(interp(brake_accel, self.params.EV_BRAKE_LOOKUP_BP, self.params.BRAKE_LOOKUP_V))) #GM
+            self.apply_gas = int(round(interp(accel if self.long_pitch else actuators.accel, self.params.EV_GAS_LOOKUP_BP, self.params.GAS_LOOKUP_V)))
+            self.apply_brake = int(round(interp(brake_accel if self.long_pitch else actuators.accel, self.params.EV_BRAKE_LOOKUP_BP, self.params.BRAKE_LOOKUP_V)))
           else:
-            self.apply_gas = int(round(interp(accel, self.params.GAS_LOOKUP_BP, self.params.GAS_LOOKUP_V)))
-            self.apply_brake = int(round(interp(brake_accel, self.params.BRAKE_LOOKUP_BP, self.params.BRAKE_LOOKUP_V)))
+            self.apply_gas = int(round(interp(accel if self.long_pitch else actuators.accel, self.params.GAS_LOOKUP_BP, self.params.GAS_LOOKUP_V)))
+            self.apply_brake = int(round(interp(brake_accel if self.long_pitch else actuators.accel, self.params.BRAKE_LOOKUP_BP, self.params.BRAKE_LOOKUP_V)))
           # Don't allow any gas above inactive regen while stopping
           # FIXME: brakes aren't applied immediately when enabling at a stop
           if stopping:

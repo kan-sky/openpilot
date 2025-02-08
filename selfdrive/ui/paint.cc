@@ -1754,7 +1754,7 @@ void DrawApilot::drawDebugText(UIState* s, bool show) {
     QString latDebugText = QString::fromStdString(lateralPlan.getLatDebugText());
 
 
-    sprintf(str, "Mappy: Turn(%d,%d), Spd(%d,%d),Sign(%d), Road(%d,%d), LW:%.1f", xTurnInfo, xDistToTurn, xSpdDist, xSpdLimit, xSignType, xRoadSignType, xRoadLimitSpeed, laneWidth);
+    sprintf(str, "Navi: Turn(%d,%d), Spd(%d,%d),Sign(%d), Road(%d,%d), LW:%.1f", xTurnInfo, xDistToTurn, xSpdDist, xSpdLimit, xSignType, xRoadSignType, xRoadLimitSpeed, laneWidth);
     y += dy;
     ui_draw_text(s, text_x, y, str, 35, COLOR_WHITE, BOLD, 0.0f, 0.0f);
     sprintf(str, "Edge(%d), %s",  roadEdgeStat, latDebugText.toStdString().c_str());

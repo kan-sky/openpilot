@@ -58,11 +58,6 @@ class CarState(CarStateBase):
 
     self.totalDistance = 0.0
     self.accFaultedCount = 0
-    #GM <<<
-    self.pitch = 0. # radians
-    self.pitch_raw = 0. # radians
-    self.pitch_ema = 1/100
-    self.pitch_future_time = 0.5 # seconds #GM>>>
 
   def update(self, pt_cp, cam_cp, loopback_cp, chassis_cp):
     ret = car.CarState.new_message()
@@ -194,14 +189,12 @@ class CarState(CarStateBase):
 
     # kans: use cluster speed & vCluRatio(longitudialPlanner)
     self.is_metric = Params().get_bool("IsMetric")
-    speed_conv = CV.KPH_TO_MS * 1.609344 if self.is_metric else CV.MPH_TO_MS
+    speed_conv = CV.MPH_TO_MS if self.is_metric else CV.KPH_TO_MS
     cluSpeed = pt_cp.vl["SPEED_RELATED"]["ClusterSpeed"]
     ret.vEgoCluster = cluSpeed * speed_conv
     vEgoClu, aEgoClu = self.update_clu_speed_kf(ret.vEgoCluster)
     ret.vCluRatio = (ret.vEgo / vEgoClu) if (vEgoClu > 3. and ret.vEgo > 3.) else 1.0
-    #GM <<<
-    self.pitch = self.pitch_ema * self.pitch_raw + (1 - self.pitch_ema) * self.pitch 
-    ret.pitch = self.pitch #GM >>>>>
+
     # TODO: APILOT
     #Engine Rpm
     self.engineRPM = pt_cp.vl["ECMEngineStatus"]["EngineRPM"]
