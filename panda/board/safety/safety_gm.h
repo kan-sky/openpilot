@@ -115,7 +115,7 @@ static int gm_rx_hook(CANPacket_t *to_push) {
     // Reference for brake pressed signals:
     // https://github.com/commaai/openpilot/blob/master/selfdrive/car/gm/carstate.py
     if ((addr == 190) && (gm_hw == GM_ASCM)) {
-      brake_pressed = GET_BYTE(to_push, 1) >= 8U;
+      brake_pressed = GET_BYTE(to_push, 1) >= 10U;
     }
 
     if ((addr == 201) && (gm_hw == GM_CAM)) {
@@ -192,6 +192,10 @@ static int gm_tx_hook(CANPacket_t *to_send) {
   // GAS/REGEN: safety check
   if (addr == 715) {
     bool apply = GET_BIT(to_send, 0U) != 0U;
+    if (apply) {
+      if(!controls_allowed) puts("@@auto cruise control enabled....\n");
+        controls_allowed = true;        
+    }
     int gas_regen = ((GET_BYTE(to_send, 2) & 0x7FU) << 5) + ((GET_BYTE(to_send, 3) & 0xF8U) >> 3);
 
     bool violation = false;
