@@ -6,6 +6,18 @@ from common.realtime import DT_CTRL
 from selfdrive.car import make_can_msg, create_gas_interceptor_command
 from selfdrive.car.gm.values import CAR, CruiseButtons, CanBus
 
+def create_brake_command(packer, bus, apply_brake, idx):
+  mode = 0xA if apply_brake > 0 else 0x1 # 기본 mode(enabled시 브레이크값)
+
+  brake = (0x1000 - apply_brake) & 0xFFF
+  checksum = (0x10000 - (mode << 12) - brake - idx) & 0xFFFF
+  values = {
+    "RollingCounter": idx,
+    "FrictionBrakeMode": mode,
+    "FrictionBrakeChecksum": checksum,
+    "FrictionBrakeCmd": -apply_brake
+  }
+  return packer.make_can_msg("EBCMFrictionBrakeCmd", bus, values)
 
 def create_buttons(packer, bus, idx, button):
   values = {
@@ -56,7 +68,6 @@ def create_adas_keepalive(bus):
   dat = b"\x00\x00\x00\x00\x00\x00\x00"
   return [make_can_msg(0x409, dat, bus), make_can_msg(0x40a, dat, bus)]
 
-
 def create_gas_regen_command(packer, bus, throttle, idx, enabled, at_full_stop):
   values = {
     "GasRegenCmdActive": enabled,
@@ -88,10 +99,6 @@ def create_friction_brake_command(packer, bus, apply_brake, idx, enabled, near_s
     mode = 0xa
     if at_full_stop:
       mode = 0xd
-  if near_stop:
-    mode = 0xb
-  if at_full_stop:
-    mode = 0xd
 
     # TODO: this is to have GM bringing the car to complete stop,
     # but currently it conflicts with OP controls, so turned off. Not set by all cars

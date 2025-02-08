@@ -190,7 +190,22 @@ class CarController:
           if self.CP.networkLocation == NetworkLocation.fwdCamera and self.CP.carFingerprint not in CC_ONLY_CAR:
             at_full_stop = at_full_stop and stopping
             friction_brake_bus = CanBus.POWERTRAIN
-          can_sends.append(gmcan.create_gas_regen_command(self.packer_pt, CanBus.POWERTRAIN, self.apply_gas, idx, CC.enabled, at_full_stop))
+
+          if self.CP.autoResumeSng:
+            resume = actuators.longControlState != LongCtrlState.starting or CC.cruiseControl.resume
+            at_full_stop = at_full_stop and not resume
+
+          if CC.cruiseControl.resume and CS.pcm_acc_status == AccState.STANDSTILL:
+            acc_engaged = False
+          else:
+            acc_engaged = CC.enabled
+
+          if actuators.longControlState in [LongCtrlState.stopping, LongCtrlState.starting]:
+            if (self.frame - self.last_button_frame) * DT_CTRL > 0.04:
+              self.last_button_frame = self.frame
+              can_sends.append(gmcan.create_buttons(self.packer_pt, CanBus.POWERTRAIN, (CS.buttons_counter + 1) % 4, CruiseButtons.RES_ACCEL))
+
+          can_sends.append(gmcan.create_gas_regen_command(self.packer_pt, CanBus.POWERTRAIN, self.apply_gas, idx, acc_engaged, at_full_stop))
           can_sends.append(gmcan.create_friction_brake_command(self.packer_ch, friction_brake_bus, self.apply_brake,
                                                              idx, CC.enabled, near_stop, at_full_stop, self.CP))
 
@@ -251,3 +266,14 @@ class CarController:
 
     self.frame += 1
     return new_actuators, can_sends
+
+  # Calculate brake
+  def brake_input(self, brake_force):
+    MAX_BRAKE = 400
+    ZERO_GAS = 2048
+
+    if brake_force > 0.0:
+      raise ValueError("brake_force는 0.0이하라야 됨.")
+
+    scaled_brake = max(0, min(MAX_BRAKE, int(brake_force * -100)))  # -를 +로 변환
+    return ZERO_GAS - scaled_brake
