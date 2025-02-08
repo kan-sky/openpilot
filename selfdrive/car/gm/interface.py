@@ -105,8 +105,9 @@ class CarInterface(CarInterfaceBase):
       ret.longitudinalTuning.kpV = [2.0]
       ret.longitudinalTuning.kiV = [0.72]
       ret.stoppingDecelRate = 2.0  # reach brake quickly after enabling
-      ret.vEgoStopping = 0.25
-      ret.vEgoStarting = 0.25
+      ret.stopAccel = -0.4
+      ret.startingState = True
+      ret.startAccel = 1.5
 
       if experimental_long:
         ret.pcmCruise = False
@@ -164,9 +165,6 @@ class CarInterface(CarInterfaceBase):
       ret.longitudinalTuning.kpV = [1.75]
       ret.longitudinalTuning.kiBP = [0.]
       ret.longitudinalTuning.kiV = [0.36]
-      ret.stoppingDecelRate = 0.2 # brake_travel/s while trying to stop
-      ret.stopAccel = -0.5
-      ret.startAccel = 0.8
 
     if ret.enableGasInterceptor:
       ret.flags |= GMFlags.PEDAL_LONG.value
@@ -200,12 +198,6 @@ class CarInterface(CarInterfaceBase):
     ret.steerControlType = car.CarParams.SteerControlType.torque
     ret.stoppingControl = True
     ret.startingState = True
-
-    ret.longitudinalTuning.kf = 1.0
-    ret.stoppingDecelRate = 3.0  # reach stopping target smoothly, brake_travel/s while trying to stop
-    ret.stopAccel = -2.0  # Required acceleration to keep vehicle stationary
-    ret.vEgoStopping = 0.5  # Speed at which the car goes into stopping state, when car starts requesting stopping accel
-    ret.vEgoStarting = 0.5  # Speed at which the car goes into starting state, when car starts requesting starting accel,
 
     return ret
 

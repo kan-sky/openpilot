@@ -51,8 +51,6 @@ class CarState(CarStateBase):
     #Engine Rpm
     self.engineRPM = 0
 
-    self.use_cluster_speed = True # Params().get_bool('UseClusterSpeed')
-
     self.buttons_counter = 0
     self.single_pedal_mode = False
 
@@ -196,7 +194,7 @@ class CarState(CarStateBase):
     cluSpeed = pt_cp.vl["SPEED_RELATED"]["ClusterSpeed"]
     ret.vEgoCluster = cluSpeed * speed_conv
     vEgoClu, aEgoClu = self.update_clu_speed_kf(ret.vEgoCluster)
-    ret.vCluRatio = (ret.vEgo / vEgoClu) if (vEgoClu > 3. and ret.vEgo > 3.) else 1.0
+    ret.vCluRatio = (ret.vEgo / vEgoClu) if (vEgoClu > 39. and ret.vEgo > 39.) else 1.0
 
     # TODO: APILOT
     #Engine Rpm
