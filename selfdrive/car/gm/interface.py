@@ -151,6 +151,8 @@ class CarInterface(CarInterfaceBase):
       ret.stopAccel = -0.5
       ret.startingState = True
       ret.startAccel = 1.9
+      ret.vEgoStopping = 0.1
+      ret.vEgoStarting = 0.07
       ret.lateralTuning.init('torque')
       ret.minEnableSpeed = -1 * CV.MPH_TO_MS
       ret.mass = 1607. + STD_CARGO_KG
