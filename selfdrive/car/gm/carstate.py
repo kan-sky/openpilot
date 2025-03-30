@@ -193,7 +193,7 @@ class CarState(CarStateBase):
     ret.vEgoCluster = cluSpeed * speed_conv
     vEgoClu, aEgoClu = self.update_clu_speed_kf(ret.vEgoCluster)
     if self.CP.carFingerprint not in CAR.VOLT2018:
-      ret.vCluRatio =  = 1.0
+      ret.vCluRatio = 1.0
     else:
       ret.vCluRatio = 0.96 # (ret.vEgo / vEgoClu) if (vEgoClu > 39. and ret.vEgo > 39.) else 1.0
 
