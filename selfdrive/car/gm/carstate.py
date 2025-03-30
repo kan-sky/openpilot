@@ -14,7 +14,6 @@ TransmissionType = car.CarParams.TransmissionType
 NetworkLocation = car.CarParams.NetworkLocation
 GearShifter = car.CarState.GearShifter
 STANDSTILL_THRESHOLD = 10 * 0.0311 * CV.KPH_TO_MS
-LongCtrlState = car.CarControl.Actuators.LongControlState # kans
 
 
 class CarState(CarStateBase):
@@ -162,7 +161,6 @@ class CarState(CarStateBase):
     # for delay Accfault event
     accFaulted = (pt_cp.vl["AcceleratorPedal2"]["CruiseState"] == AccState.FAULTED or \
                       pt_cp.vl["EBCMFrictionBrakeStatus"]["FrictionBrakeUnavailable"] == 1)
-    startingState = LongCtrlState.starting
     self.accFaultedCount = self.accFaultedCount + 1 if accFaulted else 0
     ret.accFaulted = True if self.accFaultedCount > 50 else False
     if self.CP.carFingerprint in CC_ONLY_CAR:
@@ -194,7 +192,10 @@ class CarState(CarStateBase):
     cluSpeed = pt_cp.vl["SPEED_RELATED"]["ClusterSpeed"]
     ret.vEgoCluster = cluSpeed * speed_conv
     vEgoClu, aEgoClu = self.update_clu_speed_kf(ret.vEgoCluster)
-    ret.vCluRatio = (ret.vEgo / vEgoClu) if (vEgoClu > 39. and ret.vEgo > 39.) else 1.0
+    if self.CP.carFingerprint not in CAR.VOLT2018:
+      ret.vCluRatio =  = 1.0
+    else:
+      ret.vCluRatio = 0.96 # (ret.vEgo / vEgoClu) if (vEgoClu > 39. and ret.vEgo > 39.) else 1.0
 
     # TODO: APILOT
     #Engine Rpm
