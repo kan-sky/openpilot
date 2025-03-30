@@ -11,7 +11,7 @@
       "edescr": "(-)Left,(+)Right",
       "min": -200,
       "max": 200,
-      "default": 5,
+      "default": 0,
       "unit": 1
     },
     {
@@ -37,7 +37,7 @@
       "edescr": "+Value : forward",
       "min": -1000,
       "max": 1000,
-      "default": 150,
+      "default": 120,
       "unit": 10
     },
     {
@@ -467,7 +467,7 @@
       "edescr": "",
       "min": 0,
       "max": 200,
-      "default": 105,
+      "default": 100,
       "unit": 1
     },
     {
@@ -636,7 +636,7 @@
       "edescr": "SET/DECEL up/down speed rate",
       "min": 1,
       "max": 20,
-      "default": 10,
+      "default": 5,
       "unit": 1
     },
     {
@@ -647,9 +647,9 @@
       "egroup": "BUTN",
       "etitle": "Cruise Min Speed(10)",
       "edescr": "",
-      "min": 10,
+      "min": 0,
       "max": 50,
-      "default": 10,
+      "default": 0,
       "unit": 1
     },
     {

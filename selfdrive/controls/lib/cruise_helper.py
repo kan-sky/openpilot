@@ -532,11 +532,11 @@ class CruiseHelper:
     longActiveUser = self.longActiveUser
     resume_cond = abs(CS.steeringAngleDeg) < 20 # and not CS.steeringPressed
 
-    # softHold상태: cruiseOFF: 엑셀로 밟으면 크루즈해제
-    #if self.xState == XState.softHold:
-    #  longActiveUser = -2
+    # softHold상태: cruiseOFF: 엑셀로 밟으면 크루즈해제 #kans: 점검필요 해제할지 말지 ->해제로 결정
+    if self.xState == XState.softHold:
+      longActiveUser = -2
     #  페달을 0.6초이내 뗀경우: 속도증가 autoSyncCruiseSpeedMax까지: 가속페달로 속도를 증가시킴
-    if self.gasPressedCount * DT_CTRL < 0.6:
+    elif self.gasPressedCount * DT_CTRL < 0.6:
       if not CS.gasPressed  and self.preGasPressedMax > 0.03:
         if longActiveUser <= 0:
           if self.autoResumeFromGas > 1:
