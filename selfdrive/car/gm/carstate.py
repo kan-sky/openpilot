@@ -387,5 +387,5 @@ class CarState(CarStateBase):
           ("BSM_Indicator_Light", "LeftRadar"),
           ("BSM_Indicator_Light", "RightRadar"),
         ]
-        checks = []
+    checks = []
     return CANParser(DBC[CP.carFingerprint]["lowspeed"], signals, checks, CanBus.LOWSPEED, enforce_checks=False)
