@@ -72,8 +72,8 @@ def scale_tire_stiffness(mass, wheelbase, center_to_front, tire_stiffness_factor
   return tire_stiffness_front, tire_stiffness_rear
 
 
-def dbc_dict(pt_dbc, radar_dbc, chassis_dbc=None, body_dbc=None) -> Dict[str, str]:
-  return {'pt': pt_dbc, 'radar': radar_dbc, 'chassis': chassis_dbc, 'body': body_dbc}
+def dbc_dict(pt_dbc, radar_dbc, chassis_dbc=None, body_dbc=None, lowspeed_dbc=None) -> Dict[str, str]:
+  return {'pt': pt_dbc, 'radar': radar_dbc, 'chassis': chassis_dbc, 'body': body_dbc, 'lowspeed': lowspeed_dbc}
 
 
 def apply_driver_steer_torque_limits(apply_torque, apply_torque_last, driver_torque, LIMITS):

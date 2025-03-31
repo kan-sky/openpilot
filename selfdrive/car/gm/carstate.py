@@ -53,10 +53,12 @@ class CarState(CarStateBase):
     self.buttons_counter = 0
     self.single_pedal_mode = False
 
+    # cruiseMain default(test from nd0706-vision)
+    self.cruiseMain_on = True if Params().get_int("EnableAutoEngage") == 2 else False
     self.totalDistance = 0.0
     self.accFaultedCount = 0
 
-  def update(self, pt_cp, cam_cp, loopback_cp, chassis_cp):
+  def update(self, pt_cp, cam_cp, loopback_cp, chassis_cp, lowspeed_cp):
     ret = car.CarState.new_message()
 
     self.prev_cruise_buttons = self.cruise_buttons
@@ -71,6 +73,15 @@ class CarState(CarStateBase):
     # GAP_DIST
     if self.cruise_buttons in [CruiseButtons.UNPRESS, CruiseButtons.INIT] and self.distance_button_pressed:
       self.cruise_buttons = CruiseButtons.GAP_DIST
+
+    if self.CP.enableBsm:
+      if self.CP.carFingerprint in CAR.VOLT2018:
+        ret.leftBlindspot = bool(lowspeed_cp.vl["LeftRadar"]["BSM_Indicator_Light"])
+        ret.rightBlindspot = bool(lowspeed_cp.vl["RightRadar"]["BSM_Indicator_Light"])
+
+      else:
+        ret.leftBlindspot = bool(pt_cp.vl["BCMBlindSpotMonitor"]["LeftBSM"])
+        ret.rightBlindspot = bool(pt_cp.vl["BCMBlindSpotMonitor"]["RightBSM"])
 
     # Variables used for avoiding LKAS faults
     self.loopback_lka_steering_cmd_updated = len(loopback_cp.vl_all["ASCMLKASteeringCmd"]["RollingCounter"]) > 0
@@ -157,14 +168,12 @@ class CarState(CarStateBase):
 
     ret.parkingBrake = pt_cp.vl["VehicleIgnitionAlt"]["ParkBrake"] == 1
     ret.cruiseState.available = pt_cp.vl["ECMEngineStatus"]["CruiseMainOn"] != 0
+    self.cruiseMain_on =  ret.cruiseState.available
     ret.espDisabled = pt_cp.vl["ESPStatus"]["TractionControlOn"] != 1
     # for delay Accfault event
-    accFaulted = (pt_cp.vl["AcceleratorPedal2"]["CruiseState"] == AccState.FAULTED or \
+    ret.accFaulted = (pt_cp.vl["AcceleratorPedal2"]["CruiseState"] == AccState.FAULTED or \
                       pt_cp.vl["EBCMFrictionBrakeStatus"]["FrictionBrakeUnavailable"] == 1)
-    self.accFaultedCount = self.accFaultedCount + 1 if accFaulted else 0
-    ret.accFaulted = True if self.accFaultedCount > 50 else False
-    if self.CP.carFingerprint in CC_ONLY_CAR:
-      ret.accFaulted = False
+
     if self.CP.enableGasInterceptor:  # Flip CC main logic when pedal is being used for long TODO: switch to cancel cc
       ret.cruiseState.available = (not ret.cruiseState.available)
       ret.accFaulted = False
@@ -192,12 +201,9 @@ class CarState(CarStateBase):
     cluSpeed = pt_cp.vl["SPEED_RELATED"]["ClusterSpeed"]
     ret.vEgoCluster = cluSpeed * speed_conv
     vEgoClu, aEgoClu = self.update_clu_speed_kf(ret.vEgoCluster)
-    if self.CP.carFingerprint not in CAR.VOLT2018:
-      ret.vCluRatio = 1.0
-    else:
-      ret.vCluRatio = 0.96 # (ret.vEgo / vEgoClu) if (vEgoClu > 39. and ret.vEgo > 39.) else 1.0
+    
+    ret.vCluRatio = 1.0 if self.CP.carFingerprint in CAR.VOLT2018 else 0.96 # (ret.vEgo / vEgoClu) if (vEgoClu > 39. and ret.vEgo > 39.) else 1.0
 
-    # TODO: APILOT
     #Engine Rpm
     self.engineRPM = pt_cp.vl["ECMEngineStatus"]["EngineRPM"]
 
@@ -341,6 +347,13 @@ class CarState(CarStateBase):
       signals.append(("INTERCEPTOR_GAS", "GAS_SENSOR"))
       signals.append(("INTERCEPTOR_GAS2", "GAS_SENSOR"))
       checks.append(("GAS_SENSOR", 50))
+
+    if CP.enableBsm:
+      if CP.carFingerprint not in CAR.VOLT2018:
+        signals.append(("LeftBSM", "BCMBlindSpotMonitor"))
+        signals.append(("RightBSM", "BCMBlindSpotMonitor"))
+        checks.append(("BCMBlindSpotMonitor", 10))
+
     return CANParser(DBC[CP.carFingerprint]["pt"], signals, checks, CanBus.POWERTRAIN, enforce_checks=False)
 
   @staticmethod
@@ -363,3 +376,18 @@ class CarState(CarStateBase):
     ]
     checks = []
     return CANParser(DBC[CP.carFingerprint]["chassis"], signals, checks, CanBus.CHASSIS, enforce_checks=False)
+
+  # for lowspeed
+  @staticmethod
+  def get_lowspeed_can_parser(CP):
+    signals = [
+      if CP.enableBsm:
+        if CP.carFingerprint in CAR.VOLT2018:
+          ("BSM_Indicator_Light", "LeftRadar"),
+          ("BSM_Indicator_Light", "RightRadar"),
+      ]
+      checks = [
+        ("LeftRadar", 50),
+        ("RightRadar", 50),
+      ]
+    return CANParser(DBC[CP.carFingerprint]["lowspeed"], signals, checks, CanBus.LOWSPEED, enforce_checks=False)

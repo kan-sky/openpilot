@@ -75,6 +75,10 @@ class CarInterface(CarInterfaceBase):
     ret.carName = "gm"
     ret.safetyConfigs = [get_safety_config(car.CarParams.SafetyModel.gm)]
     ret.autoResumeSng = False
+    if candidate == CAR.VOLT2018:
+      ret.enableBsm = 0x1079a379 in fingerprint[CanBus.LOWSPEED] or 0x1079f43b in fingerprint[CanBus.LOWSPEED]
+    else:
+      ret.enableBsm = 0x142 in fingerprint[CanBus.POWERTRAIN] or 0x142 in fingerprint[CanBus.CAMERA]
     ret.startAccel = 1.0
 
     ret.enableGasInterceptor = 0x201 in fingerprint[0]
@@ -205,7 +209,7 @@ class CarInterface(CarInterfaceBase):
 
   # returns a car.CarState
   def _update(self, c):
-    ret = self.CS.update(self.cp, self.cp_cam, self.cp_loopback, self.cp_chassis)
+    ret = self.CS.update(self.cp, self.cp_cam, self.cp_loopback, self.cp_chassis, self.cp_lowspeed)
 
     ret.engineRpm = self.CS.engineRPM
     buttonEvents = [] # kans
