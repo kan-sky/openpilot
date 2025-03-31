@@ -54,7 +54,7 @@ class CarState(CarStateBase):
     self.single_pedal_mode = False
 
     # cruiseMain default(test from nd0706-vision)
-    self.cruiseMain_on = True if Params().get_int("EnableAutoEngage") == 2 else False
+    self.cruiseMain_on = True if int(Params().get("EnableAutoEngage")) == 2 else False
     self.totalDistance = 0.0
     self.accFaultedCount = 0
 
