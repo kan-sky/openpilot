@@ -380,9 +380,10 @@ class CarState(CarStateBase):
   # for lowspeed
   @staticmethod
   def get_lowspeed_can_parser(CP):
+    signals = []
     if CP.enableBsm:
       if CP.carFingerprint in CAR.VOLT2018:
-        signals = [
+        signals += [
           ("BSM_Indicator_Light", "LeftRadar"),
           ("BSM_Indicator_Light", "RightRadar"),
         ]
