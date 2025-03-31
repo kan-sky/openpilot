@@ -265,6 +265,8 @@ class CarState(CarStateBase):
       ("FRWheelSpd", "EBCMWheelSpdFront"),
       ("RLWheelSpd", "EBCMWheelSpdRear"),
       ("RRWheelSpd", "EBCMWheelSpdRear"),
+      ("RRWheelDir", "EBCMWheelSpdRear"),
+      ("RLWheelDir", "EBCMWheelSpdRear"),
       ("FrictionBrakeUnavailable", "EBCMFrictionBrakeStatus"),
       ("PRNDL2", "ECMPRDNL2"),
       ("ManualMode", "ECMPRDNL2"),
