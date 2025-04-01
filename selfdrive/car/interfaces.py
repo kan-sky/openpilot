@@ -358,12 +358,12 @@ class CarInterfaceBase(ABC):
     #  events.add(EventName.doorOpen)
     if cs_out.seatbeltUnlatched:
       events.add(EventName.seatbeltNotLatched)
-    if not self.keepEngage and cs_out.gearShifter != GearShifter.drive and (extra_gears is None or
+    if cs_out.gearShifter != GearShifter.drive and (extra_gears is None or
        cs_out.gearShifter not in extra_gears):
       events.add(EventName.wrongGear)
     if cs_out.gearShifter in [GearShifter.park]:
       events.add(EventName.wrongGear)
-    if not self.keepEngage and cs_out.gearShifter == GearShifter.reverse:
+    if cs_out.gearShifter == GearShifter.reverse:
       events.add(EventName.reverseGear)
     if not cs_out.cruiseState.available:
       events.add(EventName.wrongCarMode)
@@ -476,11 +476,10 @@ class CarStateBase(ABC):
                          C=[1.0, 0.0],
                          K=[[0.12287673], [0.29666309]])
 
-    #GM <<<
     self.v_ego_clu_kf = KF1D(x0=[[0.0], [0.0]],
                          A=[[1.0, DT_CTRL], [0.0, 1.0]],
                          C=[1.0, 0.0],
-                         K=[[0.12287673], [0.29666309]]) #GM >>>>
+                         K=[[0.12287673], [0.29666309]])
 
   def update_speed_kf(self, v_ego_raw):
     if abs(v_ego_raw - self.v_ego_kf.x[0][0]) > 2.0:  # Prevent large accelerations when car starts at non zero speed
