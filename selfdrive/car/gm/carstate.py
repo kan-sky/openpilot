@@ -45,7 +45,6 @@ class CarState(CarStateBase):
 
     # brakeLights
     self.regenPaddlePressed = False
-    self.cruiseMain = False
 
     #Engine Rpm
     self.engineRPM = 0
@@ -187,8 +186,6 @@ class CarState(CarStateBase):
     # kans: avoid to accFault
     if self.CP.carFingerprint not in CAR.VOLT2018:
       ret.cruiseState.standstill = False
-    self.cruiseMain = ret.cruiseState.available
-    ret.cruiseMain = self.cruiseMain
 
     if self.CP.networkLocation == NetworkLocation.fwdCamera and self.CP.carFingerprint not in CC_ONLY_CAR:
       ret.cruiseState.speed = cam_cp.vl["ASCMActiveCruiseControlStatus"]["ACCSpeedSetpoint"] * CV.KPH_TO_MS
