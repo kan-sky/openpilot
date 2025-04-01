@@ -24,7 +24,7 @@ from common.params import Params
 
 LOW_SPEED_X = [0, 10, 20, 30]
 LOW_SPEED_Y = [15, 13, 10, 5]
-LOW_SPEED_Y_NN = [8, 6, 1, 0]
+LOW_SPEED_Y_NN = [12, 3, 1, 0]
 
 # Takes past errors (v) and associated relative times (t) and returns a function
 # that can be used to predict future errors. The function takes a time (t) and
