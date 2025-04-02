@@ -156,9 +156,9 @@ class CanBus:
   OBSTACLE = 1
   CAMERA = 2
   CHASSIS = 2
+  SW_GMLAN = 3
   LOOPBACK = 128
   DROPPED = 192
-  LOWSPEED = 3
 
 class GMFlags(IntFlag):
   PEDAL_LONG = 1
@@ -299,7 +299,7 @@ CC_ONLY_CAR = {CAR.VOLT_CC, CAR.BOLT_CC}
 CAMERA_ACC_CAR = {CAR.BOLT_EUV, CAR.SILVERADO, CAR.EQUINOX, CAR.VOLT_CC, CAR.BOLT_CC}
 
 if EV_CAR: 
-  DBC: Dict[str, Dict[str, str]] = defaultdict(lambda: dbc_dict('gm_global_a_powertrain_volt', 'gm_global_a_object', chassis_dbc='gm_global_a_chassis', lowspeed_dbc = 'gm_global_a_lowspeed'))
+  DBC: Dict[str, Dict[str, str]] = defaultdict(lambda: dbc_dict('gm_global_a_powertrain_volt', 'gm_global_a_object', chassis_dbc='gm_global_a_chassis', gmlan_dbc = 'gm_global_a_lowspeed'))
 else:
   DBC: Dict[str, Dict[str, str]] = defaultdict(lambda: dbc_dict('gm_global_a_powertrain_generated', 'gm_global_a_object', chassis_dbc='gm_global_a_chassis'))
 

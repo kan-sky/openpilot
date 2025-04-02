@@ -57,7 +57,7 @@ class CarState(CarStateBase):
     self.totalDistance = 0.0
     self.accFaultedCount = 0
 
-  def update(self, pt_cp, cam_cp, loopback_cp, chassis_cp, lowspeed_cp):
+  def update(self, pt_cp, cam_cp, loopback_cp, chassis_cp, gmlan_cp):
     ret = car.CarState.new_message()
 
     self.prev_cruise_buttons = self.cruise_buttons
@@ -73,8 +73,8 @@ class CarState(CarStateBase):
 
     if self.CP.enableBsm:
       if self.CP.carFingerprint in CAR.VOLT2018:
-        ret.leftBlindspot = bool(lowspeed_cp.vl["LeftRadar"]["BSM_Indicator_Light"])
-        ret.rightBlindspot = bool(lowspeed_cp.vl["RightRadar"]["BSM_Indicator_Light"])
+        ret.leftBlindspot = bool(gmlan_cp.vl["LeftRadar"]["BSM_Indicator_Light"])
+        ret.rightBlindspot = bool(gmlan_cp.vl["RightRadar"]["BSM_Indicator_Light"])
 
       else:
         ret.leftBlindspot = bool(pt_cp.vl["BCMBlindSpotMonitor"]["LeftBSM"])
@@ -371,7 +371,7 @@ class CarState(CarStateBase):
 
   # for lowspeed
   @staticmethod
-  def get_lowspeed_can_parser(CP):
+  def get_gmlan_can_parser(CP):
     signals = []
     if CP.enableBsm:
       if CP.carFingerprint in CAR.VOLT2018:
@@ -380,4 +380,4 @@ class CarState(CarStateBase):
           ("BSM_Indicator_Light", "RightRadar"),
         ]
     checks = []
-    return CANParser(DBC[CP.carFingerprint]["lowspeed"], signals, checks, CanBus.LOWSPEED, enforce_checks=False)
+    return CANParser(DBC[CP.carFingerprint]["gmlan"], signals, checks, CanBus.SW_GMLAN, enforce_checks=False)
