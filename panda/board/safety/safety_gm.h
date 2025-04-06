@@ -1,4 +1,4 @@
-const SteeringLimits GM_STEERING_LIMITS = {
+﻿const SteeringLimits GM_STEERING_LIMITS = {
   .max_steer = 320,
   .max_rate_up = 10,
   .max_rate_down = 15,
@@ -49,6 +49,7 @@ AddrCheckStruct gm_addr_checks[] = {
            {190, 0, 8, .expected_timestep = 100000U}}},  // Escalade
   {.msg = {{452, 0, 8, .expected_timestep = 100000U}, { 0 }, { 0 }}},
   {.msg = {{201, 0, 8, .expected_timestep = 100000U}, { 0 }, { 0 }}},
+  {.msg = {{241, 0, 6, .expected_timestep = 100000U}, { 0 }, { 0 }}},
 };
 #define GM_RX_CHECK_LEN (sizeof(gm_addr_checks) / sizeof(gm_addr_checks[0]))
 addr_checks gm_rx_checks = {gm_addr_checks, GM_RX_CHECK_LEN};
@@ -118,13 +119,19 @@ static int gm_rx_hook(CANPacket_t *to_push) {
       brake_pressed = GET_BYTE(to_push, 1) >= 10U;
     }
 
+    if ((addr == 241) && (gm_hw == GM_ASCM)) {
+      brake_pressed = GET_BYTE(to_push, 1) >= 15U;
+    }
+
     if ((addr == 201) && (gm_hw == GM_CAM)) {
+      // Bolt에서만 쓰는 브레이크 감지
       brake_pressed = GET_BIT(to_push, 40U) != 0U;
     }
 
-     if (addr == 201) {
-       acc_main_on = GET_BIT(to_push, 29U) != 0U;
-     }
+    // VOLT와 BOLT 모두에서 acc_main_on은 필요
+    if (addr == 201) {
+      acc_main_on = GET_BIT(to_push, 29U) != 0U;
+    }
 
     if (addr == 452) {
       gas_pressed = GET_BYTE(to_push, 5) != 0U;
