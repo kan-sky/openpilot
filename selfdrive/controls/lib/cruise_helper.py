@@ -712,8 +712,8 @@ class CruiseHelper:
         if self.longActiveUser <= 0:
           v_cruise_kph = self.v_ego_kph_set  ## 현재속도도 크루즈세트
           longActiveUser = 1
-          if not Params().get_bool("ActivateCruiseAfterBrake"):
-            longActiveUser = 3
+          #if not Params().get_bool("ActivateCruiseAfterBrake"):
+          #  longActiveUser = 3
         else:
           if self.xState == XState.softHold:
             longActiveUser = 1
