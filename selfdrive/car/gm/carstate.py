@@ -272,7 +272,6 @@ class CarState(CarStateBase):
       ("BrakePressed", "ECMEngineStatus"),
       ("DistanceButton", "ASCMSteeringButton"),
       ("RollingCounter", "ASCMLKASteeringCmd"),
-      ("ClusterSpeed", "SPEED_RELATED"),
       ("EngineRPM", "ECMEngineStatus"),
       ("PRESSURE_FL", "TPMS"),
       ("PRESSURE_FR", "TPMS"),
@@ -296,7 +295,6 @@ class CarState(CarStateBase):
       ("ECMEngineStatus", 100),
       ("PSCMSteeringAngle", 100),
       ("ECMAcceleratorPos", 80),
-      ("SPEED_RELATED", 20),
       ("TPMS", 0),
     ]
 
