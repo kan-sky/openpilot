@@ -55,7 +55,6 @@ class CarState(CarStateBase):
     # cruiseMain default(test from nd0706-vision)
     self.cruiseMain_on = True if int(Params().get("EnableAutoEngage")) == 2 else False
     self.totalDistance = 0.0
-    self.accFaultedCount = 0
 
   def update(self, pt_cp, cam_cp, loopback_cp, chassis_cp, gmlan_cp):
     ret = car.CarState.new_message()
@@ -163,8 +162,8 @@ class CarState(CarStateBase):
     self.cruiseMain_on =  ret.cruiseState.available
     ret.espDisabled = pt_cp.vl["ESPStatus"]["TractionControlOn"] != 1
     # for delay Accfault event
-    ret.accFaulted = (pt_cp.vl["AcceleratorPedal2"]["CruiseState"] == AccState.FAULTED or \
-                      pt_cp.vl["EBCMFrictionBrakeStatus"]["FrictionBrakeUnavailable"] == 1)
+    ret.accFaulted = (pt_cp.vl["AcceleratorPedal2"]["CruiseState"] == AccState.FAULTED #or \
+    #                  pt_cp.vl["EBCMFrictionBrakeStatus"]["FrictionBrakeUnavailable"] == 1)
 
     if self.CP.enableGasInterceptor:  # Flip CC main logic when pedal is being used for long TODO: switch to cancel cc
       ret.cruiseState.available = (not ret.cruiseState.available)
