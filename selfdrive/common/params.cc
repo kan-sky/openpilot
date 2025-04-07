@@ -265,6 +265,7 @@ std::unordered_map<std::string, uint32_t> keys = {
     { "LongControlActiveSound", PERSISTENT },
     { "StopAccelApply", PERSISTENT },
     { "StartAccelApply", PERSISTENT },
+    {"StoppingAccel", PERSISTENT},
     { "TrafficStopDistanceAdjust", PERSISTENT },
     { "AutoSpeedUptoRoadSpeedLimit", PERSISTENT },
     { "ApplyLongDynamicCost", PERSISTENT },

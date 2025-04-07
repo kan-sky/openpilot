@@ -96,6 +96,7 @@ def get_default_params():
     ("LongControlActiveSound", "1"),
     ("StartAccelApply", "50"),
     ("StopAccelApply", "50"),
+    ("StoppingAccel", "0"),
     ("TrafficStopDistanceAdjust", "150"),
     ("AutoSpeedUptoRoadSpeedLimit", "100"),
     ("ApplyLongDynamicCost", "1"), 

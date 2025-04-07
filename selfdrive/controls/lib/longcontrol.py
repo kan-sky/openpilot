@@ -10,12 +10,9 @@ LongCtrlState = car.CarControl.Actuators.LongControlState
 
 
 def long_control_state_trans(CP, active, long_control_state, v_ego, v_target,
-                             v_target_1sec, brake_pressed, cruise_standstill, softHold, a_target_now):
-  planned_stop = (v_target < CP.vEgoStopping and ## apilot: 내리막, 신호정지시 질질 가는 현상... v_target으로 보면.. 급정지, v_ego를 보면 질질감..
-                  v_target_1sec < CP.vEgoStopping)
-  stay_stopped = (v_ego < CP.vEgoStopping and
-                  (brake_pressed or cruise_standstill))
-  stopping_condition = planned_stop or stay_stopped
+                             v_target_1sec, brake_pressed, cruise_standstill, softHold, a_target_now, a_ego, stopping_accel):
+  planned_stop = (v_target < CP.vEgoStopping and v_target_1sec < CP.vEgoStopping)
+  stopping_condition = planned_stop
 
   starting_condition = (not planned_stop and
                         not cruise_standstill and
@@ -26,10 +23,14 @@ def long_control_state_trans(CP, active, long_control_state, v_ego, v_target,
     long_control_state = LongCtrlState.off
 
   else:
-    if long_control_state in (LongCtrlState.off, LongCtrlState.pid):
-      long_control_state = LongCtrlState.pid
-      if stopping_condition and a_target_now > -0.7:  ### pid출력이 급정지(-accel) 상태에서 stopping으로 들어가면... 차량이 너무 급하게 섬.. 기다려보자.... 시험 230911
+    if long_control_state == LongCtrlState.off:
+      if not starting_condition:
         long_control_state = LongCtrlState.stopping
+      else:
+        if starting_condition and CP.startingState:
+          long_control_state = LongCtrlState.starting
+        else:
+          long_control_state = LongCtrlState.pid
 
     elif long_control_state == LongCtrlState.stopping:
       if starting_condition and CP.startingState:
@@ -37,9 +38,13 @@ def long_control_state_trans(CP, active, long_control_state, v_ego, v_target,
       elif starting_condition:
         long_control_state = LongCtrlState.pid
 
-    elif long_control_state == LongCtrlState.starting:
+    elif long_control_state in [LongCtrlState.starting, LongCtrlState.pid]:
       if stopping_condition:
-        long_control_state = LongCtrlState.stopping
+        stopping_accel = stopping_accel if stopping_accel < 0.0 else -0.5
+        if a_ego > stopping_accel and v_ego < 1.0:
+          long_control_state = LongCtrlState.stopping
+        if long_control_state == LongCtrlState.starting:
+          long_control_state = LongCtrlState.stopping
       elif started_condition:
         long_control_state = LongCtrlState.pid
 
@@ -51,7 +56,7 @@ def long_control_state_trans(CP, active, long_control_state, v_ego, v_target,
 class LongControl:
   def __init__(self, CP):
     self.CP = CP
-    self.long_control_state = LongCtrlState.off  # initialized to off
+    self.long_control_state = LongCtrlState.off
     self.pid = PIDController((CP.longitudinalTuning.kpBP, CP.longitudinalTuning.kpV),
                              (CP.longitudinalTuning.kiBP, CP.longitudinalTuning.kiV),
                              k_f=CP.longitudinalTuning.kf, rate=1 / DT_CTRL)
@@ -59,9 +64,8 @@ class LongControl:
     self.last_output_accel = 0.0
     self.debugLoCText = ""
     self.readParamCount = 0
-    self.longitudinalTuningKpV = 1.0
-    self.longitudinalTuningKiV = 0.0
-    self.longitudinalTuningKf = 1.0
+    self.stopping_accel = 0
+
     self.startAccelApply = 0.0
     self.stopAccelApply = 0.0
     self.longitudinalActuatorDelayLowerBound = float(int(Params().get("LongitudinalActuatorDelayLowerBound", encoding="utf8"))) * 0.01
@@ -76,19 +80,15 @@ class LongControl:
     self.readParamCount += 1
     if self.readParamCount >= 100:
       self.readParamCount = 0
+      self.stopping_accel = float(Params().get("StoppingAccel")) * 0.01
     elif self.readParamCount == 10:
-      self.longitudinalTuningKpV = float(Params().get("LongitudinalTuningKpV", encoding="utf8")) * 0.01
-      self.longitudinalTuningKiV = float(Params().get("LongitudinalTuningKiV", encoding="utf8")) * 0.001
-      self.longitudinalTuningKf = float(Params().get("LongitudinalTuningKf", encoding="utf8")) * 0.01
-
-      ## longcontrolTuning이 한개일때만 적용
       if len(self.CP.longitudinalTuning.kpBP) == 1 and len(self.CP.longitudinalTuning.kiBP)==1:
-        self.CP.longitudinalTuning.kpV = [self.longitudinalTuningKpV]
-        self.CP.longitudinalTuning.kiV = [self.longitudinalTuningKiV]
-        self.pid._k_p = (self.CP.longitudinalTuning.kpBP, self.CP.longitudinalTuning.kpV)
-        self.pid._k_i = (self.CP.longitudinalTuning.kiBP, self.CP.longitudinalTuning.kiV)
-        self.pid.k_f = self.longitudinalTuningKf
-        #self.pid._k_i = ([0, 2.0, 200], [self.longitudinalTuningKiV, 0.0, 0.0]) # 정지때만.... i를 적용해보자... 시험..
+        longitudinalTuningKpV = float(Params().get("LongitudinalTuningKpV")) * 0.01
+        longitudinalTuningKiV = float(Params().get("LongitudinalTuningKiV")) * 0.001
+        self.pid._k_p = (self.CP.longitudinalTuning.kpBP, [longitudinalTuningKpV])
+        self.pid._k_i = (self.CP.longitudinalTuning.kiBP, [longitudinalTuningKiV])
+        self.pid.k_f = float(Params().get("LongitudinalTuningKf")) * 0.01
+
     elif self.readParamCount == 30:
       self.longitudinalActuatorDelayLowerBound = float(int(Params().get("LongitudinalActuatorDelayLowerBound", encoding="utf8"))) * 0.01
       self.longitudinalActuatorDelayUpperBound = float(int(Params().get("LongitudinalActuatorDelayUpperBound", encoding="utf8"))) * 0.01
@@ -105,12 +105,6 @@ class LongControl:
       a_target_now = interp(t_since_plan, T_IDXS[:CONTROL_N], long_plan.accels)
       j_target = long_plan.jerks[0]
 
-      #v_target_lower = interp(self.CP.longitudinalActuatorDelayLowerBound + t_since_plan, T_IDXS[:CONTROL_N], speeds)
-      #a_target_lower = 2 * (v_target_lower - v_target_now) / self.CP.longitudinalActuatorDelayLowerBound - a_target_now
-
-      #v_target_upper = interp(self.CP.longitudinalActuatorDelayUpperBound + t_since_plan, T_IDXS[:CONTROL_N], speeds)      
-      #a_target_upper = 2 * (v_target_upper - v_target_now) / self.CP.longitudinalActuatorDelayUpperBound - a_target_now
-
       v_target_lower = interp(self.longitudinalActuatorDelayLowerBound + t_since_plan, T_IDXS[:CONTROL_N], speeds)
       a_target_lower = 2 * (v_target_lower - v_target_now) / self.longitudinalActuatorDelayLowerBound - a_target_now
 
@@ -120,9 +114,6 @@ class LongControl:
       v_target = min(v_target_lower, v_target_upper)
       a_target = min(a_target_lower, a_target_upper)
 
-
-      #v_target_1sec = interp(self.CP.longitudinalActuatorDelayUpperBound + t_since_plan + 1.0, T_IDXS[:CONTROL_N], speeds)
-      #v_target_1sec = interp(self.longitudinalActuatorDelayUpperBound + t_since_plan + 1.0, T_IDXS[:CONTROL_N], speeds)
       v_target_1sec = interp(self.longitudinalActuatorDelayUpperBound + t_since_plan + 1.0, T_IDXS[:CONTROL_N], speeds)
     else:
       v_target = 0.0
@@ -143,18 +134,22 @@ class LongControl:
 
     self.long_control_state, planned_stop = long_control_state_trans(self.CP, active, self.long_control_state, CS.vEgo,
                                                        v_target, v_target_1sec, CS.brakePressed,
-                                                       CS.cruiseState.standstill, CC.hudControl.softHold, a_target_now)
+                                                       CS.cruiseState.standstill, CC.hudControl.softHold, a_target_now, CS.aEgo, self.stopping_accel)
 
     if self.long_control_state == LongCtrlState.off:
       self.reset(CS.vEgo)
       output_accel = 0.
 
     elif self.long_control_state == LongCtrlState.stopping:
-      if output_accel > self.CP.stopAccel:
+      output_accel = self.last_output_accel
+      if CC.hudControl.softHold:
+        output_accel = self.CP.stopAccel
+
+
+      stopAccel = self.stopping_accel if self.stopping_accel < 0.0 else self.CP.stopAccel
+      if output_accel > stopAccel:
         output_accel = min(output_accel, 0.0)
         output_accel -= self.CP.stoppingDecelRate * DT_CTRL
-        if CC.hudControl.softHold:
-          output_accel = self.CP.stopAccel
       self.reset(CS.vEgo)
 
     elif self.long_control_state == LongCtrlState.starting:
