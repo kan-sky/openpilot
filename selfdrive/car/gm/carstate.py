@@ -158,7 +158,7 @@ class CarState(CarStateBase):
     ret.leftBlinker = pt_cp.vl["BCMTurnSignals"]["TurnSignals"] == 1
     ret.rightBlinker = pt_cp.vl["BCMTurnSignals"]["TurnSignals"] == 2
 
-    ret.parkingBrake = pt_cp.vl["VehicleIgnitionAlt"]["ParkBrake"] == 1
+    ret.parkingBrake = pt_cp.vl["BCMGeneralPlatformStatus"]["ParkBrakeSwActive"] == 1
     ret.cruiseState.available = pt_cp.vl["ECMEngineStatus"]["CruiseMainOn"] != 0
     self.cruiseMain_on =  ret.cruiseState.available
     ret.espDisabled = pt_cp.vl["ESPStatus"]["TractionControlOn"] != 1
@@ -267,7 +267,7 @@ class CarState(CarStateBase):
       ("PSCMStatusChecksum", "PSCMStatus"),
       ("RollingCounter", "PSCMStatus"),
       ("TractionControlOn", "ESPStatus"),
-      ("ParkBrake", "VehicleIgnitionAlt"),
+      ("ParkBrakeSwActive", "BCMGeneralPlatformStatus"),
       ("CruiseMainOn", "ECMEngineStatus"),
       ("BrakePressed", "ECMEngineStatus"),
       ("DistanceButton", "ASCMSteeringButton"),
@@ -287,7 +287,7 @@ class CarState(CarStateBase):
       ("PSCMStatus", 10),
       ("ESPStatus", 10),
       ("BCMDoorBeltStatus", 10),
-      ("VehicleIgnitionAlt", 10),
+      ("BCMGeneralPlatformStatus", 10),
       ("EBCMWheelSpdFront", 20),
       ("EBCMWheelSpdRear", 20),
       ("EBCMFrictionBrakeStatus", 20),
