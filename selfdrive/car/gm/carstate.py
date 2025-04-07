@@ -161,8 +161,13 @@ class CarState(CarStateBase):
     ret.cruiseState.available = pt_cp.vl["ECMEngineStatus"]["CruiseMainOn"] != 0
     self.cruiseMain_on =  ret.cruiseState.available
     ret.espDisabled = pt_cp.vl["ESPStatus"]["TractionControlOn"] != 1
-    # for delay Accfault event
-    ret.accFaulted = (pt_cp.vl["AcceleratorPedal2"]["CruiseState"] == AccState.FAULTED #or \
+
+    # accFault state
+    cruise_state = pt_cp.vl["AcceleratorPedal2"]["CruiseState"]
+    brake_pressed = ret.brakePressed
+    # FAULTED 상태지만, 운전자가 브레이크를 밟은 경우는 실제 fault가 아님
+    ret.accFaulted = (cruise_state == AccState.FAULTED and not brake_pressed)
+    #ret.accFaulted = pt_cp.vl["AcceleratorPedal2"]["CruiseState"] == AccState.FAULTED #or \
     #                  pt_cp.vl["EBCMFrictionBrakeStatus"]["FrictionBrakeUnavailable"] == 1)
 
     if self.CP.enableGasInterceptor:  # Flip CC main logic when pedal is being used for long TODO: switch to cancel cc
