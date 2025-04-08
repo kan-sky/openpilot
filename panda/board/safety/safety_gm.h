@@ -30,7 +30,7 @@ const int GM_STANDSTILL_THRSLD = 10;  // 0.311kph
 const CanMsg GM_ASCM_TX_MSGS[] = {{384, 0, 4}, {1033, 0, 7}, {1034, 0, 7}, {715, 0, 8}, {880, 0, 6}, {512, 0, 6}, {481, 0, 7}, {789, 0, 5}, {800, 0, 6},  // pt bus
                                   {161, 1, 7}, {774, 1, 8}, {776, 1, 7}, {784, 1, 2},   // obs bus
                                   {789, 2, 5}, {481, 2, 7},// ch bus
-                                  {0x104c006c, 3, 3}, {0x10400060, 3, 5}};  // gmlan
+                                  {0x104c006c, 3, 3}, {0x10400060, 3, 5}, {0x1079a379, 3, 2}, {0x1079f43b, 3, 2}};  // gmlan
 
 const CanMsg GM_CAM_TX_MSGS[] = {{384, 0, 4}, {512, 0, 6}, {481, 0, 7},  // pt bus
                                  {481, 2, 7}, {388, 2, 8}};  // camera bus
@@ -134,7 +134,9 @@ static int gm_rx_hook(CANPacket_t *to_push) {
     }
 
     if (addr == 452) {
-      gas_pressed = GET_BYTE(to_push, 5) != 0U;
+      if (!enable_gas_interceptor) {
+        gas_pressed = GET_BYTE(to_push, 5) != 0U;
+      }
 
       // enter controls on rising edge of ACC, exit controls when ACC off
       if (gm_pcm_cruise) {
@@ -202,7 +204,7 @@ static int gm_tx_hook(CANPacket_t *to_send) {
 
   // GAS/REGEN: safety check
   if (addr == 715) {
-    bool apply = GET_BIT(to_send, 0U) != 0U;
+    bool apply = GET_BIT(to_send, 0U);
     if (apply) {
       if(!controls_allowed) puts("@@auto cruise control enabled....\n");
         controls_allowed = true;        
