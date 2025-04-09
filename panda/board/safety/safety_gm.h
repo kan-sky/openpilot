@@ -134,7 +134,7 @@ static int gm_rx_hook(CANPacket_t *to_push) {
     }
 
     if (addr == 452) {
-      if (!enable_gas_interceptor) {
+      if (!gas_interceptor_detected) {
         gas_pressed = GET_BYTE(to_push, 5) != 0U;
       }
 
