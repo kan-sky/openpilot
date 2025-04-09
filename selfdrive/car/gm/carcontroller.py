@@ -136,11 +136,11 @@ class CarController:
 
     if self.CP.openpilotLongitudinalControl:
       #if self.CP.carFingerprint in (CAR.VOLT2018):
-      #longActiveUser = self.cruise_helper.longActiveUser
+      longActiveUser = self.cruise_helper.longActiveUser
       auto_cruise_control = self.cruise_helper.auto_cruise_control
       button_counter = (CS.buttons_counter + 1) % 4
       # Auto Cruise
-      if auto_cruise_control and not CS.out.cruiseState.enabled:
+      if (longActiveUser > 0 or auto_cruise_control) and not CS.out.cruiseState.enabled:
         self.activateCruise_after_brake = False
         if (self.frame - self.last_button_frame) * DT_CTRL > 0.04: # 25Hz(40ms 버튼주기)
           self.last_button_frame = self.frame
