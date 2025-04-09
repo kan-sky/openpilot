@@ -14,9 +14,11 @@ from common.numpy_fast import clip, interp
 from common.realtime import DT_CTRL
 from selfdrive.car import apply_hysteresis, gen_empty_fingerprint, scale_rot_inertia, scale_tire_stiffness, STD_CARGO_KG
 from selfdrive.controls.lib.drive_helpers import V_CRUISE_MAX, get_friction
-from selfdrive.controls.lib.events import Events
+from selfdrive.controls.lib.events import Events, ET
 from selfdrive.controls.lib.vehicle_model import VehicleModel
 from common.params import Params
+# kans
+from selfdrive.controls.lib.cruise_helper import CruiseHelper
 
 
 ButtonType = car.CarState.ButtonEvent.Type
@@ -159,6 +161,9 @@ class CarInterfaceBase(ABC):
     self.can_parsers = []
 
     self.keepEngage = Params().get_bool("KeepEngage")
+
+    # Test: cruise
+    self.cruise_helper = CruiseHelper()
 
     if CarState is not None:
       self.CS = CarState(CP)
@@ -398,6 +403,14 @@ class CarInterfaceBase(ABC):
       if b.type == ButtonType.cancel:
         if self.CP.openpilotLongitudinalControl:
           events.add(EventName.buttonCancel)
+
+    # Test: Auto Cruise
+    if not self.CP.pcmCruise:
+      if self.cruise_helper.longActiveUser > 0:
+        if not events.any(ET.NO_ENTRY):
+          events.add(EventName.buttonEnable)
+      elif self.cruise_helper.longActiveUser < 0:
+        events.add(EventName.buttonCancel)
 
     # Handle permanent and temporary steering faults
     # tw: steer warning
