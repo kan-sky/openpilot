@@ -406,10 +406,10 @@ class CarInterfaceBase(ABC):
 
     # Test: Auto Cruise
     if not self.CP.pcmCruise:
-      if self.cruise_helper.longActiveUser > 0:
+      if self.cruise_helper.auto_cruise_control and self.cruise_helper.longActiveUser > 0:
         if not events.any(ET.NO_ENTRY):
           events.add(EventName.buttonEnable)
-      elif self.cruise_helper.longActiveUser < 0:
+      elif self.cruise_helper.auto_cruise_control and self.cruise_helper.longActiveUser < 0:
         events.add(EventName.buttonCancel)
 
     # Handle permanent and temporary steering faults
