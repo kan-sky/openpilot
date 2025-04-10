@@ -163,6 +163,7 @@ def get_default_params():
     ("CustomSteerDeltaUp", "11"),       
     ("CustomSteerDeltaDown", "12"), 
     ("NNFF", "1"),       
+    ("PathFactor", "90"),
   ]
   return default_params
 
@@ -170,7 +171,7 @@ def set_default_params():
   params = Params()
   default_params = get_default_params()
   try:
-    defulat_params.remove(("CompletedTrainingVersion", "0"))
+    default_params.remove(("CompletedTrainingVersion", "0"))
     default_params.remove(("LanguageSetting", "main_en"))
     default_params.remove(("GsmMetered", "1"))
   except ValueError:

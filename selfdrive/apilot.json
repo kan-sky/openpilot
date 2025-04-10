@@ -15,6 +15,19 @@
       "unit": 1
     },
     {
+      "group": "조향튜닝",
+      "name": "PathFactor",
+      "title": "_PathFactor(95)",
+      "descr": "커브 안쪽으로 돌면 낮게",
+      "egroup": "LAT",
+      "etitle": "_PathFactor(95)",
+      "edescr": "",
+      "min": 70,
+      "max": 150,
+      "default": 95,
+      "unit": 5
+    },
+    {
       "group": "정지",
       "name": "StopDistance",
       "title": "정지거리(600cm)",

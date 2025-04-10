@@ -5,6 +5,7 @@ from common.conversions import Conversions as CV
 from common.numpy_fast import clip, interp
 from common.realtime import DT_MDL
 from selfdrive.modeld.constants import T_IDXS
+from common.params import Params
 
 # WARNING: this value was determined based on the model's training distribution,
 #          model predictions above this speed can be unpredictable
@@ -187,7 +188,7 @@ def get_lag_adjusted_curvature(CP, v_ego, psis, curvatures, curvature_rates, ste
   safe_desired_curvature_rate = clip(desired_curvature_rate,
                                      -max_curvature_rate,
                                      max_curvature_rate)
-  safe_desired_curvature = clip(desired_curvature,
+  safe_desired_curvature = clip(desired_curvature * (float(int(Params().get("PathFactor"))) * 0.01),
                                 current_curvature_desired - max_curvature_rate * DT_MDL,
                                 current_curvature_desired + max_curvature_rate * DT_MDL)
 
