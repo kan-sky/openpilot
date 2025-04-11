@@ -50,6 +50,7 @@ AddrCheckStruct gm_addr_checks[] = {
   {.msg = {{452, 0, 8, .expected_timestep = 100000U}, { 0 }, { 0 }}},
   {.msg = {{201, 0, 8, .expected_timestep = 100000U}, { 0 }, { 0 }}},
   {.msg = {{241, 0, 6, .expected_timestep = 100000U}, { 0 }, { 0 }}},
+  {.msg = {{1323, 0, 4, .expected_timestep = 100000U}, { 0 }, { 0 }}}, //TPMS
 };
 #define GM_RX_CHECK_LEN (sizeof(gm_addr_checks) / sizeof(gm_addr_checks[0]))
 addr_checks gm_rx_checks = {gm_addr_checks, GM_RX_CHECK_LEN};

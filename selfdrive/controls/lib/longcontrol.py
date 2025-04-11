@@ -25,7 +25,7 @@ def long_control_state_trans(CP, active, long_control_state, v_ego, v_target,
   else:
     if long_control_state in (LongCtrlState.off, LongCtrlState.pid):
       long_control_state = LongCtrlState.pid
-      if stopping_condition and a_target_now > -1.0:  ### pidÃâ·ÂÀÌ ±ŞÁ¤Áö(-accel) »óÅÂ¿¡¼­ stoppingÀ¸·Î µé¾î°¡¸é... Â÷·®ÀÌ ³Ê¹« ±ŞÇÏ°Ô ¼¶.. ±â´Ù·Áº¸ÀÚ.... ½ÃÇè 230911
+      if stopping_condition and a_target_now > -1.0:  ### pidì¶œë ¥ì´ ê¸‰ì •ì§€(-accel) ìƒíƒœì—ì„œ stoppingìœ¼ë¡œ ë“¤ì–´ê°€ë©´... ì°¨ëŸ‰ì´ ë„ˆë¬´ ê¸‰í•˜ê²Œ ì„¬.. ê¸°ë‹¤ë ¤ë³´ì.... ì‹œí—˜ 230911
         long_control_state = LongCtrlState.stopping
 
     elif long_control_state == LongCtrlState.stopping:

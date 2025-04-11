@@ -125,7 +125,6 @@ class CarState(CarStateBase):
     ret.tpms.fl = pt_cp.vl["TPMS"]["PRESSURE_FL"]
     ret.tpms.rl = pt_cp.vl["TPMS"]["PRESSURE_RL"]
     ret.tpms.rr = pt_cp.vl["TPMS"]["PRESSURE_RR"]
-    print("TPMS RAW:", pt_cp.vl["TPMS"]["PRESSURE_FR"], pt_cp.vl["TPMS"]["PRESSURE_FL"], pt_cp.vl["TPMS"]["PRESSURE_RL"], pt_cp.vl["TPMS"]["PRESSURE_RR"])
 
     if self.CP.enableGasInterceptor:
       ret.gas = (pt_cp.vl["GAS_SENSOR"]["INTERCEPTOR_GAS"] + pt_cp.vl["GAS_SENSOR"]["INTERCEPTOR_GAS2"]) / 2.
@@ -299,7 +298,7 @@ class CarState(CarStateBase):
       ("ECMEngineStatus", 100),
       ("PSCMSteeringAngle", 100),
       ("ECMAcceleratorPos", 80),
-      ("TPMS", 0),
+      ("TPMS", 100),
     ]
 
     # Used to read back last counter sent to PT by camera
