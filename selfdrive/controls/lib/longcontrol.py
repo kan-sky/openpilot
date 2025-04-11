@@ -23,14 +23,10 @@ def long_control_state_trans(CP, active, long_control_state, v_ego, v_target,
     long_control_state = LongCtrlState.off
 
   else:
-    if long_control_state == LongCtrlState.off:
-      if not starting_condition:
+    if long_control_state in (LongCtrlState.off, LongCtrlState.pid):
+      long_control_state = LongCtrlState.pid
+      if stopping_condition and a_target_now > -1.0:  ### pid출력이 급정지(-accel) 상태에서 stopping으로 들어가면... 차량이 너무 급하게 섬.. 기다려보자.... 시험 230911
         long_control_state = LongCtrlState.stopping
-      else:
-        if starting_condition and CP.startingState:
-          long_control_state = LongCtrlState.starting
-        else:
-          long_control_state = LongCtrlState.pid
 
     elif long_control_state == LongCtrlState.stopping:
       if starting_condition and CP.startingState:
@@ -114,7 +110,7 @@ class LongControl:
       v_target = min(v_target_lower, v_target_upper)
       a_target = min(a_target_lower, a_target_upper)
 
-      v_target_1sec = interp(self.longitudinalActuatorDelayUpperBound + t_since_plan + 1.0, T_IDXS[:CONTROL_N], speeds)
+      v_target_1sec = interp(self.longitudinalActuatorDelayLowerBound + t_since_plan + 1.0, T_IDXS[:CONTROL_N], speeds)
     else:
       v_target = 0.0
       v_target_now = 0.0

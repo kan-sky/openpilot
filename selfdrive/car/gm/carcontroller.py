@@ -142,7 +142,7 @@ class CarController:
       self.auto_cruise_control = self.cruise_helper.auto_cruise_control
       button_counter = (CS.buttons_counter + 1) % 4
       # Auto Cruise
-      if (self.auto_cruise_control and self.longActiveUser > 0) and not CS.out.cruiseState.enabled:
+      if (self.auto_cruise_control or self.longActiveUser > 0) and not CS.out.cruiseState.enabled:
         self.activateCruise_after_brake = False
         if (self.frame - self.last_button_frame) * DT_CTRL > 0.04: # 25Hz(40ms 버튼주기)
           self.last_button_frame = self.frame
