@@ -56,7 +56,7 @@ class CarState(CarStateBase):
     self.cruiseMain_on = True if int(Params().get("EnableAutoEngage")) == 2 else False
     self.totalDistance = 0.0
 
-  def update(self, pt_cp, cam_cp, loopback_cp, chassis_cp, gmlan_cp):
+  def update(self, pt_cp, cam_cp, loopback_cp, chassis_cp):
     ret = car.CarState.new_message()
 
     self.prev_cruise_buttons = self.cruise_buttons
@@ -71,13 +71,8 @@ class CarState(CarStateBase):
       self.cruise_buttons = CruiseButtons.GAP_DIST
 
     if self.CP.enableBsm:
-      if self.CP.carFingerprint in CAR.VOLT2018:
-        ret.leftBlindspot = bool(gmlan_cp.vl["LeftRadar"]["BSM_Indicator_Light"])
-        ret.rightBlindspot = bool(gmlan_cp.vl["RightRadar"]["BSM_Indicator_Light"])
-
-      else:
-        ret.leftBlindspot = bool(pt_cp.vl["BCMBlindSpotMonitor"]["LeftBSM"])
-        ret.rightBlindspot = bool(pt_cp.vl["BCMBlindSpotMonitor"]["RightBSM"])
+      ret.leftBlindspot = bool(pt_cp.vl["BCMBlindSpotMonitor"]["LeftBSM"])
+      ret.rightBlindspot = bool(pt_cp.vl["BCMBlindSpotMonitor"]["RightBSM"])
 
     # Variables used for avoiding LKAS faults
     self.loopback_lka_steering_cmd_updated = len(loopback_cp.vl_all["ASCMLKASteeringCmd"]["RollingCounter"]) > 0
@@ -121,10 +116,11 @@ class CarState(CarStateBase):
       ret.regenBraking = pt_cp.vl["EBCMRegenPaddle"]["RegenPaddle"] != 0
       self.single_pedal_mode = ret.gearShifter == GearShifter.low or pt_cp.vl["EVDriveMode"]["SinglePedalModeActive"] == 1
 
-    ret.tpms.fr = pt_cp.vl["TPMS"]["PRESSURE_FR"]
-    ret.tpms.fl = pt_cp.vl["TPMS"]["PRESSURE_FL"]
-    ret.tpms.rl = pt_cp.vl["TPMS"]["PRESSURE_RL"]
-    ret.tpms.rr = pt_cp.vl["TPMS"]["PRESSURE_RR"]
+    cv_unit = 0.8226
+    ret.tpms.fr = cv_unit * pt_cp.vl["TPMS"]["PRESSURE_FR"]
+    ret.tpms.fl = cv_unit * pt_cp.vl["TPMS"]["PRESSURE_FL"]
+    ret.tpms.rl = cv_unit * pt_cp.vl["TPMS"]["PRESSURE_RL"]
+    ret.tpms.rr = cv_unit * pt_cp.vl["TPMS"]["PRESSURE_RR"]
 
     if self.CP.enableGasInterceptor:
       ret.gas = (pt_cp.vl["GAS_SENSOR"]["INTERCEPTOR_GAS"] + pt_cp.vl["GAS_SENSOR"]["INTERCEPTOR_GAS2"]) / 2.
@@ -298,7 +294,6 @@ class CarState(CarStateBase):
       ("ECMEngineStatus", 100),
       ("PSCMSteeringAngle", 100),
       ("ECMAcceleratorPos", 80),
-      ("TPMS", 100),
     ]
 
     # Used to read back last counter sent to PT by camera
@@ -327,10 +322,9 @@ class CarState(CarStateBase):
       checks.append(("GAS_SENSOR", 50))
 
     if CP.enableBsm:
-      if CP.carFingerprint not in CAR.VOLT2018:
-        signals.append(("LeftBSM", "BCMBlindSpotMonitor"))
-        signals.append(("RightBSM", "BCMBlindSpotMonitor"))
-        checks.append(("BCMBlindSpotMonitor", 10))
+      signals.append(("LeftBSM", "BCMBlindSpotMonitor"))
+      signals.append(("RightBSM", "BCMBlindSpotMonitor"))
+      checks.append(("BCMBlindSpotMonitor", 10))
 
     return CANParser(DBC[CP.carFingerprint]["pt"], signals, checks, CanBus.POWERTRAIN, enforce_checks=False)
 
@@ -355,15 +349,3 @@ class CarState(CarStateBase):
     checks = []
     return CANParser(DBC[CP.carFingerprint]["chassis"], signals, checks, CanBus.CHASSIS, enforce_checks=False)
 
-  # for lowspeed
-  @staticmethod
-  def get_gmlan_can_parser(CP):
-    signals = []
-    if CP.enableBsm:
-      if CP.carFingerprint in CAR.VOLT2018:
-        signals += [
-          ("BSM_Indicator_Light", "LeftRadar"),
-          ("BSM_Indicator_Light", "RightRadar"),
-        ]
-    checks = []
-    return CANParser(DBC[CP.carFingerprint]["gmlan"], signals, checks, CanBus.SW_GMLAN, enforce_checks=False)
