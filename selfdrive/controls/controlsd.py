@@ -942,12 +942,6 @@ class Controls:
     if 0 < self.cruise_helper.naviSpeed < self.cruise_helper.curveSpeed:
       controlsState.curveSpeed = -self.cruise_helper.naviSpeed
 
-    #C2#controlsState.upAccelCmd = float(self.LoC.pid.p)
-    #C2#controlsState.uiAccelCmd = float(self.LoC.pid.i)
-    #C2#controlsState.ufAccelCmd = float(self.LoC.pid.f)
-    #C2#controlsState.cumLagMs = -self.rk.remaining * 1000.
-
-    #print("cumLagMsg={:5.2f}".format(-self.rk.remaining * 1000.))
     # Fixed SR
     controlsState.steerRatio = self.VM.sR
     #self.debugText1 = 'cumLagMs={:5.1f}'.format(-self.rk.remaining * 1000.)
@@ -957,18 +951,6 @@ class Controls:
     controlsState.forceDecel = bool(force_decel)
     #C2#controlsState.canErrorCounter = self.can_rcv_timeout_counter
     controlsState.experimentalMode = self.experimental_mode
-
-    #C2#lat_tuning = self.CP.lateralTuning.which()
-    #C2#if self.joystick_mode:
-    #C2#  controlsState.lateralControlState.debugState = lac_log
-    #C2#elif self.CP.steerControlType == car.CarParams.SteerControlType.angle:
-    #C2#  controlsState.lateralControlState.angleState = lac_log
-    #C2#elif lat_tuning == 'pid':
-    #C2#  controlsState.lateralControlState.pidState = lac_log
-    #C2#elif lat_tuning == 'torque':
-    #C2#  controlsState.lateralControlState.torqueState = lac_log
-    #C2#elif lat_tuning == 'indi':
-    #C2#  controlsState.lateralControlState.indiState = lac_log
 
     self.pm.send('controlsState', dat)
 

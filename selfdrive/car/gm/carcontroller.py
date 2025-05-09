@@ -85,9 +85,12 @@ class CarController:
       steerMax = int(params.get("CustomSteerMax", encoding="utf8"))
       steerDeltaUp = int(params.get("CustomSteerDeltaUp", encoding="utf8"))
       steerDeltaDown = int(params.get("CustomSteerDeltaDown", encoding="utf8"))
-      self.params.STEER_MAX = self.params.STEER_MAX if steerMax <= 0 else steerMax
-      self.params.STEER_DELTA_UP = self.params.STEER_DELTA_UP if steerDeltaUp <= 0 else steerDeltaUp
-      self.params.STEER_DELTA_DOWN = self.params.STEER_DELTA_DOWN if steerDeltaDown <= 0 else steerDeltaDown
+      if steerMax > 0:
+        self.params.STEER_MAX = steerMax
+      if steerDeltaUp > 0:
+        self.params.STEER_DELTA_UP = steerDeltaUp
+      if steerDeltaDown > 0:
+        self.params.STEER_DELTA_DOWN = steerDeltaDown
     self.long_pitch = Params().get_bool("LongPitch")
     self.use_ev_tables = Params().get_bool("EVTable")
 
@@ -204,6 +207,8 @@ class CarController:
 
         idx = (self.frame // 4) % 4
 
+        at_full_stop = CC.longActive and CS.out.standstill
+        near_stop = CC.longActive and (abs(CS.out.vEgo) < self.params.NEAR_STOP_BRAKE_PHASE)
         if self.CP.flags & GMFlags.CC_LONG.value:
           if CC.longActive and CS.out.vEgo > self.CP.minEnableSpeed:
             # Using extend instead of append since the message is only sent intermittently

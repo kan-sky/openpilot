@@ -10,7 +10,7 @@ LongCtrlState = car.CarControl.Actuators.LongControlState
 
 
 def long_control_state_trans(CP, active, long_control_state, v_ego, v_target,
-                             v_target_1sec, brake_pressed, cruise_standstill, softHold, a_target_now, a_ego, stopping_accel):
+                             v_target_1sec, brake_pressed, cruise_standstill, softHold, a_target_now, a_ego, stopping_accel, radarState):
   planned_stop = (v_target < CP.vEgoStopping and v_target_1sec < CP.vEgoStopping)
   stopping_condition = planned_stop
 
@@ -41,7 +41,9 @@ def long_control_state_trans(CP, active, long_control_state, v_ego, v_target,
     elif long_control_state in [LongCtrlState.starting, LongCtrlState.pid]:
       if stopping_condition:
         stopping_accel = stopping_accel if stopping_accel < 0.0 else -0.5
-        if a_ego > stopping_accel and v_ego < 1.0:
+        leadOne = radarState.leadOne
+        fcw_stop = leadOne.status and leadOne.dRel < 4.0
+        if a_ego > stopping_accel or fcw_stop: # and v_ego < 1.0:
           long_control_state = LongCtrlState.stopping
         if long_control_state == LongCtrlState.starting:
           long_control_state = LongCtrlState.stopping
@@ -134,7 +136,7 @@ class LongControl:
 
     self.long_control_state, planned_stop = long_control_state_trans(self.CP, active, self.long_control_state, CS.vEgo,
                                                        v_target, v_target_1sec, CS.brakePressed,
-                                                       CS.cruiseState.standstill, CC.hudControl.softHold, a_target_now, CS.aEgo, self.stopping_accel)
+                                                       CS.cruiseState.standstill, CC.hudControl.softHold, a_target_now, CS.aEgo, self.stopping_accel, radarState)
 
     if self.long_control_state == LongCtrlState.off:
       self.reset(CS.vEgo)
