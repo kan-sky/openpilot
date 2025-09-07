@@ -218,7 +218,7 @@ class CarController:
 
         if CC.cruiseControl.resume and CS.pcm_acc_status == AccState.STANDSTILL:
           self.acc_engaged_latch = self.frame + int(0.2 / DT_CTRL)
-        if self.CP.carFingerprint == CAR.CHEVROLET_VOLT:
+        if self.CP.carFingerprint == CAR.VOLT:
           if CC.cruiseControl.resume and CS.pcm_acc_status == AccState.STANDSTILL:
             acc_engaged = False
           else:
@@ -259,7 +259,7 @@ class CarController:
                 can_sends.append(gmcan.create_brake_command(self.packer_ch, CanBus.CHASSIS, apply_brake, brk_idx))
               elif self.CP.carFingerprint in CAMERA_ACC_CAR:
                 can_sends.append(gmcan.create_brake_command(self.packer_pt, CanBus.POWERTRAIN, apply_brake, brk_idx))
-              Params().put_bool_nonblocking("ActivateCruiseAfterBrake", True) # cruise.py에 브레이크 ON신호 전달
+              Params().put_bool("ActivateCruiseAfterBrake", True) # cruise_helpers.py에 브레이크 ON신호 전달
               self.activateCruise_after_brake = True # 브레이크신호는 한번만 보내고 초기화
               # 다음 프레임(0-브레이크)까지의 기준을 위해 프레임 초기화
               self.last_button_frame = self.frame
