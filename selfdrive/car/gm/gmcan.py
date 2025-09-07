@@ -6,23 +6,28 @@ from common.realtime import DT_CTRL
 from selfdrive.car import make_can_msg, create_gas_interceptor_command
 from selfdrive.car.gm.values import CAR, CruiseButtons, CanBus
 
+# GM: AutoResume: brake signal to CAN
 def create_brake_command(packer, bus, apply_brake, idx):
-  mode = 0xA if apply_brake > 0 else 0x1 # 기본 mode(enabled시 브레이크값)
-
+  rc = idx & 0x3  # 2비트 롤링카운터
+  mode = 0xA if apply_brake > 0 else 0x1
+  apply_brake = max(0, min(0xFFF, apply_brake))
   brake = (0x1000 - apply_brake) & 0xFFF
-  checksum = (0x10000 - (mode << 12) - brake - idx) & 0xFFFF
+  checksum = (0x10000 - (mode << 12) - brake - rc) & 0xFFFF
+
   values = {
-    "RollingCounter": idx,
+    "RollingCounter": rc,
     "FrictionBrakeMode": mode,
     "FrictionBrakeChecksum": checksum,
-    "FrictionBrakeCmd": -apply_brake
+    "FrictionBrakeCmd": brake,
   }
+
   return packer.make_can_msg("EBCMFrictionBrakeCmd", bus, values)
 
 def create_buttons(packer, bus, idx, button):
+  rc = idx & 0x3
   values = {
     "ACCButtons": button,
-    "RollingCounter": idx,
+    "RollingCounter": rc,
     "ACCAlwaysOne": 1,
     "DistanceButton": 0,
   }
@@ -72,16 +77,14 @@ def create_gas_regen_command(packer, bus, throttle, idx, enabled, at_full_stop):
   values = {
     "GasRegenCmdActive": enabled,
     "RollingCounter": idx,
-    "GasRegenCmdActiveInv": 1 - enabled,
     "GasRegenCmd": throttle,
     "GasRegenFullStopActive": at_full_stop,
-    "GasRegenAlwaysOne": 1,
-    "GasRegenAlwaysOne2": 1,
-    "GasRegenAlwaysOne3": 1,
+    "GasRegenAccType": 1,
   }
 
   dat = packer.make_can_msg("ASCMGasRegenCmd", bus, values)[2]
-  values["GasRegenChecksum"] = (((0xff - dat[1]) & 0xff) << 16) | \
+  values["GasRegenChecksum"] = ((1 - enabled) << 24) | \
+                               (((0xff - dat[1]) & 0xff) << 16) | \
                                (((0xff - dat[2]) & 0xff) << 8) | \
                                ((0x100 - dat[3] - idx) & 0xff)
 
@@ -105,14 +108,16 @@ def create_friction_brake_command(packer, bus, apply_brake, idx, enabled, near_s
     #elif near_stop:
     #  mode = 0xb
 
+  apply_brake = max(0, min(0xFFF, apply_brake))
   brake = (0x1000 - apply_brake) & 0xfff
-  checksum = (0x10000 - (mode << 12) - brake - idx) & 0xffff
+  rc = idx & 0x3  # 2비트 롤링카운터
+  checksum = (0x10000 - (mode << 12) - brake - rc) & 0xffff
 
   values = {
-    "RollingCounter": idx,
+    "RollingCounter": rc,
     "FrictionBrakeMode": mode,
     "FrictionBrakeChecksum": checksum,
-    "FrictionBrakeCmd": -apply_brake
+    "FrictionBrakeCmd": brake,
   }
 
   return packer.make_can_msg("EBCMFrictionBrakeCmd", bus, values)

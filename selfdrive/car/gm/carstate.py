@@ -55,6 +55,11 @@ class CarState(CarStateBase):
     # cruiseMain default(test from nd0706-vision)
     self.cruiseMain_on = True if int(Params().get("EnableAutoEngage")) == 2 else False
     self.totalDistance = 0.0
+    # accFault hyst
+    self._standstill_hyst = True
+    self._ss_enter = 0.086   # STANDSTILL_THRESHOLD = 10 * 0.0311 * CV.KPH_TO_MS(.277) 값
+    self._ss_exit  = 0.15   # m/s, 스탠드스틸에서 '나갈' 때 임계 (≈0.18 km/h)
+    self._creep_max = 0.45  # m/s, 크리핑 윈도 (≈1.08 km/h)
 
   def update(self, pt_cp, cam_cp, loopback_cp, chassis_cp):
     ret = car.CarState.new_message()
@@ -94,7 +99,17 @@ class CarState(CarStateBase):
     )
     ret.vEgoRaw = mean([ret.wheelSpeeds.fl, ret.wheelSpeeds.fr, ret.wheelSpeeds.rl, ret.wheelSpeeds.rr])
     ret.vEgo, ret.aEgo = self.update_speed_kf(ret.vEgoRaw)
-    ret.standstill = ret.wheelSpeeds.rl <= STANDSTILL_THRESHOLD and ret.wheelSpeeds.rr <= STANDSTILL_THRESHOLD
+    # accFault hyst
+    v_rl = abs(ret.wheelSpeeds.rl)
+    v_rr = abs(ret.wheelSpeeds.rr)
+    if self._standstill_hyst:
+      if (v_rl > self._ss_exit) or (v_rr > self._ss_exit):
+        self._standstill_hyst = False
+    else:
+      if (v_rl < self._ss_enter) and (v_rr < self._ss_enter):
+        self._standstill_hyst = True
+    ret.standstill = self._standstill_hyst  # 기존 ret.standstill 대체
+    #ret.standstill = abs(ret.wheelSpeeds.rl) <= STANDSTILL_THRESHOLD and abs(ret.wheelSpeeds.rr) <= STANDSTILL_THRESHOLD
 
     if pt_cp.vl["ECMPRDNL2"]["ManualMode"] == 1:
       ret.gearShifter = self.parse_gear_shifter("T")
@@ -155,8 +170,11 @@ class CarState(CarStateBase):
     ret.cruiseState.available = pt_cp.vl["ECMEngineStatus"]["CruiseMainOn"] != 0
     self.cruiseMain_on =  ret.cruiseState.available
     ret.espDisabled = pt_cp.vl["ESPStatus"]["TractionControlOn"] != 1
-    ret.accFaulted = (pt_cp.vl["AcceleratorPedal2"]["CruiseState"] == AccState.FAULTED or
+    # accFault hyst
+    creeping = max(v_rl, v_rr) < self._creep_max
+    ret.accFaulted = ((pt_cp.vl["AcceleratorPedal2"]["CruiseState"] == AccState.FAULTED and not creeping) or
                       pt_cp.vl["EBCMFrictionBrakeStatus"]["FrictionBrakeUnavailable"] == 1)
+
 
     if self.CP.enableGasInterceptor:  # Flip CC main logic when pedal is being used for long TODO: switch to cancel cc
       ret.cruiseState.available = (not ret.cruiseState.available)
@@ -172,7 +190,7 @@ class CarState(CarStateBase):
 
     if self.CP.networkLocation == NetworkLocation.fwdCamera and self.CP.carFingerprint not in CC_ONLY_CAR:
       ret.cruiseState.speed = cam_cp.vl["ASCMActiveCruiseControlStatus"]["ACCSpeedSetpoint"] * CV.KPH_TO_MS
-      ret.stockAeb = cam_cp.vl["AEBCmd"]["AEBCmdActive"] != 0
+      ret.stockAeb = False # cam_cp.vl["AEBCmd"]["AEBCmdActive"] != 0
       # openpilot controls nonAdaptive when not pcmCruise
       if self.CP.pcmCruise:
         ret.cruiseState.nonAdaptive = cam_cp.vl["ASCMActiveCruiseControlStatus"]["ACCCruiseState"] not in (2, 3)

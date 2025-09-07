@@ -1,4 +1,4 @@
-from collections import defaultdict
+﻿from collections import defaultdict
 from dataclasses import dataclass
 from enum import Enum, IntFlag
 from typing import Dict, List, Union
@@ -12,14 +12,14 @@ Ecu = car.CarParams.Ecu
 
 class CarControllerParams:
   STEER_MAX = 300  # GM limit is 3Nm. Used by carcontroller to generate LKA output
-  STEER_STEP = 3  # Active control frames per command (~33hz)
+  STEER_STEP = 4  # Active control frames per command (~33hz)
   INACTIVE_STEER_STEP = 10  # Inactive control frames per command (10hz)
   STEER_DELTA_UP = 10  # Delta rates require review due to observed EPS weakness
   STEER_DELTA_DOWN = 15
   STEER_DRIVER_ALLOWANCE = 65
   STEER_DRIVER_MULTIPLIER = 4
   STEER_DRIVER_FACTOR = 100
-  NEAR_STOP_BRAKE_PHASE = 0.15  # m/s
+  NEAR_STOP_BRAKE_PHASE = 0.4 # m/s 차량속도가 이보다 작아질 때, carcontroller.py 쪽에서 near_stop을 True로 간주. 이 값이 커질수록 차량이 더 빠른 속도에서 '정지 직전' 상태로 판단됨 → 마찰 브레이크를 조기에 더 강하게 적용
   SNG_INTERCEPTOR_GAS = 18. / 255.
   SNG_TIME = 30  # frames until the above is reached
 
@@ -148,6 +148,7 @@ class CruiseButtons:
 class AccState:
   OFF = 0
   ACTIVE = 1
+  STANDBY = 2
   FAULTED = 3
   STANDSTILL = 4
 

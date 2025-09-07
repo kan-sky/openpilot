@@ -497,6 +497,32 @@
       "unit": 10
     },
     {
+      "group": "주행튜닝",
+      "name": "CruiseDelay",
+      "title": "오토크루즈용 SET전송 반복타임.x0.01초(8)",
+      "descr": "너무길면 크루즈폴트날 수 있음",
+      "egroup": "LONG",
+      "etitle": "CruiseDelay.x0.01s(8)",
+      "edescr": "",
+      "min": 0,
+      "max": 40,
+      "default": 8,
+      "unit": 1
+    },
+    {
+      "group": "주행튜닝",
+      "name": "ResumeDelay",
+      "title": "리쥼버튼 반복전송 타임.x0.01초(8)",
+      "descr": "너무길면 크루즈폴트날 수 있음",
+      "egroup": "LONG",
+      "etitle": "ResumeDelay.x0.01s(8)",
+      "edescr": "",
+      "min": 0,
+      "max": 40,
+      "default": 8,
+      "unit": 1
+    },
+    {
       "group": "감속제어",
       "name": "TrafficStopAccel",
       "title": "신호정지 감속율 (80%)",

@@ -29,7 +29,7 @@ const int GM_STANDSTILL_THRSLD = 10;  // 0.311kph
 
 const CanMsg GM_ASCM_TX_MSGS[] = {{384, 0, 4}, {1033, 0, 7}, {1034, 0, 7}, {715, 0, 8}, {880, 0, 6}, {512, 0, 6}, {481, 0, 7}, {789, 0, 5}, {800, 0, 6},  // pt bus
                                   {161, 1, 7}, {774, 1, 8}, {776, 1, 7}, {784, 1, 2},   // obs bus
-                                  {789, 2, 5}, {481, 2, 7},// ch bus
+                                  {789, 2, 5},// ch bus
                                   {0x104c006c, 3, 3}, {0x10400060, 3, 5}};  // gmlan
 
 const CanMsg GM_CAM_TX_MSGS[] = {{384, 0, 4}, {512, 0, 6}, {481, 0, 7},  // pt bus
@@ -37,7 +37,7 @@ const CanMsg GM_CAM_TX_MSGS[] = {{384, 0, 4}, {512, 0, 6}, {481, 0, 7},  // pt b
 
 // Note: TODO: button presses (481) may not be required on bus 2 when OP is handling long
 const CanMsg GM_CAM_LONG_TX_MSGS[] = {{384, 0, 4}, {481, 0, 7}, {512, 0, 6}, {715, 0, 8}, {789, 0, 5}, {880, 0, 6}, // pt bus
-                                      {481, 2, 7}, {388, 2, 8}};  // camera bus
+                                      {388, 2, 8}};  // camera bus
 
 // TODO: do checksum and counter checks. Add correct timestep, 0.1s for now.
 AddrCheckStruct gm_addr_checks[] = {
@@ -115,13 +115,8 @@ static int gm_rx_hook(CANPacket_t *to_push) {
 
     // Reference for brake pressed signals:
     // https://github.com/commaai/openpilot/blob/master/selfdrive/car/gm/carstate.py
-    if (gm_hw == GM_ASCM) {
-      if (addr == 190) {
-        brake_pressed = GET_BYTE(to_push, 1) >= 10U; //핑거190 브레이크답력
-      }
-      if (addr == 241) {
-        brake_pressed = GET_BYTE(to_push, 1) >= 15U; //핑거241 브레이크답력
-      }
+    if ((addr == 190) && (gm_hw == GM_ASCM)) {
+      brake_pressed = GET_BYTE(to_push, 1) >= 10U; //핑거190 브레이크답력
     }
 
     if (addr == 201) {
@@ -203,15 +198,15 @@ static int gm_tx_hook(CANPacket_t *to_send) {
   // GAS/REGEN: safety check
   if (addr == 715) {
     bool apply = GET_BIT(to_send, 0U);
-    if (apply) {
-      if(!controls_allowed) puts("@@auto cruise control enabled....\n");
-        controls_allowed = true;        
+    if (apply && !controls_allowed) {
+      controls_allowed = true;        
     }
-    int gas_regen = ((GET_BYTE(to_send, 2) & 0x7FU) << 5) + ((GET_BYTE(to_send, 3) & 0xF8U) >> 3);
+    // convert float CAN signal to an int for gas checks: 22534 / 0.125 = 180272
+    int gas_regen = (((GET_BYTE(to_send, 1) & 0x7U) << 16) | (GET_BYTE(to_send, 2) << 8) | GET_BYTE(to_send, 3)) - 180272U;
 
     bool violation = false;
     // Allow apply bit in pre-enabled and overriding states
-    violation |= !controls_allowed && apply;
+    //violation |= !controls_allowed && apply;
     violation |= longitudinal_gas_checks(gas_regen, *gm_long_limits);
 
     if (violation) {
@@ -224,6 +219,9 @@ static int gm_tx_hook(CANPacket_t *to_send) {
     int button = (GET_BYTE(to_send, 5) >> 4) & 0x7U;
     bool allowed_btn = (button == GM_BTN_CANCEL) && cruise_engaged_prev;
     // For standard CC, allow spamming of SET / RESUME
+    if ((gm_hw == GM_ASCM) || gm_force_ascm || gm_cam_long) {
+      allowed_btn |= (button == GM_BTN_SET || button == GM_BTN_RESUME || button == GM_BTN_UNPRESS);
+    }
     if (!allowed_btn) {
       tx = 0;
     }

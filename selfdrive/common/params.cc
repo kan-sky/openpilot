@@ -342,6 +342,9 @@ std::unordered_map<std::string, uint32_t> keys = {
     {"ActivateCruiseAfterBrake", CLEAR_ON_MANAGER_START},   // for GM autoResume
     {"NNFF", PERSISTENT},
     {"PathFactor", PERSISTENT},
+    // Kans
+    {"CruiseDelay", PERSISTENT},
+    {"ResumeDelay", PERSISTENT},
 };
 
 } // namespace
