@@ -415,7 +415,7 @@ class LongitudinalMpc:
       adjust_dist = carrot.trafficStopDistanceAdjust if v_ego > 0.1 else -2.0
       if 50 < stop_x + adjust_dist < cruise_obstacle[0]:
         stop_x = cruise_obstacle[0] - adjust_dist
-      x2 = stop_x * np.ones(N+1) + adjust_dist
+      x2 = stop_x * np.ones(N+1)
 
       x_obstacles = np.column_stack([lead_0_obstacle, lead_1_obstacle, cruise_obstacle, x2])
       self.source = SOURCES[np.argmin(x_obstacles[0])]

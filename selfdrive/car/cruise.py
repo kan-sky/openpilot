@@ -225,6 +225,14 @@ class VCruiseCarrot:
 
 
   @property
+  def cruise_is_on(self) -> bool:
+    #_activate_cruise가 0이 아니면 True
+    try:
+      return int(self._activate_cruise) != 0
+    except Exception:
+      return False
+
+  @property
   def v_cruise_initialized(self):
     return self.v_cruise_kph != V_CRUISE_UNSET
 
@@ -685,7 +693,7 @@ class VCruiseCarrot:
       # GM: autoResume
       elif self.params.get_bool("ActivateCruiseAfterBrake"):
         self.params.put_bool_nonblocking("ActivateCruiseAfterBrake", False)
-        self._cruise_control(1, -1, "Cruise on (brake)")
+        self._cruise_control(1, 0, "Cruise on (brake)")
       elif self.v_cruise_kph < self.v_ego_kph_set:
         self.v_cruise_kph = self.v_ego_kph_set
 

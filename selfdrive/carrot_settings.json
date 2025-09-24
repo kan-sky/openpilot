@@ -458,6 +458,19 @@
     },
     {
       "group": "주행튜닝",
+      "name": "ComfortBrake",
+      "title": "Comfort Brake(240)",
+      "descr": "x0.01, 값이 크면 급하게 브레이킹",
+      "egroup": "LONG",
+      "etitle": "Comfort Brake(240)",
+      "edescr": "",
+      "min": 200,
+      "max": 300,
+      "default": 240,
+      "unit": 5
+    },
+    {
+      "group": "주행튜닝",
       "name": "JLeadFactor3",
       "title": "JerkLeadFactor(0)",
       "descr": "값이 클수록 전방차량의 가속도변화율에 민감하게 반응",
@@ -713,7 +726,7 @@
       "edescr": "SET/DECEL up/down speed unit(mode1,2,3, GasTok)",
       "min": 1,
       "max": 100,
-      "default": 10,
+      "default": 5,
       "unit": 1
     },
     {
@@ -726,7 +739,7 @@
       "edescr": "SET/DECEL up/down speed unit(Basic unit)",
       "min": 1,
       "max": 100,
-      "default": 10,
+      "default": 5,
       "unit": 1
     },
     {
@@ -1561,6 +1574,32 @@
       "max": 0,
       "default": 0,
       "unit": 10
+    },
+    {
+      "group": "주행튜닝",
+      "name": "CruiseDelay",
+      "title": "오토크루즈용 SET전송 반복타임.x0.01초(8)",
+      "descr": "너무길면 크루즈폴트날 수 있음",
+      "egroup": "LONG",
+      "etitle": "CruiseDelay.x0.01s(8)",
+      "edescr": "",
+      "min": 0,
+      "max": 40,
+      "default": 8,
+      "unit": 1
+    },
+    {
+      "group": "주행튜닝",
+      "name": "ResumeDelay",
+      "title": "리쥼버튼 반복전송 타임.x0.01초(8)",
+      "descr": "너무길면 크루즈폴트날 수 있음",
+      "egroup": "LONG",
+      "etitle": "ResumeDelay.x0.01s(8)",
+      "edescr": "",
+      "min": 0,
+      "max": 40,
+      "default": 8,
+      "unit": 1
     },
     {
       "group": "가속설정",

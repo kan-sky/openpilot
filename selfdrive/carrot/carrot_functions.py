@@ -231,14 +231,14 @@ class CarrotPlanner:
   def check_model_stopping(self, v_cruise, v, v_ego, a_ego, model_x, y, d_rel):
     v_ego_kph = v_ego * CV.MS_TO_KPH
     model_v = self.vFilter.process(v[-1])
-    startSign = model_v > 5.0 or model_v > (v[0] + 2)
+    startSign = model_v > 4.5 and model_v > (v[0] + 1.6)
 
     if v_ego_kph < 1.0:
       stopSign = model_x < 20.0 and model_v < 10.0
     elif v_ego_kph < 82.0:
-      stopSign = (model_x < d_rel - 3.0 and
-                  model_x < np.interp(v[0] * 3.6, [60, 80], [120.0, 150]) and
-                  ((model_v < 3.0) or (model_v < v[0] * 0.7)) and
+      stopSign = (model_x < d_rel - 2.5 and
+                  model_x < np.interp(v[0] * 3.6, [60, 80], [110.0, 120]) and
+                  ((model_v < 3.5) or (model_v < v[0] * 0.75)) and
                   abs(y[-1]) < 5.0)
       # 정상주행중 감속하는 경우(카메라 감속등), 오감지가 많음. 
       # 회생감속시:v_cruise=0에는 신호호감지하도록함.
@@ -267,7 +267,7 @@ class CarrotPlanner:
 
     if self.stopSignCount * DT_MDL > 0.0:
       self.trafficState = TrafficState.red
-    elif self.startSignCount * DT_MDL > 0.2:
+    elif self.startSignCount * DT_MDL > 0.15:
       self.trafficState = TrafficState.green
     else:
       self.trafficState = TrafficState.off
@@ -436,7 +436,7 @@ class CarrotPlanner:
           self.comfort_brake = self.comfortBrake * 0.9
           #self.comfort_brake = COMFORT_BRAKE
           self.trafficStopAdjustRatio = np.interp(v_ego_kph, [0, 100], [1.0, 0.7])
-          stop_dist = self.xStop * np.interp(self.xStop, [0, 50], [1.0, self.trafficStopAdjustRatio])  ##�����Ÿ��� ���� �����Ÿ� ��������
+          stop_dist = self.xStop * np.interp(self.xStop, [0, 100], [1.0, self.trafficStopAdjustRatio])  ##�����Ÿ��� ���� �����Ÿ� ��������
           if stop_dist > 10.0: ### 10M�̻��϶���, self.actual_stop_distance�� ������Ʈ��.
             self.actual_stop_distance = stop_dist
           stop_model_x = 0

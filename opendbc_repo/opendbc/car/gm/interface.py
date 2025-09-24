@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 import json
 import os
 from cereal import car
@@ -9,12 +9,10 @@ from opendbc.car.common.basedir import BASEDIR
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.gm.carcontroller import CarController
 from opendbc.car.gm.carstate import CarState
-from opendbc.car.gm.radar_interface import RadarInterface, RADAR_HEADER_MSG
-from opendbc.car.gm.values import CAR, CarControllerParams, EV_CAR, CAMERA_ACC_CAR, CanBus, GMFlags, CC_ONLY_CAR, SDGM_CAR, CruiseButtons, GMSafetyFlags, ALT_ACCS
+from opendbc.car.gm.radar_interface import RadarInterface, RADAR_HEADER_MSG, CAMERA_DATA_HEADER_MSG
+from opendbc.car.gm.values import CAR, CarControllerParams, EV_CAR, CAMERA_ACC_CAR, CanBus, GMFlags, CC_ONLY_CAR, SDGM_CAR, GMSafetyFlags, ALT_ACCS, ASCM_INT, SASCM_CAR
 from opendbc.car.interfaces import CarInterfaceBase, TorqueFromLateralAccelCallbackType, FRICTION_THRESHOLD, LatControlInputs, NanoFFModel
 
-#ButtonType = structs.CarState.ButtonEvent.Type 이 두 줄도 사용되지 않습니다.
-#GearShifter = structs.CarState.GearShifter
 TransmissionType = structs.CarParams.TransmissionType
 NetworkLocation = structs.CarParams.NetworkLocation
 
@@ -51,7 +49,7 @@ class CarInterface(CarInterfaceBase):
     return 0.10006696 * sigmoid * (v_ego + 3.12485927)
 
   def get_steer_feedforward_function(self):
-    if self.CP.carFingerprint in (CAR.CHEVROLET_VOLT, CAR.CHEVROLET_VOLT_CC):
+    if self.CP.carFingerprint in (CAR.CHEVROLET_VOLT, CAR.CHEVROLET_VOLT_2019, CAR.CHEVROLET_VOLT_CC, CAR.CHEVROLET_VOLT_ASCM):
       return self.get_steer_feedforward_volt
     else:
       return CarInterfaceBase.get_steer_feedforward_default
@@ -112,42 +110,52 @@ class CarInterface(CarInterfaceBase):
     if PEDAL_MSG in fingerprint[0]:
       ret.enableGasInterceptorDEPRECATED = True
       ret.safetyConfigs[0].safetyParam |= GMSafetyFlags.GAS_INTERCEPTOR.value
+      # When a pedal interceptor is present, always use normal longitudinal (block stock cruise)
+      alpha_long = False
 
     if candidate in EV_CAR:
       ret.transmissionType = TransmissionType.direct
+      ret.safetyConfigs[0].safetyParam |= GMSafetyFlags.EV.value
     else:
       ret.transmissionType = TransmissionType.automatic
 
     ret.longitudinalTuning.kpBP = [0.]
     ret.longitudinalTuning.kiBP = [0.]
 
-    if candidate in (CAMERA_ACC_CAR | SDGM_CAR):
-      ret.alphaLongitudinalAvailable = candidate not in SDGM_CAR
+    if candidate in (CAMERA_ACC_CAR | SDGM_CAR | ASCM_INT):
+      ret.alphaLongitudinalAvailable = candidate not in (CC_ONLY_CAR | ASCM_INT | SDGM_CAR) or 0x2FF in fingerprint[CanBus.POWERTRAIN]
       ret.networkLocation = NetworkLocation.fwdCamera
-      ret.radarUnavailable = True  # no radar
+      ret.radarUnavailable = RADAR_HEADER_MSG not in fingerprint[CanBus.OBSTACLE] or CAMERA_DATA_HEADER_MSG not in fingerprint[CanBus.OBSTACLE]
       ret.pcmCruise = True
-      ret.safetyConfigs[0].safetyParam |= GMSafetyFlags.HW_CAM.value
-      ret.minEnableSpeed = -1 * CV.KPH_TO_MS
+      ret.minEnableSpeed = 5 * CV.KPH_TO_MS
       ret.minSteerSpeed = 10 * CV.KPH_TO_MS
+      if candidate in SDGM_CAR:
+        ret.safetyConfigs[0].safetyParam |= GMSafetyFlags.HW_SDGM.value
+        # Use C9 brake bit only on SDGM variants that lack 0xBE (ECMAcceleratorPos)
+        if ACCELERATOR_POS_MSG not in fingerprint[CanBus.POWERTRAIN]:
+          ret.safetyConfigs[0].safetyParam |= GMSafetyFlags.FORCE_BRAKE_C9.value
+          ret.flags |= GMFlags.FORCE_BRAKE_C9.value
+        ret.minEnableSpeed = -1.  # engage speed is decided by pcm
+        ret.minSteerSpeed = 7 * CV.MPH_TO_MS
+      elif candidate in ASCM_INT:
+        ret.safetyConfigs[0].safetyParam |= GMSafetyFlags.HW_CAM.value
+        ret.minSteerSpeed = 7 * CV.MPH_TO_MS
+        ret.safetyConfigs[0].safetyParam |= GMSafetyFlags.ASCM_INT.value
+      else:
+        ret.safetyConfigs[0].safetyParam |= GMSafetyFlags.HW_CAM.value
 
       # Tuning for experimental long
-      ret.longitudinalTuning.kiV = [1.7]
-      ret.stoppingDecelRate = 2.0  # reach brake quickly after enabling
-      ret.vEgoStopping = 0.5
-      ret.vEgoStarting = 0.4
-      ret.stopAccel = -0.4
-      ret.startingState = True
-      ret.startAccel = 1.0
+      ret.longitudinalTuning.kiV = [1.0, 1.0]
+
+      ret.stoppingDecelRate = 1.0  # reach brake quickly after enabling
+      ret.vEgoStopping = 0.25
+      ret.vEgoStarting = 0.25
+      ret.stopAccel = -0.20
 
       if alpha_long:
         ret.pcmCruise = False
         ret.openpilotLongitudinalControl = True
         ret.safetyConfigs[0].safetyParam |= GMSafetyFlags.HW_CAM_LONG.value
-
-      if candidate in ALT_ACCS:
-        ret.alphaLongitudinalAvailable = False
-        ret.openpilotLongitudinalControl = False
-        ret.minEnableSpeed = -1.  # engage speed is decided by PCM
 
     else:  # ASCM, OBD-II harness
       ret.openpilotLongitudinalControl = True
@@ -166,82 +174,78 @@ class CarInterface(CarInterfaceBase):
         # Need to set ASCM long limits when using pedal interceptor, instead of camera ACC long limits
         ret.safetyConfigs[0].safetyParam |= GMSafetyFlags.HW_ASCM_LONG.value
 
-    # These cars have been put into dashcam only due to both a lack of users and test coverage.
-    # These cars likely still work fine. Once a user confirms each car works and a test route is
-    # added to opendbc/car/tests/routes.py, we can remove it from this list.
-    # ret.dashcamOnly = candidate in {CAR.CADILLAC_ATS, CAR.HOLDEN_ASTRA, CAR.CHEVROLET_MALIBU, CAR.BUICK_REGAL} or \
-    #                   (ret.networkLocation == NetworkLocation.gateway and ret.radarUnavailable)
-
     # Start with a baseline tuning for all GM vehicles. Override tuning as needed in each model section below.
-    ret.steerActuatorDelay = 0.28  # Default delay, not measured yet
+    ret.lateralTuning.pid.kiBP, ret.lateralTuning.pid.kpBP = [[0.], [0.]]
+    ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.2], [0.00]]
+    ret.lateralTuning.pid.kf = 0.00004   # full torque for 20 deg at 80mph means 0.00007818594
+    ret.steerActuatorDelay = 0.1  # Default delay, not measured yet
 
     ret.steerLimitTimer = 0.4
-    ret.longitudinalActuatorDelay = Params().get_float("LongActuatorDelay")*0.01 # 0.5  # large delay to initially start braking
+    ret.radarTimeStep = 0.0667  # GM radar runs at 15Hz instead of standard 20Hz
+    ret.longitudinalActuatorDelay = 0.5  # large delay to initially start braking
 
-    if candidate == CAR.CHEVROLET_VOLT:
-      ret.steerActuatorDelay = 0.45 if useEVTables else 0.3
+    if candidate in (CAR.CHEVROLET_VOLT, CAR.CHEVROLET_VOLT_CC):
       ret.longitudinalTuning.kpBP = [0.]
       ret.longitudinalTuning.kpV = [1.0]
       ret.longitudinalTuning.kiBP = [0.]
-      ret.longitudinalTuning.kiV = [.35]
+      ret.longitudinalTuning.kiV = [0.]
       ret.longitudinalTuning.kf = 1.0
-      ret.stoppingDecelRate = 0.2 # brake_travel/s while trying to stop
+      ret.stoppingDecelRate = 0.8 # brake_travel/s while trying to stop
       ret.vEgoStopping = 0.25
       ret.vEgoStarting = 0.15
       ret.stopAccel = -0.5
       ret.startingState = True
-      ret.startAccel = 1.9
+      ret.startAccel = 2.0
 
-      # softer long tune for ev table
-      if useEVTables:
-        ret.longitudinalTuning.kpBP = [0.]
-        ret.longitudinalTuning.kpV = [1.0]
-        ret.longitudinalTuning.kiBP = [0.]
-        ret.longitudinalTuning.kiV = [.35]
-        ret.longitudinalTuning.kf = 1.0
-        ret.stoppingDecelRate = 1.0 # brake_travel/s while trying to stop
-        ret.stopAccel = -0.5
-        ret.startAccel = 0.6
-
-      useTorque = Params().get_bool("LateralTorqueCustom")
-      if useTorque:
-        CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
-      else:
-        ret.lateralTuning.pid.kpBP = [0., 40.]
-        ret.lateralTuning.pid.kpV = [0., 0.17]
-        ret.lateralTuning.pid.kiBP = [0.]
-        ret.lateralTuning.pid.kiV = [0.]
-        ret.lateralTuning.pid.kf = 1.
-
-    elif candidate == CAR.CADILLAC_CT6_ACC:
-      ret.steerActuatorDelay = 0.3
-      ret.longitudinalTuning.kpBP = [0.]
-      ret.longitudinalTuning.kpV = [1.0]
-      ret.longitudinalTuning.kiBP = [0.]
-      ret.longitudinalTuning.kiV = [.3]
-      ret.longitudinalTuning.kf = 1.0
-      ret.stoppingDecelRate = 0.2 # brake_travel/s while trying to stop
-      ret.stopAccel = -0.5
-      ret.startingState = True
-      ret.startAccel = 1.5
-
-      useTorque = Params().get_bool("LateralTorqueCustom")
-      if useTorque:
-        CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
-      else:
-        ret.lateralTuning.pid.kpBP = [0., 40.]
-        ret.lateralTuning.pid.kpV = [0., 0.17]
-        ret.lateralTuning.pid.kiBP = [0.]
-        ret.lateralTuning.pid.kiV = [0.]
-        ret.lateralTuning.pid.kf = 1.
+      CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
 
     elif candidate == CAR.GMC_ACADIA:
       ret.minEnableSpeed = -1.  # engage speed is decided by pcm
       ret.steerActuatorDelay = 0.2
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
 
-    elif candidate in (CAR.CHEVROLET_MALIBU, CAR.CHEVROLET_MALIBU_CC):
+    elif candidate == CAR.CHEVROLET_MALIBU:
+      ret.safetyConfigs[0].safetyParam |= GMSafetyFlags.HW_ASCM_LONG.value
+      ret.openpilotLongitudinalControl = True
+      ret.networkLocation = NetworkLocation.gateway
+      ret.radarUnavailable = False
+      ret.pcmCruise = False
+      ret.minEnableSpeed = -1 * CV.MPH_TO_MS
+      ret.minSteerSpeed = (6.7 if useEVTables else 7) * CV.MPH_TO_MS
+      ret.longitudinalTuning.kpV = [1.0]
+      ret.longitudinalTuning.kiV = [0.3]
+      ret.vEgoStopping = 0.4
+      ret.vEgoStarting = 0.15
+      ret.stopAccel = -0.5
+      ret.startingState = True
+      ret.startAccel = 1.0
       ret.steerActuatorDelay = 0.2
+      CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
+	  
+    elif candidate == CAR.CHEVROLET_MALIBU_CC:
+      ret.steerActuatorDelay = 0.2
+      ret.lateralTuning.pid.kiBP, ret.lateralTuning.pid.kpBP = [[0.], [0.]]
+      ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.2], [0.00]]
+      ret.lateralTuning.pid.kf = 0.00004   # full torque for 20 deg at 80mph means 0.00007818594
+
+    elif candidate == CAR.CHEVROLET_MALIBU_2019:
+      ret.minEnableSpeed = -1
+      ret.stoppingDecelRate = 1.2 # brake_travel/s while trying to stop
+      ret.vEgoStopping = 0.5
+      ret.vEgoStarting = 0.4
+      ret.stopAccel = -0.4
+      ret.startingState = True
+      ret.startAccel = .9
+      CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
+
+    elif candidate == CAR.CHEVROLET_MALIBU_SASCM:
+      ret.minEnableSpeed = -1
+      ret.stoppingDecelRate = 1.2 # brake_travel/s while trying to stop
+      ret.vEgoStopping = 0.5
+      ret.vEgoStarting = 0.4
+      ret.stopAccel = -0.4
+      ret.startingState = True
+      ret.startAccel = .9
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
 
     elif candidate == CAR.BUICK_LACROSSE:
@@ -280,9 +284,43 @@ class CarInterface(CarInterfaceBase):
 
     elif candidate in (CAR.CHEVROLET_EQUINOX, CAR.CHEVROLET_EQUINOX_CC):
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
+      ret.stoppingDecelRate = 1.0
+      ret.minEnableSpeed = -1.
+      ret.stopAccel = -0.7
+      ret.startingState = True
+      ret.startAccel = .9
 
     elif candidate in (CAR.CHEVROLET_TRAILBLAZER, CAR.CHEVROLET_TRAILBLAZER_CC):
       ret.steerActuatorDelay = 0.2
+      ret.longitudinalTuning.kpBP = [0.]
+      ret.longitudinalTuning.kpV = [1.0]
+      ret.longitudinalTuning.kiBP = [0.]
+      ret.longitudinalTuning.kiV = [0.]
+      ret.longitudinalTuning.kf = 1.0
+      ret.stoppingDecelRate = 1.2 # brake_travel/s while trying to stop
+      ret.vEgoStopping = 0.5
+      ret.vEgoStarting = 0.4
+      ret.stopAccel = -0.5
+      ret.startingState = True
+      ret.startAccel = 1.0
+      CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
+
+    elif candidate == CAR.CHEVROLET_NEW_TRAILBLAZER:
+      ret.networkLocation = NetworkLocation.fwdCamera
+      ret.steerActuatorDelay = 0.2
+      ret.minEnableSpeed = -1 * CV.MPH_TO_MS
+      ret.minSteerSpeed = 7 * CV.MPH_TO_MS
+      ret.longitudinalTuning.kpBP = [0.]
+      ret.longitudinalTuning.kpV = [1.0]
+      ret.longitudinalTuning.kiBP = [0.]
+      ret.longitudinalTuning.kiV = [.1]
+      ret.longitudinalTuning.kf = 1.0
+      ret.stoppingDecelRate = 0.8 # brake_travel/s while trying to stop
+      ret.vEgoStopping = 0.2
+      ret.vEgoStarting = 0.1
+      ret.stopAccel = -0.5
+      ret.startingState = True
+      ret.startAccel = 1.0
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
 
     elif candidate in (CAR.CHEVROLET_SUBURBAN, CAR.CHEVROLET_SUBURBAN_CC):
@@ -298,6 +336,17 @@ class CarInterface(CarInterfaceBase):
       ret.minEnableSpeed = -1.  # engage speed is decided by pcm
       ret.minSteerSpeed = 30 * CV.MPH_TO_MS
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
+    elif candidate == CAR.CADILLAC_CT6_2019:
+      ret.networkLocation = NetworkLocation.fwdCamera
+      ret.minEnableSpeed = -1
+      ret.stoppingDecelRate = 1.2 # brake_travel/s while trying to stop
+      ret.vEgoStopping = 0.5
+      ret.vEgoStarting = 0.4
+      ret.stopAccel = -0.4
+      ret.startingState = True
+      ret.startAccel = .9
+      CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
+
     elif candidate == CAR.CHEVROLET_VOLT_2019:
       ret.steerActuatorDelay = 0.2
       ret.minEnableSpeed = -1.  # engage speed is decided by pcm
@@ -307,38 +356,34 @@ class CarInterface(CarInterfaceBase):
       ret.steerActuatorDelay = 0.2
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
 
-    elif candidate == CAR.CHEVROLET_TRAVERSE:
-      ret.steerActuatorDelay = 0.2
-      ret.minEnableSpeed = -1.  # engage speed is decided by pcm
-      CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
-
-    elif candidate == CAR.BUICK_BABYENCLAVE:
-      ret.steerActuatorDelay = 0.2
-      ret.minEnableSpeed = -1.  # engage speed is decided by pcm
-      CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
-
     elif candidate == CAR.CADILLAC_CT6_CC:
-      CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
-
-    elif candidate == CAR.CHEVROLET_MALIBU_CC:
-      ret.steerActuatorDelay = 0.2
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
 
     elif candidate == CAR.CHEVROLET_TRAX:
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
-      ret.stoppingDecelRate = 0.3
+      ret.stoppingDecelRate = 0.8
       ret.minEnableSpeed = -1.
       ret.stopAccel = -0.5
       ret.startingState = True
       ret.startAccel = 1.0
     elif candidate == CAR.CHEVROLET_TRAVERSE:
-      ret.steerActuatorDelay = 0.2
+      ret.minEnableSpeed = -1.
+      ret.vEgoStopping = 0.4
+      ret.vEgoStarting = 0.2
+      ret.stopAccel = -0.5
+      ret.startingState = True
+      ret.startAccel = .9
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
 
     elif candidate == CAR.GMC_YUKON:
       ret.steerActuatorDelay = 0.5
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
       ret.dashcamOnly = True  # Needs steerRatio, tireStiffness, and lat accel factor tuning
+
+    elif candidate == CAR.BUICK_BABYENCLAVE:
+      ret.steerActuatorDelay = 0.2
+      ret.minEnableSpeed = -1.  # engage speed is decided by pcm
+      CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
 
     if ret.enableGasInterceptorDEPRECATED:
       ret.networkLocation = NetworkLocation.fwdCamera
@@ -384,16 +429,11 @@ class CarInterface(CarInterfaceBase):
       ret.safetyConfigs[0].safetyParam |= GMSafetyFlags.NO_ACC.value
 
     # Exception for flashed cars, or cars whose camera was removed
-    if (ret.networkLocation == NetworkLocation.fwdCamera or candidate in CC_ONLY_CAR) and CAM_MSG not in fingerprint[
-      CanBus.CAMERA] and not candidate in SDGM_CAR:
+    if (ret.networkLocation == NetworkLocation.fwdCamera or candidate in CC_ONLY_CAR) and CAM_MSG not in fingerprint[CanBus.CAMERA] and not candidate in (SDGM_CAR | ASCM_INT):
       ret.flags |= GMFlags.NO_CAMERA.value
       ret.safetyConfigs[0].safetyParam |= GMSafetyFlags.NO_CAMERA.value
 
     if ACCELERATOR_POS_MSG not in fingerprint[CanBus.POWERTRAIN]:
       ret.flags |= GMFlags.NO_ACCELERATOR_POS_MSG.value
-
-    if 608 in fingerprint[CanBus.POWERTRAIN]:
-      ret.flags |= GMFlags.SPEED_RELATED_MSG.value
-
 
     return ret
