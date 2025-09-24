@@ -294,6 +294,8 @@ class CarController(CarControllerBase):
                 self.send_btn(CS, can_sends, CruiseButtons.RES_ACCEL)
               if (self.frame - self.resume_frame) * DT_CTRL >= self.resumeDelay_time:
                 self.resume_activate = True
+                apply_gas = self.gas_input(0.5)
+                can_sends.append(gmcan.create_gas_command(self.packer, CanBus.POWERTRAIN, apply_gas, idx))
           else:
             self.resume_frame = 0
             self.resume_activate = False
@@ -386,6 +388,13 @@ class CarController(CarControllerBase):
 
     scaled_brake = max(0, min(MAX_BRAKE, int(brake_force * -100)))  # -를 +로 변환
     return -scaled_brake
+
+  def gas_input(self, gas_force: float) -> int:
+    SCALE = 0.125
+    OFFSET = -22534
+    gas_force = max(0.0, min(gas_force, 43001.875))  # 음수 방지 및 범위 클램프
+    raw_value = int((gas_force - OFFSET) / SCALE)
+    return raw_value
 
   def send_btn(self, CS, can_sends, cruise_btn, bus=None):
     if bus is None:
