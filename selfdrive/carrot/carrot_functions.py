@@ -79,7 +79,7 @@ class CarrotPlanner:
     self.stopSignCount = 0
 
     self.stop_distance = 6.0
-    self.trafficStopDistanceAdjust = 2.0 #params.get_float("TrafficStopDistanceAdjust") / 100.
+    self.trafficStopDistanceAdjust = 1.7 #params.get_float("TrafficStopDistanceAdjust") / 100.
     self.comfortBrake = 2.4
     self.comfort_brake = self.comfortBrake
 
@@ -436,8 +436,8 @@ class CarrotPlanner:
           self.comfort_brake = self.comfortBrake * 0.9
           #self.comfort_brake = COMFORT_BRAKE
           self.trafficStopAdjustRatio = np.interp(v_ego_kph, [0, 100], [1.0, 0.7])
-          stop_dist = self.xStop * np.interp(self.xStop, [0, 100], [1.0, self.trafficStopAdjustRatio])  ##�����Ÿ��� ���� �����Ÿ� ��������
-          if stop_dist > 10.0: ### 10M�̻��϶���, self.actual_stop_distance�� ������Ʈ��.
+          stop_dist = self.xStop * np.interp(self.xStop, [0, 100], [1.0, self.trafficStopAdjustRatio])  ## 남은거리에 따라 정지거리 비율조정
+          if stop_dist > 10.0:
             self.actual_stop_distance = stop_dist
           stop_model_x = 0
           self.fakeCruiseDistance = 0 if self.actual_stop_distance > 10.0 else 10.0

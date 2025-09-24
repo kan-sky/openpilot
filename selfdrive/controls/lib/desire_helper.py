@@ -152,6 +152,9 @@ class DesireHelper:
     self.auto_lane_change_enable = False
     self.next_lane_change = False
 
+    self.modelTurnSpeedFactor = 0.0
+    self.model_turn_speed = 0.0
+
   def check_lane_state(self, modeldata):
     lane_width_left, self.distance_to_road_edge_left, self.distance_to_road_edge_left_far, lane_prob_left = calculate_lane_width(modeldata.laneLines[0], modeldata.laneLineProbs[0],
                                                                                                  modeldata.laneLines[1], modeldata.roadEdges[0])
@@ -192,13 +195,24 @@ class DesireHelper:
       self.turn_disable_count = max(0, self.turn_disable_count - 1)
     #print(f"desire_state = {desire_state}, turn_desire_state = {self.turn_desire_state}, disable_count = {self.desire_disable_count}")
 
+  def make_model_turn_speed(self, modeldata):
+    if self.modelTurnSpeedFactor > 0:
+      self.model_turn_speed = 200.0
+    else:
+      model_turn_speed = np.interp(self.modelTurnSpeedFactor, modeldata.velocity.t, modeldata.velocity.x) * CV.MS_TO_KPH
+      self.model_turn_speed = self.model_turn_speed * 0.9 + model_turn_speed * 0.1
+    
   def update(self, carstate, modeldata, lateral_active, lane_change_prob, carrotMan, radarState):
 
     if self.frame % 100 == 0:
       self.laneChangeNeedTorque = self.params.get_int("LaneChangeNeedTorque")
       self.laneChangeBsd = self.params.get_int("LaneChangeBsd")
       self.laneChangeDelay = self.params.get_float("LaneChangeDelay") * 0.1
+      self.modelTurnSpeedFactor= self.params.get_float("ModelTurnSpeedFactor") * 0.1
+
     self.frame += 1
+
+    self.make_model_turn_speed(modeldata)
 
     self.carrot_lane_change_count = max(0, self.carrot_lane_change_count - 1)
     self.lane_change_delay = max(0, self.lane_change_delay - DT_MDL)
