@@ -147,6 +147,12 @@ class CarrotPlanner:
       else:
         self.myDrivingMode = myDrivingMode
 
+      self.mySafeFactor = 1.0
+      if self.myDrivingMode == DrivingMode.Eco: # eco
+        self.mySafeFactor = self.myEcoModeFactor
+      elif self.myDrivingMode == DrivingMode.Safe: #safe
+        self.mySafeFactor = self.mySafeModeFactor
+
     if self.params_count == 10:
       self.myHighModeFactor = 1.2 #float(self.params.get_int("MyHighModeFactor")) / 100.
       self.trafficLightDetectMode = self.params.get_int("TrafficLightDetectMode") # 0: None, 1:Stop, 2:Stop&Go
@@ -348,23 +354,14 @@ class CarrotPlanner:
     v_ego_cluster = carstate.vEgoCluster
     v_ego_cluster_kph = v_ego_cluster * CV.MS_TO_KPH
 
-    leadOne = radarstate.leadOne
-    self.mySafeFactor = 1.0
-    if leadOne.status and leadOne.vLead < 5 and leadOne.aLead < -0.5:
-      self.myDrivingMode = DrivingMode.Safe
-    if self.myDrivingMode == DrivingMode.Eco: # eco
-      self.mySafeFactor = self.myEcoModeFactor
-    elif self.myDrivingMode == DrivingMode.Safe: #safe
-      self.mySafeFactor = self.mySafeModeFactor
-
     if self.frame % 20 == 0: # every 1 sec
       vLead = 0
       aLead = 0
       dRel = 200
-      if leadOne.status:
-        vLead = leadOne.vLead * CV.MS_TO_KPH
-        aLead = leadOne.aLead
-        dRel = leadOne.dRel
+      if radarstate.leadOne.status:
+        vLead = radarstate.leadOne.vLead * CV.MS_TO_KPH
+        aLead = radarstate.leadOne.aLead
+        dRel = radarstate.leadOne.dRel
 
       self.drivingModeDetector.update_data(v_ego_kph, vLead, carstate.aEgo, aLead, dRel)
 
