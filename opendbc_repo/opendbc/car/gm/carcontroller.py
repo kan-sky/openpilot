@@ -267,7 +267,7 @@ class CarController(CarControllerBase):
               # 전송시점에 _brk_rc 변수로 RC증가(+1) 조치
               self._brk_rc = (self._brk_rc + 1) & 0x3
               brk_idx = self._brk_rc
-              apply_brake = self.brake_input(-self.brake_pulse_strength())
+              apply_brake = self.brake_input(-self.brake_strength())
               # 브레이크신호 전송(롱컨 꺼짐)
               if self.CP.carFingerprint == CAR.CHEVROLET_VOLT:  
                 can_sends.append(gmcan.create_brake_command(self.packer_ch, CanBus.CHASSIS, apply_brake, brk_idx))
