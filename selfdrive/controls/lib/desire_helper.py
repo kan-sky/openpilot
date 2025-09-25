@@ -197,11 +197,11 @@ class DesireHelper:
 
   def make_model_turn_speed(self, modeldata):
     if self.modelTurnSpeedFactor > 0:
-      self.model_turn_speed = 200.0
-    else:
       model_turn_speed = np.interp(self.modelTurnSpeedFactor, modeldata.velocity.t, modeldata.velocity.x) * CV.MS_TO_KPH
       self.model_turn_speed = self.model_turn_speed * 0.9 + model_turn_speed * 0.1
-    
+    else:
+      self.model_turn_speed = 200.0
+
   def update(self, carstate, modeldata, lateral_active, lane_change_prob, carrotMan, radarState):
 
     if self.frame % 100 == 0:
