@@ -693,7 +693,7 @@ class VCruiseCarrot:
       # GM: autoResume
       elif self.params.get_bool("ActivateCruiseAfterBrake"):
         self.params.put_bool_nonblocking("ActivateCruiseAfterBrake", False)
-        self._cruise_control(1, 0, "Cruise on (brake)")
+        self._cruise_control(1, -1, "Cruise on (brake)")
       elif self.v_cruise_kph < self.v_ego_kph_set:
         self.v_cruise_kph = self.v_ego_kph_set
 
