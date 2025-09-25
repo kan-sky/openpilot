@@ -285,15 +285,12 @@ class CarController(CarControllerBase):
 
         # Kans: AutoResume 2nd step
         if Params().get_int("AutoEngage") == 2:
+          if CS.out.aEgo < -0.010:  # 임계값
+            self._hill_detect_count += 1
+          else:
+            self._hill_detect_count = 0
+          gas_force = 1000.0 if self._hill_detect_count >= 4 else 500.0
           if actuators.longControlState == LongCtrlState.starting:
-            if CS.out.vEgo < 0.1 and CS.out.aEgo < -0.02:  # 임계값
-              self._hill_detect_count += 1
-            else:
-              self._hill_detect_count = 0
-            if self._hill_detect_count >= 5:  # 5프레임(.05초)
-              gas_force = 1.0
-            else:
-              gas_force = 0.6
             if self.resume_frame == 0:
               self.resume_frame = self.frame
               self.resume_activate = False
@@ -301,7 +298,7 @@ class CarController(CarControllerBase):
               if (self.frame - self.last_button_frame) * DT_CTRL >= 0.04:
                 self.last_button_frame = self.frame
                 self.send_btn(CS, can_sends, CruiseButtons.RES_ACCEL)
-              if (self.frame - self.resume_frame) * DT_CTRL >= self.resumeDelay_time:
+              if self.frame % 2 == 1 and (self.frame - self.resume_frame) * DT_CTRL >= self.resumeDelay_time:
                 apply_gas = self.gas_input(gas_force)
                 can_sends.append(gmcan.create_gas_command(self.packer_pt, CanBus.POWERTRAIN, apply_gas, idx))
                 self.resume_activate = True
@@ -401,10 +398,11 @@ class CarController(CarControllerBase):
   def gas_input(self, gas_force: float) -> int:
     SCALE = 0.125
     OFFSET = -22534
-    MAX_GAS = 1346.0 if self.CP.carFingerprint in (CAMERA_ACC_CAR | SDGM_CAR) and self.CP.carFingerprint not in CC_ONLY_CAR else 1018.0
+    ZERO_GAS = 0.0
+    neutral_raw = int((ZERO_GAS - OFFSET) / SCALE)  # 중립값=약180272
 
-    gas_force = max(0.0, min(gas_force, MAX_GAS))
-    raw_value = int((gas_force - OFFSET) / SCALE)
+    gas_force = max(ZERO_GAS, gas_force)
+    raw_value = neutral_raw + int(gas_force)
     return raw_value
 
   def send_btn(self, CS, can_sends, cruise_btn, bus=None):
