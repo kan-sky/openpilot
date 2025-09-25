@@ -286,12 +286,12 @@ class CarController(CarControllerBase):
         # Kans: AutoResume 2nd step
         if Params().get_int("AutoEngage") == 2:
           if actuators.longControlState == LongCtrlState.starting:
-            if CS.out.vEgo < 0.1 and CS.out.aEgo < -0.03:  # 임계값
+            if CS.out.vEgo < 0.1 and CS.out.aEgo < -0.02:  # 임계값
               self._hill_detect_count += 1
             else:
               self._hill_detect_count = 0
             if self._hill_detect_count >= 5:  # 5프레임(.05초)
-              gas_force = 0.8
+              gas_force = 1.0
             else:
               gas_force = 0.6
             if self.resume_frame == 0:
@@ -403,7 +403,9 @@ class CarController(CarControllerBase):
   def gas_input(self, gas_force: float) -> int:
     SCALE = 0.125
     OFFSET = -22534
-    gas_force = max(0.0, min(gas_force, 43001.875))  # 음수 방지 및 범위 클램프
+    MAX_GAS = 1346.0 if self.CP.carFingerprint in (CAMERA_ACC_CAR | SDGM_CAR) and self.CP.carFingerprint not in CC_ONLY_CAR else 1018.0
+
+    gas_force = max(0.0, min(gas_force, MAX_GAS))
     raw_value = int((gas_force - OFFSET) / SCALE)
     return raw_value
 
@@ -431,6 +433,6 @@ class CarController(CarControllerBase):
 
   def brake_strength(self) -> float:
     if self.CP.carFingerprint in EV_CAR:
-      return 0.5
+      return 0.4
     else:
-      return 0.9
+      return 0.65
