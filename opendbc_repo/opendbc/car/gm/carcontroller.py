@@ -295,7 +295,7 @@ class CarController(CarControllerBase):
               if (self.frame - self.resume_frame) * DT_CTRL >= self.resumeDelay_time:
                 self.resume_activate = True
                 apply_gas = self.gas_input(0.5)
-                can_sends.append(gmcan.create_gas_command(self.packer, CanBus.POWERTRAIN, apply_gas, idx))
+                can_sends.append(gmcan.create_gas_command(self.packer_pt, CanBus.POWERTRAIN, apply_gas, idx))
           else:
             self.resume_frame = 0
             self.resume_activate = False
