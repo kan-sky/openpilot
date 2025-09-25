@@ -147,6 +147,12 @@ class CarrotPlanner:
       else:
         self.myDrivingMode = myDrivingMode
 
+      self.mySafeFactor = 1.0
+      if self.myDrivingMode == DrivingMode.Eco: # eco
+        self.mySafeFactor = self.myEcoModeFactor
+      elif self.myDrivingMode == DrivingMode.Safe: #safe
+        self.mySafeFactor = self.mySafeModeFactor
+
     if self.params_count == 10:
       self.myHighModeFactor = 1.2 #float(self.params.get_int("MyHighModeFactor")) / 100.
       self.trafficLightDetectMode = self.params.get_int("TrafficLightDetectMode") # 0: None, 1:Stop, 2:Stop&Go
@@ -231,14 +237,14 @@ class CarrotPlanner:
   def check_model_stopping(self, v_cruise, v, v_ego, a_ego, model_x, y, d_rel):
     v_ego_kph = v_ego * CV.MS_TO_KPH
     model_v = self.vFilter.process(v[-1])
-    startSign = model_v > 5.0 or model_v > (v[0] + 2)
+    startSign = model_v > 4.5 and model_v > (v[0] + 1.6)
 
     if v_ego_kph < 1.0:
       stopSign = model_x < 20.0 and model_v < 10.0
     elif v_ego_kph < 82.0:
-      stopSign = (model_x < d_rel - 3.0 and
-                  model_x < np.interp(v[0] * 3.6, [60, 80], [120.0, 150]) and
-                  ((model_v < 3.0) or (model_v < v[0] * 0.7)) and
+      stopSign = (model_x < d_rel - 2.5 and
+                  model_x < np.interp(v[0] * 3.6, [60, 80], [110.0, 120]) and
+                  ((model_v < 3.5) or (model_v < v[0] * 0.75)) and
                   abs(y[-1]) < 5.0)
       # 정상주행중 감속하는 경우(카메라 감속등), 오감지가 많음. 
       # 회생감속시:v_cruise=0에는 신호호감지하도록함.
@@ -267,7 +273,7 @@ class CarrotPlanner:
 
     if self.stopSignCount * DT_MDL > 0.0:
       self.trafficState = TrafficState.red
-    elif self.startSignCount * DT_MDL > 0.2:
+    elif self.startSignCount * DT_MDL > 0.15:
       self.trafficState = TrafficState.green
     else:
       self.trafficState = TrafficState.off
@@ -348,23 +354,14 @@ class CarrotPlanner:
     v_ego_cluster = carstate.vEgoCluster
     v_ego_cluster_kph = v_ego_cluster * CV.MS_TO_KPH
 
-    leadOne = radarstate.leadOne
-    self.mySafeFactor = 1.0
-    if leadOne.status and leadOne.vLead < 5 and leadOne.aLead < 0.2: # 앞차가 매우 느리거나 정지한경우
-      self.myDrivingMode = DrivingMode.Safe
-    if self.myDrivingMode == DrivingMode.Eco: # eco
-      self.mySafeFactor = self.myEcoModeFactor
-    elif self.myDrivingMode == DrivingMode.Safe: #safe
-      self.mySafeFactor = self.mySafeModeFactor
-
     if self.frame % 20 == 0: # every 1 sec
       vLead = 0
       aLead = 0
       dRel = 200
-      if leadOne.status:
-        vLead = leadOne.vLead * CV.MS_TO_KPH
-        aLead = leadOne.aLead
-        dRel = leadOne.dRel
+      if radarstate.leadOne.status:
+        vLead = radarstate.leadOne.vLead * CV.MS_TO_KPH
+        aLead = radarstate.leadOne.aLead
+        dRel = radarstate.leadOne.dRel
 
       self.drivingModeDetector.update_data(v_ego_kph, vLead, carstate.aEgo, aLead, dRel)
 
@@ -436,7 +433,7 @@ class CarrotPlanner:
           self.comfort_brake = self.comfortBrake * 0.9
           #self.comfort_brake = COMFORT_BRAKE
           self.trafficStopAdjustRatio = np.interp(v_ego_kph, [0, 100], [1.0, 0.7])
-          stop_dist = self.xStop * np.interp(self.xStop, [0, 50], [1.0, self.trafficStopAdjustRatio])  ## 남은거리에 따라 정지거리 비율조정
+          stop_dist = self.xStop * np.interp(self.xStop, [0, 100], [1.0, self.trafficStopAdjustRatio])  ## 남은거리에 따라 정지거리 비율조정
           if stop_dist > 10.0:
             self.actual_stop_distance = stop_dist
           stop_model_x = 0
