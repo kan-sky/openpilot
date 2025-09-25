@@ -286,25 +286,27 @@ class CarController(CarControllerBase):
         # Kans: AutoResume 2nd step
         if Params().get_int("AutoEngage") == 2:
           if actuators.longControlState == LongCtrlState.starting:
-            if CS.out.aEgo < -0.03:  # 임계값
+            if CS.out.vEgo < 0.1 and CS.out.aEgo < -0.03:  # 임계값
               self._hill_detect_count += 1
             else:
               self._hill_detect_count = 0
-            if self._hill_detect_count >= 5:  # 5프레임(.1초)
+            if self._hill_detect_count >= 5:  # 5프레임(.05초)
               gas_force = 0.8
             else:
-              gas_force = 0.5
+              gas_force = 0.6
             if self.resume_frame == 0:
               self.resume_frame = self.frame
               self.resume_activate = False
             if not self.resume_activate:
               if (self.frame - self.last_button_frame) * DT_CTRL >= 0.04:
                 self.last_button_frame = self.frame
-                self.send_btn(CS, can_sends, CruiseButtons.RES_ACCEL)
+                if (self.frame % 2) == 0:
+                  apply_gas = self.gas_input(gas_force)
+                  can_sends.append(gmcan.create_gas_command(self.packer_pt, CanBus.POWERTRAIN, apply_gas, idx))
+                else:
+                  self.send_btn(CS, can_sends, CruiseButtons.RES_ACCEL)
               if (self.frame - self.resume_frame) * DT_CTRL >= self.resumeDelay_time:
                 self.resume_activate = True
-                apply_gas = self.gas_input(gas_force)
-                can_sends.append(gmcan.create_gas_command(self.packer_pt, CanBus.POWERTRAIN, apply_gas, idx))
           else:
             self.resume_frame = 0
             self.resume_activate = False
