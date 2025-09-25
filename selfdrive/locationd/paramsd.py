@@ -55,20 +55,24 @@ class ParamsLearner:
       if roll_valid:
         roll = localizer_roll
         # Experimentally found multiplier of 2 to be best trade-off between stability and accuracy or similar?
-        #roll_std = 2 * localizer_roll_std
-        roll_std = 3 * localizer_roll_std
+        roll_std = 2 * localizer_roll_std
       else:
         # This is done to bound the road roll estimate when localizer values are invalid
         roll = 0.0
         roll_std = np.radians(10.0)
       self.roll = np.clip(roll, self.roll - ROLL_MAX_DELTA, self.roll + ROLL_MAX_DELTA)
+      yaw_rate_valid = msg.angularVelocityCalibrated.valid
+      yaw_rate_valid = yaw_rate_valid and 0 < self.yaw_rate_std < 10  # rad/s
+      yaw_rate_valid = yaw_rate_valid and abs(self.yaw_rate) < 1  # rad/s
 
       if self.active:
         if msg.posenetOK:
-          self.kf.predict_and_observe(t,
-                                      ObservationKind.ROAD_FRAME_YAW_RATE,
-                                      np.array([[-self.yaw_rate]]),
-                                      np.array([np.atleast_2d(self.yaw_rate_std**2)]))
+
+          if yaw_rate_valid:
+            self.kf.predict_and_observe(t,
+                                        ObservationKind.ROAD_FRAME_YAW_RATE,
+                                        np.array([[-self.yaw_rate]]),
+                                        np.array([np.atleast_2d(self.yaw_rate_std**2)]))
 
           self.kf.predict_and_observe(t,
                                       ObservationKind.ROAD_ROLL,
@@ -88,8 +92,9 @@ class ParamsLearner:
       self.steering_angle = msg.steeringAngleDeg
       self.speed = msg.vEgo
 
+      complex_dynamics = abs(msg.aEgo) > 1.0 or abs(msg.steeringRateDeg) > 20
       in_linear_region = abs(self.steering_angle) < 45
-      self.active = self.speed > MIN_ACTIVE_SPEED and in_linear_region
+      self.active = self.speed > MIN_ACTIVE_SPEED and in_linear_region and not complex_dynamics
 
       if self.active:
         self.kf.predict_and_observe(t, ObservationKind.STEER_ANGLE, np.array([[math.radians(msg.steeringAngleDeg)]]))
