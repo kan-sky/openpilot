@@ -286,11 +286,11 @@ class CarController(CarControllerBase):
         # Kans: AutoResume 2nd step
         if Params().get_int("AutoEngage") == 2:
           if actuators.longControlState == LongCtrlState.starting:
-            if CS.out.aEgo < -0.05:  # 안정적인 기본 임계값
+            if CS.out.aEgo < -0.03:  # 임계값
               self._hill_detect_count += 1
             else:
               self._hill_detect_count = 0
-            if self._hill_detect_count >= 3:  #3프레임(.06초?)
+            if self._hill_detect_count >= 5:  # 5프레임(.1초)
               gas_force = 0.8
             else:
               gas_force = 0.5
