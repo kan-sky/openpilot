@@ -161,6 +161,8 @@ class CarController(CarControllerBase):
         friction_sent_this_tick = False
         self.cruiseDelay_time = Params().get_float("CruiseDelay") * 0.01
         self.resumeDelay_time = Params().get_float("ResumeDelay") * 0.01
+        auto_cruise_enabled = Params().get_int("AutoCruiseControl") > 0
+        auto_engage_enabled = Params().get_int("AutoEngage") == 2
         # GM: softHold
         stopping = actuators.longControlState == LongCtrlState.stopping or CS.out.softHoldActive > 0
 
@@ -240,7 +242,7 @@ class CarController(CarControllerBase):
         else:
           acc_engaged = CC.enabled or (self.frame < self.acc_engaged_latch)
 
-        if Params().get_int("AutoCruiseControl") > 0:
+        if auto_cruise_enabled:
           # Kans: autoCruise
           if CS.out.activateCruise and not CS.out.cruiseState.enabled:
             if self.autoCruise_frame == 0:
@@ -261,35 +263,35 @@ class CarController(CarControllerBase):
             self.autoCruise_frame = 0
             self.autoCruise_activate = False
 
-          # Kans: AutoResume 1st step(브레이크 True펄스) #후 → 0-브레이크전송로직)
-          if actuators.longControlState == LongCtrlState.starting:
-            if CS.out.cruiseState.enabled and not self.activateCruise_after_brake: #브레이크신호 한번만 보내기 위한 조건.
-              # 전송시점에 _brk_rc 변수로 RC증가(+1) 조치
-              self._brk_rc = (self._brk_rc + 1) & 0x3
-              brk_idx = self._brk_rc
-              apply_brake = self.brake_input(-self.brake_strength())
-              # 브레이크신호 전송(롱컨 꺼짐)
-              if self.CP.carFingerprint == CAR.CHEVROLET_VOLT:  
-                can_sends.append(gmcan.create_brake_command(self.packer_ch, CanBus.CHASSIS, apply_brake, brk_idx))
-              elif self.CP.carFingerprint in SDGM_CAR:
-                can_sends.append(gmcan.create_brake_command(self.packer_pt, CanBus.CAMERA, apply_brake, brk_idx))
-              elif self.CP.carFingerprint in CAMERA_ACC_CAR:
-                can_sends.append(gmcan.create_brake_command(self.packer_pt, CanBus.POWERTRAIN, apply_brake, brk_idx))
-              Params().put_bool_nonblocking("ActivateCruiseAfterBrake", True) # cruise.py에 브레이크 ON신호 전달
-              self.activateCruise_after_brake = True # 브레이크신호는 한번만 보내고 초기화
-              # 다음 프레임(0-브레이크)까지의 기준을 위해 프레임 초기화도 불필요.
-              #self.last_button_frame = self.frame
-              # 직전 idx(_last_brake_idx)를 다음 단계에서 +1로 쓰기 위해 brk_idx로 저장
-              # self._last_brake_idx = brk_idx # 0 브레이크 보내기 로직이 필요치 않으므로 주석처리
-              friction_sent_this_tick = True
+        # Kans: AutoResume 1st step(브레이크 True펄스) #후 → 0-브레이크전송로직)
+        if actuators.longControlState == LongCtrlState.starting:
+          if CS.out.cruiseState.enabled and not self.activateCruise_after_brake: #브레이크신호 한번만 보내기 위한 조건.
+            # 전송시점에 _brk_rc 변수로 RC증가(+1) 조치
+            self._brk_rc = (self._brk_rc + 1) & 0x3
+            brk_idx = self._brk_rc
+            apply_brake = self.brake_input(-self.brake_strength())
+            # 브레이크신호 전송(롱컨 꺼짐)
+            if self.CP.carFingerprint == CAR.CHEVROLET_VOLT:  
+              can_sends.append(gmcan.create_brake_command(self.packer_ch, CanBus.CHASSIS, apply_brake, brk_idx))
+            elif self.CP.carFingerprint in SDGM_CAR:
+              can_sends.append(gmcan.create_brake_command(self.packer_pt, CanBus.CAMERA, apply_brake, brk_idx))
+            elif self.CP.carFingerprint in CAMERA_ACC_CAR:
+              can_sends.append(gmcan.create_brake_command(self.packer_pt, CanBus.POWERTRAIN, apply_brake, brk_idx))
+            Params().put_bool_nonblocking("ActivateCruiseAfterBrake", True) # cruise.py에 브레이크 ON신호 전달
+            self.activateCruise_after_brake = True # 브레이크신호는 한번만 보내고 초기화
+            # 다음 프레임(0-브레이크)까지의 기준을 위해 프레임 초기화도 불필요.
+            #self.last_button_frame = self.frame
+            # 직전 idx(_last_brake_idx)를 다음 단계에서 +1로 쓰기 위해 brk_idx로 저장
+            # self._last_brake_idx = brk_idx # 0 브레이크 보내기 로직이 필요치 않으므로 주석처리
+            friction_sent_this_tick = True
 
         # Kans: AutoResume 2nd step
-        if Params().get_int("AutoEngage") == 2:
-          if CS.out.aEgo < -0.010:  # 임계값
+        if auto_engage_enabled:
+          if CS.out.aEgo < -0.010:  # 밀림감지 임계값
             self._hill_detect_count += 1
           else:
             self._hill_detect_count = 0
-          gas_force = 1000.0 if self._hill_detect_count >= 4 else 500.0
+          gas_force = 1000.0 if self._hill_detect_count >= 10 else 500.0
           if actuators.longControlState == LongCtrlState.starting:
             if self.resume_frame == 0:
               self.resume_frame = self.frame
