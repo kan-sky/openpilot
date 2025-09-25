@@ -301,10 +301,10 @@ class CarController(CarControllerBase):
               if (self.frame - self.last_button_frame) * DT_CTRL >= 0.04:
                 self.last_button_frame = self.frame
                 if (self.frame % 2) == 0:
+                  self.send_btn(CS, can_sends, CruiseButtons.RES_ACCEL)
+                else:
                   apply_gas = self.gas_input(gas_force)
                   can_sends.append(gmcan.create_gas_command(self.packer_pt, CanBus.POWERTRAIN, apply_gas, idx))
-                else:
-                  self.send_btn(CS, can_sends, CruiseButtons.RES_ACCEL)
               if (self.frame - self.resume_frame) * DT_CTRL >= self.resumeDelay_time:
                 self.resume_activate = True
           else:
@@ -431,7 +431,6 @@ class CarController(CarControllerBase):
 
   def brake_strength(self) -> float:
     if self.CP.carFingerprint in EV_CAR:
-      return 0.65
+      return 0.5
     else:
       return 0.9
-    return 0.7
