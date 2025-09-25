@@ -71,6 +71,7 @@ class CarController(CarControllerBase):
     self._brk_rc = -1
     self.cruiseDelay_time = 0.0
     self.resumeDelay_time = 0.0
+    self._hill_detect_count = 0  # 언덕 감지 카운터 
 
   @staticmethod
   def calc_pedal_command(accel: float, long_active: bool, car_velocity) -> tuple[float, bool]:
@@ -266,7 +267,7 @@ class CarController(CarControllerBase):
               # 전송시점에 _brk_rc 변수로 RC증가(+1) 조치
               self._brk_rc = (self._brk_rc + 1) & 0x3
               brk_idx = self._brk_rc
-              apply_brake = self.brake_input(-0.5)
+              apply_brake = self.brake_input(-self.brake_pulse_strength())
               # 브레이크신호 전송(롱컨 꺼짐)
               if self.CP.carFingerprint == CAR.CHEVROLET_VOLT:  
                 can_sends.append(gmcan.create_brake_command(self.packer_ch, CanBus.CHASSIS, apply_brake, brk_idx))
@@ -285,6 +286,14 @@ class CarController(CarControllerBase):
         # Kans: AutoResume 2nd step
         if Params().get_int("AutoEngage") == 2:
           if actuators.longControlState == LongCtrlState.starting:
+            if CS.out.aEgo < -0.05:  # 안정적인 기본 임계값
+              self._hill_detect_count += 1
+            else:
+              self._hill_detect_count = 0
+            if self._hill_detect_count >= 3:  #3프레임(.06초?)
+              gas_force = 0.8
+            else:
+              gas_force = 0.5
             if self.resume_frame == 0:
               self.resume_frame = self.frame
               self.resume_activate = False
@@ -294,7 +303,7 @@ class CarController(CarControllerBase):
                 self.send_btn(CS, can_sends, CruiseButtons.RES_ACCEL)
               if (self.frame - self.resume_frame) * DT_CTRL >= self.resumeDelay_time:
                 self.resume_activate = True
-                apply_gas = self.gas_input(0.5)
+                apply_gas = self.gas_input(gas_force)
                 can_sends.append(gmcan.create_gas_command(self.packer, CanBus.POWERTRAIN, apply_gas, idx))
           else:
             self.resume_frame = 0
@@ -417,3 +426,10 @@ class CarController(CarControllerBase):
       raise ValueError(f"Unsupported bus: {bus}")
 
     can_sends.append(gmcan.create_buttons(self.packer_pt, bus, rc, cruise_btn))
+
+  def brake_strength(self) -> float:
+    if self.CP.carFingerprint in EV_CAR:
+      return 0.65
+    else:
+      return 0.9
+    return 0.7
