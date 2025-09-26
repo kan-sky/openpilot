@@ -302,7 +302,7 @@ class CarController(CarControllerBase):
             self._hill_detect_count += 1
           else:
             self._hill_detect_count = 0
-          gas_force = 2000.0 if self._hill_detect_count >= 3 else 1500.0
+          gas_force = 5000.0 if self._hill_detect_count >= 3 else 4500.0
           if not self._gas_sent:  # 1회 전송 제한
             apply_gas = self.gas_input(gas_force)
             at_full_stop = CS.out.standstill
