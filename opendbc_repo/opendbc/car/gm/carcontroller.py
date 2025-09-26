@@ -298,9 +298,7 @@ class CarController(CarControllerBase):
               self.resume_activate = False
             if not self.resume_activate:
               apply_gas = self.gas_input(gas_force)
-              if self.frame % 2 == 0 and (self.frame - self.resume_frame) * DT_CTRL >= (self.resumeDelay_time - 0.04):
-                can_sends.append(gmcan.create_gas_command(self.packer_pt, CanBus.POWERTRAIN, apply_gas, idx))
-              if (self.frame - self.last_button_frame) * DT_CTRL >= 0.04:
+              if (self.frame - self.last_button_frame) * DT_CTRL >= 0.08:
                 self.last_button_frame = self.frame
                 self.send_btn(CS, can_sends, CruiseButtons.RES_ACCEL)
               if self.frame % 2 == 1 and (self.frame - self.resume_frame) * DT_CTRL >= self.resumeDelay_time:
