@@ -71,7 +71,8 @@ class CarController(CarControllerBase):
     self._brk_rc = -1
     self.cruiseDelay_time = 0.0
     self.resumeDelay_time = 0.0
-    self._hill_detect_count = 0  # 언덕 감지 카운터 
+    self._hill_detect_count = 0  # 언덕 감지 카운터
+    self._gas_sent = False 
 
   @staticmethod
   def calc_pedal_command(accel: float, long_active: bool, car_velocity) -> tuple[float, bool]:
@@ -282,26 +283,33 @@ class CarController(CarControllerBase):
 
         # Kans: AutoResume 2nd step
         if auto_engage_enabled:
-          if CS.out.aEgo < -0.010:  # 밀림감지 임계값
-            self._hill_detect_count += 1
-          else:
-            self._hill_detect_count = 0
-          gas_force = 1000.0 if self._hill_detect_count >= 10 else 500.0
           if actuators.longControlState == LongCtrlState.starting:
             if self.resume_frame == 0:
               self.resume_frame = self.frame
               self.resume_activate = False
             if not self.resume_activate:
-              apply_gas = self.gas_input(gas_force)
               if (self.frame - self.last_button_frame) * DT_CTRL >= 0.08:
                 self.last_button_frame = self.frame
                 self.send_btn(CS, can_sends, CruiseButtons.RES_ACCEL)
               if self.frame % 2 == 1 and (self.frame - self.resume_frame) * DT_CTRL >= self.resumeDelay_time:
-                can_sends.append(gmcan.create_gas_command(self.packer_pt, CanBus.POWERTRAIN, apply_gas, idx))
                 self.resume_activate = True
           else:
             self.resume_frame = 0
             self.resume_activate = False
+
+        if actuators.longControlState == LongCtrlState.starting:
+          if CS.out.aEgo < -0.010:  # 밀림감지 임계값
+            self._hill_detect_count += 1
+          else:
+            self._hill_detect_count = 0
+          gas_force = 1000.0 if self._hill_detect_count >= 3 else 500.0
+          if not self._gas_sent:  # 1회 전송 제한
+            apply_gas = self.gas_input(gas_force)
+            at_full_stop = CS.out.standstill
+            can_sends.append(gmcan.create_gas_command(self.packer_pt, CanBus.POWERTRAIN, apply_gas, idx, at_full_stop))
+            self._gas_sent = True
+        else:
+          self._gas_sent = False
 
         # GasRegenCmdActive needs to be 1 to avoid cruise faults. It describes the ACC state, not actuation
         can_sends.append(gmcan.create_gas_regen_command(self.packer_pt, CanBus.POWERTRAIN, self.apply_gas, idx, acc_engaged, at_full_stop))
