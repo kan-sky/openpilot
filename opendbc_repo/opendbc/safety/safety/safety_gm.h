@@ -107,7 +107,7 @@ static void gm_rx_hook(const CANPacket_t *to_push) {
       }
 
       // enter controls on rising edge of ACC, exit controls when ACC off
-      if (gm_pcm_cruise && gm_has_acc) {
+      if ((gm_pcm_cruise || gm_hw == GM_SDGM) && gm_has_acc) {  // GM_SDGM도 크루즈체크에 포함
         bool cruise_engaged = (GET_BYTE(to_push, 1) >> 5) != 0U;
         pcm_cruise_check(cruise_engaged);
       }
