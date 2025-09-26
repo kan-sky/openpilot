@@ -263,10 +263,9 @@ class CarController(CarControllerBase):
             self.autoCruise_frame = 0
             self.autoCruise_activate = False
 
-        # Kans: AutoResume 1st step(브레이크 True펄스) #후 → 0-브레이크전송로직)
+        # Kans: AutoResume 1st step
         if actuators.longControlState == LongCtrlState.starting:
           if CS.out.cruiseState.enabled and not self.activateCruise_after_brake: #브레이크신호 한번만 보내기 위한 조건.
-            # 전송시점에 _brk_rc 변수로 RC증가(+1) 조치
             self._brk_rc = (self._brk_rc + 1) & 0x3
             brk_idx = self._brk_rc
             apply_brake = self.brake_input(-self.brake_strength())
@@ -274,15 +273,11 @@ class CarController(CarControllerBase):
             if self.CP.carFingerprint == CAR.CHEVROLET_VOLT:  
               can_sends.append(gmcan.create_brake_command(self.packer_ch, CanBus.CHASSIS, apply_brake, brk_idx))
             elif self.CP.carFingerprint in SDGM_CAR:
-              can_sends.append(gmcan.create_brake_command(self.packer_pt, CanBus.CHASSIS, apply_brake, brk_idx))
+              can_sends.append(gmcan.create_brake_command(self.packer_ch, CanBus.CHASSIS, apply_brake, brk_idx))
             elif self.CP.carFingerprint in CAMERA_ACC_CAR:
               can_sends.append(gmcan.create_brake_command(self.packer_pt, CanBus.POWERTRAIN, apply_brake, brk_idx))
             Params().put_bool_nonblocking("ActivateCruiseAfterBrake", True) # cruise.py에 브레이크 ON신호 전달
             self.activateCruise_after_brake = True # 브레이크신호는 한번만 보내고 초기화
-            # 다음 프레임(0-브레이크)까지의 기준을 위해 프레임 초기화도 불필요.
-            #self.last_button_frame = self.frame
-            # 직전 idx(_last_brake_idx)를 다음 단계에서 +1로 쓰기 위해 brk_idx로 저장
-            # self._last_brake_idx = brk_idx # 0 브레이크 보내기 로직이 필요치 않으므로 주석처리
             friction_sent_this_tick = True
 
         # Kans: AutoResume 2nd step
@@ -317,7 +312,7 @@ class CarController(CarControllerBase):
             can_sends.append(gmcan.create_friction_brake_command(self.packer_ch, CanBus.CHASSIS, self.apply_brake,
                              brk_idx_base, CC.enabled, near_stop, at_full_stop, self.CP))
           elif self.CP.carFingerprint in SDGM_CAR:
-            can_sends.append(gmcan.create_friction_brake_command(self.packer_pt, CanBus.CHASSIS, self.apply_brake,
+            can_sends.append(gmcan.create_friction_brake_command(self.packer_ch, CanBus.CHASSIS, self.apply_brake,
                              brk_idx_base, CC.enabled, near_stop, at_full_stop, self.CP))
           elif self.CP.carFingerprint in CAMERA_ACC_CAR:
             can_sends.append(gmcan.create_friction_brake_command(self.packer_pt, CanBus.POWERTRAIN, self.apply_brake,
