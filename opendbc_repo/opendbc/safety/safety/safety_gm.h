@@ -224,8 +224,12 @@ static bool gm_tx_hook(const CANPacket_t *to_send) {
     int button = (GET_BYTE(to_send, 5) >> 4) & 0x7U;
     bool allowed_btn = (button == GM_BTN_CANCEL) && cruise_engaged_prev;
 
-    if ((gm_hw == GM_ASCM) || (gm_hw == GM_SDGM) || gm_cam_long || gm_pedal_long) {
+    if ((gm_hw == GM_ASCM) || gm_cam_long || gm_pedal_long) {
       allowed_btn |= (button == GM_BTN_SET || button == GM_BTN_RESUME || button == GM_BTN_UNPRESS);
+    }
+    if (gm_hw == GM_SDGM) {
+      allowed_btn |= cruise_engaged_prev && (button == GM_BTN_RESUME);
+      allowed_btn |= (button == GM_BTN_SET || button == GM_BTN_UNPRESS);
     }
     if (gm_cc_long || gm_pcm_cruise) {
       allowed_btn |= cruise_engaged_prev && (button == GM_BTN_SET || button == GM_BTN_RESUME || button == GM_BTN_UNPRESS);
