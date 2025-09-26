@@ -428,4 +428,4 @@ class CarController(CarControllerBase):
     if self.CP.carFingerprint in EV_CAR:
       return 0.4
     else:
-      return 0.65
+      return 0.5
