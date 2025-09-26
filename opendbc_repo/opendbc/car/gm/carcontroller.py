@@ -251,7 +251,7 @@ class CarController(CarControllerBase):
             self.activateCruise_after_brake = False # 오토크루즈가 되기 위해 브레이크 신호는 OFF여야 함.
             if actuators.longControlState != LongCtrlState.starting:
               if not self.autoCruise_activate:
-                if (self.frame - self.last_button_frame) * DT_CTRL > 0.04:
+                if (self.frame - self.last_button_frame) * DT_CTRL > 0.12:
                   self.last_button_frame = self.frame
                   self.send_btn(CS, can_sends, CruiseButtons.DECEL_SET)
                   self.autoCruise_activate = True  # 전송 직후 잠금
