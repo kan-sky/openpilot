@@ -72,7 +72,9 @@ class CarController(CarControllerBase):
     self.cruiseDelay_time = 0.0
     self.resumeDelay_time = 0.0
     self._hill_detect_count = 0  # 언덕 감지 카운터
-    self._gas_sent = False 
+    self._gas_sent = False
+    self._gas_force_hill = 0.0
+    self._gas_force_ground = 0.0 
 
   @staticmethod
   def calc_pedal_command(accel: float, long_active: bool, car_velocity) -> tuple[float, bool]:
@@ -164,6 +166,8 @@ class CarController(CarControllerBase):
         self.resumeDelay_time = Params().get_float("ResumeDelay") * 0.01
         auto_cruise_enabled = Params().get_int("AutoCruiseControl") > 0
         auto_engage_enabled = Params().get_int("AutoEngage") == 2
+        self._gas_force_hill = Params().get_float("GasForceHill")
+        self._gas_force_ground = Params().get_float("GasForceGround") 
         # GM: softHold
         stopping = actuators.longControlState == LongCtrlState.stopping or CS.out.softHoldActive > 0
 
@@ -289,9 +293,9 @@ class CarController(CarControllerBase):
             else:
               self._hill_detect_count = 0
             if self.CP.carFingerprint in CAMERA_ACC_CAR:
-              gas_force = 400.0 if self._hill_detect_count >= 3 else 100.0
+              gas_force = self._gas_force_hill if self._hill_detect_count >= 3 else self._gas_force_ground
             else:
-              gas_force = 1000.0 if self._hill_detect_count >= 3 else 500.0
+              gas_force = self._gas_force_hill if self._hill_detect_count >= 3 else self._gas_force_ground
 
             if self.resume_frame == 0:
               self.resume_frame = self.frame

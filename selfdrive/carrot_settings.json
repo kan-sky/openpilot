@@ -443,6 +443,33 @@
       "default": 60,
       "unit": 5
     },
+
+    {
+      "group": "가속설정",
+      "name": "GasForceGround",
+      "title": "평지리쥼 가속도: 500",
+      "descr": "평지리쥼 가속도 \n\n CAMERA_CAR: 1400",
+      "egroup": "ACCEL",
+      "etitle": "Accel Ground: 500",
+      "edescr": "Acceleration from Ground",
+      "min": 400,
+      "max": 1500,
+      "default": 500,
+      "unit": 100
+    },
+    {
+      "group": "가속설정",
+      "name": "GasForceHill",
+      "title": "언덕리쥼 가속도: 800",
+      "descr": "언덕리쥼 가속도 \n\n CAMERA_CAR: 2500",
+      "egroup": "ACCEL",
+      "etitle": "Accel Hill: 800",
+      "edescr": "Acceleration from Hill",
+      "min": 600,
+      "max": 4000,
+      "default": 800,
+      "unit": 100
+    },
     {
       "group": "주행튜닝",
       "name": "StopDistanceCarrot",
