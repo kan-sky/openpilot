@@ -288,14 +288,14 @@ class CarController(CarControllerBase):
         # Kans: AutoResume 2nd step
         if auto_engage_enabled:
           if actuators.longControlState == LongCtrlState.starting:
-            if CS.out.aEgo < -0.010:  # 밀림감지 임계값
+            if CS.out.aEgo < -0.003:  # 밀림감지 임계값
               self._hill_detect_count += 1
             else:
               self._hill_detect_count = 0
             if self.CP.carFingerprint in CAMERA_ACC_CAR:
-              gas_force = self._gas_force_hill if self._hill_detect_count >= 3 else self._gas_force_ground
+              gas_force = self._gas_force_hill if self._hill_detect_count >= 1 else self._gas_force_ground
             else:
-              gas_force = self._gas_force_hill if self._hill_detect_count >= 3 else self._gas_force_ground
+              gas_force = self._gas_force_hill if self._hill_detect_count >= 1 else self._gas_force_ground
 
             if self.resume_frame == 0:
               self.resume_frame = self.frame
