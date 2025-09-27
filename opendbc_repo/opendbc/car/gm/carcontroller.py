@@ -73,8 +73,8 @@ class CarController(CarControllerBase):
     self.resumeDelay_time = 0.0
     self._hill_detect_count = 0  # 언덕 감지 카운터
     self._gas_sent = False
-    self._gas_force_hill = 0.0
-    self._gas_force_ground = 0.0 
+    self._gas_force_hill = 0
+    self._gas_force_ground = 0 
 
   @staticmethod
   def calc_pedal_command(accel: float, long_active: bool, car_velocity) -> tuple[float, bool]:
@@ -166,8 +166,8 @@ class CarController(CarControllerBase):
         self.resumeDelay_time = Params().get_float("ResumeDelay") * 0.01
         auto_cruise_enabled = Params().get_int("AutoCruiseControl") > 0
         auto_engage_enabled = Params().get_int("AutoEngage") == 2
-        self._gas_force_hill = Params().get_float("GasForceHill")
-        self._gas_force_ground = Params().get_float("GasForceGround") 
+        self._gas_force_hill = Params().get_int("GasForceHill")
+        self._gas_force_ground = Params().get_int("GasForceGround") 
         # GM: softHold
         stopping = actuators.longControlState == LongCtrlState.stopping or CS.out.softHoldActive > 0
 
@@ -311,7 +311,7 @@ class CarController(CarControllerBase):
                 if not self._gas_sent:
                   apply_gas = self.gas_input(gas_force)
                   print(f"[AutoResume] apply_gas={apply_gas}, gas_force={gas_force:.1f}, hill_detect_count={self._hill_detect_count}")
-                  can_sends.append(gmcan.create_gas_command(self.packer_pt, CanBus.POWERTRAIN, apply_gas, idx))
+                  can_sends.append(gmcan.create_gas_command(self.packer_pt, CanBus.POWERTRAIN, apply_gas, idx, acc_engaged))
                   self._gas_sent = True
                 self.resume_activate = True
           else:
@@ -420,7 +420,7 @@ class CarController(CarControllerBase):
       MAX_GAS = 1018.0
 
     gas_force = max(MIN_GAS, min(gas_force, MAX_GAS))
-    raw = int((gas_force + 22534) / SCALE)
+    raw = int((gas_force - OFFSET) / SCALE)
     return raw
 
   def send_btn(self, CS, can_sends, cruise_btn, bus=None):

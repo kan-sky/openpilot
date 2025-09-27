@@ -452,7 +452,7 @@
       "egroup": "ACCEL",
       "etitle": "Accel Ground: 500",
       "edescr": "Acceleration from Ground",
-      "min": 400,
+      "min": 100,
       "max": 1500,
       "default": 500,
       "unit": 100
@@ -465,7 +465,7 @@
       "egroup": "ACCEL",
       "etitle": "Accel Hill: 800",
       "edescr": "Acceleration from Hill",
-      "min": 600,
+      "min": 400,
       "max": 4000,
       "default": 800,
       "unit": 100
