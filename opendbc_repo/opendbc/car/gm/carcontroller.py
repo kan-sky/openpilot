@@ -71,10 +71,6 @@ class CarController(CarControllerBase):
     self._brk_rc = -1
     self.cruiseDelay_time = 0.0
     self.resumeDelay_time = 0.0
-    self._hill_detect_count = 0  # 언덕 감지 카운터
-    self._gas_sent = False
-    self._gas_force_hill = 0
-    self._gas_force_ground = 0 
 
   @staticmethod
   def calc_pedal_command(accel: float, long_active: bool, car_velocity) -> tuple[float, bool]:
@@ -166,8 +162,7 @@ class CarController(CarControllerBase):
         self.resumeDelay_time = Params().get_float("ResumeDelay") * 0.01
         auto_cruise_enabled = Params().get_int("AutoCruiseControl") > 0
         auto_engage_enabled = Params().get_int("AutoEngage") == 2
-        self._gas_force_hill = Params().get_int("GasForceHill")
-        self._gas_force_ground = Params().get_int("GasForceGround") 
+
         # GM: softHold
         stopping = actuators.longControlState == LongCtrlState.stopping or CS.out.softHoldActive > 0
 
@@ -288,19 +283,9 @@ class CarController(CarControllerBase):
         # Kans: AutoResume 2nd step
         if auto_engage_enabled:
           if actuators.longControlState == LongCtrlState.starting:
-            if CS.out.aEgo < -0.003:  # 밀림감지 임계값
-              self._hill_detect_count += 1
-            else:
-              self._hill_detect_count = 0
-            if self.CP.carFingerprint in CAMERA_ACC_CAR:
-              gas_force = self._gas_force_hill if self._hill_detect_count >= 1 else self._gas_force_ground
-            else:
-              gas_force = self._gas_force_hill if self._hill_detect_count >= 1 else self._gas_force_ground
-
             if self.resume_frame == 0:
               self.resume_frame = self.frame
               self.resume_activate = False
-              self._gas_sent = False  # AutoResume 진입 시 초기화
 
             if not self.resume_activate:
               if (self.frame - self.last_button_frame) * DT_CTRL >= 0.08:
@@ -308,16 +293,10 @@ class CarController(CarControllerBase):
                 self.send_btn(CS, can_sends, CruiseButtons.RES_ACCEL)
 
               if self.frame % 2 == 1 and (self.frame - self.resume_frame) * DT_CTRL >= self.resumeDelay_time:
-                if not self._gas_sent:
-                  apply_gas = self.gas_input(gas_force)
-                  print(f"[AutoResume] apply_gas={apply_gas}, gas_force={gas_force:.1f}, hill_detect_count={self._hill_detect_count}")
-                  can_sends.append(gmcan.create_gas_command(self.packer_pt, CanBus.POWERTRAIN, apply_gas, idx, acc_engaged))
-                  self._gas_sent = True
                 self.resume_activate = True
           else:
             self.resume_frame = 0
             self.resume_activate = False
-            self._gas_sent = False
 
         # GasRegenCmdActive needs to be 1 to avoid cruise faults. It describes the ACC state, not actuation
         can_sends.append(gmcan.create_gas_regen_command(self.packer_pt, CanBus.POWERTRAIN, self.apply_gas, idx, acc_engaged, at_full_stop))
@@ -407,21 +386,6 @@ class CarController(CarControllerBase):
 
     scaled_brake = max(0, min(MAX_BRAKE, int(brake_force * -100)))  # -를 +로 변환
     return -scaled_brake
-
-  def gas_input(self, gas_force: float) -> int:
-    SCALE = 0.125
-    OFFSET = -22534
-
-    if self.CP.carFingerprint in CAMERA_ACC_CAR:
-      MIN_GAS = -540.0
-      MAX_GAS = 1346.0
-    else:
-      MIN_GAS = -650.0
-      MAX_GAS = 1018.0
-
-    gas_force = max(MIN_GAS, min(gas_force, MAX_GAS))
-    raw = int((gas_force - OFFSET) / SCALE)
-    return raw
 
   def send_btn(self, CS, can_sends, cruise_btn, bus=None):
     if bus is None:

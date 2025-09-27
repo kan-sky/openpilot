@@ -26,8 +26,6 @@ def get_default_params():
     ("EVTable", "1"),
     ("CruiseDelay", "8"),
     ("ResumeDelay", "8"),
-    ("GasForceHill", "800"),
-    ("GasForceGround", "500"),
 
     ("CompletedTrainingVersion", "0"),
     ("DisengageOnAccelerator", "0"),

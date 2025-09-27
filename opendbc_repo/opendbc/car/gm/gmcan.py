@@ -20,23 +20,6 @@ def create_brake_command(packer, bus, apply_brake, idx):
 
   return packer.make_can_msg("EBCMFrictionBrakeCmd", bus, values)
 
-def create_gas_command(packer, bus, throttle, idx, enabled):
-  rc = int(idx) & 0x3  # 2비트 롤링카운터
-  values = {
-    "GasRegenCmdActive": enabled,
-    "RollingCounter": idx,
-    "GasRegenCmd": throttle,  # 가속 명령만 설정
-    "GasRegenAccType": 1,
-  }
-
-  dat = packer.make_can_msg("ASCMGasRegenCmd", bus, values)[1]
-  values["GasRegenChecksum"] = ((1 - enabled) << 24) | \
-                               (((0xff - dat[1]) & 0xff) << 16) | \
-                               (((0xff - dat[2]) & 0xff) << 8) | \
-                               ((0x100 - dat[3] - idx) & 0xff)
-
-  return packer.make_can_msg("ASCMGasRegenCmd", bus, values)
-
 def create_buttons(packer, bus, idx, button):
   rc = int(idx) & 0x3
   values = {
