@@ -196,7 +196,7 @@ class CarController(CarControllerBase):
           else:
             self.apply_gas = int(round(np.interp(accel if self.long_pitch else actuators.accel, self.params.GAS_LOOKUP_BP, self.params.GAS_LOOKUP_V)))
             self.apply_brake = int(round(np.interp(brake_accel if self.long_pitch else actuators.accel, self.params.BRAKE_LOOKUP_BP, self.params.BRAKE_LOOKUP_V)))
-          # Don't allow any gas above inactive regen while stopping
+          # Don't allow any  gas above inactive regen while stopping
           # FIXME: brakes aren't applied immediately when enabling at a stop
           if stopping:
             self.apply_gas = self.params.INACTIVE_REGEN
@@ -291,7 +291,7 @@ class CarController(CarControllerBase):
             if self.CP.carFingerprint in CAMERA_ACC_CAR:
               gas_force = 400.0 if self._hill_detect_count >= 3 else 100.0
             else:
-              gas_force = 393.0 if self._hill_detect_count >= 3 else 200.0
+              gas_force = 1000.0 if self._hill_detect_count >= 3 else 500.0
 
             if self.resume_frame == 0:
               self.resume_frame = self.frame
