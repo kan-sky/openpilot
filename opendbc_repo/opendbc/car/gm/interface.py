@@ -125,7 +125,7 @@ class CarInterface(CarInterfaceBase):
     if candidate in (CAMERA_ACC_CAR | SDGM_CAR | ASCM_INT):
       ret.alphaLongitudinalAvailable = candidate not in (CC_ONLY_CAR | ASCM_INT | SDGM_CAR) or 0x2FF in fingerprint[CanBus.POWERTRAIN]
       ret.networkLocation = NetworkLocation.fwdCamera
-      ret.radarUnavailable = RADAR_HEADER_MSG not in fingerprint[CanBus.OBSTACLE] or CAMERA_DATA_HEADER_MSG not in fingerprint[CanBus.OBSTACLE]
+      ret.radarUnavailable = 0x460 not in fingerprint[CanBus.OBSTACLE]
       ret.pcmCruise = True
       ret.minEnableSpeed = 5 * CV.KPH_TO_MS
       ret.minSteerSpeed = 10 * CV.KPH_TO_MS
@@ -160,7 +160,7 @@ class CarInterface(CarInterfaceBase):
     else:  # ASCM, OBD-II harness
       ret.openpilotLongitudinalControl = True
       ret.networkLocation = NetworkLocation.gateway
-      ret.radarUnavailable = False # kans
+      ret.radarUnavailable = RADAR_HEADER_MSG not in fingerprint[CanBus.OBSTACLE] and not docs
       ret.pcmCruise = False  # stock non-adaptive cruise control is kept off
       # supports stop and go, but initial engage must (conservatively) be above 18mph
       ret.minEnableSpeed = -1 * CV.MPH_TO_MS
