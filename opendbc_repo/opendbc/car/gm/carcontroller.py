@@ -306,9 +306,8 @@ class CarController(CarControllerBase):
               if self.frame % 2 == 1 and (self.frame - self.resume_frame) * DT_CTRL >= self.resumeDelay_time:
                 if not self._gas_sent:
                   apply_gas = self.gas_input(gas_force)
-                  at_full_stop = CS.out.standstill
-                  print(f"[AutoResume] apply_gas={apply_gas}, gas_force={gas_force:.1f}, hill_detect_count={self._hill_detect_count}, full_stop={at_full_stop}")
-                  can_sends.append(gmcan.create_gas_command(self.packer_pt, CanBus.POWERTRAIN, apply_gas, idx, at_full_stop))
+                  print(f"[AutoResume] apply_gas={apply_gas}, gas_force={gas_force:.1f}, hill_detect_count={self._hill_detect_count}")
+                  can_sends.append(gmcan.create_gas_command(self.packer_pt, CanBus.POWERTRAIN, apply_gas, idx))
                   self._gas_sent = True
                 self.resume_activate = True
           else:
