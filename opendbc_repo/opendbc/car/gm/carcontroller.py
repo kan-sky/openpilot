@@ -71,6 +71,7 @@ class CarController(CarControllerBase):
     self._brk_rc = -1
     self.cruiseDelay_time = 0.0
     self.resumeDelay_time = 0.0
+    self._hill_detect_count = 0
 
   @staticmethod
   def calc_pedal_command(accel: float, long_active: bool, car_velocity) -> tuple[float, bool]:
@@ -283,12 +284,20 @@ class CarController(CarControllerBase):
         # Kans: AutoResume 2nd step
         if auto_engage_enabled:
           if actuators.longControlState == LongCtrlState.starting:
+            if CS.out.aEgo < -0.002:  # 언덕밀림 감지
+              self._hill_detect_count += 1
+            else:
+              self._hill_detect_count = 0
+
+            is_on_slope = self._hill_detect_count >= 2
+            btn_repeat_interval = 0.04 if is_on_slope else 0.08  # 빠른 반복 or 일반 주기
+
             if self.resume_frame == 0:
               self.resume_frame = self.frame
               self.resume_activate = False
 
             if not self.resume_activate:
-              if (self.frame - self.last_button_frame) * DT_CTRL >= 0.08:
+              if (self.frame - self.last_button_frame) * DT_CTRL >= btn_repeat_interval:
                 self.last_button_frame = self.frame
                 self.send_btn(CS, can_sends, CruiseButtons.RES_ACCEL)
 
@@ -297,6 +306,7 @@ class CarController(CarControllerBase):
           else:
             self.resume_frame = 0
             self.resume_activate = False
+            self._hill_detect_count = 0
 
         # GasRegenCmdActive needs to be 1 to avoid cruise faults. It describes the ACC state, not actuation
         can_sends.append(gmcan.create_gas_regen_command(self.packer_pt, CanBus.POWERTRAIN, self.apply_gas, idx, acc_engaged, at_full_stop))
