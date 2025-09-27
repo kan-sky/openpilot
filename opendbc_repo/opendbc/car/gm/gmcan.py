@@ -20,7 +20,7 @@ def create_brake_command(packer, bus, apply_brake, idx):
 
   return packer.make_can_msg("EBCMFrictionBrakeCmd", bus, values)
 
-def create_gas_command(packer, bus, throttle, idx, at_full_stop=False):
+def create_gas_command(packer, bus, throttle, idx, at_full_stop=True):
   rc = int(idx) & 0x3  # 2비트 롤링카운터
   values = {
     "GasRegenCmdActive": True,
