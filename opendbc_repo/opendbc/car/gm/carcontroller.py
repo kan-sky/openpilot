@@ -291,7 +291,7 @@ class CarController(CarControllerBase):
             if self.CP.carFingerprint in CAMERA_ACC_CAR:
               gas_force = 400.0 if self._hill_detect_count >= 3 else 100.0
             else:
-              gas_force = 293.0 if self._hill_detect_count >= 3 else 88.0
+              gas_force = 393.0 if self._hill_detect_count >= 3 else 200.0
 
             if self.resume_frame == 0:
               self.resume_frame = self.frame
