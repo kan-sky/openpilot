@@ -159,7 +159,6 @@ class CarController(CarControllerBase):
     if self.CP.openpilotLongitudinalControl:
       signal_stop_detected = CS.out.vEgo < 0.1 and CS.lead_distance == float('inf')  # 신호정지중
       lead_departed = CS.lead_distance < 45.0 and CS.lead_speed > 0.5  # 리드카 출발
-      
       ego_stopped = CS.out.vEgo < 0.3  # 내 차는 정지 상태
       # Gas/regen, brakes, and UI commands - all at 25Hz
       if self.frame % 4 == 0:
@@ -259,10 +258,12 @@ class CarController(CarControllerBase):
             if actuators.longControlState != LongCtrlState.starting:
               if not self.autoCruise_activate:
                 if (self.frame - self.last_button_frame) * DT_CTRL > 0.12:
-                  self.last_button_frame = self.frame
                   self.send_btn(CS, can_sends, CruiseButtons.DECEL_SET)
-                  if self.CP.carFingerprint in SDGM_CAR or self.CP.carFingerprint in CAMERA_ACC_CAR:
-                    self.send_btn(CS, can_sends, CruiseButtons.UNPRESS)
+                  self.last_button_frame = self.frame
+                  if (self.CP.carFingerprint in SDGM_CAR or self.CP.carFingerprint in CAMERA_ACC_CAR):
+                    if (self.frame - self.last_button_frame) * DT_CTRL > 0.04:
+                      self.send_btn(CS, can_sends, CruiseButtons.UNPRESS)
+                      self.last_button_frame = self.frame
 
                   self.autoCruise_activate = True  # 전송 직후 잠금
                   self.autoCruise_frame = self.frame  # 쿨다운 기준점
@@ -307,8 +308,8 @@ class CarController(CarControllerBase):
 
             if not self.resume_activate: # and (self.frame - self.resume_frame) * DT_CTRL <= 0.5:
               if (self.frame - self.last_button_frame) * DT_CTRL >= btn_repeat_interval:
-                self.last_button_frame = self.frame
                 self.send_btn(CS, can_sends, CruiseButtons.RES_ACCEL)
+                self.last_button_frame = self.frame
 
               if self.frame % 2 == 1 and (self.frame - self.resume_frame) * DT_CTRL >= self.resumeDelay_time:
                 self.resume_activate = True
