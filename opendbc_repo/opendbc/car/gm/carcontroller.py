@@ -317,7 +317,7 @@ class CarController(CarControllerBase):
             self.resume_activate = False
             self._hill_detect_count = 0
 
-        print(f"[GAS APPLY] accel={actuators.accel:.2f}, apply_gas={self.apply_gas}, hill_detect={self._hill_detect_count}, vEgo={CS.out.vEgo:.2f}")
+        print(f"[GAS APPLY] accel={actuators.accel:.2f}, apply_gas={self.apply_gas}, hill_detect={self._hill_detect_count}, vEgo={CS.out.vEgo:.2f}, aEgo={CS.out.aEgo:.2f}")
         # GasRegenCmdActive needs to be 1 to avoid cruise faults. It describes the ACC state, not actuation
         if self._hill_detect_count >= 3:
           accel_force = self.accel_force_hill
