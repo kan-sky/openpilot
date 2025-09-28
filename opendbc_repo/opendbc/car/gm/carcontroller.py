@@ -413,7 +413,10 @@ class CarController(CarControllerBase):
 
   def send_btn(self, CS, can_sends, cruise_btn, bus=None):
     if bus is None:
-      bus = CanBus.POWERTRAIN if self.CP.carFingerprint in (EV_CAR | SDGM_CAR) else CanBus.CAMERA
+      if self.CP.carFingerprint in EV_CAR or self.CP.carFingerprint in SDGM_CAR:
+        bus = CanBus.POWERTRAIN
+      else:
+        bus = CanBus.CAMERA
     # RollinfCounter초기화
     if bus == CanBus.CAMERA:
       if self.btn_rc_cam < 0:
@@ -434,7 +437,7 @@ class CarController(CarControllerBase):
     can_sends.append(gmcan.create_buttons(self.packer_pt, bus, rc, cruise_btn))
 
   def brake_strength(self) -> float:
-    if self.CP.carFingerprint in EV_CAR:
+    if self.CP.carFingerprint in EV_CAR or self.CP.carFingerprint in SDGM_CAR:
       return 0.4
     else:
       return 0.5
