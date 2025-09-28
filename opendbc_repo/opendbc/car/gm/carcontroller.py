@@ -157,10 +157,10 @@ class CarController(CarControllerBase):
       can_sends.append(gmcan.create_steering_control(self.packer_pt, CanBus.POWERTRAIN, apply_torque, idx, CC.latActive))
 
     if self.CP.openpilotLongitudinalControl:
-      # 1. 리드카 출발 감지
-      lead_departed = CS.lead_distance < 45.0 and CS.lead_speed > 0.5
-      # 2. 내 차는 아직 정지 상태
-      ego_stopped = CS.out.vEgo < 0.3
+      signal_stop_detected = CS.out.vEgo < 0.1 and CS.lead_distance == float('inf')  # 신호정지중
+      lead_departed = CS.lead_distance < 45.0 and CS.lead_speed > 0.5  # 리드카 출발
+      
+      ego_stopped = CS.out.vEgo < 0.3  # 내 차는 정지 상태
       # Gas/regen, brakes, and UI commands - all at 25Hz
       if self.frame % 4 == 0:
         friction_sent_this_tick = False
@@ -261,7 +261,8 @@ class CarController(CarControllerBase):
                 if (self.frame - self.last_button_frame) * DT_CTRL > 0.12:
                   self.last_button_frame = self.frame
                   self.send_btn(CS, can_sends, CruiseButtons.DECEL_SET)
-                  self.send_btn(CS, can_sends, CruiseButtons.UNPRESS)
+                  if self.CP.carFingerprint in SDGM_CAR or self.CP.carFingerprint in CAMERA_ACC_CAR:
+                    self.send_btn(CS, can_sends, CruiseButtons.UNPRESS)
 
                   self.autoCruise_activate = True  # 전송 직후 잠금
                   self.autoCruise_frame = self.frame  # 쿨다운 기준점
@@ -292,19 +293,19 @@ class CarController(CarControllerBase):
         # Kans: AutoResume 2nd step
         if auto_engage_enabled:
           if actuators.longControlState == LongCtrlState.starting:
-            if lead_departed and ego_stopped:  # 앞차출발했으나 나는 정지상태
+            if (lead_departed or signal_stop_detected) and ego_stopped and CS.out.aEgo < -0.002:
               self._hill_detect_count += 1
             else:
               self._hill_detect_count = 0
 
-            is_on_slope = self._hill_detect_count >= 1
+            is_on_slope = self._hill_detect_count >= 2
             btn_repeat_interval = 0.04 if is_on_slope else 0.08  # 빠른 반복 or 일반 주기
 
             if self.resume_frame == 0:
               self.resume_frame = self.frame
               self.resume_activate = False
 
-            if not self.resume_activate and (self.frame - self.resume_frame) * DT_CTRL <= 0.5:
+            if not self.resume_activate: # and (self.frame - self.resume_frame) * DT_CTRL <= 0.5:
               if (self.frame - self.last_button_frame) * DT_CTRL >= btn_repeat_interval:
                 self.last_button_frame = self.frame
                 self.send_btn(CS, can_sends, CruiseButtons.RES_ACCEL)
@@ -318,7 +319,7 @@ class CarController(CarControllerBase):
 
         print(f"[GAS APPLY] accel={actuators.accel:.2f}, apply_gas={self.apply_gas}, hill_detect={self._hill_detect_count}, vEgo={CS.out.vEgo:.2f}")
         # GasRegenCmdActive needs to be 1 to avoid cruise faults. It describes the ACC state, not actuation
-        if self._hill_detect_count >= 2:
+        if self._hill_detect_count >= 3:
           accel_force = self.accel_force_hill
           self.apply_gas = int(round(np.interp(accel_force, self.params.EV_GAS_LOOKUP_BP if self.CP.carFingerprint in EV_CAR else self.params.GAS_LOOKUP_BP, self.params.GAS_LOOKUP_V)))
           print(f"[HILL GAS] accel_force={accel_force}, apply_gas={self.apply_gas}")

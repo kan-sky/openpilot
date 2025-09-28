@@ -66,8 +66,7 @@ class CarState(CarStateBase):
       lead = self.sm['radarState'].leadOne
       if lead is not None and lead.status:
         self.lead_distance = float(lead.dRel if lead.dRel is not None else float('inf'))
-        v = float(lead.vLead if lead.vLead is not None else 0.0)
-        self.lead_speed = max(0.0, v)
+        self.lead_speed = float(lead.vLead if lead.vLead is not None else 0.0)
       else:
         self.lead_distance = float('inf')
         self.lead_speed = 0.0
