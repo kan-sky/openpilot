@@ -157,6 +157,10 @@ class CarController(CarControllerBase):
       can_sends.append(gmcan.create_steering_control(self.packer_pt, CanBus.POWERTRAIN, apply_torque, idx, CC.latActive))
 
     if self.CP.openpilotLongitudinalControl:
+      # 1. 리드카 출발 감지
+      lead_departed = CS.lead_distance < 45.0 and CS.lead_speed > 0.5
+      # 2. 내 차는 아직 정지 상태
+      ego_stopped = CS.out.vEgo < 0.3
       # Gas/regen, brakes, and UI commands - all at 25Hz
       if self.frame % 4 == 0:
         friction_sent_this_tick = False
@@ -286,7 +290,7 @@ class CarController(CarControllerBase):
         # Kans: AutoResume 2nd step
         if auto_engage_enabled:
           if actuators.longControlState == LongCtrlState.starting:
-            if CS.out.aEgo < -0.002:  # 언덕밀림 감지
+            if lead_departed and ego_stopped:  # 앞차출발했으나 나는 정지상태
               self._hill_detect_count += 1
             else:
               self._hill_detect_count = 0
