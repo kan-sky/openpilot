@@ -26,7 +26,7 @@ def get_default_params():
     ("EVTable", "1"),
     ("CruiseDelay", "8"),
     ("ResumeDelay", "8"),
-
+    ("AccelForceHill", "80"),
     ("CompletedTrainingVersion", "0"),
     ("DisengageOnAccelerator", "0"),
     ("GsmMetered", "1"),

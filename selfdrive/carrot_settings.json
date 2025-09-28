@@ -444,6 +444,19 @@
       "unit": 5
     },
     {
+      "group": "가속설정",
+      "name": "AccelForceHill",
+      "title": "언덕리쥼 가속도(*0.01): 80",
+      "descr": "언덕리쥼 가속도 \n\n CAMERA_CAR: 200",
+      "egroup": "ACCEL",
+      "etitle": "Accel for Hill(*0.01): 80",
+      "edescr": "Acceleration from Hill",
+      "min": 0,
+      "max": 450,
+      "default": 80,
+      "unit": 10
+    },
+    {
       "group": "주행튜닝",
       "name": "StopDistanceCarrot",
       "title": "StopDistance(600)cm",

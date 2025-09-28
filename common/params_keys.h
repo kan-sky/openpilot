@@ -292,4 +292,5 @@ inline static std::unordered_map<std::string, uint32_t> keys = {
     // Kans
     {"CruiseDelay", PERSISTENT},
     {"ResumeDelay", PERSISTENT},
+    {"AccelForceHill", PERSISTENT},
 };
