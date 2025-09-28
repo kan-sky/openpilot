@@ -261,6 +261,8 @@ class CarController(CarControllerBase):
                 if (self.frame - self.last_button_frame) * DT_CTRL > 0.12:
                   self.last_button_frame = self.frame
                   self.send_btn(CS, can_sends, CruiseButtons.DECEL_SET)
+                  self.send_btn(CS, can_sends, CruiseButtons.UNPRESS)
+
                   self.autoCruise_activate = True  # 전송 직후 잠금
                   self.autoCruise_frame = self.frame  # 쿨다운 기준점
               if self.autoCruise_activate:
