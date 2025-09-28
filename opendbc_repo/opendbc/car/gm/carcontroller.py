@@ -413,7 +413,7 @@ class CarController(CarControllerBase):
 
   def send_btn(self, CS, can_sends, cruise_btn, bus=None):
     if bus is None:
-      bus = CanBus.CAMERA if self.CP.carFingerprint in CAMERA_ACC_CAR else CanBus.POWERTRAIN
+      bus = CanBus.POWERTRAIN if self.CP.carFingerprint in (EV_CAR | SDGM_CAR) else CanBus.CAMERA
     # RollinfCounter초기화
     if bus == CanBus.CAMERA:
       if self.btn_rc_cam < 0:
