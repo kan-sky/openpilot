@@ -178,7 +178,7 @@ class CarController(CarControllerBase):
           brake_accel = actuators.accel + self.accel_g * np.interp(CS.out.vEgo, BRAKE_PITCH_FACTOR_BP, BRAKE_PITCH_FACTOR_V)
 
         # 언덕밀림 감지(accel_g가 0.3보다 클수록 높은 경사)
-        rolling_back = (CS.out.aEgo < -0.05) and (self.accel_g > 0.15)  # 0.3=2.3도 정도의 언덕
+        rolling_back = (self.accel_g > 0.15)  # 0.3=2.3도 정도의 언덕
         at_full_stop = CC.longActive and CS.out.standstill
         near_stop = CC.longActive and (abs(CS.out.vEgo) < self.params.NEAR_STOP_BRAKE_PHASE)
         interceptor_gas_cmd = 0
