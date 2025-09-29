@@ -257,7 +257,7 @@ class CarController(CarControllerBase):
             self.activateCruise_after_brake = False # 오토크루즈가 되기 위해 브레이크 신호는 OFF여야 함.
             if actuators.longControlState != LongCtrlState.starting:
               if not self.autoCruise_activate:
-                if (self.frame - self.last_button_frame) * DT_CTRL > 0.12:
+                if (self.frame - self.last_button_frame) * DT_CTRL > self.cruiseDelay_time:
                   self.send_btn(CS, can_sends, CruiseButtons.DECEL_SET)
                   self.last_button_frame = self.frame
                   if (self.CP.carFingerprint in SDGM_CAR or self.CP.carFingerprint in CAMERA_ACC_CAR):
