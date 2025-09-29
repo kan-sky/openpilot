@@ -227,7 +227,7 @@ static bool gm_tx_hook(const CANPacket_t *to_send) {
     if ((gm_hw == GM_ASCM) || (gm_hw == GM_SDGM) || gm_cam_long || gm_pedal_long) {
       allowed_btn |= (button == GM_BTN_SET || button == GM_BTN_RESUME || button == GM_BTN_UNPRESS);
     }
-    if (gm_cc_long || gm_pcm_cruise) {
+    if (gm_cc_long) {
       allowed_btn |= cruise_engaged_prev && (button == GM_BTN_SET || button == GM_BTN_RESUME || button == GM_BTN_UNPRESS);
     }
 
