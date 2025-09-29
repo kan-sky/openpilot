@@ -159,7 +159,7 @@ class CarController(CarControllerBase):
     if self.CP.openpilotLongitudinalControl:
       signal_stop_detected = CS.out.vEgo < 0.1 and CS.lead_distance == float('inf')  # 신호정지중
       lead_departed = CS.lead_distance < 45.0 and CS.lead_speed > 0.5  # 리드카 출발
-      ego_stopped = CS.out.vEgo < 0.3  # 내 차는 정지 상태
+      rolling_back = CS.out.vEgo > 0.5 and CS.out.aEgo < -0.3  # 정지후 뒤로 밀리고 있는 상태
       # Gas/regen, brakes, and UI commands - all at 25Hz
       if self.frame % 4 == 0:
         friction_sent_this_tick = False
@@ -294,7 +294,7 @@ class CarController(CarControllerBase):
         # Kans: AutoResume 2nd step
         if auto_engage_enabled:
           if actuators.longControlState == LongCtrlState.starting:
-            if (lead_departed or signal_stop_detected) and ego_stopped and CS.out.aEgo < -0.002:
+            if (lead_departed or signal_stop_detected) and rolling_back:
               self._hill_detect_count += 1
             else:
               self._hill_detect_count = 0
