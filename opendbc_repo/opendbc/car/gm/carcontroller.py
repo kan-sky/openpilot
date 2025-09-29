@@ -157,8 +157,6 @@ class CarController(CarControllerBase):
       can_sends.append(gmcan.create_steering_control(self.packer_pt, CanBus.POWERTRAIN, apply_torque, idx, CC.latActive))
 
     if self.CP.openpilotLongitudinalControl:
-      # vEgo는 뒤로밀림속도도 양수로 나옴. 차는 뒤로 밀리고 있음(aEgo음수)
-      rolling_back = 0.1 < CS.out.vEgo < 3.0 and CS.out.aEgo < -0.05  # 언덕밀림 상태
       # Gas/regen, brakes, and UI commands - all at 25Hz
       if self.frame % 4 == 0:
         friction_sent_this_tick = False
@@ -179,6 +177,8 @@ class CarController(CarControllerBase):
           accel += self.accel_g
           brake_accel = actuators.accel + self.accel_g * np.interp(CS.out.vEgo, BRAKE_PITCH_FACTOR_BP, BRAKE_PITCH_FACTOR_V)
 
+        # 언덕밀림 감지(accel_g가 0.3보다 클수록 높은 경사)
+        rolling_back = (CS.out.aEgo < -0.05) and (self.accel_g > 0.3)  # 2.3도 정도의 언덕
         at_full_stop = CC.longActive and CS.out.standstill
         near_stop = CC.longActive and (abs(CS.out.vEgo) < self.params.NEAR_STOP_BRAKE_PHASE)
         interceptor_gas_cmd = 0
