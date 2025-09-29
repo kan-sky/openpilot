@@ -1591,8 +1591,8 @@
     {
       "group": "주행튜닝",
       "name": "CruiseDelay",
-      "title": "오토크루즈용 SET전송 반복타임.x0.01초(8)",
-      "descr": "너무길면 크루즈폴트날 수 있음",
+      "title": "오토크루즈 재진입 지연시간 x0.01초(8)",
+      "descr": "진입실패율 높으면 낮추고 \n 폴트가 잦으면 높인다",
       "egroup": "LONG",
       "etitle": "CruiseDelay.x0.01s(8)",
       "edescr": "",
@@ -1604,8 +1604,8 @@
     {
       "group": "주행튜닝",
       "name": "ResumeDelay",
-      "title": "리쥼버튼 반복전송 타임.x0.01초(8)",
-      "descr": "너무길면 크루즈폴트날 수 있음",
+      "title": "리쥼재진입 지연시간.x0.01초(8)",
+      "descr": "리쥼이 느리면 낮추고 \n 폴트가 잦으면 높인다.",
       "egroup": "LONG",
       "etitle": "ResumeDelay.x0.01s(8)",
       "edescr": "",
