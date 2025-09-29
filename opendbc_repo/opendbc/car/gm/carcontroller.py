@@ -158,8 +158,8 @@ class CarController(CarControllerBase):
 
     if self.CP.openpilotLongitudinalControl:
       signal_stop_detected = CS.lead_distance == float('inf')  # 신호정지중
-      lead_departed = CS.lead_distance < 45.0 and CS.lead_speed > 0.4 and CS.lead_accel > 0.0  # 리드카 출발
-      rolling_back = CS.out.aEgo < -0.05  # 정지후 뒤로 밀리고 있는 상태
+      lead_departed = CS.lead_distance < 45.0 and CS.lead_speed > 0.4  # 리드카 출발
+      rolling_back = CS.out.aEgo < -0.02 and  and CS.lead_accel < -0.02  # 정지후 뒤로 밀리고 있는 상태
       # Gas/regen, brakes, and UI commands - all at 25Hz
       if self.frame % 4 == 0:
         friction_sent_this_tick = False
