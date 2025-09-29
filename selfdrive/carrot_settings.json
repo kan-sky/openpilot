@@ -1591,10 +1591,10 @@
     {
       "group": "주행튜닝",
       "name": "CruiseDelay",
-      "title": "오토크루즈 재진입 지연시간 x0.01초(8)",
+      "title": "오토크루즈 재진입 지연시간 x0.01초(12권장)",
       "descr": "진입실패율 높으면 낮추고 \n 폴트가 잦으면 높인다",
       "egroup": "LONG",
-      "etitle": "CruiseDelay.x0.01s(8)",
+      "etitle": "CruiseDelay.x0.01s(12)",
       "edescr": "",
       "min": 0,
       "max": 40,
@@ -1604,7 +1604,7 @@
     {
       "group": "주행튜닝",
       "name": "ResumeDelay",
-      "title": "리쥼재진입 지연시간.x0.01초(8)",
+      "title": "리쥼재진입 지연시간.x0.01초(16권장)",
       "descr": "리쥼이 느리면 낮추고 \n 폴트가 잦으면 높인다.",
       "egroup": "LONG",
       "etitle": "ResumeDelay.x0.01s(8)",
