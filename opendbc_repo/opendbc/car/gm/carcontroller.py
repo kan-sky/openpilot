@@ -178,7 +178,7 @@ class CarController(CarControllerBase):
           brake_accel = actuators.accel + self.accel_g * np.interp(CS.out.vEgo, BRAKE_PITCH_FACTOR_BP, BRAKE_PITCH_FACTOR_V)
 
         # 언덕밀림 감지(accel_g가 0.3보다 클수록 높은 경사)
-        rolling_back = (CS.out.aEgo < -0.05) and (self.accel_g > 0.3)  # 2.3도 정도의 언덕
+        rolling_back = (CS.out.aEgo < -0.05) and (self.accel_g > 0.15)  # 0.3=2.3도 정도의 언덕
         at_full_stop = CC.longActive and CS.out.standstill
         near_stop = CC.longActive and (abs(CS.out.vEgo) < self.params.NEAR_STOP_BRAKE_PHASE)
         interceptor_gas_cmd = 0
@@ -317,7 +317,7 @@ class CarController(CarControllerBase):
             self.resume_activate = False
             self._hill_detect_count = 0
 
-        print(f"[GAS APPLY] apply_gas={self.apply_gas}, hill_detect={self._hill_detect_count}, aEgo={CS.out.aEgo:.2f}")
+        print(f"[GAS APPLY] apply_gas={self.apply_gas}, accel_g={self.accel_g:.2f}, hill_detect={self._hill_detect_count}, aEgo={CS.out.aEgo:.2f}")
         # GasRegenCmdActive needs to be 1 to avoid cruise faults. It describes the ACC state, not actuation
         if self._hill_detect_count >= 3:
           accel_force = self.accel_force_hill
