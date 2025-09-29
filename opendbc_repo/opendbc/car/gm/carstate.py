@@ -41,6 +41,7 @@ class CarState(CarStateBase):
     # lead_car condition
     self.lead_distance = float('inf') # float('inf')는 무한대값을 의미하는 문자열. 즉 레이더에 잡히는 대상이 없음=앞차없음
     self.lead_speed = 0.0
+    self.lead_accel = 0.0
     self.sm = messaging.SubMaster(['radarState'])
 
     self.cruiseMain_on = False
@@ -67,9 +68,11 @@ class CarState(CarStateBase):
       if lead is not None and lead.status:
         self.lead_distance = float(lead.dRel if lead.dRel is not None else float('inf'))
         self.lead_speed = float(lead.vLead if lead.vLead is not None else 0.0)
+        self.lead_accel = float(lead.aLead if lead.aLead is not None else 0.0)
       else:
         self.lead_distance = float('inf')
         self.lead_speed = 0.0
+        self.lead_accel = 0.0
 
     pt_cp = can_parsers[Bus.pt]
     cam_cp = can_parsers[Bus.cam]

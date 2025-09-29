@@ -157,8 +157,8 @@ class CarController(CarControllerBase):
       can_sends.append(gmcan.create_steering_control(self.packer_pt, CanBus.POWERTRAIN, apply_torque, idx, CC.latActive))
 
     if self.CP.openpilotLongitudinalControl:
-      signal_stop_detected = CS.out.vEgo < 0.1 and CS.lead_distance == float('inf')  # 신호정지중
-      lead_departed = CS.lead_distance < 45.0 and CS.lead_speed > 0.5  # 리드카 출발
+      signal_stop_detected = CS.lead_distance == float('inf')  # 신호정지중
+      lead_departed = CS.lead_distance < 45.0 and CS.lead_speed > 0.4 and CS.lead_accel > 0.0  # 리드카 출발
       rolling_back = CS.out.aEgo < -0.05  # 정지후 뒤로 밀리고 있는 상태
       # Gas/regen, brakes, and UI commands - all at 25Hz
       if self.frame % 4 == 0:
@@ -318,7 +318,7 @@ class CarController(CarControllerBase):
             self.resume_activate = False
             self._hill_detect_count = 0
 
-        print(f"[GAS APPLY] accel={actuators.accel:.2f}, apply_gas={self.apply_gas}, hill_detect={self._hill_detect_count}, vEgo={CS.out.vEgo:.2f}, aEgo={CS.out.aEgo:.2f}")
+        print(f"[GAS APPLY] accel={actuators.accel:.2f}, apply_gas={self.apply_gas}, hill_detect={self._hill_detect_count}, vEgo={CS.out.vEgo:.2f}, aEgo={CS.out.aEgo:.2f}, vLead={CS.lead_speed:.2f}, aLead={CS.lead_accel:.2f}")
         # GasRegenCmdActive needs to be 1 to avoid cruise faults. It describes the ACC state, not actuation
         if self._hill_detect_count >= 3:
           accel_force = self.accel_force_hill
