@@ -178,15 +178,6 @@ class CarController(CarControllerBase):
           accel += self.accel_g
           brake_accel = actuators.accel + self.accel_g * np.interp(CS.out.vEgo, BRAKE_PITCH_FACTOR_BP, BRAKE_PITCH_FACTOR_V)
 
-        # 언덕밀림 감지(accel_g가 클수록 높은 경사)0.3=2.3도 정도의 언덕
-        if self.accel_g > 0.2:
-          self._hill_detect_count += 1
-        else:
-          self._hill_detect_count = 0
-
-        is_on_slope = self._hill_detect_count >= 2
-        self.btn_repeat_interval = 0.04 if is_on_slope else 0.08  # 빠른 반복 or 일반 주기
-
         at_full_stop = CC.longActive and CS.out.standstill
         near_stop = CC.longActive and (abs(CS.out.vEgo) < self.params.NEAR_STOP_BRAKE_PHASE)
         interceptor_gas_cmd = 0
@@ -299,6 +290,17 @@ class CarController(CarControllerBase):
             friction_sent_this_tick = True
 
         # Kans: AutoResume 2nd step
+        # 언덕밀림 감지(accel_g가 클수록 높은 경사)0.3=2.3도 정도의 언덕
+        if self.accel_g > 0.2:
+          self._hill_detect_count += 1
+        else:
+          self._hill_detect_count = 0
+
+        if self._hill_detect_count >= 2:
+          self.btn_repeat_interval = 0.04  # 빠른 반복 or 일반 주기
+        else:
+          self.btn_repeat_interval = 0.08
+
         if auto_engage_enabled:
           if actuators.longControlState == LongCtrlState.starting:
             if self.resume_frame == 0:
@@ -315,11 +317,10 @@ class CarController(CarControllerBase):
           else:
             self.resume_frame = 0
             self.resume_activate = False
-            self._hill_detect_count = 0
 
         print(f"[GAS APPLY] apply_gas={self.apply_gas}, accel_g={self.accel_g:.2f}, hill_detect={self._hill_detect_count}, aEgo={CS.out.aEgo:.2f}")
         # GasRegenCmdActive needs to be 1 to avoid cruise faults. It describes the ACC state, not actuation
-        if self._hill_detect_count >= 3:
+        if self._hill_detect_count >= 3 or self.accel_g > 0.2:
           accel_force = self.accel_force_hill
           self.apply_gas = int(round(np.interp(accel_force, self.params.EV_GAS_LOOKUP_BP if self.CP.carFingerprint in EV_CAR else self.params.GAS_LOOKUP_BP, self.params.GAS_LOOKUP_V)))
           print(f"[HILL GAS] accel_force={accel_force}, apply_gas={self.apply_gas}")
