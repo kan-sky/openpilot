@@ -74,6 +74,7 @@ class CarController(CarControllerBase):
     self._hill_detect_count = 0  # 언덕 감지 카운터
     self.accel_force_hill = 0
     self.btn_repeat_interval = 0.0
+    self._hill_gas_sent = 0
 
   @staticmethod
   def calc_pedal_command(accel: float, long_active: bool, car_velocity) -> tuple[float, bool]:
@@ -290,16 +291,13 @@ class CarController(CarControllerBase):
             friction_sent_this_tick = True
 
         # Kans: AutoResume 2nd step
-        # 언덕밀림 감지(accel_g가 클수록 높은 경사)0.3=2.3도 정도의 언덕
-        if self.accel_g > 0.2:
-          self._hill_detect_count += 1
+        # 언덕감지(accel_g가 클수록 높은 경사)0.3=2.3도 정도의 언덕
+        if self.accel_g > 0.2 and CS.out.aEgo < -0.02:
+          self._hill_detect_count = min(self._hill_detect_count + 1, 6)  # 최대치는 6
         else:
-          self._hill_detect_count = 0
-
-        if self._hill_detect_count >= 2:
-          self.btn_repeat_interval = 0.04  # 빠른 반복 or 일반 주기
-        else:
-          self.btn_repeat_interval = 0.08
+          self._hill_detect_count = max(self._hill_detect_count - 1, 0)  # 조건외엔 1씩 감소
+        # 버튼주기(언덕에선 빨리 0.04)
+        self.btn_repeat_interval = 0.04 if self._hill_detect_count >= 2 else 0.08
 
         if auto_engage_enabled:
           if actuators.longControlState == LongCtrlState.starting:
@@ -307,7 +305,7 @@ class CarController(CarControllerBase):
               self.resume_frame = self.frame
               self.resume_activate = False
 
-            if not self.resume_activate: # and (self.frame - self.resume_frame) * DT_CTRL <= 0.5:
+            if not self.resume_activate:
               if (self.frame - self.last_button_frame) * DT_CTRL >= self.btn_repeat_interval:
                 self.send_btn(CS, can_sends, CruiseButtons.RES_ACCEL)
                 self.last_button_frame = self.frame
@@ -318,20 +316,21 @@ class CarController(CarControllerBase):
             self.resume_frame = 0
             self.resume_activate = False
 
-        print(f"[GAS APPLY] apply_gas={self.apply_gas}, accel_g={self.accel_g:.2f}, hill_detect={self._hill_detect_count}, aEgo={CS.out.aEgo:.2f}")
         # GasRegenCmdActive needs to be 1 to avoid cruise faults. It describes the ACC state, not actuation
-        if self._hill_detect_count >= 3 or self.accel_g > 0.2:
+        if self._hill_detect_count >= 3 and self._hill_gas_sent < 3:  # 언덕리쥼용 가속은 3회만.
           accel_force = self.accel_force_hill
           if self.CP.carFingerprint in EV_CAR:
             self.params.update_ev_gas_brake_threshold(CS.out.vEgo)
             self.apply_gas = int(round(np.interp(accel_force, self.params.EV_GAS_LOOKUP_BP, self.params.GAS_LOOKUP_V)))
           else:
             self.apply_gas = int(round(np.interp(accel_force, self.params.GAS_LOOKUP_BP, self.params.GAS_LOOKUP_V)))
-          print(f"[HILL GAS] accel_force={accel_force}, apply_gas={self.apply_gas}")
+          print(f"[HILL GAS] accel_g={self.accel_g:.2f}, aEgo={CS.out.aEgo:.2f}, hill={self._hill_detect_count}, apply_gas={self.apply_gas}")
+          self._hill_gas_sent += 1
           can_sends.append(gmcan.create_gas_regen_command(self.packer_pt, CanBus.POWERTRAIN, self.apply_gas, idx, acc_engaged, at_full_stop))
         else:
           print(f"[NORMAL GAS] apply_gas={self.apply_gas}")
-          can_sends.append(gmcan.create_gas_regen_command(self.packer_pt, CanBus.POWERTRAIN, self.apply_gas, idx, acc_engaged, at_full_stop))
+
+        can_sends.append(gmcan.create_gas_regen_command(self.packer_pt, CanBus.POWERTRAIN, self.apply_gas, idx, acc_engaged, at_full_stop))
         if not friction_sent_this_tick:
           self._brk_rc = (self._brk_rc + 1) & 0x3
           brk_idx_base = self._brk_rc
