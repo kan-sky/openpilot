@@ -73,6 +73,8 @@ class CarController(CarControllerBase):
     self.resumeDelay_time = 0.0
     self._hill_detect_count = 0  # 언덕 감지 카운터
     self.accel_force_hill = 0
+    self.rolling_back = 0.0
+    self.btn_repeat_interval = 0.0
 
   @staticmethod
   def calc_pedal_command(accel: float, long_active: bool, car_velocity) -> tuple[float, bool]:
@@ -177,8 +179,16 @@ class CarController(CarControllerBase):
           accel += self.accel_g
           brake_accel = actuators.accel + self.accel_g * np.interp(CS.out.vEgo, BRAKE_PITCH_FACTOR_BP, BRAKE_PITCH_FACTOR_V)
 
-        # 언덕밀림 감지(accel_g가 0.3보다 클수록 높은 경사)
-        rolling_back = (self.accel_g > 0.15)  # 0.3=2.3도 정도의 언덕
+        # 언덕밀림 감지(accel_g가 클수록 높은 경사)
+        self.rolling_back = self.accel_g > 0.2  # 0.3=2.3도 정도의 언덕
+        if self.rolling_back:
+          self._hill_detect_count += 1
+        else:
+          self._hill_detect_count = 0
+
+        is_on_slope = self._hill_detect_count >= 2
+        self.btn_repeat_interval = 0.04 if is_on_slope else 0.08  # 빠른 반복 or 일반 주기
+
         at_full_stop = CC.longActive and CS.out.standstill
         near_stop = CC.longActive and (abs(CS.out.vEgo) < self.params.NEAR_STOP_BRAKE_PHASE)
         interceptor_gas_cmd = 0
@@ -293,20 +303,12 @@ class CarController(CarControllerBase):
         # Kans: AutoResume 2nd step
         if auto_engage_enabled:
           if actuators.longControlState == LongCtrlState.starting:
-            if rolling_back:
-              self._hill_detect_count += 1
-            else:
-              self._hill_detect_count = 0
-
-            is_on_slope = self._hill_detect_count >= 2
-            btn_repeat_interval = 0.04 if is_on_slope else 0.08  # 빠른 반복 or 일반 주기
-
             if self.resume_frame == 0:
               self.resume_frame = self.frame
               self.resume_activate = False
 
             if not self.resume_activate: # and (self.frame - self.resume_frame) * DT_CTRL <= 0.5:
-              if (self.frame - self.last_button_frame) * DT_CTRL >= btn_repeat_interval:
+              if (self.frame - self.last_button_frame) * DT_CTRL >= self.btn_repeat_interval:
                 self.send_btn(CS, can_sends, CruiseButtons.RES_ACCEL)
                 self.last_button_frame = self.frame
 
