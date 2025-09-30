@@ -73,7 +73,6 @@ class CarController(CarControllerBase):
     self.resumeDelay_time = 0.0
     self._hill_detect_count = 0  # 언덕 감지 카운터
     self.accel_force_hill = 0
-    self.rolling_back = 0.0
     self.btn_repeat_interval = 0.0
 
   @staticmethod
@@ -179,9 +178,8 @@ class CarController(CarControllerBase):
           accel += self.accel_g
           brake_accel = actuators.accel + self.accel_g * np.interp(CS.out.vEgo, BRAKE_PITCH_FACTOR_BP, BRAKE_PITCH_FACTOR_V)
 
-        # 언덕밀림 감지(accel_g가 클수록 높은 경사)
-        self.rolling_back = self.accel_g > 0.2  # 0.3=2.3도 정도의 언덕
-        if self.rolling_back:
+        # 언덕밀림 감지(accel_g가 클수록 높은 경사)0.3=2.3도 정도의 언덕
+        if self.accel_g > 0.2:
           self._hill_detect_count += 1
         else:
           self._hill_detect_count = 0
