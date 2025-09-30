@@ -296,6 +296,8 @@ class CarController(CarControllerBase):
           self._hill_detect_count = min(self._hill_detect_count + 1, 6)  # 최대치는 6
         else:
           self._hill_detect_count = max(self._hill_detect_count - 1, 0)  # 조건외엔 1씩 감소
+        if self._hill_detect_count == 0:  #카운터 초기화
+          self._hill_gas_sent = 0
         # 버튼주기(언덕에선 빨리 0.04)
         self.btn_repeat_interval = 0.04 if self._hill_detect_count >= 2 else 0.08
 
@@ -324,12 +326,11 @@ class CarController(CarControllerBase):
             self.apply_gas = int(round(np.interp(accel_force, self.params.EV_GAS_LOOKUP_BP, self.params.GAS_LOOKUP_V)))
           else:
             self.apply_gas = int(round(np.interp(accel_force, self.params.GAS_LOOKUP_BP, self.params.GAS_LOOKUP_V)))
-          print(f"[HILL GAS] accel_g={self.accel_g:.2f}, aEgo={CS.out.aEgo:.2f}, hill={self._hill_detect_count}, apply_gas={self.apply_gas}")
+          print(f"[HILL GAS] accel_g={self.accel_g:.2f}, aEgo={CS.out.aEgo:.2f}, hill={self._hill_detect_count}, apply_gas={self.apply_gas}, sent={self._hill_gas_sent+1}")
           self._hill_gas_sent += 1
-          can_sends.append(gmcan.create_gas_regen_command(self.packer_pt, CanBus.POWERTRAIN, self.apply_gas, idx, acc_engaged, at_full_stop))
         else:
           print(f"[NORMAL GAS] apply_gas={self.apply_gas}")
-
+        # 가속송신은 한번만.
         can_sends.append(gmcan.create_gas_regen_command(self.packer_pt, CanBus.POWERTRAIN, self.apply_gas, idx, acc_engaged, at_full_stop))
         if not friction_sent_this_tick:
           self._brk_rc = (self._brk_rc + 1) & 0x3
