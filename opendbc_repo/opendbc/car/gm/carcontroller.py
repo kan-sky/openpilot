@@ -322,7 +322,11 @@ class CarController(CarControllerBase):
         # GasRegenCmdActive needs to be 1 to avoid cruise faults. It describes the ACC state, not actuation
         if self._hill_detect_count >= 3 or self.accel_g > 0.2:
           accel_force = self.accel_force_hill
-          self.apply_gas = int(round(np.interp(accel_force, self.params.EV_GAS_LOOKUP_BP if self.CP.carFingerprint in EV_CAR else self.params.GAS_LOOKUP_BP, self.params.GAS_LOOKUP_V)))
+          if self.CP.carFingerprint in EV_CAR:
+            self.params.update_ev_gas_brake_threshold(CS.out.vEgo)
+            self.apply_gas = int(round(np.interp(accel_force, self.params.EV_GAS_LOOKUP_BP, self.params.GAS_LOOKUP_V)))
+          else:
+            self.apply_gas = int(round(np.interp(accel_force, self.params.GAS_LOOKUP_BP, self.params.GAS_LOOKUP_V)))
           print(f"[HILL GAS] accel_force={accel_force}, apply_gas={self.apply_gas}")
           can_sends.append(gmcan.create_gas_regen_command(self.packer_pt, CanBus.POWERTRAIN, self.apply_gas, idx, acc_engaged, at_full_stop))
         else:
