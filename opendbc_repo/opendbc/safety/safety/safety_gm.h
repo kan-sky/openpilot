@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "safety_declarations.h"
 
@@ -107,7 +107,7 @@ static void gm_rx_hook(const CANPacket_t *to_push) {
       }
 
       // enter controls on rising edge of ACC, exit controls when ACC off
-      if ((gm_pcm_cruise || gm_hw == GM_SDGM) && gm_has_acc) {  // GM_SDGM도 크루즈체크에 포함
+      if (gm_pcm_cruise && gm_has_acc) {
         bool cruise_engaged = (GET_BYTE(to_push, 1) >> 5) != 0U;
         pcm_cruise_check(cruise_engaged);
       }
@@ -222,12 +222,13 @@ static bool gm_tx_hook(const CANPacket_t *to_send) {
   // BUTTONS: used for resume spamming and cruise cancellation with stock longitudinal
   if (addr == 0x1E1) {
     int button = (GET_BYTE(to_send, 5) >> 4) & 0x7U;
-    bool allowed_btn = (button == GM_BTN_CANCEL) && cruise_engaged_prev;
 
-    if ((gm_hw == GM_ASCM) || (gm_hw == GM_SDGM) || gm_cam_long || gm_pedal_long) {
+    bool allowed_btn = (button == GM_BTN_CANCEL) && cruise_engaged_prev;
+    if ((gm_hw == GM_ASCM) || (gm_hw == GM_SDGM) || gm_cam_long) {
       allowed_btn |= (button == GM_BTN_SET || button == GM_BTN_RESUME || button == GM_BTN_UNPRESS);
     }
-    if (gm_cc_long) {
+    // For CC_LONG or PCM cruise vehicles, allow SET/RESUME when cruise is engaged
+    if (gm_cc_long || gm_pcm_cruise) {
       allowed_btn |= cruise_engaged_prev && (button == GM_BTN_SET || button == GM_BTN_RESUME || button == GM_BTN_UNPRESS);
     }
 
