@@ -283,9 +283,9 @@ class CarController(CarControllerBase):
             if self.CP.carFingerprint == CAR.CHEVROLET_VOLT:  
               can_sends.append(gmcan.create_brake_command(self.packer_ch, CanBus.CHASSIS, apply_brake, brk_idx))
             elif self.CP.carFingerprint in SDGM_CAR:
-              can_sends.append(gmcan.create_brake_command(self.packer_ch, CanBus.CHASSIS, apply_brake, brk_idx))
+              can_sends.append(gmcan.create_brake_command(self.packer_ch, CanBus.CAMERA, apply_brake, brk_idx))
             elif self.CP.carFingerprint in CAMERA_ACC_CAR:
-              can_sends.append(gmcan.create_brake_command(self.packer_pt, CanBus.POWERTRAIN, apply_brake, brk_idx))
+              can_sends.append(gmcan.create_brake_command(self.packer_ch, CanBus.POWERTRAIN, apply_brake, brk_idx))
             Params().put_bool_nonblocking("ActivateCruiseAfterBrake", True) # cruise.py에 브레이크 ON신호 전달
             self.activateCruise_after_brake = True # 브레이크신호는 한번만 보내고 초기화
             friction_sent_this_tick = True
@@ -339,10 +339,10 @@ class CarController(CarControllerBase):
             can_sends.append(gmcan.create_friction_brake_command(self.packer_ch, CanBus.CHASSIS, self.apply_brake,
                              brk_idx_base, CC.enabled, near_stop, at_full_stop, self.CP))
           elif self.CP.carFingerprint in SDGM_CAR:
-            can_sends.append(gmcan.create_friction_brake_command(self.packer_ch, CanBus.CHASSIS, self.apply_brake,
+            can_sends.append(gmcan.create_friction_brake_command(self.packer_ch, CanBus.CAMERA, self.apply_brake,
                              brk_idx_base, CC.enabled, near_stop, at_full_stop, self.CP))
           elif self.CP.carFingerprint in CAMERA_ACC_CAR:
-            can_sends.append(gmcan.create_friction_brake_command(self.packer_pt, CanBus.POWERTRAIN, self.apply_brake,
+            can_sends.append(gmcan.create_friction_brake_command(self.packer_ch, CanBus.POWERTRAIN, self.apply_brake,
                              brk_idx_base, CC.enabled, near_stop, at_full_stop, self.CP))
 
         # Send dashboard UI commands (ACC status)
