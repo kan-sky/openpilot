@@ -295,4 +295,8 @@ inline static std::unordered_map<std::string, uint32_t> keys = {
     {"NNFFModelName", CLEAR_ON_OFFROAD_TRANSITION},
 
     {"HardwareC3xLite", PERSISTENT},
+    // Kans
+    {"CruiseDelay", PERSISTENT},
+    {"ResumeDelay", PERSISTENT},
+    {"AccelForce", PERSISTENT},
 };

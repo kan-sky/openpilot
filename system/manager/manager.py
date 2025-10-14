@@ -24,6 +24,9 @@ def get_default_params():
     # kans
     ("LongPitch", "1"),
     ("EVTable", "1"),
+    ("CruiseDelay", "8"),
+    ("ResumeDelay", "8"),
+    ("AccelForce", "950"),
     ("CompletedTrainingVersion", "0"),
     ("DisengageOnAccelerator", "0"),
     ("GsmMetered", "1"),
@@ -90,6 +93,7 @@ def get_default_params():
     ("ModelTurnSpeedFactor", "0"),
     ("StoppingAccel", "0"),
     ("StopDistanceCarrot", "550"),
+    ("ComfortBrake", "240"),
     ("JLeadFactor3", "0"),
     ("CruiseButtonMode", "0"),
     ("CancelButtonMode", "0"),
@@ -180,7 +184,7 @@ def get_default_params():
     ("SoftwareMenu", "1"),
     ("CustomSR", "0"),
     ("SteerRatioRate", "100"),
-    ("NNFF", "0"),
+    ("NNFF", "1"),
     ("NNFFLite", "0"),
   ]
   return default_params

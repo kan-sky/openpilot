@@ -127,7 +127,7 @@ class CarSpecificEvents:
         events.add(EventName.belowEngageSpeed)
       if CS.cruiseState.standstill:
         events.add(EventName.resumeRequired)
-      if CS.vEgo < self.CP.minSteerSpeed:
+      if (CS.vEgo < self.CP.minSteerSpeed) and (CS_prev.vEgo >= self.CP.minSteerSpeed):
         events.add(EventName.belowSteerSpeed)
 
     elif self.CP.brand == 'volkswagen':
@@ -254,10 +254,11 @@ class CarSpecificEvents:
         # if the user overrode recently, show a less harsh alert
         if self.silent_steer_warning > 0 or CS.standstill or self.steering_unpressed < int(1.5 / DT_CTRL):
           self.silent_steer_warning += 1
-          if self.silent_steer_warning > 20:
+          if (CS.vEgo > self.CP.minSteerSpeed) and (self.silent_steer_warning > 20):
             events.add(EventName.steerTempUnavailableSilent)
         else:
-          events.add(EventName.steerTempUnavailable)
+          if CS.vEgo > self.CP.minSteerSpeed:
+            events.add(EventName.steerTempUnavailable)
     else:
       self.no_steer_warning = False
       self.silent_steer_warning = 0

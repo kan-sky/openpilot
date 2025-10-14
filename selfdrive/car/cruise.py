@@ -225,6 +225,14 @@ class VCruiseCarrot:
 
 
   @property
+  def cruise_is_on(self) -> bool:
+    #_activate_cruise가 0이 아니면 True
+    try:
+      return int(self._activate_cruise) != 0
+    except Exception:
+      return False
+
+  @property
   def v_cruise_initialized(self):
     return self.v_cruise_kph != V_CRUISE_UNSET
 
@@ -406,7 +414,7 @@ class VCruiseCarrot:
       elif not b.pressed and self.button_cnt > 0 and bt == self.button_prev:
         if bt == ButtonType.cancel:
           button_type = bt
-        elif not self.long_pressed:          
+        elif not self.long_pressed:
           if bt == ButtonType.accelCruise:
             unit = SPEED_UP_UNIT if is_metric else SPEED_UP_UNIT * CV.MPH_TO_KPH
             button_kph = math.ceil((button_kph + 0.01) / unit) * unit
@@ -703,16 +711,19 @@ class VCruiseCarrot:
       else:
         v_cruise_kph = self._v_cruise_desired(CS, v_cruise_kph)
     elif self._gas_pressed_count == -1:
-      if 0 < self.d_rel < CS.vEgo * 0.8:
+      if 0 < self.d_rel < CS.vEgo * 1.5:
         if CS.vEgo < 1.0:
           self._cruise_control(1, -1 if self.aTarget > 0.0 else 0, "Cruise on (safe speed)")
-        else:
+        elif CS.vEgo < 2.5 and not CC.enabled:
           self._cruise_control(-1, 0, "Cruise off (lead car too close)")
-      elif self.v_ego_kph_set < 30:
+      elif self.v_ego_kph_set < 11:
         self._cruise_control(-1, 0, "Cruise off (gas speed)")
       elif self.xState == 3:
         v_cruise_kph = self.v_ego_kph_set
         self._cruise_control(-1, 3, "Cruise off (traffic sign)")
+      elif self.xState == 5:
+        v_cruise_kph = self.v_ego_kph_set
+        self._cruise_control(1, -1, "Cruise on (traffic sign changed)")
       elif self.v_ego_kph_set >= self.autoGasTokSpeed and not CC.enabled:
         v_cruise_kph = self.v_ego_kph_set
         self._cruise_control(1, -1 if self.aTarget > 0.0 else 0, "Cruise on (gas pressed)")
@@ -720,7 +731,7 @@ class VCruiseCarrot:
       if self.v_ego_kph_set > self.autoGasTokSpeed:
         v_cruise_kph = self.v_ego_kph_set
         self._cruise_control(1, -1 if self.aTarget > 0.0 else 0, "Cruise on (speed)")
-      elif abs(CS.steeringAngleDeg) < 20:
+      elif abs(CS.steeringAngleDeg) < 30: #커브각도 상향
         if self.xState in [3, 5]:
           if self.xState == 3:  # 감속중
             v_cruise_kph = self.v_ego_kph_set

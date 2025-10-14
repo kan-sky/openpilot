@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "safety_declarations.h"
 
@@ -21,13 +21,13 @@ enum {
   GM_BTN_UNPRESS = 1,
   GM_BTN_RESUME = 2,
   GM_BTN_SET = 3,
-  GM_BTN_MAIN = 5,
   GM_BTN_CANCEL = 6,
 };
 
 typedef enum {
   GM_ASCM,
-  GM_CAM
+  GM_CAM,
+  GM_SDGM
 } GmHardware;
 static GmHardware gm_hw = GM_ASCM;
 static bool gm_cam_long = false;
@@ -37,6 +37,7 @@ static bool gm_pedal_long = false;
 static bool gm_cc_long = false;
 static bool gm_skip_relay_check = false;
 static bool gm_force_ascm = false;
+static bool gm_force_brake_c9 = false;
 
 static void gm_rx_hook(const CANPacket_t *to_push) {
 
@@ -66,7 +67,7 @@ static void gm_rx_hook(const CANPacket_t *to_push) {
     }
 
     // ACC steering wheel buttons (GM_CAM is tied to the PCM)
-    if ((addr == 0x1E1) && (!gm_pcm_cruise || gm_cc_long)) {
+    if ((addr == 0x1E1) && (gm_pcm_cruise || gm_cc_long || (gm_hw == GM_ASCM) || gm_force_ascm)) {
       int button = (GET_BYTE(to_push, 5) & 0x70U) >> 4;
 
       // enter controls on falling edge of set or rising edge of resume (avoids fault)
@@ -86,14 +87,18 @@ static void gm_rx_hook(const CANPacket_t *to_push) {
 
     // Reference for brake pressed signals:
     // https://github.com/commaai/openpilot/blob/master/selfdrive/car/gm/carstate.py
-    if ((addr == 0xBE) && (gm_hw == GM_ASCM)) {
-      brake_pressed = GET_BYTE(to_push, 1) >= 10U;
+    // Force to 0xC9(201;ECMEngineStatus) when gm_force_brake_c9 is set, otherwise keep legacy behavior.
+    // This allows SDGM/Traverse variants without 0xBE(190;ECMAcceleratorPos) to report brake correctly.
+    if ((addr == 0xC9) && gm_force_brake_c9) {
+      brake_pressed = GET_BIT(to_push, 40U) != 0U;
+    } else if ((addr == 0xBE) && ((gm_hw == GM_ASCM) || (gm_hw == GM_SDGM))) {
+      brake_pressed = GET_BYTE(to_push, 1) >= 8U;
+    } else if ((addr == 0xC9) && (gm_hw == GM_CAM)) {
+      brake_pressed = GET_BIT(to_push, 40U) != 0U;
     }
-    if (addr == 0xC9) {
-      if (gm_hw == GM_CAM) {
-        brake_pressed = (GET_BYTE(to_push, 5) & 0x01U) != 0U;
-      }
-      acc_main_on = (GET_BYTE(to_push, 3) & 0x20U) != 0U;
+
+    if ((addr == 0xC9) && ((gm_hw == GM_ASCM) || gm_cam_long)) {
+      acc_main_on = GET_BIT(to_push, 29U) != 0U;
     }
 
     if (addr == 0x1C4) {
@@ -108,6 +113,10 @@ static void gm_rx_hook(const CANPacket_t *to_push) {
       }
     }
 
+    if (addr == 0xBD) {
+      regen_braking = (GET_BYTE(to_push, 0) >> 4) != 0U;
+    }
+
     // Cruise check for CC only cars
     if ((addr == 0x3D1) && !gm_has_acc) {
       bool cruise_engaged = (GET_BYTE(to_push, 4) >> 7) != 0U;
@@ -116,10 +125,6 @@ static void gm_rx_hook(const CANPacket_t *to_push) {
       } else {
         cruise_engaged_prev = cruise_engaged;
       }
-    }
-
-    if (addr == 0xBD) {
-      regen_braking = (GET_BYTE(to_push, 0) >> 4) != 0U;
     }
 
     // Pedal Interceptor
@@ -137,6 +142,22 @@ static void gm_rx_hook(const CANPacket_t *to_push) {
       stock_ecu_detected = true;
     }
     generic_rx_checks(stock_ecu_detected);
+  }
+  // Cruise check for Gen2 Bolt (ASCMActiveCruiseControlStatus on bus 2)
+  int addr = GET_ADDR(to_push);
+  if ((addr == 0x370) && (GET_BUS(to_push) == 2U)) {
+    bool cruise_engaged = (GET_BYTE(to_push, 2) >> 7) != 0U;  // ACCCmdActive
+    // Align SDGM/camera PCM cruise behavior with ASCM path: when using stock PCM cruise,
+    // drive controls_allowed via pcm_cruise_check on ACC engaged edges.
+    if (gm_pcm_cruise && gm_has_acc) {
+      pcm_cruise_check(cruise_engaged);
+    } else {
+      cruise_engaged_prev = cruise_engaged;
+    }
+  }
+  //Kans
+  if ((GET_BUS(to_push) == 2U) && (addr == 0xC9) && (gm_force_brake_c9 || (gm_hw == GM_SDGM))) {
+    acc_main_on = GET_BIT(to_push, 29U) != 0U;
   }
 }
 
@@ -205,12 +226,13 @@ static bool gm_tx_hook(const CANPacket_t *to_send) {
   // BUTTONS: used for resume spamming and cruise cancellation with stock longitudinal
   if (addr == 0x1E1) {
     int button = (GET_BYTE(to_send, 5) >> 4) & 0x7U;
-    bool allowed_btn = (button == GM_BTN_CANCEL) && cruise_engaged_prev;
 
-    if (!gm_pcm_cruise) {
+    bool allowed_btn = (button == GM_BTN_CANCEL) && cruise_engaged_prev;
+    if ((gm_pcm_cruise || gm_cc_long || (gm_hw == GM_ASCM) || gm_force_ascm)) {
       allowed_btn |= (button == GM_BTN_SET || button == GM_BTN_RESUME || button == GM_BTN_UNPRESS);
     }
-    if (gm_cc_long) {
+    // For CC_LONG or PCM cruise vehicles, allow SET/RESUME when cruise is engaged
+    if (gm_cc_long || gm_pcm_cruise) {
       allowed_btn |= cruise_engaged_prev && (button == GM_BTN_SET || button == GM_BTN_RESUME || button == GM_BTN_UNPRESS);
     }
 
@@ -218,14 +240,13 @@ static bool gm_tx_hook(const CANPacket_t *to_send) {
       tx = false;
     }
   }
-
   return tx;
 }
 
 static int gm_fwd_hook(int bus_num, int addr) {
   int bus_fwd = -1;
 
-  if (gm_hw == GM_CAM) {
+  if ((gm_hw == GM_CAM) || (gm_hw == GM_SDGM)) {
     if (bus_num == 0) {
       // block PSCMStatus; forwarded through openpilot to hide an alert from the camera
       bool is_pscm_msg = (addr == 0x184);
@@ -239,6 +260,10 @@ static int gm_fwd_hook(int bus_num, int addr) {
       bool is_lkas_msg = (addr == 0x180);
       bool is_acc_msg = (addr == 0x315) || (addr == 0x2CB) || (addr == 0x370);
       bool block_msg = is_lkas_msg || (is_acc_msg && gm_cam_long);
+      // allow brake signal (0x315) passthrough only for SDGM
+      if ((gm_hw == GM_SDGM) && (addr == 0x315)) {
+        block_msg = false;
+      }
       if (!block_msg) {
         bus_fwd = 0;
       }
@@ -250,12 +275,17 @@ static int gm_fwd_hook(int bus_num, int addr) {
 
 static safety_config gm_init(uint16_t param) {
   const uint16_t GM_PARAM_HW_CAM = 1;
+  const uint16_t GM_PARAM_HW_CAM_LONG = 2;
   const uint16_t GM_PARAM_CC_LONG = 4;
   const uint16_t GM_PARAM_NO_CAMERA = 8;
   const uint16_t GM_PARAM_HW_ASCM_LONG = 16;
   const uint16_t GM_PARAM_NO_ACC = 32;
-  const uint16_t GM_PARAM_PEDAL_LONG = 64;  // TODO: this can be inferred
+  const uint16_t GM_PARAM_PEDAL_LONG = 64;
+  const uint16_t GM_PARAM_PEDAL_INTERCEPTOR = 128;  // TODO: this can be inferred
   const uint16_t GM_PARAM_EV = 256;
+  const uint16_t GM_PARAM_FORCE_BRAKE_C9 = 512;
+  const uint16_t GM_PARAM_HW_SDGM = 1024;
+  const uint16_t GM_PARAM_ASCM_INT = 2048;
 
   // common safety checks assume unscaled integer values
   static const int GM_GAS_TO_CAN = 8;  // 1 / 0.125
@@ -269,7 +299,8 @@ static safety_config gm_init(uint16_t param) {
 
   static const CanMsg GM_ASCM_TX_MSGS[] = {{0x180, 0, 4}, {0x409, 0, 7}, {0x40A, 0, 7}, {0x2CB, 0, 8}, {0x370, 0, 6}, {0x200, 0, 6}, {0x1E1, 0, 7}, {0xBD, 0, 7},// pt bus
                                            {0xA1, 1, 7}, {0x306, 1, 8}, {0x308, 1, 7}, {0x310, 1, 2},   // obs bus
-                                           {0x315, 2, 5}};  // ch bus
+                                           {0x315, 2, 5},  // ch bus
+                                           {0x184, 2, 8}};  // camera bus
 
 
   static const LongitudinalLimits GM_CAM_LONG_LIMITS = {
@@ -280,7 +311,7 @@ static safety_config gm_init(uint16_t param) {
   };
 
   static const CanMsg GM_CAM_LONG_TX_MSGS[] = {{0x180, 0, 4}, {0x315, 0, 5}, {0x2CB, 0, 8}, {0x370, 0, 6}, {0x200, 0, 6}, {0x1E1, 0, 7},  // pt bus
-                                               {0x184, 2, 8}};  // camera bus
+                                               {0x184, 2, 8}, {0x315, 2, 5}};  // camera bus
 
   // TODO: do checksum and counter checks. Add correct timestep, 0.1s for now.
   static RxCheck gm_rx_checks[] = {
@@ -318,47 +349,43 @@ static safety_config gm_init(uint16_t param) {
 
   static const CanMsg GM_CC_LONG_TX_MSGS[] = {{0x180, 0, 4}, {0x1E1, 0, 7},  // pt bus
                                               {0x184, 2, 8}, {0x1E1, 2, 7}};  // camera bus
-  gm_hw = GET_FLAG(param, GM_PARAM_HW_CAM) ? GM_CAM : GM_ASCM;
+  //gm_hw = GET_FLAG(param, GM_PARAM_HW_CAM) ? GM_CAM : GM_ASCM;
+  const bool gm_ascm_int = GET_FLAG(param, GM_PARAM_ASCM_INT);  
+  if (GET_FLAG(param, GM_PARAM_HW_CAM)) {
+    gm_hw = GM_CAM;
+  } else if (GET_FLAG(param, GM_PARAM_HW_SDGM)) {
+    gm_hw = GM_SDGM;
+  } else {
+    gm_hw = GM_ASCM;
+  }
+
   gm_force_ascm = GET_FLAG(param, GM_PARAM_HW_ASCM_LONG);
 
-  if ((gm_hw == GM_ASCM) || gm_force_ascm) {
+  if ((gm_hw == GM_ASCM) || gm_force_ascm || gm_ascm_int) {
     gm_long_limits = &GM_ASCM_LONG_LIMITS;
-  } else if (gm_hw == GM_CAM) {
+  } else if ((gm_hw == GM_CAM) || (gm_hw == GM_SDGM)) {
     gm_long_limits = &GM_CAM_LONG_LIMITS;
   } else {
   }
 
-#ifdef ALLOW_DEBUG
-  const uint16_t GM_PARAM_HW_CAM_LONG = 2;
-  gm_cam_long = GET_FLAG(param, GM_PARAM_HW_CAM_LONG) && !gm_cc_long;
-#endif
   gm_pedal_long = GET_FLAG(param, GM_PARAM_PEDAL_LONG);
   gm_cc_long = GET_FLAG(param, GM_PARAM_CC_LONG);
-  gm_pcm_cruise = (gm_hw == GM_CAM) && (!gm_cam_long || gm_cc_long) && !gm_force_ascm && !gm_pedal_long;
+  gm_cam_long = GET_FLAG(param, GM_PARAM_HW_CAM_LONG) && !gm_cc_long;
+  gm_pcm_cruise = (((gm_hw == GM_CAM) || (gm_hw == GM_SDGM)) && (!gm_cam_long || gm_cc_long) && !gm_force_ascm && !gm_pedal_long);
   gm_skip_relay_check = GET_FLAG(param, GM_PARAM_NO_CAMERA);
   gm_has_acc = !GET_FLAG(param, GM_PARAM_NO_ACC);
-
-  const uint16_t GM_PARAM_PEDAL_INTERCEPTOR = 128;
   enable_gas_interceptor = GET_FLAG(param, GM_PARAM_PEDAL_INTERCEPTOR);
-  if (enable_gas_interceptor) {
-      print("GM Pedal Interceptor Enabled\n");
-  }
-  else print("GM Pedal Interceptor Disabled\n");
+  gm_force_brake_c9 = GET_FLAG(param, GM_PARAM_FORCE_BRAKE_C9);
 
-  safety_config ret;
+  safety_config ret = BUILD_SAFETY_CFG(gm_rx_checks, GM_ASCM_TX_MSGS);
   if (gm_hw == GM_CAM) {
     if (gm_cc_long) {
       ret = BUILD_SAFETY_CFG(gm_rx_checks, GM_CC_LONG_TX_MSGS);
-      print("GM CC Long\n");
     } else if (gm_cam_long) {
       ret = BUILD_SAFETY_CFG(gm_rx_checks, GM_CAM_LONG_TX_MSGS);
-      print("GM CAM Long\n");
     } else {
       ret = BUILD_SAFETY_CFG(gm_rx_checks, GM_CAM_TX_MSGS);
-      print("GM CAM\n");
     }
-  } else {
-    ret = BUILD_SAFETY_CFG(gm_rx_checks, GM_ASCM_TX_MSGS);
   }
 
   const bool gm_ev = GET_FLAG(param, GM_PARAM_EV);
