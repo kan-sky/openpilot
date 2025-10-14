@@ -279,7 +279,7 @@ class CAR(Platforms):
   )
   CHEVROLET_TRAX = GMPlatformConfig(
     [GMCarDocs("Chevrolet TRAX 2024")],
-    CarSpecs(mass=1365, wheelbase=2.7, steerRatio=16.1, centerToFrontRatio=1.0),
+    CarSpecs(mass=1365, wheelbase=2.7, steerRatio=16.1, centerToFrontRatio=0.6),
   )
   GMC_YUKON = GMPlatformConfig(
     [GMCarDocs("GMC Yukon 2019-20", "Adaptive Cruise Control (ACC) & LKAS")],
