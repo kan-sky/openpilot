@@ -228,6 +228,8 @@ class CarController:
 
         if Params().get_int("EnableAutoEngage") > 0:
           # Kans: autoCruise
+          self.longActiveUser = self.cruise_helper.longActiveUser
+          self.auto_cruise_control = self.cruise_helper.auto_cruise_control
           if (self.auto_cruise_control or self.longActiveUser > 0) and not CS.out.cruiseState.enabled:
             if self.autoCruise_frame == 0:
               self.autoCruise_frame = self.frame
