@@ -29,8 +29,7 @@ const int GM_STANDSTILL_THRSLD = 10;  // 0.311kph
 
 const CanMsg GM_ASCM_TX_MSGS[] = {{384, 0, 4}, {1033, 0, 7}, {1034, 0, 7}, {715, 0, 8}, {880, 0, 6}, {512, 0, 6}, {481, 0, 7}, {789, 0, 5}, {800, 0, 6},  // pt bus
                                   {161, 1, 7}, {774, 1, 8}, {776, 1, 7}, {784, 1, 2},   // obs bus
-                                  {789, 2, 5},// ch bus
-                                  {0x104c006c, 3, 3}, {0x10400060, 3, 5}};  // gmlan
+                                  {789, 2, 5}},// ch bus
 
 const CanMsg GM_CAM_TX_MSGS[] = {{384, 0, 4}, {512, 0, 6}, {481, 0, 7},  // pt bus
                                  {481, 2, 7}, {388, 2, 8}};  // camera bus
@@ -116,14 +115,11 @@ static int gm_rx_hook(CANPacket_t *to_push) {
     // Reference for brake pressed signals:
     // https://github.com/commaai/openpilot/blob/master/selfdrive/car/gm/carstate.py
     if ((addr == 190) && (gm_hw == GM_ASCM)) {
-      brake_pressed = GET_BYTE(to_push, 1) >= 10U; //핑거190 브레이크답력
+      brake_pressed = GET_BYTE(to_push, 1) >= 8U; //핑거190 브레이크답력
     }
 
-    if (addr == 201) {
-      if (gm_hw == GM_CAM) {
-        brake_pressed = GET_BIT(to_push, 40U);  // Bolt 브레이크 체크(201핑거 40번째 비트)
-      }
-      acc_main_on = GET_BIT(to_push, 29U);  // (오토)크루즈 메인스위치 체크(201핑거 29번째 비트)
+    if ((addr == 0xC9) && (gm_hw == GM_CAM)) {
+      brake_pressed = (GET_BYTE(to_push, 5) & 0x01U) != 0U;
     }
 
     if (addr == 452) {
@@ -143,22 +139,13 @@ static int gm_rx_hook(CANPacket_t *to_push) {
       regen_braking = (GET_BYTE(to_push, 0) >> 4) != 0U;
     }
 
-    bool stock_ecu_detected = (addr == 384);  // ASCMLKASteeringCmd
-
-    // Only check ASCMGasRegenCmd if ASCM, GM_CAM uses stock longitudinal
-    if (!gm_pcm_cruise && (addr == 715)) {
-      stock_ecu_detected = true;
-    }
-    generic_rx_checks(stock_ecu_detected);
   }
-  return valid;
-}
 
-// all commands: gas/regen, friction brake and steering
-// if controls_allowed and no pedals pressed
-//     allow all commands up to limit
-// else
-//     block all commands that produce actuation
+  // main_on for AOL
+  if (addr == 0xC9U) {
+    acc_main_on = (GET_BYTE(to_push, 3) & 0x20U) != 0U;
+  }
+}
 
 static int gm_tx_hook(CANPacket_t *to_send) {
 
@@ -206,7 +193,7 @@ static int gm_tx_hook(CANPacket_t *to_send) {
 
     bool violation = false;
     // Allow apply bit in pre-enabled and overriding states
-    //violation |= !controls_allowed && apply;
+    violation |= !controls_allowed && apply;
     violation |= longitudinal_gas_checks(gas_regen, *gm_long_limits);
 
     if (violation) {
@@ -218,12 +205,19 @@ static int gm_tx_hook(CANPacket_t *to_send) {
   if ((addr == 481) && (gm_pcm_cruise)) {
     int button = (GET_BYTE(to_send, 5) >> 4) & 0x7U;
     bool allowed_btn = (button == GM_BTN_CANCEL) && cruise_engaged_prev;
-    // For standard CC, allow spamming of SET / RESUME
-    if ((gm_hw == GM_ASCM) || gm_force_ascm || gm_cam_long) {
-      allowed_btn |= (button == GM_BTN_SET || button == GM_BTN_RESUME || button == GM_BTN_UNPRESS);
+
+    if (gm_pcm_cruise) {
+      allowed_btn |= cruise_engaged_prev && (button == GM_BTN_SET || button == GM_BTN_RESUME || button == GM_BTN_UNPRESS);
     }
     if (!allowed_btn) {
       tx = 0;
+    }
+  }
+
+  // GAS: safety check (interceptor)
+  if (addr == 512) {
+    if (longitudinal_interceptor_checks(to_send)) {
+      tx = false;
     }
   }
 
