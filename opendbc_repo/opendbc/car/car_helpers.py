@@ -11,6 +11,9 @@ from opendbc.car.mock.values import CAR as MOCK
 from opendbc.car.values import BRANDS
 from opendbc.car.vin import get_vin, is_valid_vin, VIN_UNKNOWN
 
+from common.params import Params
+
+
 FRAME_FINGERPRINT = 100  # 1s
 
 
@@ -81,7 +84,7 @@ def can_fingerprint(can_recv: CanRecvCallable) -> tuple[str | None, dict[int, di
 
 
 # **** for use live only ****
-def fingerprint(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_multiplexing: ObdCallback,
+def fingerprint(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_multiplexing: ObdCallback, num_pandas: int,
                 cached_params: CarParamsT | None) -> tuple[str | None, dict, str, list[CarParams.CarFw], CarParams.FingerprintSource, bool]:
   fixed_fingerprint = os.environ.get('FINGERPRINT', "")
   skip_fw_query = os.environ.get('SKIP_FW_QUERY', False)
@@ -103,8 +106,8 @@ def fingerprint(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_mu
       set_obd_multiplexing(True)
       # VIN query only reliably works through OBDII
       vin_rx_addr, vin_rx_bus, vin = get_vin(can_recv, can_send, (0, 1))
-      ecu_rx_addrs = get_present_ecus(can_recv, can_send, set_obd_multiplexing)
-      car_fw = get_fw_versions_ordered(can_recv, can_send, set_obd_multiplexing, vin, ecu_rx_addrs)
+      ecu_rx_addrs = get_present_ecus(can_recv, can_send, set_obd_multiplexing, num_pandas=num_pandas)
+      car_fw = get_fw_versions_ordered(can_recv, can_send, set_obd_multiplexing, vin, ecu_rx_addrs, num_pandas=num_pandas)
       cached = False
 
     exact_fw_match, fw_candidates = match_fw_to_car(car_fw, vin)
@@ -149,13 +152,45 @@ def fingerprint(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_mu
 
 
 def get_car(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_multiplexing: ObdCallback, alpha_long_allowed: bool,
-            is_release: bool, cached_params: CarParamsT | None = None):
-  candidate, fingerprints, vin, car_fw, source, exact_match = fingerprint(can_recv, can_send, set_obd_multiplexing, cached_params)
+            is_release: bool, num_pandas: int = 1, cached_params: CarParamsT | None = None):
+  candidate, fingerprints, vin, car_fw, source, exact_match = fingerprint(can_recv, can_send, set_obd_multiplexing, num_pandas, cached_params)
 
   if candidate is None:
     carlog.error({"event": "car doesn't match any fingerprints", "fingerprints": repr(fingerprints)})
     candidate = "MOCK"
 
+  selected_car = Params().get("CarSelected3")
+  if selected_car:
+    def find_car(name: str):
+      from opendbc.car.hyundai.values import CAR as HYUNDAI
+      from opendbc.car.gm.values import CAR as GM
+      from opendbc.car.toyota.values import CAR as TOYOTA
+      from opendbc.car.mazda.values import CAR as MAZDA
+      for platform in GM:
+        for doc in platform.config.car_docs:
+          if name == doc.name:
+            return platform
+      for platform in TOYOTA:
+        for doc in platform.config.car_docs:
+          if name == doc.name:
+            return platform
+      for platform in HYUNDAI:
+        for doc in platform.config.car_docs:
+          if name == doc.name:
+            return platform
+      for platform in MAZDA:
+        for doc in platform.config.car_docs:
+          if name == doc.name:
+            return platform
+      return None
+    found_car = find_car(selected_car)
+    if found_car is not None:
+      candidate = found_car
+
+  print(f"SelectedCar = {candidate}")
+  Params().put("CarName", str(candidate))
+
+  Params().put("FingerPrints", str(fingerprints))
   CarInterface = interfaces[candidate]
   CP: CarParams = CarInterface.get_params(candidate, fingerprints, car_fw, alpha_long_allowed, is_release, docs=False)
   CP.carVin = vin

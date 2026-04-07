@@ -1,5 +1,6 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 import math
+from cereal import car
 from opendbc.can import CANParser
 from opendbc.car import Bus, structs
 from opendbc.car.common.conversions import Conversions as CV
@@ -37,26 +38,45 @@ class RadarInterface(RadarInterfaceBase):
   def __init__(self, CP):
     super().__init__(CP)
 
+    # CP.radarUnavailable == True 인 차량은 레이더 완전 비사용 (비전-only 모드)
     self.rcp = None if CP.radarUnavailable else create_radar_can_parser(CP.carFingerprint)
 
-    self.trigger_msg = LAST_RADAR_MSG
+    # 한 프레임이 완성되었다고 보는 트리거 메시지
+    self.trigger_msg = RADAR_HEADER_MSG  #LAST_RADAR_MSG
     self.updated_messages = set()
 
+    # Kans
+    self.track_id = 0 # RadarPoint.trackId 생성용 내부 카운터
+
   def update(self, can_strings):
+    # 레이더가 완전히 비활성(CP.radarUnavailable=True)인 경우
     if self.rcp is None:
       return super().update(None)
 
     vls = self.rcp.update(can_strings)
     self.updated_messages.update(vls)
 
+    # 아직 모든 target 메시지를 받지 못함
     if self.trigger_msg not in self.updated_messages:
       return None
 
     ret = structs.RadarData()
     header = self.rcp.vl[RADAR_HEADER_MSG]
+
     fault = header['FLRRSnsrBlckd'] or header['FLRRSnstvFltPrsntInt'] or \
       header['FLRRYawRtPlsblityFlt'] or header['FLRRHWFltPrsntInt'] or \
       header['FLRRAntTngFltPrsnt'] or header['FLRRAlgnFltPrsnt']
+
+    # debug logic
+    if not self.rcp.can_valid or fault:
+      print(
+        f"GM_RADAR v={int(self.rcp.can_valid)} f={int(fault)} "
+        f"blk={header['FLRRSnsrBlckd']} sns={header['FLRRSnstvFltPrsntInt']} "
+        f"yaw={header['FLRRYawRtPlsblityFlt']} hw={header['FLRRHWFltPrsntInt']} "
+        f"ant={header['FLRRAntTngFltPrsnt']} algn={header['FLRRAlgnFltPrsnt']} "
+        f"nTgts={header['FLRRNumValidTargets']}"
+      )
+
     if not self.rcp.can_valid:
       ret.errors.canError = True
     if fault:
@@ -79,17 +99,26 @@ class RadarInterface(RadarInterfaceBase):
       if cpt['TrkRange'] > 0.0:
         targetId = cpt['TrkObjectID']
         currentTargets.add(targetId)
+
+        # 새로운 타겟이면 RadarPoint 생성 + 내부 track_id 부여
         if targetId not in self.pts:
           self.pts[targetId] = structs.RadarData.RadarPoint()
-          self.pts[targetId].trackId = targetId
+          self.pts[targetId].trackId = self.track_id
+          self.track_id += 1
+
         distance = cpt['TrkRange']
+
+        # 값 업데이트
         self.pts[targetId].dRel = distance  # from front of car
         # From driver's pov, left is positive
         self.pts[targetId].yRel = math.sin(cpt['TrkAzimuth'] * CV.DEG_TO_RAD) * distance
         self.pts[targetId].vRel = cpt['TrkRangeRate']
+        self.pts[targetId].vLead = self.pts[targetId].vRel + self.v_ego
         self.pts[targetId].aRel = float('nan')
-        self.pts[targetId].yvRel = float('nan')
+        self.pts[targetId].yvRel = 0# float('nan')
+        self.pts[targetId].measured = True
 
+    # 이전 프레임에서 사라진 타겟 제거
     for oldTarget in list(self.pts.keys()):
       if oldTarget not in currentTargets:
         del self.pts[oldTarget]
