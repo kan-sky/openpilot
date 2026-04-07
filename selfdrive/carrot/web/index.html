@@ -1,0 +1,377 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Carrot</title>
+  <link rel="stylesheet" href="/css/tokens.css?v=2603-73" />
+  <link rel="stylesheet" href="/css/hud_card.css?v=2603-73" />
+  <link rel="stylesheet" href="/css/app.css?v=2603-81" />
+</head>
+
+<body>
+
+  <div class="wrap swipe-container" id="swipeContainer">
+    <!-- ════════════ HOME ════════════ -->
+    <div id="pageHome" class="page">
+
+      <!-- Top Utility: Server State + Quick Link -->
+      <div class="home-utility">
+        <div class="setting home-utility-item">
+          <div class="home-utility-head">
+            <div id="chipServerLabel" class="title home-utility-title">Server State</div>
+            <button id="btnToggleServerState" class="smallBtn home-utility-actionBtn" type="button" aria-expanded="false" aria-controls="utilityStatePane">Open</button>
+          </div>
+          <div class="home-utility-content">
+            <div class="home-utility-meta">
+              <span class="chip-dot" id="chipDot"></span>
+              <span id="chipStateText" class="muted home-utility-value">connecting...</span>
+            </div>
+          </div>
+          <div id="utilityStatePane" class="home-utility-pane" hidden>
+            <hr class="divider--thin" />
+            <pre id="stateBox" class="home-utility-pre">connecting...</pre>
+          </div>
+        </div>
+
+        <div class="setting home-utility-item">
+          <div class="home-utility-head">
+            <div id="chipQuickLabel" class="title home-utility-title">Quick Link</div>
+            <button id="btnSaveQuickLink" class="smallBtn home-utility-actionBtn home-utility-actionBtn--save" type="button">Save</button>
+          </div>
+          <div class="home-utility-content">
+            <a id="quickLink" class="home-utility-linkInline" href="#" target="_blank" rel="noopener">Quick Link</a>
+          </div>
+        </div>
+      </div>
+
+      <!-- WebRTC -->
+      <div id="rtcCard" class="card" style="display:none;">
+        <div class="row-between mb-sm">
+          <h4 id="webrtcTitle" style="margin:0; font-size:var(--fs-title-sm); font-weight:600;">WebRTC</h4>
+          <div class="row-between" style="gap:8px;">
+            <span class="muted" id="rtcStatus">connecting...</span>
+            <button id="btnRtcFs" class="smallBtn">Full</button>
+          </div>
+        </div>
+        <div id="rtcWrap" style="position:relative;">
+          <video id="rtcVideo" class="rtcVideo" autoplay playsinline muted style="display:none;"></video>
+          <div id="hudOverlayHost" class="hudOverlayHost" style="display:none;"></div>
+        </div>
+      </div>
+
+      <!-- HUD Widget -->
+      <div id="driveHudCard">
+        <div class="hudWrap" id="hudRoot">
+          <div class="hudTop">
+            <div class="hudMini">
+              <div class="hudMiniLabel">CPU</div>
+              <div class="hudMiniVal" id="hudCpuVal">--°C</div>
+            </div>
+            <div class="hudMini">
+              <div class="hudMiniLabel">MEM</div>
+              <div class="hudMiniVal" id="hudMemVal">--%</div>
+            </div>
+            <div class="hudMini">
+              <div class="hudMiniLabel" id="hudDiskLabel">DISK</div>
+              <div class="hudMiniVal" id="hudDiskVal">--%</div>
+            </div>
+          </div>
+          <div class="hudLowerGroup">
+            <div class="hudMain">
+              <div class="hudSpeedBg" aria-hidden="true"></div>
+              <div class="hudRedDot" id="hudRedDot" style="display:none;"></div>
+              <div class="hudSpeed" id="hudSpeed">--</div>
+              <div class="hudSignalDot" id="hudSignalDot"></div>
+              <div class="hudTempReason" id="hudTempReason">eco</div>
+              <div class="hudTempSpeed" id="hudTempSpeed">--</div>
+              <div class="hudSetSpeed" id="hudSetSpeed">--</div>
+              <div class="hudGapNum" id="hudGapNum">-</div>
+              <div class="hudGear" id="hudGear">U</div>
+            </div>
+            <div class="hudBottom">
+              <div class="hudLeftStack">
+                <div id="hudGps" class="hudGps">GPS</div>
+                <div class="hudDriveMode mode_normal" id="hudDriveMode">Normal</div>
+              </div>
+              <div class="hudRoadLimitBox">
+                <div class="hudRoadLimitLabel">LIMIT</div>
+                <div class="hudRoadLimitVal" id="hudRoadLimitVal">--</div>
+              </div>
+              <div class="hudBars" id="hudBars">
+                <div class="hudBar"></div>
+                <div class="hudBar"></div>
+                <div class="hudBar"></div>
+                <div class="hudBar"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ════════════ CAR SELECT ════════════ -->
+    <div id="pageCar" class="page" style="display:none;">
+      <div class="page-header">
+        <h2 id="carTitle" class="page-title" style="cursor:pointer;">Car Select</h2>
+        <button id="btnBackCar" class="btn">Back</button>
+      </div>
+
+      <!-- Current Car -->
+      <div class="row-between mb-md" style="padding:var(--sp-md) 0; border-bottom:1px solid var(--md-outline-var);">
+        <div id="curCarLabelCar" style="font-weight:700; font-size:var(--fs-title-md);">-</div>
+      </div>
+
+      <div class="muted mb-sm" id="carMeta">loading...</div>
+
+      <!-- Maker screen -->
+      <div id="carScreenMakers" class="screen">
+        <h3 id="makersTitle" class="section-title">Makers</h3>
+        <div id="makerList"></div>
+      </div>
+
+      <!-- Model screen -->
+      <div id="carScreenModels" class="screen hidden" style="display:none;">
+        <div class="row-between mb-sm">
+          <h3 id="modelTitle" class="section-title" style="cursor:pointer; margin:0;">Models</h3>
+          <span class="muted" id="modelMeta">-</span>
+        </div>
+        <div id="modelList"></div>
+      </div>
+    </div>
+
+    <!-- ════════════ SETTING ════════════ -->
+    <div id="pageSetting" class="page" style="display:none;">
+      <div class="page-header">
+        <h2 id="settingTitle" style="margin:0; font-size:var(--fs-headline); font-weight:700; cursor:pointer;"><span id="settingTitleText">Setting</span></h2>
+      </div>
+
+      <div class="muted mb-sm" id="settingsMeta">loading...</div>
+
+      <div id="settingScreenHost" class="screen-host">
+        <!-- Groups Screen -->
+        <div id="settingScreenGroups" class="screen">
+          <div id="settingCarRow" class="row-between mb-md" style="padding:var(--sp-md) 0; border-bottom:1px solid var(--md-outline-var);">
+            <div id="curCarLabelSetting" style="font-weight:700; font-size:var(--fs-title-md);">-</div>
+            <button id="btnChangeCar" class="btn">Change</button>
+          </div>
+          <h3 id="groupsTitle" class="section-title">Groups</h3>
+          <div id="groupList"></div>
+        </div>
+
+        <!-- Items Screen -->
+        <div id="settingScreenItems" class="screen hidden" style="display:none;">
+          <div id="settingSubnavWrap" class="setting-subnav-wrap">
+            <div id="settingSubnav" class="setting-subnav" aria-label="Setting groups"></div>
+          </div>
+          <div class="row-between mb-sm">
+            <h3 id="itemsTitle" class="section-title" style="cursor:pointer; margin:0;">Items</h3>
+            <span class="muted" id="groupMeta">-</span>
+          </div>
+          <div id="items"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════════ TOOLS ════════════ -->
+    <div id="pageTools" class="page" style="display:none;">
+      <div class="page-header">
+        <h2 id="toolsTitle" class="page-title">Tools</h2>
+      </div>
+
+      <div class="muted mb-md" id="toolsMeta">-</div>
+      <div id="toolsProgress" class="tools-progress" hidden aria-hidden="true">
+        <div id="toolsProgressBar" class="tools-progress__bar"></div>
+      </div>
+
+      <div class="tools-scroll-stack">
+        <!-- Git Commands -->
+        <div class="section">
+          <h3 id="gitCommandsTitle" class="section-title">Git Commands</h3>
+          <div class="row-wrap">
+            <button id="btnGitPull" class="btn">git pull</button>
+            <button id="btnGitSync" class="btn">git sync</button>
+            <button id="btnGitReset" class="btn">git reset</button>
+            <button id="btnGitBranch" class="btn">change branch</button>
+          </div>
+        </div>
+
+        <hr class="divider">
+
+        <!-- User / System -->
+        <div class="section">
+          <h3 id="userSystemTitle" class="section-title">User / System</h3>
+          <div class="row-wrap">
+            <button id="btnSendTmuxLog" class="btn">capture tmux</button>
+            <button id="btnSendTmuxServerLog" class="btn">send tmux</button>
+            <button id="btnInstallRequired" class="btn">install flask</button>
+            <button id="btnDeleteVideos" class="btn btn--danger">delete all videos</button>
+            <button id="btnDeleteLogs" class="btn btn--danger">delete all logs</button>
+            <button id="btnRebuildAll" class="smallBtn btn--danger">Rebuild All</button>
+            <button id="btnReboot" class="btn">reboot</button>
+          </div>
+        </div>
+
+        <hr class="divider">
+
+        <!-- Settings Backup -->
+        <div class="section">
+          <h3 id="userSettingsTitle" class="section-title">Settings</h3>
+          <div class="row-wrap">
+            <button id="btnBackupSettings" class="btn">backup settings</button>
+            <button id="btnRestoreSettings" class="btn">restore settings</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="tools-console-dock">
+        <div class="tools-console-shell">
+          <div class="tools-console-meta hidden" aria-hidden="true">
+            <span id="sysCmdTitle">System Command</span>
+            <span id="outputTitle">Output</span>
+          </div>
+          <form id="sysCmdForm" class="tools-console-form">
+            <span class="tools-console-prompt" aria-hidden="true">&gt;_</span>
+            <input id="sysCmdInput" type="text" class="input-text" placeholder="git pull" />
+            <button id="btnSysCmdInfo" class="tools-console-iconBtn" type="button" aria-expanded="false" aria-controls="sysCmdHelpPanel" aria-label="Allowed commands">
+              <svg class="tools-console-iconBtn__svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path fill="currentColor" d="M11 17h2v-6h-2zm0-8h2V7h-2zm1 13C6.48 22 2 17.52 2 12S6.48 2 12 2s10 4.48 10 10-4.48 10-10 10m0-18a8 8 0 1 0 0 16 8 8 0 0 0 0-16"/>
+              </svg>
+            </button>
+          </form>
+          <div id="sysCmdHelpPanel" class="tools-console-help" hidden>
+            <span id="sysCmdHelp">Allowed: git pull/status/branch/log, df, free, uptime</span>
+          </div>
+          <pre id="toolsOut" class="tools-console-log">-</pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════════ BRANCH SELECT ════════════ -->
+    <div id="pageBranch" class="page" style="display:none;">
+      <div class="page-header">
+        <h2 id="branchTitle" class="page-title" style="cursor:pointer;">Branch Select</h2>
+        <button id="btnBackBranch" class="btn">Back</button>
+      </div>
+
+      <div class="muted mb-sm" id="branchMeta">-</div>
+      <div id="branchList"></div>
+    </div>
+
+    <!-- ════════════ TERMINAL ════════════ -->
+    <div id="pageTerminal" class="page" style="display:none;">
+      <div class="terminal-shell">
+        <div class="terminal-head">
+          <div class="page-header terminal-pageHeader">
+            <h2 id="terminalTitle" class="page-title">Terminal</h2>
+          </div>
+
+          <div class="muted terminal-meta" id="terminalMeta">connecting...</div>
+
+          <div class="terminal-toolbar">
+            <div id="terminalSessionMeta" class="terminal-sessionMeta">IP</div>
+            <div class="terminal-toolbar__actions">
+              <button id="btnTerminalCtrlC" class="smallBtn" type="button">Ctrl+C</button>
+              <button id="btnTerminalClear" class="smallBtn" type="button">Clear</button>
+              <button id="btnTerminalReconnect" class="smallBtn" type="button">Reconnect</button>
+            </div>
+          </div>
+        </div>
+        <div id="terminalScreen" class="terminal-screen">
+          <pre id="terminalOutput" class="terminal-output">...</pre>
+        </div>
+        <form id="terminalForm" class="terminal-form">
+          <span class="terminal-form__prompt" aria-hidden="true">&gt;</span>
+          <input id="terminalInput" type="text" class="terminal-form__input" />
+          <button id="btnTerminalSend" class="smallBtn btn--filled" type="submit">Send</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Record FAB -->
+  <button id="btnRecordToggle" class="fab">REC</button>
+
+  <!-- Bottom Navigation (Material 3 style) -->
+  <nav class="topbar">
+    <button id="btnHome" class="nav-btn active">
+      <span class="nav-icon">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
+      </span>
+      <span>Home</span>
+    </button>
+    <button id="btnSetting" class="nav-btn">
+      <span class="nav-icon">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 00.12-.61l-1.92-3.32a.49.49 0 00-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 00-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58a.49.49 0 00-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1115.6 12 3.611 3.611 0 0112 15.6z"/></svg>
+      </span>
+      <span>Setting</span>
+    </button>
+    <button id="btnTools" class="nav-btn">
+      <span class="nav-icon">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M22.7 19l-9.1-9.1c.9-2.3.4-5-1.5-6.9-2-2-5-2.4-7.4-1.3L9 6 6 9 1.6 4.7C.4 7.1.9 10.1 2.9 12.1c1.9 1.9 4.6 2.4 6.9 1.5l9.1 9.1c.4.4 1 .4 1.4 0l2.3-2.3c.5-.4.5-1.1.1-1.4z"/></svg>
+      </span>
+      <span>Tools</span>
+    </button>
+    <button id="btnTerminal" class="nav-btn">
+      <span class="nav-icon">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M4 5h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2m0 2v10h16V7zm2.8 8.6 3.8-3.6-3.8-3.6 1.4-1.4 5.2 5-5.2 5zm7.7 0H18v2h-3.5z"/></svg>
+      </span>
+      <span>Terminal</span>
+    </button>
+    <button id="btnFleet" class="nav-btn">
+      <span class="nav-icon">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.5 16c-.83 0-1.5-.67-1.5-1.5S5.67 13 6.5 13s1.5.67 1.5 1.5S7.33 16 6.5 16zm11 0c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zM5 11l1.5-4.5h11L19 11H5z"/></svg>
+      </span>
+      <span>Fleet</span>
+    </button>
+    <button id="btnLang" class="nav-btn langToggle">
+      <span class="nav-icon">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M12.87 15.07l-2.54-2.51.03-.03A17.52 17.52 0 0014.07 6H17V4h-7V2H8v2H1v2h11.17C11.5 7.92 10.44 9.75 9 11.35 8.07 10.32 7.3 9.19 6.69 8h-2c.73 1.63 1.73 3.17 2.98 4.56l-5.09 5.02L4 19l5-5 3.11 3.11.76-2.04zM18.5 10h-2L12 22h2l1.12-3h4.75L21 22h2l-4.5-12zm-2.62 7l1.62-4.33L19.12 17h-3.24z"/></svg>
+      </span>
+      <span id="langLabel" class="lang-label">
+        <span class="lang-label__main">lang</span>
+        <span class="lang-label__sub">(ko)</span>
+      </span>
+    </button>
+  </nav>
+
+  <div id="appToastHost" class="app-toast-host" aria-live="polite" aria-atomic="true"></div>
+
+  <div id="appDialog" class="app-dialog" hidden>
+    <button id="appDialogBackdrop" class="app-dialog__backdrop" type="button" aria-label="Close dialog"></button>
+    <div class="app-dialog__sheet" role="dialog" aria-modal="true" aria-labelledby="appDialogTitle" aria-describedby="appDialogBody">
+      <div class="app-dialog__head">
+        <div id="appDialogTitle" class="app-dialog__title">알림</div>
+      </div>
+      <div id="appDialogBody" class="app-dialog__body">-</div>
+      <div id="appDialogInputWrap" class="app-dialog__inputWrap" hidden>
+        <input id="appDialogInput" type="text" class="input-text app-dialog__input" />
+      </div>
+      <div class="app-dialog__actions">
+        <button id="appDialogCancel" class="smallBtn" type="button">취소</button>
+        <button id="appDialogConfirm" class="smallBtn btn--filled" type="button">확인</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="appBranchPicker" class="app-dialog app-branch-picker" hidden>
+    <button id="appBranchPickerBackdrop" class="app-dialog__backdrop" type="button" aria-label="Close branch picker"></button>
+    <div class="app-dialog__sheet app-branch-picker__sheet" role="dialog" aria-modal="true" aria-labelledby="appBranchPickerTitle" aria-describedby="appBranchPickerMeta">
+      <div class="app-branch-picker__head">
+        <div class="app-branch-picker__titles">
+          <div id="appBranchPickerTitle" class="app-dialog__title">Branch Select</div>
+          <div id="appBranchPickerMeta" class="muted app-branch-picker__meta">-</div>
+        </div>
+        <button id="appBranchPickerClose" class="smallBtn" type="button">Close</button>
+      </div>
+      <div id="appBranchPickerList" class="app-branch-picker__list"></div>
+    </div>
+  </div>
+
+  <script src="/js/hud_card.js?v=2603-73"></script>
+  <script src="/js/app_core.js?v=2603-79"></script>
+  <script src="/js/app_pages.js?v=2603-81"></script>
+  <script src="/js/app_realtime.js?v=2603-74"></script>
+</body>
+</html>

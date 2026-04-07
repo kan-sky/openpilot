@@ -58,7 +58,9 @@ class ModelRenderer(Widget):
     self._lane_lines = [ModelPoints() for _ in range(4)]
     self._road_edges = [ModelPoints() for _ in range(2)]
     self._acceleration_x = np.empty((0,), dtype=np.float32)
-
+    # carrot
+    self._acceleration_x_filter = FirstOrderFilter(0.0, 0.1, 1 / gui_app.target_fps)
+    self._acceleration_x_filter2 = FirstOrderFilter(0.0, 1, 1 / gui_app.target_fps)
     # Transform matrix (3x3 for car space to screen space)
     self._car_space_transform = np.zeros((3, 3), dtype=np.float32)
     self._transform_dirty = True
@@ -165,23 +167,36 @@ class ModelRenderer(Widget):
     max_idx = self._get_path_length_idx(self._lane_lines[0].raw_points[:, 0], max_distance)
 
     # Update lane lines using raw points
+    line_width_factor = 0.025 # Kans: 차선 기본굵기 = 0.025
     for i, lane_line in enumerate(self._lane_lines):
+      width = line_width_factor * 5 if i in (1, 2) else line_width_factor * 3 # 좌우차선은 더 굵게
       lane_line.projected_points = self._map_line_to_polygon(
-        lane_line.raw_points, 0.025 * self._lane_line_probs[i], 0.0, max_idx, max_distance
+        lane_line.raw_points, width * self._lane_line_probs[i], 0.0, max_idx, max_distance
       )
 
     # Update road edges using raw points
     for road_edge in self._road_edges:
-      road_edge.projected_points = self._map_line_to_polygon(road_edge.raw_points, 0.025, 0.0, max_idx, max_distance)
+      road_edge.projected_points = self._map_line_to_polygon(road_edge.raw_points, line_width_factor * 2, 0.0, max_idx, max_distance)
 
     # Update path using raw points
     if lead and lead.status:
       lead_d = lead.dRel * 2.0
       max_distance = np.clip(lead_d - min(lead_d * 0.35, 10.0), 0.0, max_distance)
 
+    # Kans: Acceleration-based path width (experimental)
+    soon_acceleration = self._acceleration_x[len(self._acceleration_x) // 4] if len(self._acceleration_x) > 0 else 0
+    self._acceleration_x_filter.update(soon_acceleration)
+    self._acceleration_x_filter2.update(soon_acceleration)
+
+    if self._experimental_mode and False:
+      high_pass_acceleration = self._acceleration_x_filter.x - self._acceleration_x_filter2.x
+      y_off = np.interp(high_pass_acceleration, [-1, 0, 1], [0.9 * 2, 0.9, 0.9 / 2])
+    else:
+      y_off = 0.9
+
     max_idx = self._get_path_length_idx(path_x_array, max_distance)
     self._path.projected_points = self._map_line_to_polygon(
-      self._path.raw_points, 0.9, self._path_offset_z, max_idx, max_distance, allow_invert=False
+      self._path.raw_points, y_off, self._path_offset_z, max_idx, max_distance, allow_invert=False
     )
 
     self._update_experimental_gradient()
@@ -340,15 +355,17 @@ class ModelRenderer(Widget):
     # Slice points and filter non-negative x-coordinates
     points = line[:max_idx + 1]
 
-    # Interpolate around max_idx so path end is smooth (max_distance is always >= p0.x)
-    if 0 < max_idx < line.shape[0] - 1:
+    # Kans: Smoothly interpolate the endpoint if max_distance is provided
+    if max_distance is not None and 0 <= max_idx < line.shape[0] - 1:
       p0 = line[max_idx]
       p1 = line[max_idx + 1]
       x0, x1 = p0[0], p1[0]
-      interp_y = np.interp(max_distance, [x0, x1], [p0[1], p1[1]])
-      interp_z = np.interp(max_distance, [x0, x1], [p0[2], p1[2]])
-      interp_point = np.array([max_distance, interp_y, interp_z], dtype=points.dtype)
-      points = np.concatenate((points, interp_point[None, :]), axis=0)
+      # Kans
+      if x1 > x0 and x0 <= max_distance <= x1:
+        interp_y = np.interp(max_distance, [x0, x1], [p0[1], p1[1]])
+        interp_z = np.interp(max_distance, [x0, x1], [p0[2], p1[2]])
+        interp_point = np.array([max_distance, interp_y, interp_z], dtype=points.dtype)
+        points = np.concatenate((points, interp_point[None, :]), axis=0)
 
     points = points[points[:, 0] >= 0]
     if points.shape[0] == 0:

@@ -13,6 +13,9 @@ from openpilot.selfdrive.ui.onroad.cameraview import CameraView
 from openpilot.system.ui.lib.application import gui_app
 from openpilot.common.transformations.camera import DEVICE_CAMERAS, DeviceCameraConfig, view_frame_from_device_frame
 from openpilot.common.transformations.orientation import rot_from_euler
+# mici
+from openpilot.selfdrive.ui.onroad.confidence_ball import ConfidenceBall
+from openpilot.selfdrive.ui.onroad.traffic_light import TrafficLight
 
 OpState = log.SelfdriveState.OpenpilotState
 CALIBRATED = log.LiveCalibrationData.Status.calibrated
@@ -32,7 +35,8 @@ INF_POINT = np.array([1000.0, 0.0, 0.0])
 
 
 class AugmentedRoadView(CameraView):
-  def __init__(self, stream_type: VisionStreamType = VisionStreamType.VISION_STREAM_ROAD):
+  # Kans: pm=None
+  def __init__(self, stream_type: VisionStreamType = VisionStreamType.VISION_STREAM_ROAD, pm=None):
     super().__init__("camerad", stream_type)
     self._set_placeholder_color(BORDER_COLORS[UIStatus.DISENGAGED])
 
@@ -48,9 +52,13 @@ class AugmentedRoadView(CameraView):
     self._hud_renderer = HudRenderer()
     self.alert_renderer = AlertRenderer()
     self.driver_state_renderer = DriverStateRenderer()
+    # mici
+    self._confidence_ball = ConfidenceBall()
+    self._traffic_light = TrafficLight()
 
-    # debug
-    self._pm = messaging.PubMaster(['uiDebug'])
+    # debug # Kans: share publisher
+    self._last_ui_debug_send = 0.0
+    self._pm = pm # messaging.PubMaster(['uiDebug'])
 
   def _render(self, rect):
     # Only render when system is started to avoid invalid data access
@@ -80,8 +88,8 @@ class AugmentedRoadView(CameraView):
       int(self._content_rect.height)
     )
 
-    # Render the base camera view
-    super()._render(rect)
+    # Kans: Render the base camera view
+    super()._render(self._content_rect) # super()._render(rect)
 
     # Draw all UI overlays
     self.model_renderer.render(self._content_rect)
@@ -97,11 +105,20 @@ class AugmentedRoadView(CameraView):
 
     # Draw colored border based on driving state
     self._draw_border(rect)
+    # mici
+    self._traffic_light.render(rect)
+    if not self._traffic_light.is_visible():
+      self._confidence_ball.render(rect)
 
-    # publish uiDebug
-    msg = messaging.new_message('uiDebug')
-    msg.uiDebug.drawTimeMillis = (time.monotonic() - start_draw) * 1000
-    self._pm.send('uiDebug', msg)
+
+    # publish uiDebug  # Kans: debugPlot
+    now = time.monotonic()
+
+    if self._pm is not None and (now - getattr(self, "_last_ui_debug_send", 0.0)) > 0.1:
+      self._last_ui_debug_send = now
+      msg = messaging.new_message('uiDebug')
+      msg.uiDebug.drawTimeMillis = (now - start_draw) * 1000
+      self._pm.send('uiDebug', msg)
 
   def _handle_mouse_press(self, _):
     if not self._hud_renderer.user_interacting() and self._click_callback is not None:

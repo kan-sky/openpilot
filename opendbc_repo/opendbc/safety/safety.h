@@ -56,7 +56,13 @@ struct sample_t vehicle_speed;
 bool vehicle_moving = false;
 bool acc_main_on = false;  // referred to as "ACC off" in ISO 15622:2018
 int cruise_button_prev = 0;
+int cruise_main_prev = 0;
 bool safety_rx_checks_invalid = false;
+// AOL
+bool aol_allowed = false;
+bool lkas_button_prev = false;
+bool lkas_on = false;
+bool main_button_prev = false;
 
 // for safety modes with torque steering control
 int desired_torque_last = 0;       // last desired steer torque
@@ -88,6 +94,7 @@ uint16_t current_safety_mode = SAFETY_SILENT;
 uint16_t current_safety_param = 0;
 static const safety_hooks *current_hooks = &nooutput_hooks;
 safety_config current_safety_config;
+bool enable_gas_interceptor = false;
 
 static void generic_rx_checks(void);
 static void stock_ecu_check(bool stock_ecu_detected);
@@ -359,6 +366,9 @@ static void generic_rx_checks(void) {
     controls_allowed = false;
   }
   steering_disengage_prev = steering_disengage;
+
+  // AOL
+  aol_allowed = (acc_main_on || lkas_on) && (alternative_experience & ALT_EXP_ALWAYS_ON_LATERAL);
 }
 
 static void stock_ecu_check(bool stock_ecu_detected) {
@@ -417,6 +427,7 @@ int set_safety_hooks(uint16_t mode, uint16_t param) {
   // reset state set by safety mode
   safety_mode_cnt = 0U;
   relay_malfunction = false;
+  gas_interceptor_prev = 0;
   gas_pressed = false;
   gas_pressed_prev = false;
   brake_pressed = false;
@@ -477,6 +488,13 @@ int set_safety_hooks(uint16_t mode, uint16_t param) {
       current_safety_config.rx_checks[j].status = (RxStatus){0};
     }
   }
+  // AOL
+  enable_gas_interceptor = false;
+  aol_allowed = false;
+  lkas_button_prev = false;
+  lkas_on = false;
+  main_button_prev = false;
+
   return set_status;
 }
 

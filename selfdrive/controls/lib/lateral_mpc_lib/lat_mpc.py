@@ -19,7 +19,7 @@ X_DIM = 4
 P_DIM = 2
 COST_E_DIM = 3
 COST_DIM = COST_E_DIM + 2
-SPEED_OFFSET = 10.0
+SPEED_OFFSET = 5.0
 MODEL_NAME = 'lat'
 ACADOS_SOLVER_TYPE = 'SQP_RTI'
 N = 32
@@ -166,6 +166,16 @@ class LateralMpc:
       self.solver.cost_set(i, 'W', W)
     self.solver.cost_set(N, 'W', W[:COST_E_DIM,:COST_E_DIM])
 
+  # Kans: spped offset
+  def get_speed_offset(self, v_ego):
+    return float(np.interp(v_ego, [0.0, 5.0, 10.0, 15.0, 20.0], [6.2, 5.4, 4.6, 3.9, 3.5]))
+  # Kans: curvature offset
+  def get_curvature_offset(self, v_ego, yaw_rate_pts):
+    vego = max(v_ego, 1.0)
+    curvature_pts = np.abs(yaw_rate_pts[:8]) / vego
+    curvature_ref = float(np.max(curvature_pts))
+    return float(np.interp(curvature_ref, [0.00, 0.015, 0.03, 0.06, 0.10], [0.0, 0.15, 0.40, 0.80, 1.2]))
+
   def run(self, x0, p, y_pts, heading_pts, yaw_rate_pts):
     x0_cp = np.copy(x0)
     p_cp = np.copy(p)
@@ -173,9 +183,13 @@ class LateralMpc:
     self.solver.constraints_set(0, "ubx", x0_cp)
     self.yref[:,0] = y_pts
     v_ego = p_cp[0, 0]
-    # rotation_radius = p_cp[1]
-    self.yref[:,1] = heading_pts * (v_ego + SPEED_OFFSET)
-    self.yref[:,2] = yaw_rate_pts * (v_ego + SPEED_OFFSET)
+    # Kans
+    speed_offset = self.get_speed_offset(v_ego)
+    curve_offset = self.get_curvature_offset(v_ego, yaw_rate_pts)
+    v_ego_offset = v_ego + speed_offset + curve_offset
+
+    self.yref[:,1] = heading_pts * v_ego_offset
+    self.yref[:,2] = yaw_rate_pts * v_ego_offset
     for i in range(N):
       self.solver.cost_set(i, "yref", self.yref[i])
       self.solver.set(i, "p", p_cp[i])

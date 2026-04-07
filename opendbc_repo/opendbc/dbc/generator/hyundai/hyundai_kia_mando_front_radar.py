@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
+import os
 
-
-def generate():
-  parts = []
-  parts.append("""
+if __name__ == "__main__":
+  dbc_name = os.path.basename(__file__).replace(".py", ".dbc")
+  hyundai_path = os.path.dirname(os.path.realpath(__file__))
+  with open(os.path.join(hyundai_path, dbc_name), "w", encoding='utf-8') as f:
+    f.write("""
 VERSION ""
 
 
@@ -42,9 +44,9 @@ BS_:
 BU_: XXX
     """)
 
-  # note: 0x501/0x502 seem to be special in 0x5XX range
-  for a in range(0x500, 0x500 + 32):
-    parts.append(f"""
+    # note: 0x501/0x502 seem to be special in 0x5XX range
+    for a in range(0x500, 0x500 + 32):
+        f.write(f"""
 BO_ {a} RADAR_TRACK_{a:x}: 8 RADAR
  SG_ UNKNOWN_1 : 7|8@0- (1,0) [-128|127] "" XXX
  SG_ AZIMUTH : 12|10@0- (0.2,0) [-102.4|102.2] "" XXX
@@ -57,5 +59,3 @@ BO_ {a} RADAR_TRACK_{a:x}: 8 RADAR
  SG_ REL_SPEED : 53|14@0- (0.01,0) [-81.92|81.92] "" XXX
  SG_ STATE_2 : 55|2@0+ (1,0) [0|3] "" XXX
     """)
-
-  return {"hyundai_kia_mando_front_radar.dbc": "".join(parts)}
