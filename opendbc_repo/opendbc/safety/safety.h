@@ -60,9 +60,6 @@ int cruise_main_prev = 0;
 bool safety_rx_checks_invalid = false;
 // AOL
 bool aol_allowed = false;
-bool lkas_button_prev = false;
-bool lkas_on = false;
-bool main_button_prev = false;
 
 // for safety modes with torque steering control
 int desired_torque_last = 0;       // last desired steer torque
@@ -367,10 +364,6 @@ static void generic_rx_checks(void) {
   }
   steering_disengage_prev = steering_disengage;
 
-  // AOL
-  aol_allowed = (acc_main_on || lkas_on) && (alternative_experience & ALT_EXP_ALWAYS_ON_LATERAL);
-}
-
 static void stock_ecu_check(bool stock_ecu_detected) {
   // allow 1s of transition timeout after relay changes state before assessing malfunctioning
   const uint32_t RELAY_TRNS_TIMEOUT = 1U;
@@ -488,12 +481,9 @@ int set_safety_hooks(uint16_t mode, uint16_t param) {
       current_safety_config.rx_checks[j].status = (RxStatus){0};
     }
   }
+
   // AOL
-  enable_gas_interceptor = false;
   aol_allowed = false;
-  lkas_button_prev = false;
-  lkas_on = false;
-  main_button_prev = false;
 
   return set_status;
 }
