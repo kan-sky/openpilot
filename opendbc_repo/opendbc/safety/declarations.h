@@ -268,7 +268,6 @@ extern int cruise_button_prev;
 extern bool safety_rx_checks_invalid;
 // AOL
 extern bool aol_allowed;
-extern bool main_button_prev;
 
 // for safety modes with torque steering control
 extern int desired_torque_last;       // last desired steer torque
