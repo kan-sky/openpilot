@@ -77,6 +77,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"LastUpdateRouteCount", {PERSISTENT, INT, "0"}},
     {"LastUpdateTime", {PERSISTENT, TIME}},
     {"LastUpdateUptimeOnroad", {PERSISTENT, FLOAT, "0.0"}},
+    {"LateralManeuverMode", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION, BOOL}},
     {"LiveDelay", {PERSISTENT, BYTES}},
     {"LiveParameters", {PERSISTENT, JSON}},
     {"LiveParametersV2", {PERSISTENT, BYTES}},
