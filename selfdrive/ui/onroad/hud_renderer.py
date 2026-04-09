@@ -128,6 +128,7 @@ COLORS = Colors()
 class TurnIntent(Widget):
   def __init__(self):
     super().__init__()
+    self._pre = False
     self._turn_intent_direction: int = 0
 
     self._turn_intent_alpha_filter = FirstOrderFilter(0, 0.05, 1 / gui_app.target_fps)
@@ -140,23 +141,31 @@ class TurnIntent(Widget):
       turn_intent_texture = self._txt_turn_intent_right if self._turn_intent_direction == 1 else self._txt_turn_intent_left
 
       src_rect = rl.Rectangle(0, 0, turn_intent_texture.width, turn_intent_texture.height)
-      dest_rect = rl.Rectangle(self._rect.x, self._rect.y, self._rect.width, self._rect.height)
+      dest_rect = rl.Rectangle(self._rect.x + self._rect.width / 2, self._rect.y + self._rect.height / 2,
+                               turn_intent_texture.width, turn_intent_texture.height)
 
+      origin = rl.Vector2(turn_intent_texture.width / 2, turn_intent_texture.height / 2)
       color = rl.Color(255, 255, 255, int(255 * self._turn_intent_alpha_filter.x))
-      rl.draw_texture_pro(turn_intent_texture, src_rect, dest_rect, rl.Vector2(0, 0), 0.0, color)
+      rl.draw_texture_pro(turn_intent_texture, src_rect, dest_rect, origin, 0.0, color)
 
   def _update_state(self) -> None:
     sm = ui_state.sm
 
     left = any(e.name == EventName.preLaneChangeLeft for e in sm['onroadEvents'])
     right = any(e.name == EventName.preLaneChangeRight for e in sm['onroadEvents'])
-    if left:
-      self._turn_intent_direction = -1
+
+    if left or right:
+      self._pre = True
+      self._turn_intent_direction = -1 if left else 1
       self._turn_intent_alpha_filter.update(1)
-    elif right:
-      self._turn_intent_direction = 1
-      self._turn_intent_alpha_filter.update(1)
+    elif any(e.name == EventName.laneChange for e in sm['onroadEvents']):
+      # fade out only, keep last direction
+      self._pre = False
+      self._turn_intent_alpha_filter.update(0)
+
     else:
+      # didn't complete lane change, just hide
+      self._pre = False
       self._turn_intent_direction = 0
       self._turn_intent_alpha_filter.update(0)
 
