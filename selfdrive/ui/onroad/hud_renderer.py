@@ -283,7 +283,7 @@ class HudRenderer(Widget):
     #self._wheel_y_filter.update(0)
 
     # 기본 좌표
-    margin_x = 30
+    margin_x = 10
     margin_y = 30
     pos_x = int(rect.x + margin_x)
     pos_y = int(rect.y + margin_y + 50)
@@ -301,7 +301,7 @@ class HudRenderer(Widget):
     # 시간표시
     self._draw_text_with_outline(now_text, rl.Vector2(time_x, time_y), time_font, rl.Color(255, 255, 255, 230), rl.BLACK, thickness=1)
     # 방향표시
-    turn_gap = 15  # 화살표와 시간 사이 간격
+    turn_gap = 250  # 화살표와 시간 사이 간격
     turn_box_w = 80  # turn intent 렌더 박스 너비
     turn_box_h = 80  # turn intent 렌더 박스 높이
 
@@ -318,13 +318,13 @@ class HudRenderer(Widget):
     if self._draw_traffic_light_info(traffic_x, traffic_y):
       return
 
-    side_font = int(wheel_txt.height * 0.28)
+    side_font = int(wheel_txt.height * 0.35)
     cpu_text = self._get_cpu_temp_text()
     cpu_size = measure_text_cached(self._font_medium, cpu_text, side_font)
     line_gap = max(4, int(side_font * 0.15))
 
     total_h = cpu_size.y + line_gap 
-    info_x = time_x + 25
+    info_x = time_x
     base_y = pos_y - total_h / 2
     cpu_y = base_y + 70
 
