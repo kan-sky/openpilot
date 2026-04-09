@@ -301,12 +301,12 @@ class HudRenderer(Widget):
     # 시간표시
     self._draw_text_with_outline(now_text, rl.Vector2(time_x, time_y), time_font, rl.Color(255, 255, 255, 230), rl.BLACK, thickness=1)
     # 방향표시
-    turn_gap = 12  # 화살표와 시간 사이 간격
-    turn_box_w = 50  # turn intent 렌더 박스 너비
-    turn_box_h = 20  # turn intent 렌더 박스 높이
+    turn_gap = 15  # 화살표와 시간 사이 간격
+    turn_box_w = 80  # turn intent 렌더 박스 너비
+    turn_box_h = 80  # turn intent 렌더 박스 높이
 
     turn_x = time_x + time_size.x + turn_gap
-    turn_y = pos_y - turn_box_h / 2
+    turn_y = pos_y - time_size.y / 2 # time표시 위치와 동일
 
     self._turn_intent.render(rl.Rectangle(turn_x, turn_y, turn_box_w, turn_box_h,
     ))
@@ -317,6 +317,18 @@ class HudRenderer(Widget):
 
     if self._draw_traffic_light_info(traffic_x, traffic_y):
       return
+
+    side_font = int(wheel_txt.height * 0.8)
+    cpu_text = self._get_cpu_temp_text()
+    cpu_size = measure_text_cached(self._font_medium, cpu_text, side_font)
+    line_gap = max(4, int(side_font * 0.15))
+
+    total_h = cpu_size.y + line_gap 
+    info_x = time_x + 25
+    base_y = pos_y - total_h / 2
+    cpu_y = base_y
+
+    self._draw_text_with_outline(cpu_text, rl.Vector2(info_x, cpu_y), side_font, rl.Color(255, 255, 255, 210), rl.BLACK, thickness=1)
 
   def _get_cpu_temp_text(self) -> str:
     try:
