@@ -19,7 +19,6 @@ source "$DIR/launch_env.sh"
 function agnos_init {
   # TODO: move this to agnos
   sudo rm -f /data/etc/NetworkManager/system-connections/*.nmmeta
-  rm -f /data/scons_cache/config.lock
 
   # set success flag for current boot slot
   sudo abctl --set_success
@@ -113,7 +112,7 @@ function launch {
   LANG=$(cat /data/params/d/LanguageSetting)
   EVENTSTAT=$(git status)
 
-  # events.py ÇÑ±Û·Î º¯°æ ¹× ÆÄÀÏÀÌ ±³Ã¼µÈ »óÅÂÀÎÁö È®ÀÎ
+  # events.py í•œê¸€ë¡œ ë³€ê²½ ë° íŒŒì¼ì´ êµì²´ëœ ìƒíƒœì¸ì§€ í™•ì¸
   if [ "${LANG}" = "main_ko" ] && [[ ! "${EVENTSTAT}" == *"modified:   selfdrive/controls/lib/events.py"* ]]; then
     cp -f $DIR/selfdrive/selfdrived/events.py $DIR/scripts/add/events_en.py
     cp -f $DIR/scripts/add/events_ko.py $DIR/selfdrive/selfdrived/events.py
