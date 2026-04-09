@@ -1,3 +1,4 @@
+# carrot
 import numpy as np
 from collections import deque
 
@@ -36,6 +37,7 @@ class BounceFilter(FirstOrderFilter):
     self.x += self.velocity.x
     return self.x
 
+# Carrot
 class MyMovingAverage:
   def __init__(self, window_size, value=None):
     self.window_size = window_size

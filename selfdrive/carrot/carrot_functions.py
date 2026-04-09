@@ -496,8 +496,10 @@ class CarrotPlanner:
           self.comfort_brake = self.comfortBrake * 0.9
           #self.comfort_brake = COMFORT_BRAKE
           self.trafficStopAdjustRatio = np.interp(v_ego_kph, [0, 100], [1.0, 0.7])
-          stop_dist = stop_model_x_rl * np.interp(stop_model_x_rl, [0, 50], [1.0, self.trafficStopAdjustRatio])  ##�����Ÿ��� ���� �����Ÿ� ��������
-          if stop_dist > 10.0: ### 10M�̻��϶���, self.actual_stop_distance�� ������Ʈ��.
+          stop_dist = stop_model_x_rl * np.interp(stop_model_x_rl, [0, 50], [1.0, self.trafficStopAdjustRatio])
+          # Kans: stop_dist역시 신호정지 거리로 본다면,
+          stop_dist = max(0.0, stop_dist - self.trafficStopDistanceAdjust)
+          if stop_dist > 10.0:
             self.actual_stop_distance = stop_dist
           stop_model_x = 0
           self.fakeCruiseDistance = 0 if self.actual_stop_distance > 10.0 else 10.0
@@ -512,17 +514,19 @@ class CarrotPlanner:
           self.xState = XState.e2eCruise
       elif v_ego_kph < 5.0 and self.trafficState != TrafficState.green:
         self.xState = XState.e2eStop
-        self.actual_stop_distance = 5.0 #2.0
-      elif v_ego_kph > 5.0: # and stop_model_x > 30.0:
+        # Kans: 실제 신호정지거리
+        self.actual_stop_distance = max(0.0, 5.0 - self.trafficStopDistanceAdjust) # 5.0
+      elif v_ego_kph > 5.0:
         self.xState = XState.e2eCruise
-    else: #XState.lead, XState.cruise, XState.e2eCruise
+    else:
       self.traffic_starting_count = max(0, self.traffic_starting_count - 1)
       if lead_detected:
         self.xState = XState.lead
       elif self.trafficState == TrafficState.red and abs(carstate.steeringAngleDeg) < 30 and self.traffic_starting_count == 0:
         self.add_event(EventName.trafficStopping)
         self.xState = XState.e2eStop
-        self.actual_stop_distance = stop_model_x_rl
+        # Kans: 실제 빨간불 정지거리에서 신호정지거리만큼 빼서 미리 정지하게 함.
+        self.actual_stop_distance = max(0.0, stop_model_x_rl - self.trafficStopDistanceAdjust)
       else:
         self.xState = XState.e2eCruise
 
@@ -549,13 +553,6 @@ class CarrotPlanner:
     if not stopping_active:
       self._stop_x_rl = stop_model_x_raw
 
-    # self.debugLongText = (
-    #   f"XState({str(self.xState)})," +
-    #   f"stop_x={stop_x:.1f}," +
-    #   f"stopDist={self.actual_stop_distance:.1f}," +
-    #   f"Traffic={str(self.trafficState)}"
-    # )
-    #��ȣ�� �������� self.xState.value
 
     stop_dist =  stop_model_x + self.actual_stop_distance
     stop_dist = max(stop_dist, 0.0)

@@ -403,14 +403,8 @@ class LongitudinalMpc:
       self.stopped_lead_count = 0
     if not hasattr(self, "stopped_lead_active"):
       self.stopped_lead_active = False
-    if not hasattr(self, "final_stop_x"):
-      self.final_stop_x = 0.0
 
-    stopped_lead_cond = (
-      radarstate.leadOne.status and
-      4.0 < lead_d < 30.0 and
-      lead_v < 1.5
-    )
+    stopped_lead_cond = (radarstate.leadOne.status and 4.0 < lead_d < 30.0 and lead_v < 1.5)
 
     if stopped_lead_cond:
       self.stopped_lead_count = min(self.stopped_lead_count + 1, 20)
@@ -419,33 +413,17 @@ class LongitudinalMpc:
 
     self.stopped_lead_active = self.stopped_lead_count >= 3
 
-    lead_v_for_follow = lead_v_0
-    if self.stopped_lead_active:
-      lead_v_for_follow = 0.0
+    # 정지차로 판단되면 lead speed만 0으로 간주하고,
+    # 실제 정차 간격은 StopDistanceCarrot(stop_distance)가 결정하도록 함
+    lead_v_for_follow = 0.0 if self.stopped_lead_active else lead_v_0
 
     desired_distance = desired_follow_distance(v_ego, lead_v_for_follow, comfort_brake, stop_distance, t_follow)
     t_follow = carrot.dynamic_t_follow(t_follow, radarstate.leadOne, desired_distance, self.prev_a)
 
-    lead_0_obstacle = lead_xv_0[:, 0] + get_stopped_equivalence_factor(lead_xv_0[:, 1])
+    lead_0_obstacle = lead_xv_0[:, 0] + get_stopped_equivalence_factor(
+      np.zeros_like(lead_xv_0[:, 1]) if self.stopped_lead_active else lead_xv_0[:, 1]
+    )
     lead_1_obstacle = lead_xv_1[:, 0] + get_stopped_equivalence_factor(lead_xv_1[:, 1])
-
-    lead_stop_buffer = np.interp(v_ego, [0.0, 10.0, 20.0], [1.5, 2.3, 3.0]) # Kans: stop distance
-    if self.stopped_lead_active:
-      lead_0_obstacle = lead_0_obstacle - lead_stop_buffer
-
-    final_stop_hold = (
-      self.stopped_lead_active and
-      radarstate.leadOne.status and
-      lead_d < 6.0 and
-      v_ego < 2.0 and
-      lead_v < 0.5)
-
-    if final_stop_hold:
-      if self.final_stop_x <= 0.0:
-        self.final_stop_x = lead_0_obstacle[0]
-      lead_0_obstacle[:] = np.minimum(lead_0_obstacle, self.final_stop_x)
-    else:
-      self.final_stop_x = 0.0
 
     self.desired_distance = desired_follow_distance(v_ego, lead_v_for_follow, comfort_brake, stop_distance, t_follow)
     self.params[:, 0] = ACCEL_MIN if not reset_state else a_ego
@@ -459,7 +437,7 @@ class LongitudinalMpc:
       cruise_obstacle = np.cumsum(T_DIFFS * v_cruise_clipped) + get_safe_obstacle_distance(v_cruise_clipped, t_follow, comfort_brake, stop_distance)
 
       adjust_dist = carrot.trafficStopDistanceAdjust if v_ego > 0.1 else -2.0
-      adjust_dist = np.clip(adjust_dist, -2.0, 0.0) #Kans: traffic stop Dist offset
+      adjust_dist = np.clip(adjust_dist, -2.0, 0.0)  # Kans: traffic stop Dist offset
 
       d_min = np.interp(v_ego, [0.0, 10.0, 15.0, 20.0], [5.0, 45.0, 65.0, 75.0])
       if d_min < stop_x + adjust_dist < cruise_obstacle[0]:
@@ -468,26 +446,7 @@ class LongitudinalMpc:
       x2 = stop_x * np.ones(N + 1) + adjust_dist
 
       x_obstacles = np.column_stack([lead_0_obstacle, lead_1_obstacle, cruise_obstacle, x2])
-
-      near_stopped_lead = (
-        self.stopped_lead_active and
-        radarstate.leadOne.status and
-        lead_d < 12.0
-      )
-
-      if near_stopped_lead:
-        x_obstacles[:, 2] = 1e6
-        x_obstacles[:, 3] = 1e6
-        self.source = 'lead0'
-      else:
-        self.source = SOURCES[np.argmin(x_obstacles[0])]
-
-      if final_stop_hold:
-        x_obstacles[:, 2] = 1e6
-        x_obstacles[:, 3] = 1e6
-        self.source = 'lead0'
-        min_brake = np.interp(v_ego, [0.0, 3.0], [-0.3, -0.6])
-        self.params[:, 0] = np.minimum(self.params[:, 0], min_brake)
+      self.source = SOURCES[np.argmin(x_obstacles[0])]
 
       if v_cruise == 0 and self.source == 'cruise':
         self.params[:, 0] = -carrot.autoNaviSpeedDecelRate
@@ -545,7 +504,7 @@ class LongitudinalMpc:
     self.run()
 
     if (np.any(lead_xv_0[FCW_IDXS, 0] - self.x_sol[FCW_IDXS, 0] < CRASH_DISTANCE) and
-        radarstate.leadOne.modelProb > 0.9):
+            radarstate.leadOne.modelProb > 0.9):
       self.crash_cnt += 1
     else:
       self.crash_cnt = 0
