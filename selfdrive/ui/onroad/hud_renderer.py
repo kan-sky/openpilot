@@ -318,7 +318,7 @@ class HudRenderer(Widget):
     if self._draw_traffic_light_info(traffic_x, traffic_y):
       return
 
-    side_font = int(wheel_txt.height * 0.8)
+    side_font = int(wheel_txt.height * 0.28)
     cpu_text = self._get_cpu_temp_text()
     cpu_size = measure_text_cached(self._font_medium, cpu_text, side_font)
     line_gap = max(4, int(side_font * 0.15))
@@ -326,7 +326,7 @@ class HudRenderer(Widget):
     total_h = cpu_size.y + line_gap 
     info_x = time_x + 25
     base_y = pos_y - total_h / 2
-    cpu_y = base_y
+    cpu_y = base_y + 70
 
     self._draw_text_with_outline(cpu_text, rl.Vector2(info_x, cpu_y), side_font, rl.Color(255, 255, 255, 210), rl.BLACK, thickness=1)
 
