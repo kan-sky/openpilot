@@ -429,16 +429,16 @@ class LongitudinalMpc:
     lead_0_obstacle = lead_xv_0[:, 0] + get_stopped_equivalence_factor(lead_xv_0[:, 1])
     lead_1_obstacle = lead_xv_1[:, 0] + get_stopped_equivalence_factor(lead_xv_1[:, 1])
 
-    lead_stop_buffer = np.interp(v_ego, [0.0, 10.0, 20.0], [2.0, 3.0, 4.0])
+    lead_stop_buffer = np.interp(v_ego, [0.0, 10.0, 20.0], [1.5, 2.3, 3.0]) # Kans: stop distance
     if self.stopped_lead_active:
       lead_0_obstacle = lead_0_obstacle - lead_stop_buffer
 
     final_stop_hold = (
       self.stopped_lead_active and
       radarstate.leadOne.status and
-      lead_d < 8.0 and
-      v_ego < 3.0
-    )
+      lead_d < 6.0 and
+      v_ego < 2.0 and
+      lead_v < 0.5)
 
     if final_stop_hold:
       if self.final_stop_x <= 0.0:
@@ -459,7 +459,7 @@ class LongitudinalMpc:
       cruise_obstacle = np.cumsum(T_DIFFS * v_cruise_clipped) + get_safe_obstacle_distance(v_cruise_clipped, t_follow, comfort_brake, stop_distance)
 
       adjust_dist = carrot.trafficStopDistanceAdjust if v_ego > 0.1 else -2.0
-      adjust_dist = np.clip(adjust_dist, -3.0, 0.0)
+      adjust_dist = np.clip(adjust_dist, -2.0, 0.0) #Kans: traffic stop Dist offset
 
       d_min = np.interp(v_ego, [0.0, 10.0, 15.0, 20.0], [5.0, 45.0, 65.0, 75.0])
       if d_min < stop_x + adjust_dist < cruise_obstacle[0]:
@@ -486,7 +486,8 @@ class LongitudinalMpc:
         x_obstacles[:, 2] = 1e6
         x_obstacles[:, 3] = 1e6
         self.source = 'lead0'
-        self.params[:, 0] = np.minimum(self.params[:, 0], -0.8)
+        min_brake = np.interp(v_ego, [0.0, 3.0], [-0.3, -0.6])
+        self.params[:, 0] = np.minimum(self.params[:, 0], min_brake)
 
       if v_cruise == 0 and self.source == 'cruise':
         self.params[:, 0] = -carrot.autoNaviSpeedDecelRate
