@@ -126,6 +126,8 @@ COLORS = Colors()
 
 # Carrot
 class TurnIntent(Widget):
+  FADE_IN_ANGLE = 30  # degrees
+
   def __init__(self):
     super().__init__()
     self._pre = False
@@ -137,14 +139,13 @@ class TurnIntent(Widget):
     self._txt_turn_intent_right: rl.Texture = gui_app.texture('icons_mici/turn_intent_left.png', 50, 20, flip_x=True)
 
   def _render(self, _):
-    if self._turn_intent_alpha_filter.x > 1e-2 and self._turn_intent_direction != 0:
+    if self._turn_intent_alpha_filter.x > 1e-2:
       turn_intent_texture = self._txt_turn_intent_right if self._turn_intent_direction == 1 else self._txt_turn_intent_left
-
       src_rect = rl.Rectangle(0, 0, turn_intent_texture.width, turn_intent_texture.height)
       dest_rect = rl.Rectangle(self._rect.x + self._rect.width / 2, self._rect.y + self._rect.height / 2,
                                turn_intent_texture.width, turn_intent_texture.height)
 
-      origin = rl.Vector2(turn_intent_texture.width / 2, turn_intent_texture.height / 2)
+      origin = (turn_intent_texture.width / 2, self._rect.height / 2)
       color = rl.Color(255, 255, 255, int(255 * self._turn_intent_alpha_filter.x))
       rl.draw_texture_pro(turn_intent_texture, src_rect, dest_rect, origin, 0.0, color)
 
@@ -175,7 +176,6 @@ class HudRenderer(Widget):
     super().__init__()
     """Initialize the HUD renderer."""
     # carrot
-    self.sm = ui_state.sm
     self._debug_speed_panel = False
     self._set_speed_changed_time: float = 0
     self._engaged: bool = False
@@ -185,6 +185,7 @@ class HudRenderer(Widget):
     self.speed: float = 0.0
     self.v_ego_cluster_seen: bool = False
 
+    self._can_draw_top_icons = True
     self._font_bold: rl.Font = gui_app.font(FontWeight.BOLD)
     self._font_medium: rl.Font = gui_app.font(FontWeight.MEDIUM)
     self._font_semi_bold: rl.Font = gui_app.font(FontWeight.SEMI_BOLD)
@@ -192,20 +193,16 @@ class HudRenderer(Widget):
 
     # Carrot
     self._font_display: rl.Font = gui_app.font(FontWeight.DISPLAY)
-    self._can_draw_top_icons = True
+
     self._turn_intent = TurnIntent()
     self._debug_traffic_light = False
     self._set_speed_override = SetSpeedOverride()
     self._txt_wheel: rl.Texture = gui_app.texture('icons/wheel.png', 100, 100) # 이미지 사이즈용으로 사용
     self._txt_speed_bg: rl.Texture = gui_app.texture('images/speed_bg.png', 307, 115)
+
     self._wheel_alpha_filter = FirstOrderFilter(0, 0.05, 1 / gui_app.target_fps)
     self._wheel_y_filter = FirstOrderFilter(0, 0.1, 1 / gui_app.target_fps)
     self._set_speed_alpha_filter = FirstOrderFilter(0.0, 0.1, 1 / gui_app.target_fps)
-    
-    #Kans: APN 
-    self.img_apn = gui_app.texture("images/img_apn.png", 120, 54)
-    self.img_apm = gui_app.texture("images/img_apm.png", 120, 54)
-    self.img_radartracks = gui_app.texture("images/img_radartracks.png", 240, 54)
 
   def _draw_text_with_outline(self, text, pos, font_size, text_color, outline_color=rl.BLACK, thickness=1):
     x, y = pos.x, pos.y
@@ -273,71 +270,56 @@ class HudRenderer(Widget):
 
     if self.is_cruise_available:
       self._draw_set_speed(rect)
-    self._draw_connect_info(rect)
-    self._draw_time_and_turn_intent(rect)
-    self._draw_current_speed(rect)
+    #self._draw_current_speed(rect)
     self._draw_speed_limit_sign(rect)
 
     button_x = rect.x + rect.width - UI_CONFIG.border_size - UI_CONFIG.button_size
     button_y = rect.y + UI_CONFIG.border_size
     self._exp_button.render(rl.Rectangle(button_x, button_y, UI_CONFIG.button_size, UI_CONFIG.button_size))
+    self._draw_steering_wheel(rect)
 
   def user_interacting(self) -> bool:
     return self._exp_button.is_pressed
 
-  # Kans
-  def _draw_time_and_turn_intent(self, rect: rl.Rectangle) -> None:
+  # Carrot
+  def _draw_steering_wheel(self, rect: rl.Rectangle) -> None:
     wheel_txt = self._txt_wheel
 
-    #self._wheel_y_filter.update(0)
+    # Always visible (no hide). We keep filters but drive them to stable values.
+    self._wheel_alpha_filter.update(255 * 0.95)
+    self._wheel_y_filter.update(0)
 
-    # 기본 좌표
-    margin_x = 10
-    margin_y = 30
-    pos_x = int(rect.x + margin_x)
-    pos_y = int(rect.y + margin_y + 50)
+    # 기본 좌표(Top_left)
+    margin_x = 20
+    margin_y = 20
+    pos_x = int(rect.x + margin_x + wheel_txt.width / 2)
+    pos_y = int(rect.y + margin_y + wheel_txt.height / 2 + self._wheel_y_filter.x)
 
-    # 현재시간
-    now_text = datetime.now().strftime("%H:%M")
-    # 휠 높이 기준으로 폰트 크기 설정
-    time_font = int(wheel_txt.height * 0.8)  # 80% 정도 (너무 꽉 차지 않게)
+    self._draw_steering_wheel_icon(wheel_txt, pos_x, pos_y)
+    self._draw_wheel_side_info(wheel_txt, pos_x, pos_y)
 
-    time_size = measure_text_cached(self._font_semi_bold, now_text, time_font)
 
-    time_x = pos_x
-    time_y = pos_y - time_size.y / 2
+  def _draw_steering_wheel_icon(self, wheel_txt, pos_x: int, pos_y: int) -> None:
+    rotation = 0.0
 
-    # 시간표시
-    self._draw_text_with_outline(now_text, rl.Vector2(time_x, time_y), time_font, rl.Color(255, 255, 255, 230), rl.BLACK, thickness=1)
-    # 방향표시
-    turn_gap = 250  # 화살표와 시간 사이 간격
-    turn_box_w = 80  # turn intent 렌더 박스 너비
-    turn_box_h = 80  # turn intent 렌더 박스 높이
-
-    turn_x = time_x + time_size.x + turn_gap
-    turn_y = pos_y - time_size.y / 2 # time표시 위치와 동일
-
-    self._turn_intent.render(rl.Rectangle(turn_x, turn_y, turn_box_w, turn_box_h,
+    turn_intent_margin = 25
+    self._turn_intent.render(rl.Rectangle(
+      pos_x - wheel_txt.width / 2 - turn_intent_margin,
+      pos_y - wheel_txt.height / 2 - turn_intent_margin,
+      wheel_txt.width + turn_intent_margin * 2,
+      wheel_txt.height + turn_intent_margin * 2,
     ))
 
-    # Traffic Light
-    traffic_x = int(turn_x + 15)
-    traffic_y = int(turn_y)
+    src_rect = rl.Rectangle(0, 0, wheel_txt.width, wheel_txt.height)
+    dest_rect = rl.Rectangle(pos_x, pos_y, wheel_txt.width, wheel_txt.height)
+    origin = (wheel_txt.width / 2, wheel_txt.height / 2)
 
-    if self._draw_traffic_light_info(traffic_x, traffic_y):
-      return
+    if ui_state.lat_active:
+      wheel_color = rl.Color(0, 255, 0, int(self._wheel_alpha_filter.x))
+    else:
+      wheel_color = rl.Color(160, 160, 160, int(self._wheel_alpha_filter.x))
 
-    side_font = int(wheel_txt.height * 0.35)
-    cpu_text = self._get_cpu_temp_text()
-    cpu_size = measure_text_cached(self._font_medium, cpu_text, side_font)
-    line_gap = max(4, int(side_font * 0.15))
-
-    total_h = cpu_size.y + line_gap 
-    info_x = time_x
-    base_y = pos_y - total_h / 2
-    cpu_y = base_y + 70
-
-    self._draw_text_with_outline(cpu_text, rl.Vector2(info_x, cpu_y), side_font, rl.Color(255, 255, 255, 210), rl.BLACK, thickness=1)
+    rl.draw_texture_pro(wheel_txt, src_rect, dest_rect, origin, rotation, wheel_color)
 
   def _get_cpu_temp_text(self) -> str:
     try:
@@ -353,6 +335,180 @@ class HudRenderer(Widget):
       pass
 
     return "CPU: --"
+
+
+  def _draw_wheel_side_info(self, wheel_txt, pos_x: int, pos_y: int) -> None:
+    now = datetime.now()
+
+    try:
+      show_date_time = int(ui_state.show_date_time)
+    except Exception:
+      show_date_time = 1
+
+    try:
+      show_debug_ui = int(ui_state.show_debug_ui)
+    except Exception:
+      show_debug_ui = 0
+
+    time_font = int(wheel_txt.height * 0.8)
+    small_dt_font = max(25, int(time_font * 0.62))   # date+time 2줄용
+    side_font = max(25, int(time_font * 0.33))
+
+    time_x = pos_x + wheel_txt.width / 2 + 15
+
+    # Date / Time
+    # show_date_time: 0=hide, 1=date+time, 2=time only, 3=date only
+    time_block_right = time_x
+
+    if show_date_time != 0:
+      time_text = now.strftime("%H:%M:%S")
+      date_text = now.strftime("%y-%m-%d")
+
+      if show_date_time == 1:
+        # two lines: both use smaller font
+        dt_font = small_dt_font
+
+        date_size = measure_text_cached(self._font_medium, date_text, dt_font)
+        time_size = measure_text_cached(self._font_semi_bold, time_text, dt_font)
+
+        line_gap = max(2, int(dt_font * 0.10))
+        total_h = date_size.y + line_gap + time_size.y
+        base_y = pos_y - total_h / 2
+
+        date_y = base_y
+        time_y = date_y + date_size.y + line_gap
+
+        block_w = max(date_size.x, time_size.x)
+        date_x = time_x + (block_w - date_size.x) / 2
+        draw_time_x = time_x + (block_w - time_size.x) / 2
+
+        self._draw_text_with_outline(
+          date_text,
+          rl.Vector2(date_x, date_y),
+          dt_font,
+          rl.Color(255, 255, 255, 220),
+          rl.BLACK,
+          thickness=1
+        )
+
+        self._draw_text_with_outline(
+          time_text,
+          rl.Vector2(draw_time_x, time_y),
+          dt_font,
+          rl.Color(255, 255, 255, 230),
+          rl.BLACK,
+          thickness=1
+        )
+
+        time_block_right = time_x + block_w
+
+      elif show_date_time == 2:
+        # time only: large font
+        text_font = time_font
+        time_size = measure_text_cached(self._font_semi_bold, time_text, text_font)
+        time_y = pos_y - time_size.y / 2
+
+        self._draw_text_with_outline(
+          time_text,
+          rl.Vector2(time_x, time_y),
+          text_font,
+          rl.Color(255, 255, 255, 230),
+          rl.BLACK,
+          thickness=1
+        )
+
+        time_block_right = time_x + time_size.x
+
+      elif show_date_time == 3:
+        # date only: also large font
+        text_font = time_font
+        date_size = measure_text_cached(self._font_medium, date_text, text_font)
+        date_y = pos_y - date_size.y / 2
+
+        self._draw_text_with_outline(
+          date_text,
+          rl.Vector2(time_x, date_y),
+          text_font,
+          rl.Color(255, 255, 255, 220),
+          rl.BLACK,
+          thickness=1
+        )
+
+        time_block_right = time_x + date_size.x
+
+    # Traffic Light (always higher priority than debug UI)
+    traffic_x = int(time_block_right + 12)
+    traffic_y = int(pos_y)
+
+    if self._draw_traffic_light_info(traffic_x, traffic_y):
+      return
+
+    # Debug UI
+    if show_debug_ui == 0:
+      return
+
+    info_x = time_block_right + 25
+
+    cpu_text = self._get_cpu_temp_text()
+
+    try:
+      steer_ratio = float(ui_state.sm['liveParameters'].steerRatio)
+      sr_text = f"SR: {steer_ratio:.1f}"
+    except Exception:
+      sr_text = "SR: --.-"
+
+    try:
+      road_name = ui_state.sm['carrotMan'].szPosRoadName
+      if not road_name:
+        road_name = ""
+    except Exception:
+      road_name = ""
+
+    cpu_size = measure_text_cached(self._font_medium, cpu_text, side_font)
+    sr_size = measure_text_cached(self._font_medium, sr_text, side_font)
+    road_size = measure_text_cached(self._font_medium, road_name, side_font) if road_name else rl.Vector2(0, 0)
+
+    line_gap = max(4, int(side_font * 0.15))
+
+    total_h = cpu_size.y + line_gap + sr_size.y
+    if road_name:
+      total_h += line_gap + road_size.y
+
+    base_y = pos_y - total_h / 2
+
+    cpu_y = base_y
+    sr_y = cpu_y + cpu_size.y + line_gap
+    road_y = sr_y + sr_size.y + line_gap
+
+    self._draw_text_with_outline(
+      cpu_text,
+      rl.Vector2(info_x, cpu_y),
+      side_font,
+      rl.Color(255, 255, 255, 210),
+      rl.BLACK,
+      thickness=1
+    )
+
+    self._draw_text_with_outline(
+      sr_text,
+      rl.Vector2(info_x, sr_y),
+      side_font,
+      rl.Color(255, 255, 255, 210),
+      rl.BLACK,
+      thickness=1
+    )
+
+    if road_name:
+      self._draw_text_with_outline(
+        road_name,
+        rl.Vector2(info_x, road_y),
+        side_font,
+        rl.Color(255, 255, 255, 210),
+        rl.BLACK,
+        thickness=1
+      )
+
+
   def _get_gear_text(self) -> str:
     sm = ui_state.sm
 
@@ -580,7 +736,7 @@ class HudRenderer(Widget):
     if carState.brakeHoldActive:
       return tr("brake hold"), rl.Color(255, 0, 0, 230)
     elif carState.softHoldActive:
-      return tr("soft hold"), rl.Color(0, 0, 255, 230)
+      return tr("soft hold"), rl.Color(255, 165, 0, 230)
     elif carState.carrotCruise:
       return tr("carrot"), rl.Color(0, 255, 0, 230)
     
@@ -613,26 +769,7 @@ class HudRenderer(Widget):
     unit_pos = rl.Vector2(rect.x + rect.width / 2 - unit_text_size.x / 2, rect.y + 290 - unit_text_size.y / 2)
     rl.draw_text_ex(self._font_medium, unit_text, unit_pos, FONT_SIZES.speed_unit, 0, COLORS.WHITE_TRANSLUCENT)
 
-  # Kans: APN display
-  def _draw_connect_info(self, rect: rl.Rectangle) -> None:
-    sm = ui_state.sm
-    active_carrot = sm['carrotMan'].activeCarrot
-    s_center_x = rect.x + UI_CONFIG.border_size + 110
-    
-    if active_carrot >= 2:
-      img_apn = self.img_apn
-      icon_rect = rl.Rectangle(s_center_x + 850, rect.y + 35, 120, 54)
-      source_rect = rl.Rectangle(0, 0, 120, 54)
-      rl.draw_texture_pro(img_apn, source_rect, icon_rect, rl.Vector2(0, 0), 0, COLORS.WHITE_TRANSLUCENT)
-    elif active_carrot >= 1:
-      img_apm = self.img_apm
-      icon_rect = rl.Rectangle(s_center_x + 850, rect.y + 35, 120, 54)
-      source_rect = rl.Rectangle(0, 0, 120, 54)
-      rl.draw_texture_pro(img_apm, source_rect, icon_rect, rl.Vector2(0, 0), 0, COLORS.WHITE_TRANSLUCENT)
-
   def _draw_speed_limit_sign(self, rect: rl.Rectangle) -> None:
-    #if not (self.sm.alive["carrotMan"] and self.sm.updated["carrotMan"]):
-    #  return
     carrot_man = self.sm['carrotMan']
     active_carrot = carrot_man.activeCarrot
     limit_speed = carrot_man.xSpdLimit
