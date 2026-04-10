@@ -770,7 +770,8 @@ class HudRenderer(Widget):
     rl.draw_text_ex(self._font_medium, unit_text, unit_pos, FONT_SIZES.speed_unit, 0, COLORS.WHITE_TRANSLUCENT)
 
   def _draw_speed_limit_sign(self, rect: rl.Rectangle) -> None:
-    carrot_man = self.sm['carrotMan']
+    sm = ui_state.sm
+    carrot_man = sm['carrotMan']
     active_carrot = carrot_man.activeCarrot
     limit_speed = carrot_man.xSpdLimit
     limit_dist = carrot_man.xSpdDist
