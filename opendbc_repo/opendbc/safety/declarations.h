@@ -246,6 +246,8 @@ void speed_mismatch_check(const float speed_2);
 
 void safety_tick(const safety_config *safety_config);
 
+bool longitudinal_interceptor_checks(const CANPacket_t *to_send);
+
 // This can be set by the safety hooks
 extern bool controls_allowed;
 extern bool relay_malfunction;
@@ -263,6 +265,8 @@ extern bool vehicle_moving;
 extern bool acc_main_on; // referred to as "ACC off" in ISO 15622:2018
 extern int cruise_button_prev;
 extern bool safety_rx_checks_invalid;
+// AOL
+extern bool aol_allowed;
 
 // for safety modes with torque steering control
 extern int desired_torque_last;       // last desired steer torque
@@ -284,6 +288,7 @@ extern uint32_t ts_angle_check_last;
 extern int desired_angle_last;
 extern struct sample_t angle_meas;         // last 6 steer angles/curvatures
 
+extern bool enable_gas_interceptor;
 // Alt experiences can be set with a USB command
 // It enables features that allow alternative experiences, like not disengaging on gas press
 // It is only either 0 or 1 on mainline comma.ai openpilot

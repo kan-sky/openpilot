@@ -21,6 +21,16 @@ from openpilot.common.swaglog import cloudlog, add_file_handler
 from openpilot.system.version import get_build_metadata
 from openpilot.system.hardware.hw import Paths
 
+def set_default_params():
+  params = Params()
+  for k in params.all_keys():
+    default_value = params.get_default_value(k)
+    if default_value is not None:
+      params.put(k, default_value)
+      print(f"SetToDefault[{k}]={default_value}")
+
+def get_default_params_key():
+  return Params().all_keys()
 
 def manager_init() -> None:
   save_bootlog()
@@ -103,6 +113,16 @@ def manager_cleanup() -> None:
 
   cloudlog.info("everything is dead")
 
+#Kans: 메모리사용파악
+def read_rss_kb(pid: int) -> int:
+  try:
+    with open(f"/proc/{pid}/status") as f:
+      for line in f:
+        if line.startswith("VmRSS:"):
+          return int(line.split()[1])  # kB
+  except Exception:
+    pass
+  return 0
 
 def manager_thread() -> None:
   cloudlog.bind(daemon="manager")
@@ -124,11 +144,15 @@ def manager_thread() -> None:
   write_onroad_params(False, params)
   ensure_running(managed_processes.values(), False, params=params, CP=sm['carParams'], not_run=ignore)
 
+  print_timer = 0
+
   started_prev = False
   ignition_prev = False
 
+  mem_print_t = 0.0
   while True:
     sm.update(1000)
+    now = time.monotonic()
 
     started = sm['deviceState'].started
 
@@ -150,9 +174,22 @@ def manager_thread() -> None:
 
     ensure_running(managed_processes.values(), started, params=params, CP=sm['carParams'], not_run=ignore)
 
+    # Kans: 메모리사용파악
+    if params.get_bool("MemUsage") and now - mem_print_t > 10.0:
+      mem_print_t = now
+      mem_lines = []
+      for p in managed_processes.values():
+        if p.proc and p.proc.is_alive():
+          pid = p.proc.pid
+          rss_kb = read_rss_kb(pid)
+          mem_lines.append(f"{p.name}[{pid}]={rss_kb/1024:.1f}MB")
+      print("PROC_MEM " + " | ".join(mem_lines))    
+
     running = ' '.join("{}{}\u001b[0m".format("\u001b[32m" if p.proc.is_alive() else "\u001b[31m", p.name)
                        for p in managed_processes.values() if p.proc)
-    print(running)
+    print_timer = (print_timer + 1)%10
+    if print_timer == 0:
+      print(running)
     cloudlog.debug(running)
 
     # send managerState
@@ -179,9 +216,14 @@ def manager_thread() -> None:
     if shutdown:
       break
 
-
 def main() -> None:
   manager_init()
+  print(f"python ../../opendbc/car/hyundai/values.py > {Params().get_param_path()}/SupportedCars")
+  os.system(f"python ../../opendbc/car/hyundai/values.py > {Params().get_param_path()}/SupportedCars")
+  os.system(f"python ../../opendbc/car/gm/values.py > {Params().get_param_path()}/SupportedCars_gm")
+  os.system(f"python ../../opendbc/car/toyota/values.py > {Params().get_param_path()}/SupportedCars_toyota")
+  os.system(f"python ../../opendbc/car/mazda/values.py > {Params().get_param_path()}/SupportedCars_mazda")
+
   if os.getenv("PREPAREONLY") is not None:
     return
 

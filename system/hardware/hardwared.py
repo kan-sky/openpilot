@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import fcntl
 import os
+import subprocess
 import queue
 import struct
 import threading
@@ -37,7 +38,7 @@ ONROAD_CYCLE_TIME = 1  # seconds to wait offroad after requesting an onroad cycl
 
 ThermalBand = namedtuple("ThermalBand", ['min_temp', 'max_temp'])
 HardwareState = namedtuple("HardwareState", ['network_type', 'network_info', 'network_strength', 'network_stats',
-                                             'network_metered', 'modem_temps'])
+                                             'network_metered', 'modem_temps', 'ip_address'])
 
 # List of thermal bands. We will stay within this region as long as we are within the bounds.
 # When exiting the bounds, we'll jump to the lower or higher band. Bands are ordered in the dict.
@@ -59,7 +60,15 @@ OFFROAD_DANGER_TEMP = 85 if HARDWARE.get_device_type() == "mici" else 75
 
 prev_offroad_states: dict[str, tuple[bool, str | None]] = {}
 
-
+def get_ip_address():
+  try:
+    out = subprocess.check_output(["hostname", "-I"], text=True).strip()
+    for ip in out.split():
+      if "." in ip:
+        return ip
+    return ""
+  except subprocess.CalledProcessError:
+    return ""
 
 def set_offroad_alert_if_changed(offroad_alert: str, show_alert: bool, extra_text: str | None=None):
   if prev_offroad_states.get(offroad_alert, None) == (show_alert, extra_text):
@@ -108,6 +117,7 @@ def hw_state_thread(end_event, hw_queue):
   prev_hw_state = None
 
   modem_version = None
+  ip_address = ""
 
   while not end_event.is_set():
     # these are expensive calls. update every 10s
@@ -126,6 +136,7 @@ def hw_state_thread(end_event, hw_queue):
             cloudlog.event("modem version", version=modem_version)
 
         tx, rx = HARDWARE.get_modem_data_usage()
+        ip_address = get_ip_address() if TICI else ""
 
         hw_state = HardwareState(
           network_type=network_type,
@@ -134,6 +145,7 @@ def hw_state_thread(end_event, hw_queue):
           network_stats={'wwanTx': tx, 'wwanRx': rx},
           network_metered=HARDWARE.get_network_metered(network_type),
           modem_temps=modem_temps,
+          ip_address=ip_address,
         )
 
         try:
@@ -176,6 +188,7 @@ def hardware_thread(end_event, hw_queue) -> None:
     network_strength=NetworkStrength.unknown,
     network_stats={'wwanTx': -1, 'wwanRx': -1},
     modem_temps=[],
+    ip_address = "",
   )
 
   all_temp_filter = FirstOrderFilter(0., TEMP_TAU, DT_HW, initialized=False)
@@ -255,7 +268,7 @@ def hardware_thread(end_event, hw_queue) -> None:
     msg.deviceState.modemTempC = last_hw_state.modem_temps
 
     msg.deviceState.screenBrightnessPercent = HARDWARE.get_screen_brightness()
-
+    msg.deviceState.ipAddress = last_hw_state.ip_address
     # this subset is only used for offroad
     temp_sources = [
       msg.deviceState.memoryTempC,
@@ -316,7 +329,7 @@ def hardware_thread(end_event, hw_queue) -> None:
     if not PC:
       # we enforce this for our software, but you are welcome
       # to make a different decision in your software
-      startup_conditions["registered_device"] = PC or (params.get("DongleId") != UNREGISTERED_DONGLE_ID)
+      startup_conditions["registered_device"] = True #PC or (params.get("DongleId") != UNREGISTERED_DONGLE_ID)
 
     # Handle offroad/onroad transition
     should_start = all(onroad_conditions.values())

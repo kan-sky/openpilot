@@ -1,10 +1,16 @@
+from collections import deque
 from cereal import car, log
+import cereal.messaging as messaging
 from opendbc.car import DT_CTRL, structs
 from opendbc.car.car_helpers import interfaces
 from opendbc.car.interfaces import MAX_CTRL_SPEED
-from opendbc.car.toyota.values import ToyotaFlags
+from opendbc.car.volkswagen.values import CarControllerParams as VWCarControllerParams
+from opendbc.car.hyundai.interface import ENABLE_BUTTONS as HYUNDAI_ENABLE_BUTTONS
+from opendbc.car.hyundai.carstate import PREV_BUTTON_SAMPLES as HYUNDAI_PREV_BUTTON_SAMPLES
 
-from openpilot.selfdrive.selfdrived.events import Events
+from openpilot.selfdrive.selfdrived.events import Events, ET
+
+from openpilot.common.params import Params
 
 ButtonType = structs.CarState.ButtonEvent.Type
 GearShifter = structs.CarState.GearShifter
@@ -12,6 +18,31 @@ EventName = log.OnroadEvent.EventName
 NetworkLocation = structs.CarParams.NetworkLocation
 
 
+# TODO: the goal is to abstract this file into the CarState struct and make events generic
+class MockCarState:
+  def __init__(self):
+    self.sm = messaging.SubMaster(['gpsLocation', 'gpsLocationExternal'])
+
+  def update(self, CS: car.CarState):
+    self.sm.update(0)
+    gps_sock = 'gpsLocationExternal' if self.sm.recv_frame['gpsLocationExternal'] > 1 else 'gpsLocation'
+
+    CS.vEgo = self.sm[gps_sock].speed
+    CS.vEgoRaw = self.sm[gps_sock].speed
+
+    return CS
+
+
+BRAND_EXTRA_GEARS = {
+  'ford': [GearShifter.low, GearShifter.manumatic],
+  'nissan': [GearShifter.brake],
+  'chrysler': [GearShifter.low],
+  'honda': [GearShifter.sport],
+  'toyota': [GearShifter.sport],
+  'gm': [GearShifter.sport, GearShifter.low, GearShifter.eco, GearShifter.manumatic],
+  'volkswagen': [GearShifter.eco, GearShifter.sport, GearShifter.manumatic],
+  'hyundai': [GearShifter.sport, GearShifter.manumatic]
+}
 class CarSpecificEvents:
   def __init__(self, CP: structs.CarParams):
     self.CP = CP
@@ -21,13 +52,38 @@ class CarSpecificEvents:
     self.no_steer_warning = False
     self.silent_steer_warning = True
 
+    self.cruise_buttons: deque = deque([], maxlen=HYUNDAI_PREV_BUTTON_SAMPLES)
+
+    self.do_shutdown = False
+    self.params = Params()
+    self.frame = 0
+    self.mute_door = False
+    self.mute_seatbelt = False
+    self.vCruise_prev = 250
+    self.carrotCruise_prev = False
+
+  def update_params(self):
+    if self.frame % 100 == 0:
+      self.mute_seatbelt = self.params.get_bool("MuteSeatbelt")
+      self.mute_door = self.params.get_bool("MuteDoor")
+    
   def update(self, CS: car.CarState, CS_prev: car.CarState, CC: car.CarControl):
+    extra_gears = BRAND_EXTRA_GEARS.get(self.CP.brand, None)
+
+    self.frame += 1
+    self.update_params()
     if self.CP.brand in ('body', 'mock'):
-      return Events()
+      events = Events()
 
-    events = self.create_common_events(CS, CS_prev)
+    elif self.CP.brand == 'ford':
+      events = self.create_common_events(CS, CS_prev, extra_gears=extra_gears)
 
-    if self.CP.brand == 'chrysler':
+    elif self.CP.brand == 'nissan':
+      events = self.create_common_events(CS, CS_prev, extra_gears=extra_gears)
+
+    elif self.CP.brand == 'chrysler':
+      events = self.create_common_events(CS, CS_prev, extra_gears=extra_gears)
+
       # Low speed steer alert hysteresis logic
       if self.CP.minSteerSpeed > 0. and CS.vEgo < (self.CP.minSteerSpeed + 0.5):
         self.low_speed_alert = True
@@ -37,6 +93,8 @@ class CarSpecificEvents:
         events.add(EventName.belowSteerSpeed)
 
     elif self.CP.brand == 'honda':
+      events = self.create_common_events(CS, CS_prev, extra_gears=extra_gears, pcm_enable=False)
+
       if self.CP.pcmCruise and CS.vEgo < self.CP.minEnableSpeed:
         events.add(EventName.belowEngageSpeed)
 
@@ -56,10 +114,10 @@ class CarSpecificEvents:
         events.add(EventName.manualRestart)
 
     elif self.CP.brand == 'toyota':
-      # TODO: when we check for unexpected disengagement, check gear not S1, S2, S3
+      events = self.create_common_events(CS, CS_prev, extra_gears=extra_gears)
+
       if self.CP.openpilotLongitudinalControl:
-        # Only can leave standstill when planner wants to move
-        if CS.cruiseState.standstill and not CS.brakePressed and (CC.cruiseControl.resume or self.CP.flags & ToyotaFlags.HYBRID.value):
+        if CS.cruiseState.standstill and not CS.brakePressed:
           events.add(EventName.resumeRequired)
         if CS.vEgo < self.CP.minEnableSpeed:
           events.add(EventName.belowEngageSpeed)
@@ -71,6 +129,8 @@ class CarSpecificEvents:
             events.add(EventName.manualRestart)
 
     elif self.CP.brand == 'gm':
+      events = self.create_common_events(CS, CS_prev, extra_gears=extra_gears, pcm_enable=self.CP.pcmCruise)
+
       # Enabling at a standstill with brake is allowed
       # TODO: verify 17 Volt can enable for the first time at a stop and allow for all GMs
       if CS.vEgo < self.CP.minEnableSpeed and not (CS.standstill and CS.brake >= 20 and
@@ -80,6 +140,17 @@ class CarSpecificEvents:
         events.add(EventName.resumeRequired)
 
     elif self.CP.brand == 'volkswagen':
+      events = self.create_common_events(CS, CS_prev, extra_gears=[GearShifter.eco, GearShifter.sport, GearShifter.manumatic],
+                                         pcm_enable=self.CP.pcmCruise)
+
+      # Low speed steer alert hysteresis logic
+      if (self.CP.minSteerSpeed - 1e-3) > VWCarControllerParams.DEFAULT_MIN_STEER_SPEED and CS.vEgo < (self.CP.minSteerSpeed + 1.):
+        self.low_speed_alert = True
+      elif CS.vEgo > (self.CP.minSteerSpeed + 2.):
+        self.low_speed_alert = False
+      if self.low_speed_alert:
+        events.add(EventName.belowSteerSpeed)
+
       if self.CP.openpilotLongitudinalControl:
         if CS.vEgo < self.CP.minEnableSpeed + 0.5:
           events.add(EventName.belowEngageSpeed)
@@ -87,26 +158,53 @@ class CarSpecificEvents:
           events.add(EventName.speedTooLow)
 
       # TODO: this needs to be implemented generically in carState struct
-      # if CC.eps_timer_soft_disable_alert:
+      # if CC.eps_timer_soft_disable_alert:  # type: ignore[attr-defined]
       #   events.add(EventName.steerTimeLimit)
+
+    elif self.CP.brand == 'hyundai':
+      # On some newer model years, the CANCEL button acts as a pause/resume button based on the PCM state
+      # To avoid re-engaging when openpilot cancels, check user engagement intention via buttons
+      # Main button also can trigger an engagement on these cars
+      self.cruise_buttons.append(any(ev.type in HYUNDAI_ENABLE_BUTTONS for ev in CS.buttonEvents))
+      events = self.create_common_events(CS, CS_prev, extra_gears=(GearShifter.sport, GearShifter.manumatic),
+                                         #pcm_enable=self.CP.pcmCruise, allow_enable=any(self.cruise_buttons), allow_button_cancel=False)
+                                         pcm_enable=self.CP.pcmCruise, allow_enable=True, allow_button_cancel=False)
+
+      # low speed steer alert hysteresis logic (only for cars with steer cut off above 10 m/s)
+      if CS.vEgo < (self.CP.minSteerSpeed + 2.) and self.CP.minSteerSpeed > 10.:
+        self.low_speed_alert = True
+      if CS.vEgo > (self.CP.minSteerSpeed + 4.):
+        self.low_speed_alert = False
+      if self.low_speed_alert:
+        events.add(EventName.belowSteerSpeed)
+
+    else:
+      events = self.create_common_events(CS, CS_prev, extra_gears=extra_gears)
+
+    if CC.enabled:
+      if self.vCruise_prev == 0 and CS.vCruise > 0:
+        events.add(EventName.audioPrompt)
+
+    if self.carrotCruise_prev != CS.carrotCruise:
+      events.add(EventName.audioPrompt)
+
+    self.carrotCruise_prev = CS.carrotCruise
+    self.vCruise_prev = CS.vCruise
 
     return events
 
-  def create_common_events(self, CS: structs.CarState, CS_prev: car.CarState):
+  def create_common_events(self, CS: structs.CarState, CS_prev: car.CarState, extra_gears: list | None = None, pcm_enable=True,
+                           allow_enable=True, allow_button_cancel=True):
     events = Events()
 
     CI = interfaces[self.CP.carFingerprint]
-    # TODO: cleanup the honda-specific logic
-    pcm_enable = self.CP.pcmCruise and self.CP.brand != 'honda'
-    # TODO: on some hyundai cars, the cancel button is also the pause/resume button,
-    # so only use it for cancel when running openpilot longitudinal
-    allow_button_cancel = self.CP.brand != 'hyundai'
 
     if CS.doorOpen:
       events.add(EventName.doorOpen)
     if CS.seatbeltUnlatched:
       events.add(EventName.seatbeltNotLatched)
-    if CS.gearShifter != GearShifter.drive and CS.gearShifter not in CI.DRIVABLE_GEARS:
+    if CS.gearShifter != GearShifter.drive and (extra_gears is None or
+       CS.gearShifter not in extra_gears):
       events.add(EventName.wrongGear)
     if CS.gearShifter == GearShifter.reverse:
       events.add(EventName.reverseGear)
@@ -130,7 +228,7 @@ class CarSpecificEvents:
       events.add(EventName.brakeHold)
     if CS.parkingBrake:
       events.add(EventName.parkBrake)
-    if CS.accFaulted:
+    if CS.accFaulted and not CS.brakePressed:
       events.add(EventName.accFaulted)
     if CS.steeringPressed:
       events.add(EventName.steerOverride)
@@ -167,9 +265,11 @@ class CarSpecificEvents:
         # if the user overrode recently, show a less harsh alert
         if self.silent_steer_warning or CS.standstill or self.steering_unpressed < int(1.5 / DT_CTRL):
           self.silent_steer_warning = True
-          events.add(EventName.steerTempUnavailableSilent)
+          if CS.vEgo < self.CP.minSteerSpeed:
+            events.add(EventName.steerTempUnavailableSilent)
         else:
-          events.add(EventName.steerTempUnavailable)
+          if CS.vEgo < self.CP.minSteerSpeed:
+            events.add(EventName.steerTempUnavailable)
     else:
       self.no_steer_warning = False
       self.silent_steer_warning = False
@@ -179,9 +279,19 @@ class CarSpecificEvents:
     # we engage when pcm is active (rising edge)
     # enabling can optionally be blocked by the car interface
     if pcm_enable:
-      if CS.cruiseState.enabled and not CS_prev.cruiseState.enabled and not CS.blockPcmEnable:
+      if CS.cruiseState.enabled and not CS_prev.cruiseState.enabled and allow_enable:
         events.add(EventName.pcmEnable)
       elif not CS.cruiseState.enabled:
         events.add(EventName.pcmDisable)
+
+
+    if not self.CP.pcmCruise:
+      if CS.activateCruise > 0 and CS_prev.activateCruise <= 0:
+        if not events.contains(ET.NO_ENTRY):
+          events.add(EventName.buttonEnable)
+      elif CS.activateCruise < 0 and CS_prev.activateCruise >= 0:
+        events.add(EventName.buttonCancel)
+      if CS.softHoldActive > 0:
+        events.add(EventName.softHold)
 
     return events

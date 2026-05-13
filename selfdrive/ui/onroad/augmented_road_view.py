@@ -10,8 +10,13 @@ from openpilot.selfdrive.ui.onroad.hud_renderer import HudRenderer
 from openpilot.selfdrive.ui.onroad.model_renderer import ModelRenderer
 from openpilot.selfdrive.ui.onroad.cameraview import CameraView
 from openpilot.system.ui.lib.application import gui_app
+from openpilot.common.filter_simple import BounceFilter, FirstOrderFilter
 from openpilot.common.transformations.camera import DEVICE_CAMERAS, DeviceCameraConfig, view_frame_from_device_frame
 from openpilot.common.transformations.orientation import rot_from_euler
+# mici
+from openpilot.selfdrive.ui.onroad.confidence_ball import ConfidenceBall
+from openpilot.selfdrive.ui.onroad.traffic_light import TrafficLight
+from openpilot.system.ui.lib.text_draw import draw_text_ui_style
 
 OpState = log.SelfdriveState.OpenpilotState
 CALIBRATED = log.LiveCalibrationData.Status.calibrated
@@ -47,6 +52,16 @@ class AugmentedRoadView(CameraView):
     self._hud_renderer = HudRenderer()
     self.alert_renderer = AlertRenderer()
     self.driver_state_renderer = DriverStateRenderer()
+    # mici
+    self._confidence_ball = ConfidenceBall()
+    self._traffic_light = TrafficLight()
+    self._fade_texture = gui_app.texture("icons_mici/onroad/onroad_fade.png")
+    self._fade_alpha_filter = FirstOrderFilter(0, 0.1, 1 / gui_app.target_fps)
+
+    # Kans: Scr Recording
+    self._rec_x = 0
+    self._rec_y = 0
+    self._rec_r = 75
 
   def _render(self, rect):
     # Only render when system is started to avoid invalid data access
@@ -75,25 +90,113 @@ class AugmentedRoadView(CameraView):
       int(self._content_rect.height)
     )
 
-    # Render the base camera view
-    super()._render(rect)
+    # Kans: Render the base camera view
+    super()._render(self._content_rect) # super()._render(rect)
 
     # Draw all UI overlays
     self.model_renderer.render(self._content_rect)
-    self._hud_renderer.render(self._content_rect)
-    self.alert_renderer.render(self._content_rect)
-    self.driver_state_renderer.render(self._content_rect)
 
-    # Custom UI extension point - add custom overlays here
-    # Use self._content_rect for positioning within camera bounds
+    # Fade out bottom of overlays for looks
+    rl.draw_texture_ex(self._fade_texture, rl.Vector2(self._content_rect.x, self._content_rect.y), 0.0, 1.0, rl.WHITE)
+
+    alert_to_render = self.alert_renderer.will_render()
+    self._hud_renderer.set_can_draw_top_icons(alert_to_render is None)
+    # TODO: have alert renderer draw offroad tizi label below
+    self._hud_renderer.render(self._content_rect)
+    if ui_state.started:
+      self.alert_renderer.render(self._content_rect)
+
+    # Draw fake rounded border
+    rl.draw_rectangle_rounded_lines_ex(self._content_rect, 0.2 * 1.02, 10, 50, rl.BLACK)
+
+    self.driver_state_renderer.render(self._content_rect)
 
     # End clipping region
     rl.end_scissor_mode()
 
     # Draw colored border based on driving state
-    self._draw_border(rect)
+    self._draw_border_carrot(rect)
 
-  def _handle_mouse_press(self, _):
+    # Custom UI extension point - add custom overlays here
+    # Use self._content_rect for positioning within camera bounds
+    self._traffic_light.render(rect)
+    if not self._traffic_light.is_visible():
+      self._confidence_ball.render(rect)
+
+    # Kans: Scr recording
+    self._rec_x = int(rect.x + 160)
+    self._rec_y = int(rect.y + rect.height - 670)
+    self._rec_r = 75
+
+    is_rec = gui_app.is_recording()
+    elapsed = gui_app.recording_elapsed()
+
+    R = 75
+    self._rec_r = R
+
+    # 2초 깜박임
+    blink_on = (int(elapsed / 2.0) % 2 == 0) if is_rec else True
+    # 평상시
+    idle_ring = rl.Color(190, 190, 190, 180)
+    idle_fill = rl.Color(90, 90, 90, 120)
+    idle_dot = rl.Color(170, 170, 170, 180)
+    # 녹화중 채움색
+    rec_fill_on = rl.Color(90, 20, 20, 120)
+    rec_fill_off = rl.Color(0, 0, 0, 120)
+    # 녹화중 테두리색
+    rec_ring_on = rl.Color(210, 90, 90, 220)
+    rec_ring_off = rl.Color(120, 70, 70, 170)
+    # 녹화중 Dot color
+    rec_dot_on = rl.Color(220, 95, 95, 230)
+    rec_dot_off = rl.Color(110, 55, 55, 170)
+
+    # 바깥 원 배경 + 테두리
+    if is_rec:
+      fill_color = rec_fill_on if blink_on else rec_fill_off
+      ring_color = rec_ring_on if blink_on else rec_ring_off
+    else:
+      fill_color = idle_fill
+      ring_color = idle_ring
+
+    rl.draw_circle(self._rec_x, self._rec_y, R, fill_color)
+    rl.draw_circle_lines(self._rec_x, self._rec_y, R, ring_color)
+
+    # 녹화중 반경(dot_r)
+    dot_y = self._rec_y 
+    dot_r = 51
+    if is_rec:
+      dot_color = rec_dot_on if blink_on else rec_dot_off
+    else:
+      dot_color = idle_dot
+    rl.draw_circle(self._rec_x, dot_y, dot_r, dot_color)
+
+    # REC 텍스트
+    text_color = rl.Color(240, 240, 240, 220) if not is_rec else rl.Color(255, 235, 235, 230)
+    rl.draw_text("REC", self._rec_x - 28, self._rec_y - 10, 30, text_color)
+
+    # 경과시간
+    if is_rec:
+      total_sec = int(elapsed)
+      mm = total_sec // 60
+      ss = total_sec % 60
+      timer_text = f"{mm:02d}:{ss:02d}"
+      rl.draw_text(timer_text, self._rec_x - 30, self._rec_y + 24, 24, rl.Color(255, 255, 255, 220))
+
+  def _handle_mouse_press(self, mouse_event):
+    mx = mouse_event.x
+    my = mouse_event.y
+
+    dx = mx - self._rec_x
+    dy = my - self._rec_y
+    hit = (dx * dx + dy * dy) <= (self._rec_r * self._rec_r)
+
+    print(f"[RECDBG] touch=({mx}, {my}) rec=({self._rec_x}, {self._rec_y}) r={self._rec_r} dx={dx} dy={dy} hit={hit}")
+
+    if hit:
+      gui_app.toggle_recording()
+      print(f"[REC] toggled -> {gui_app.is_recording()}")
+      return
+
     if not self._hud_renderer.user_interacting() and self._click_callback is not None:
       self._click_callback()
 
@@ -207,6 +310,204 @@ class AugmentedRoadView(CameraView):
 
     return self._cached_matrix
 
+  def _get_border_color(self, status: UIStatus) -> rl.Color:
+    return BORDER_COLORS.get(status, BORDER_COLORS[UIStatus.DISENGAGED])
+
+  def _draw_border_carrot(self, rect: rl.Rectangle):
+    sm = ui_state.sm
+    if not sm.alive["carState"]:
+      self._draw_border(rect)
+      return
+
+    car_state = sm["carState"]
+
+    x = float(rect.x)
+    y = float(rect.y)
+    w = float(rect.width)
+    h = float(rect.height)
+
+    mid_y = y + h / 2.0
+    center_gap = 200.0
+    gap_half = center_gap / 2.0
+
+    thickness = float(UI_BORDER_SIZE)
+    roundness = 0.18
+    segments = 10
+
+    # ---------- colors ----------
+    if car_state.steeringPressed:
+      top_color = self._get_border_color(UIStatus.OVERRIDE)
+    elif ui_state.lat_active:
+      top_color = self._get_border_color(UIStatus.ENGAGED)
+    else:
+      top_color = self._get_border_color(UIStatus.DISENGAGED)
+
+    bottom_color = self._get_border_color(ui_state.status)
+
+    left_blink = bool(car_state.leftBlinker)
+    right_blink = bool(car_state.rightBlinker)
+
+    # ---------- geometry ----------
+    top_h = max(0.0, mid_y - gap_half - y)
+    bottom_y = mid_y + gap_half
+    bottom_h = max(0.0, y + h - bottom_y)
+
+    # blinker box
+    blink_w = UI_BORDER_SIZE
+    blink_h = center_gap
+    blink_y = mid_y - blink_h / 2.0
+
+    left_blink_rect = rl.Rectangle(
+      x,
+      blink_y,
+      blink_w,
+      blink_h
+    )
+    right_blink_rect = rl.Rectangle(
+      x + w - blink_w,
+      blink_y,
+      blink_w,
+      blink_h
+    )
+
+    # ---------- top inverted U ----------
+    # top horizontal
+    rl.draw_rectangle(
+      int(x),
+      int(y),
+      int(w),
+      int(thickness),
+      top_color
+    )
+
+    # top left vertical
+    rl.draw_rectangle(
+      int(x),
+      int(y),
+      int(thickness),
+      int(top_h),
+      top_color
+    )
+
+    # top right vertical
+    rl.draw_rectangle(
+      int(x + w - thickness),
+      int(y),
+      int(thickness),
+      int(top_h),
+      top_color
+    )
+
+    # ---------- bottom U ----------
+    # bottom left vertical
+    rl.draw_rectangle(
+      int(x),
+      int(bottom_y),
+      int(thickness),
+      int(bottom_h),
+      bottom_color
+    )
+
+    # bottom right vertical
+    rl.draw_rectangle(
+      int(x + w - thickness),
+      int(bottom_y),
+      int(thickness),
+      int(bottom_h),
+      bottom_color
+    )
+
+    # bottom horizontal
+    rl.draw_rectangle(
+      int(x),
+      int(y + h - thickness),
+      int(w),
+      int(thickness),
+      bottom_color
+    )
+
+    # ---------- blinkers ----------
+    rl.draw_rectangle_rounded(
+      left_blink_rect,
+      roundness,
+      segments,
+      rl.ORANGE if left_blink else rl.BLACK
+    )
+    rl.draw_rectangle_rounded_lines_ex(
+      left_blink_rect,
+      roundness,
+      segments,
+      1.0,
+      top_color
+    )
+
+    rl.draw_rectangle_rounded(
+      right_blink_rect,
+      roundness,
+      segments,
+      rl.ORANGE if right_blink else rl.BLACK
+    )
+    rl.draw_rectangle_rounded_lines_ex(
+      right_blink_rect,
+      roundness,
+      segments,
+      1.0,
+      top_color
+    )
+
+    # ---------- text ----------
+    text_margin = 30.0
+    font_size = 30.0
+    line_margin = 2.0
+
+    top = str(car_state.logCarrot)
+    top_left = ""
+    top_right = ""
+    bottom = ""
+    bottom_left = ""
+    bottom_right = ""
+
+    car_name = ui_state.params.get("CarName") or ""
+
+    if ui_state.params.get_int("HyundaiCameraSCC") > 0:
+      car_name += "(CAMERA SCC)"
+    else:
+      try:
+        if sm.alive["carParams"] and sm["carParams"].openpilotLongitudinalControl:
+          car_name += " - OP Long"
+      except Exception:
+        pass
+
+    nnff_model_name = ui_state.params.get("NNFFModelName") or ""
+    if len(nnff_model_name) > 0:
+      car_name += ",NNFF"
+
+    top_left = car_name
+
+    if sm.alive["lateralPlan"]:
+      lat_plan = sm["lateralPlan"]
+      bottom = str(lat_plan.latDebugText)
+
+    bottom_left = ui_state.params.get("GitBranch") or ""
+
+    bottom_right = ui_state.params_memory.get("NetworkAddress") or ""
+
+    # text positions
+    top_text_y = y + line_margin
+    bottom_text_y = bottom_y + bottom_h - font_size - 2
+    draw_text_ui_style(top, x + w / 2.0, top_text_y, font_size, rl.WHITE,
+                       align="center_top", y_offset=0.0)
+    draw_text_ui_style(top_left, x + text_margin, top_text_y, font_size, rl.WHITE,
+                       align="left_top", y_offset=0.0)
+    draw_text_ui_style(top_right, x + w - text_margin, top_text_y, font_size, rl.WHITE,
+                       align="right_top", y_offset=0.0)
+
+    draw_text_ui_style(bottom, x + w / 2.0, bottom_text_y, font_size, rl.WHITE,
+                       align="center_top", y_offset=0.0)
+    draw_text_ui_style(bottom_left, x + text_margin, bottom_text_y, font_size, rl.WHITE,
+                       align="left_top", y_offset=0.0)
+    draw_text_ui_style(bottom_right, x + w - text_margin, bottom_text_y, font_size, rl.WHITE,
+                       align="right_top", y_offset=0.0)
 
 if __name__ == "__main__":
   gui_app.init_window("OnRoad Camera View")
@@ -220,5 +521,6 @@ if __name__ == "__main__":
         if WIDE_CAM in road_camera_view.available_streams:
           stream = ROAD_CAM if road_camera_view.stream_type == WIDE_CAM else WIDE_CAM
           road_camera_view.switch_stream(stream)
+      road_camera_view.render(rl.Rectangle(0, 0, gui_app.width, gui_app.height))
   finally:
     road_camera_view.close()

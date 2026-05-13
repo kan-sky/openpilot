@@ -59,6 +59,7 @@ _services: dict[str, tuple] = {
   "liveParameters": (True, 20., 5),
   "cameraOdometry": (True, 20., 10),
   "thumbnail": (True, 1 / 60., 1),
+  "lateralPlan": (True, 20., 5),
   "onroadEvents": (True, 1., 1),
   "carParams": (True, 0.02, 1),
   "roadCameraState": (True, 20., 20),
@@ -71,6 +72,12 @@ _services: dict[str, tuple] = {
   "drivingModelData": (True, 20., 10),
   "modelV2": (True, 20., None, QueueSize.BIG),
   "managerState": (True, 2., 1),
+  "navInstruction": (True, 1., 10),
+  "navRoute": (True, 0.),
+  "navRouteNavd": (True, 0.),
+  "navThumbnail": (True, 0.),
+  "navModel": (True, 2., 4.),
+  "mapRenderState": (True, 2., 1.),
   "qRoadEncodeIdx": (False, 20.),
   "userBookmark": (True, 0., 1),
   "soundPressure": (True, 10., 10),
@@ -81,6 +88,9 @@ _services: dict[str, tuple] = {
   "driverEncodeData": (False, 20., None, QueueSize.BIG),
   "wideRoadEncodeData": (False, 20., None, QueueSize.BIG),
   "qRoadEncodeData": (False, 20., None, QueueSize.BIG),
+
+  "carrotMan": (True, 0.),
+  "navInstructionCarrot": (True, 1., 10),
 
   # debug
   "uiDebug": (True, 0., 1),

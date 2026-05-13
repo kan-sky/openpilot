@@ -3,6 +3,8 @@ import capnp
 import numpy as np
 from cereal import log
 from openpilot.selfdrive.modeld.constants import ModelConstants, Plan, Meta
+# Carrot
+import math
 
 SEND_RAW_PRED = os.getenv('SEND_RAW_PRED')
 
@@ -96,7 +98,49 @@ def fill_model_msg(base_msg: capnp._DynamicStructBuilder, extended_msg: capnp._D
   modelV2.action = action
 
   # times at X_IDXS of edges and lines aren't used
-  LINE_T_IDXS: list[float] = []
+  # Carrot: 모델이 예측한 시간별 전진거리(plan_x)를 이용해, 각 고정거리 X_IDXS에 대응하는 도달시간 LINE_T_IDXS를 안전하게 보간해서 만드는 로직
+  # LINE_T_IDXS: list[float] = [] <- 이렇게 빈 곳을 시간대별로 예측되는 거리에 값을 저장하기 위한 
+
+  # times at X_IDXS according to model plan
+  LINE_T_IDXS = [np.nan] * ModelConstants.IDX_N
+  LINE_T_IDXS[0] = 0.0
+  plan_x = net_output_data['plan'][0, :, Plan.POSITION][:, 0].tolist()
+  Tmax = ModelConstants.T_IDXS[ModelConstants.IDX_N - 1]
+  for xidx in range(1, ModelConstants.IDX_N):
+    tidx = 0
+    # increment tidx until we find an element that's further away than the current xidx
+    while tidx < ModelConstants.IDX_N - 1 and plan_x[tidx + 1] < ModelConstants.X_IDXS[xidx]:
+      tidx += 1
+    if tidx == ModelConstants.IDX_N - 1:
+      for k in range(xidx, ModelConstants.IDX_N):
+        LINE_T_IDXS[k] = Tmax
+      break  
+    # interpolate to find `t` for the current xidx
+    current_x_val = plan_x[tidx]
+    next_x_val = plan_x[tidx + 1]
+
+    dx = next_x_val - current_x_val
+    if dx <= 1e-9:
+      LINE_T_IDXS[xidx] = ModelConstants.T_IDXS[tidx]
+    else:
+      p = (ModelConstants.X_IDXS[xidx] - current_x_val) / dx
+      if p < 0.0: p = 0.0                                   
+      elif p > 1.0: p = 1.0                                 
+      LINE_T_IDXS[xidx] = p * ModelConstants.T_IDXS[tidx + 1] + (1.0 - p) * ModelConstants.T_IDXS[tidx]
+
+    #p = (ModelConstants.X_IDXS[xidx] - current_x_val) / (next_x_val - current_x_val) if abs(
+    #  next_x_val - current_x_val) > 1e-9 else float('nan')
+    #LINE_T_IDXS[xidx] = p * ModelConstants.T_IDXS[tidx + 1] + (1 - p) * ModelConstants.T_IDXS[tidx]
+
+  LINE_T_IDXS = [float(Tmax if math.isnan(float(v)) else float(v)) for v in LINE_T_IDXS]
+
+  # 비내림(monotonic non-decreasing) 보정 (순수 파이썬, numpy 불사용)
+  running = LINE_T_IDXS[0]
+  for i in range(1, len(LINE_T_IDXS)):
+      if LINE_T_IDXS[i] < running:
+          LINE_T_IDXS[i] = running
+      else:
+          running = LINE_T_IDXS[i]
 
   # lane lines
   modelV2.init('laneLines', 4)

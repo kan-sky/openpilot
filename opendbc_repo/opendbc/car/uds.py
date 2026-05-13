@@ -163,6 +163,7 @@ class ISOTP_FRAME_TYPE(IntEnum):
   FIRST = 1
   CONSECUTIVE = 2
   FLOW = 3
+  UNKNOWN = 4  # Kans
 
 
 class DynamicSourceDefinition(NamedTuple):
@@ -481,6 +482,10 @@ class IsoTpMessage:
       while True:
         for msg in self._can_client.recv():
           frame_type = self._isotp_rx_next(msg)
+          # Kans
+          if frame_type == ISOTP_FRAME_TYPE.UNKNOWN:
+            continue
+
           start_time = time.monotonic()
           # Anything that signifies we're building a response
           rx_in_progress = frame_type in (ISOTP_FRAME_TYPE.FIRST, ISOTP_FRAME_TYPE.CONSECUTIVE)
@@ -527,11 +532,34 @@ class IsoTpMessage:
       # Once a first frame is received, further frames must be consecutive
       assert self.rx_dat == b"" or self.rx_done, "isotp - rx: first frame with active frame"
       self.rx_len = ((rx_data[0] & 0x0F) << 8) + rx_data[1]
-      assert self.rx_len >= self.max_len, f"isotp - rx: invalid first frame length: {self.rx_len}"
-      assert len(rx_data) == self.max_len, f"isotp - rx: invalid CAN frame length: {len(rx_data)}"
+      #assert self.rx_len >= self.max_len, f"isotp - rx: invalid first frame length: {self.rx_len}"
+      #assert len(rx_data) == self.max_len, f"isotp - rx: invalid CAN frame length:
+      # Kans
+      if self.rx_len <= (self.max_len - 2):
+        carlog.error(
+          f"isotp - rx: invalid first frame length={self.rx_len} "
+          f"addr={hex(self._can_client.rx_addr)} data=0x{rx_data.hex()}"
+        )
+        self.rx_dat = b""
+        self.rx_len = 0
+        self.rx_idx = 0
+        self.rx_done = False
+        return ISOTP_FRAME_TYPE.UNKNOWN
+
+      if len(rx_data) != self.max_len:
+        carlog.error(
+          f"isotp - rx: invalid CAN frame length={len(rx_data)} "
+          f"expected={self.max_len} addr={hex(self._can_client.rx_addr)} data=0x{rx_data.hex()}"
+        )
+        self.rx_dat = b""
+        self.rx_len = 0
+        self.rx_idx = 0
+        self.rx_done = False
+        return ISOTP_FRAME_TYPE.UNKNOWN
+
       self.rx_dat = rx_data[2:]
       self.rx_idx = 0
-      self.rx_done = False
+      self.rx_done = len(self.rx_dat) >= self.rx_len  # False
       carlog.debug(f"ISO-TP: RX - first frame - {hex(self._can_client.rx_addr)} idx={self.rx_idx} done={self.rx_done}")
       carlog.debug(f"ISO-TP: TX - flow control continue - {hex(self._can_client.tx_addr)}")
       # send flow control message
@@ -586,7 +614,12 @@ class IsoTpMessage:
 
     # 4-15 - reserved
     else:
-      raise Exception(f"isotp - rx: invalid frame type: {rx_data[0] >> 4}")
+      #raise Exception(f"isotp - rx: invalid frame type: {rx_data[0] >> 4}")
+      carlog.error(
+        f"isotp - rx: invalid frame type={rx_data[0] >> 4} "
+        f"addr={hex(self._can_client.rx_addr)} data=0x{rx_data.hex()}"
+      )
+      return ISOTP_FRAME_TYPE.UNKNOWN
 
 
 FUNCTIONAL_ADDRS = [0x7DF, 0x18DB33F1]

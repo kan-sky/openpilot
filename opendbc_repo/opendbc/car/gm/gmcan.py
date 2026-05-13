@@ -1,23 +1,41 @@
+﻿from opendbc.car import DT_CTRL
 from opendbc.car.can_definitions import CanData
-from opendbc.car.gm.values import CAR
+from opendbc.car.gm.values import CAR, CruiseButtons, CanBus
+from opendbc.car.common.conversions import Conversions as CV
 
+# GM: AutoResume: brake signal to CAN
+def create_brake_command(packer, bus, apply_brake, idx):
+  rc = int(idx) & 0x3  # 2비트 롤링카운터
+  mode = 0xA if apply_brake > 0 else 0x1
+  apply_brake = max(0, min(0xFFF, int(apply_brake)))
+  brake = (0x1000 - apply_brake) & 0xFFF
+  checksum = (0x10000 - (mode << 12) - brake - rc) & 0xFFFF
+
+  values = {
+    "RollingCounter": rc,
+    "FrictionBrakeMode": mode,
+    "FrictionBrakeChecksum": checksum,
+    "FrictionBrakeCmd": brake,   # unsigned/raw DBC
+  }
+
+  return packer.make_can_msg("EBCMFrictionBrakeCmd", bus, values)
 
 def create_buttons(packer, bus, idx, button):
+  rc = int(idx) & 0x3
   values = {
     "ACCButtons": button,
-    "RollingCounter": idx,
+    "RollingCounter": rc,
     "ACCAlwaysOne": 1,
     "DistanceButton": 0,
   }
 
   checksum = 240 + int(values["ACCAlwaysOne"] * 0xf)
   checksum += values["RollingCounter"] * (0x4ef if values["ACCAlwaysOne"] != 0 else 0x3f0)
-  checksum -= int(values["ACCButtons"] - 1) << 4  # not correct if value is 0
+  checksum -= int(values["ACCButtons"] - 1) << 4  # 값이 0일 경우 문제 발생 가능성 있음
   checksum -= 2 * values["DistanceButton"]
 
   values["SteeringButtonChecksum"] = checksum
   return packer.make_can_msg("ASCMSteeringButton", bus, values)
-
 
 def create_pscm_status(packer, bus, pscm_status):
   values = {s: pscm_status[s] for s in [
@@ -53,6 +71,7 @@ def create_adas_keepalive(bus):
 
 
 def create_gas_regen_command(packer, bus, throttle, idx, enabled, at_full_stop):
+  idx = int(idx) & 0x3  # 2-bit rolling counter
   values = {
     "GasRegenCmdActive": enabled,
     "RollingCounter": idx,
@@ -69,7 +88,6 @@ def create_gas_regen_command(packer, bus, throttle, idx, enabled, at_full_stop):
 
   return packer.make_can_msg("ASCMGasRegenCmd", bus, values)
 
-
 def create_friction_brake_command(packer, bus, apply_brake, idx, enabled, near_stop, at_full_stop, CP):
   mode = 0x1
 
@@ -78,23 +96,26 @@ def create_friction_brake_command(packer, bus, apply_brake, idx, enabled, near_s
     mode = 0x9
 
   if apply_brake > 0:
-    mode = 0xa
+    mode = 0xA
     if at_full_stop:
-      mode = 0xd
+      mode = 0xD
 
     # TODO: this is to have GM bringing the car to complete stop,
     # but currently it conflicts with OP controls, so turned off. Not set by all cars
     #elif near_stop:
-    #  mode = 0xb
+    #  mode = 0xB
 
-  brake = (0x1000 - apply_brake) & 0xfff
-  checksum = (0x10000 - (mode << 12) - brake - idx) & 0xffff
+
+  apply_brake = max(0, min(0xFFF, int(apply_brake)))
+  brake = (0x1000 - apply_brake) & 0xFFF
+  rc = int(idx) & 0x3  # 2비트 롤링카운터
+  checksum = (0x10000 - (mode << 12) - brake - rc) & 0xFFFF
 
   values = {
-    "RollingCounter": idx,
+    "RollingCounter": rc,
     "FrictionBrakeMode": mode,
     "FrictionBrakeChecksum": checksum,
-    "FrictionBrakeCmd": -apply_brake
+    "FrictionBrakeCmd": brake,   # unsigned/raw DBC
   }
 
   return packer.make_can_msg("EBCMFrictionBrakeCmd", bus, values)
@@ -169,3 +190,61 @@ def create_lka_icon_command(bus, active, critical, steer):
   else:
     dat = b"\x00\x00\x00"
   return CanData(0x104c006c, dat, bus)
+
+def create_regen_paddle_command(packer, bus, press_regen_paddle):
+  regen_paddle_value = 2 if press_regen_paddle else 0
+  values = {
+    "RegenPaddle": regen_paddle_value,
+    "Byte1": 0,
+    "Byte2": 0,
+    "Byte3": 0,
+    "Byte4": 0,
+    "Byte5": 0,
+    "Byte6": 0
+  }
+  return packer.make_can_msg("EBCMRegenPaddle", bus, values)
+
+def create_gm_cc_spam_command(packer, controller, CS, actuators):
+  if controller.params_.get_bool("IsMetric"):
+    _CV = CV.MS_TO_KPH
+    RATE_UP_MAX = 0.04
+    RATE_DOWN_MAX = 0.04
+  else:
+    _CV = CV.MS_TO_MPH
+    RATE_UP_MAX = 0.2
+    RATE_DOWN_MAX = 0.2
+
+  accel = actuators.accel * _CV  # m/s/s to mph/s
+  speedSetPoint = int(round(CS.out.cruiseState.speed * _CV))
+
+  cruiseBtn = CruiseButtons.INIT
+  if speedSetPoint == CS.CP.minEnableSpeed and accel < -1:
+    cruiseBtn = CruiseButtons.CANCEL
+    controller.apply_speed = 0
+    rate = 0.04
+  elif accel < 0:
+    cruiseBtn = CruiseButtons.DECEL_SET
+    if speedSetPoint > (CS.out.vEgo * _CV) + 3.0:  # If accel is changing directions, bring set speed to current speed as fast as possible
+      rate = RATE_DOWN_MAX
+    else:
+      rate = max(-1 / accel, RATE_DOWN_MAX)
+    controller.apply_speed = speedSetPoint - 1
+  elif accel > 0:
+    cruiseBtn = CruiseButtons.RES_ACCEL
+    if speedSetPoint < (CS.out.vEgo * _CV) - 3.0:
+      rate = RATE_UP_MAX
+    else:
+      rate = max(1 / accel, RATE_UP_MAX)
+    controller.apply_speed = speedSetPoint + 1
+  else:
+    controller.apply_speed = speedSetPoint
+    rate = float('inf')
+
+  # Check rlogs closely - our message shouldn't show up on the pt bus for us
+  # Or bus 2, since we're forwarding... but I think it does
+  if (cruiseBtn != CruiseButtons.INIT) and ((controller.frame - controller.last_button_frame) * DT_CTRL > rate):
+    controller.last_button_frame = controller.frame
+    idx = (CS.buttons_counter + 1) % 4  # Need to predict the next idx for '22-23 EUV
+    return [create_buttons(packer, CanBus.POWERTRAIN, idx, cruiseBtn)]
+  else:
+    return []

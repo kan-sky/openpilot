@@ -81,12 +81,17 @@ class DBC:
       self._parse_file(name)
     else:
       dbc_path = os.path.join(DBC_PATH, name + ".dbc")
-      if content := get_generated_dbcs().get(name):
-        self._parse_content(name, content)
-      elif os.path.exists(dbc_path):
+      # Kans: 수정가능한 파일(DBC_PATH, name + ".dbc") 우선 사용
+      if os.path.exists(dbc_path):
         self._parse_file(dbc_path)
       else:
-        raise FileNotFoundError(f"DBC not found: {name}")
+        # 자동생성 DBC사용
+        generated = get_generated_dbcs()
+        content = generated.get(name)
+        if content is None:
+          raise FileNotFoundError(f"DBC not found: {name}")
+        self._parse_content(name, content)
+
 
   def _parse_file(self, path: str):
     self.name = os.path.basename(path).replace(".dbc", "")
