@@ -175,6 +175,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"AutoGasTokSpeed", {PERSISTENT, INT, "5"}},
     {"AutoGasSyncSpeed", {PERSISTENT, INT, "0"}},
     {"AutoEngage", {PERSISTENT, INT, "2"}},
+    {"AlwaysLateral", {PERSISTENT, INT, "1"} },
     {"AutoCurveSpeedLowerLimit", {PERSISTENT, INT, "30"}},
     {"AutoCurveSpeedFactor", {PERSISTENT, INT, "120"}},
     {"AutoCurveSpeedAggressiveness", {PERSISTENT, INT, "85"}},
