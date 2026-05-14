@@ -113,7 +113,7 @@ def manager_cleanup() -> None:
 
   cloudlog.info("everything is dead")
 
-#Kans: �޸𸮻���ľ�
+#Kans: 메모리사용파악
 def read_rss_kb(pid: int) -> int:
   try:
     with open(f"/proc/{pid}/status") as f:
@@ -174,7 +174,7 @@ def manager_thread() -> None:
 
     ensure_running(managed_processes.values(), started, params=params, CP=sm['carParams'], not_run=ignore)
 
-    # Kans: �޸𸮻���ľ�
+    # Kans: 메모리사용파악
     if params.get_bool("MemUsage") and now - mem_print_t > 10.0:
       mem_print_t = now
       mem_lines = []
