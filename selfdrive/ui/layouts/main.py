@@ -30,25 +30,24 @@ class MainLayout(Widget):
 
     self._sidebar = Sidebar()
     self._current_mode = MainState.HOME
-    self._prev_onroad = False
-
-    # uiDebug publisher for onroad/debug overlay timing
-    self._ui_debug_pm = messaging.PubMaster(['uiDebug'])
-    self._prev_standstill = False
-    self._onroad_time_delay: float | None = None
 
     # Initialize layouts
     self._home_layout = HomeLayout()
     self._home_body_layout = BodyLayout()
 
     # Custom onroad widgets
-    self._onroad_layout = AugmentedRoadView(pm=self._ui_debug_pm)
+    self._onroad_layout = AugmentedRoadView()
     self._debug_plot = DebugPlot()
 
     self._layouts = {
       MainState.HOME: HomeLayout(),
       MainState.SETTINGS: SettingsLayout(),
-      MainState.ONROAD: self._onroad_layout}
+      MainState.ONROAD: self._onroad_layout,
+    }
+
+    self._prev_onroad = False
+    self._prev_standstill = False
+    self._onroad_time_delay: float | None = None
 
     self._sidebar_rect = rl.Rectangle(0, 0, 0, 0)
     self._content_rect = rl.Rectangle(0, 0, 0, 0)

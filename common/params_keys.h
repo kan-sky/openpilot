@@ -175,7 +175,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"AutoGasTokSpeed", {PERSISTENT, INT, "5"}},
     {"AutoGasSyncSpeed", {PERSISTENT, INT, "0"}},
     {"AutoEngage", {PERSISTENT, INT, "2"}},
-    {"AlwaysLateral", {PERSISTENT, INT, "1"} },
+    {"AlwaysLateral", {PERSISTENT, INT, "1"}},
     {"AutoCurveSpeedLowerLimit", {PERSISTENT, INT, "30"}},
     {"AutoCurveSpeedFactor", {PERSISTENT, INT, "120"}},
     {"AutoCurveSpeedAggressiveness", {PERSISTENT, INT, "85"}},
@@ -342,4 +342,5 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"PsiDampingSCurve", {PERSISTENT, INT, "60"}},
     {"MaxLatAccelNoRollLowSpeed", {PERSISTENT, INT, "38"}},
     {"LatSmoothDebug", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION, STRING}},
+    {"MemUsage", {PERSISTENT, INT, "0"}},
 };
