@@ -161,8 +161,8 @@ class LanePlanner:
     else:
       lane_path_y = (l_prob * path_from_left_lane + r_prob * path_from_right_lane) / (l_prob + r_prob + 0.0001)
 
-    # Kans: 안쪽차선 마진 .5m, 최소곡률 .0008(=완만한 커브에도 적용), 차선폭 2.8미터 미만은 미적용.
-    INSIDE_LANE_MARGIN = 0.5
+    # Kans: 안쪽차선 마진 .6m, 최소곡률 .0008(=완만한 커브에도 적용), 차선폭 2.8미터 미만은 미적용.
+    INSIDE_LANE_MARGIN = 0.6
     CURVE_THRESHOLD = 0.0008
     MIN_LANE_WIDTH_FOR_MARGIN = 2.8
     curvature = getattr(self, "curvature", 0.0)
