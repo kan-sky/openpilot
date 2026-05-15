@@ -414,7 +414,7 @@ class LongitudinalMpc:
     self.stopped_lead_active = self.stopped_lead_count >= 3
     # Kans: 앞차가 출발하면 정지차 상태 즉시 해제
     if self.stopped_lead_active and radarstate.leadOne.status:
-      if lead_v > 1.0 or radarstate.leadOne.vRel > 0.3:
+      if lead_v > 0.5 or radarstate.leadOne.vRel > 0.2:
         self.stopped_lead_count = 0
         self.stopped_lead_active = False
 
