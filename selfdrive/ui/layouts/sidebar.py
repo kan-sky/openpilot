@@ -202,9 +202,9 @@ class Sidebar(Widget):
         if calib.calStatus != log.LiveCalibrationData.Status.uncalibrated:
           pitch = math.degrees(calib.rpyCalib[1])
           yaw = math.degrees(calib.rpyCalib[2])
-          desc += str("{:.2f}¡Æ {} | {:.2f}¡Æ {}").format(
-            abs(pitch), str("¡é") if pitch > 0 else str("¡è"),
-            abs(yaw), str("¡ç") if yaw > 0 else str("¡æ"))
+          desc += str("{:.2f}Â° {} | {:.2f}Â° {}").format(
+            abs(pitch), str("â†“") if pitch > 0 else str("â†‘"),
+            abs(yaw), str("â†") if yaw > 0 else str("â†’"))
       except Exception:
         cloudlog.exception("invalid CalibrationParams")
     device_text_y = rect.y + 800
@@ -224,7 +224,7 @@ class Sidebar(Widget):
       y = int(y_pos + dot_size // 2)
       rl.draw_circle(x, y, dot_size // 2, color)
 
-    # Network type text
+    # Network type text -> IP text
     text_y = rect.y + 247
     text_pos = rl.Vector2(rect.x + 32, text_y)
     rl.draw_text_ex(self._font_regular, self._ip_address, text_pos, FONT_SIZE-1, 0, Colors.WHITE)
