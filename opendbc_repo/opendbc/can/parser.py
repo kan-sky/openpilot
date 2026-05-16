@@ -1,3 +1,4 @@
+import time
 import math
 import numbers
 from collections import defaultdict, deque
@@ -108,8 +109,12 @@ class MessageState:
     if self.ignore_alive:
       return True
     if not self.timestamps:
+      if self.first_seen_nanos != 0 and (current_nanos - self.first_seen_nanos) < 2e9:  # 2초 유예
+        return True
+      #print(f"Not Seen {self.name} on bus {self.address} has no timestamps yet, first seen at {self.first_seen_nanos} ns")
       return False
     if (current_nanos - self.timestamps[-1]) > self.timeout_threshold:
+      #print(f"Timeout {self.name} on bus {self.address} timed out: {current_nanos - self.timestamps[-1]} ns since last update")
       return False
     return True
 
@@ -136,6 +141,8 @@ class CANParser:
     self.ts_nanos: dict[int | str, dict[str, int]] = {}
     self.addresses: set[int] = set()
     self.message_states: dict[int, MessageState] = {}
+    self.seen_addresses: set[int] = set()
+    self.controls_ready = False
 
     for name_or_addr, freq in messages:
       if isinstance(name_or_addr, numbers.Number):
@@ -153,7 +160,7 @@ class CANParser:
     self.last_nonempty_nanos: int = 0
     self._last_update_nanos: int = 0
 
-  def _add_message(self, name_or_addr: str | int, freq: int | None = None) -> None:
+  def _add_message(self, name_or_addr: str | int, freq: int | None = None, ignore_counter: bool = False) -> None:
     if isinstance(name_or_addr, numbers.Number):
       msg = self.dbc.addr_to_msg.get(int(name_or_addr))
     else:
@@ -177,7 +184,9 @@ class CANParser:
       size=msg.size,
       signals=list(msg.sigs.values()),
       ignore_alive=freq is not None and math.isnan(freq),
+      ignore_counter=ignore_counter,
     )
+    state.first_seen_nanos = time.monotonic_ns()  # 등록시 즉시 타임스탬프 설정
     if freq is not None and freq > 0:
       state.frequency = freq
     else:
@@ -229,6 +238,8 @@ class CANParser:
       for address, dat, src in frames:
         if src != self.bus:
           continue
+        if self.controls_ready:
+          self.seen_addresses.add(address)
         bus_empty = False
         state = self.message_states.get(address)
         if state is None or len(dat) > 64:

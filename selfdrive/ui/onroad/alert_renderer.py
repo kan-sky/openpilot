@@ -1,4 +1,6 @@
 import time
+# mici
+from typing import NamedTuple
 import pyray as rl
 from dataclasses import dataclass
 from cereal import messaging, log
@@ -81,6 +83,7 @@ class AlertRenderer(Widget):
     self._full_text2_label = Label("", font_size=ALERT_FONT_BIG, text_alignment=rl.GuiTextAlignment.TEXT_ALIGN_CENTER,
                                    text_alignment_vertical=rl.GuiTextAlignmentVertical.TEXT_ALIGN_TOP)
 
+    self._prev_alert: Alert | None = None # Kans
   def get_alert(self, sm: messaging.SubMaster) -> Alert | None:
     """Generate the current alert based on selfdrive state."""
     ss = sm['selfdriveState']
@@ -112,7 +115,14 @@ class AlertRenderer(Widget):
       return None
 
     # Return current alert
-    return Alert(text1=ss.alertText1, text2=ss.alertText2, size=ss.alertSize.raw, status=ss.alertStatus.raw)
+    # Kans
+    ret = Alert(text1=ss.alertText1, text2=ss.alertText2, size=ss.alertSize.raw, status=ss.alertStatus.raw)
+    self._prev_alert = ret
+    return ret
+
+  def will_render(self) -> tuple[Alert | None, bool]:
+    alert = self.get_alert(ui_state.sm)
+    return alert or self._prev_alert, alert is None
 
   def _render(self, rect: rl.Rectangle):
     alert = self.get_alert(ui_state.sm)

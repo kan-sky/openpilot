@@ -34,6 +34,7 @@ class UIState:
 
   def _initialize(self):
     self.params = Params()
+    self.params_memory = Params("/dev/shm/params")
     self.sm = messaging.SubMaster(
       [
         "modelV2",
@@ -58,6 +59,11 @@ class UIState:
         "liveParameters",
         "testJoystick",
         "rawAudioData",
+        "carrotMan",
+        "peripheralState",
+        "liveDelay",
+        "liveTorqueParameters",
+        "lateralPlan",
       ]
     )
 
@@ -65,6 +71,7 @@ class UIState:
 
     # UI Status tracking
     self.status: UIStatus = UIStatus.DISENGAGED
+    self.lat_active: bool = False
     self.started_frame: int = 0
     self.started_time: float = 0.0
     self._engaged_prev: bool = False
@@ -86,6 +93,12 @@ class UIState:
     self.light_sensor: float = -1.0
 
     self._params_thread: threading.Thread | None = None
+
+    # carrot
+    self.active_carrot: int = 0
+    self.limitSpeed: float = 0
+    self.limitDist: float = 0
+    self.angleSteers: float = 0.0
 
     # Callbacks
     self._offroad_transition_callbacks: list[Callable[[], None]] = []
@@ -158,6 +171,17 @@ class UIState:
       for callback in self._on_body_changed_callbacks:
         callback()
 
+    # Kans
+    if self.sm.updated["carState"]:
+      car_state = self.sm["carState"]
+      self.angleSteers = car_state.steeringAngleDeg
+
+    if self.sm.updated["carrotMan"]:
+      carrot_man = self.sm["carrotMan"]
+      self.active_carrot = carrot_man.activeCarrot
+      self.limitSpeed = carrot_man.xSpdLimit
+      self.limitDist = carrot_man.xSpdDist
+
   def _update_status(self) -> None:
     if self.started and self.sm.updated["selfdriveState"]:
       ss = self.sm["selfdriveState"]
@@ -167,6 +191,8 @@ class UIState:
         self.status = UIStatus.OVERRIDE
       else:
         self.status = UIStatus.ENGAGED if ss.enabled else UIStatus.DISENGAGED
+
+      self.lat_active = self.sm["carControl"].latActive # Kans
 
     # Check for engagement state changes
     if self.engaged != self._engaged_prev:
@@ -201,6 +227,10 @@ class UIState:
     self.is_metric = self.params.get_bool("IsMetric")
     self.always_on_dm = self.params.get_bool("AlwaysOnDM")
     self.experimental_mode = self.params.get_bool("ExperimentalMode")
+    # Kans
+    self.show_debug_ui = self.params.get_int("ShowDebugUI")
+    self.show_date_time = self.params.get_int("ShowDateTime")
+    self.show_radar_info = self.params.get_int("ShowRadarInfo")
 
 
 class Device:

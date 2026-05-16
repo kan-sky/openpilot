@@ -6,10 +6,12 @@ from dataclasses import dataclass, field
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.params import Params
 from openpilot.selfdrive.locationd.calibrationd import HEIGHT_INIT
-from openpilot.selfdrive.ui.ui_state import ui_state
-from openpilot.system.ui.lib.application import gui_app
+from openpilot.selfdrive.ui.ui_state import ui_state, UIStatus
+from openpilot.selfdrive.ui.onroad import blend_colors
+from openpilot.system.ui.lib.application import gui_app, FontWeight
 from openpilot.system.ui.lib.shader_polygon import draw_polygon, Gradient
 from openpilot.system.ui.widgets import Widget
+from typing import Optional, Any
 
 CLIP_MARGIN = 500
 MIN_DRAW_DISTANCE = 10.0
@@ -27,6 +29,12 @@ NO_THROTTLE_COLORS = [
   rl.Color(242, 242, 242, 0),   # HSLF(112/360, 0.0, 0.95, 0.0)
 ]
 
+LANE_LINE_COLORS = {
+  UIStatus.DISENGAGED: rl.Color(200, 200, 200, 255),
+  UIStatus.OVERRIDE: rl.Color(255, 255, 255, 255),
+  UIStatus.ENGAGED: rl.Color(0, 255, 64, 255),
+}
+
 
 @dataclass
 class ModelPoints:
@@ -39,8 +47,19 @@ class LeadVehicle:
   glow: list[float] = field(default_factory=list)
   chevron: list[float] = field(default_factory=list)
   fill_alpha: int = 0
+  rect: list[tuple[float, float]] = field(default_factory=list)   # 4 corners (screen space)
+  color: Optional[Any] = None
 
-
+@dataclass
+class RadarInfoItem:
+  x: float = 0.0
+  y: float = 0.0
+  w: float = 0.0
+  h: float = 0.0
+  text: str = ""
+  color: Optional[Any] = None
+  is_star: bool = False
+  
 class ModelRenderer(Widget):
   def __init__(self):
     super().__init__()
@@ -58,11 +77,21 @@ class ModelRenderer(Widget):
     self._lane_lines = [ModelPoints() for _ in range(4)]
     self._road_edges = [ModelPoints() for _ in range(2)]
     self._acceleration_x = np.empty((0,), dtype=np.float32)
+    # carrot
+    self._acceleration_x_filter = FirstOrderFilter(0.0, 0.1, 1 / gui_app.target_fps)
+    self._acceleration_x_filter2 = FirstOrderFilter(0.0, 1, 1 / gui_app.target_fps)
+
+    self._torque_filter = FirstOrderFilter(0, 0.1, 1 / gui_app.target_fps)
+    self._ll_color_filter = FirstOrderFilter(0.0, 0.1, 1 / gui_app.target_fps)
 
     # Transform matrix (3x3 for car space to screen space)
     self._car_space_transform = np.zeros((3, 3), dtype=np.float32)
     self._transform_dirty = True
     self._clip_region = None
+    
+    self._lead_pt_filt = [None, None]
+    self._radar_info_items: list[RadarInfoItem] = []
+    self._font_display: rl.Font = gui_app.font(FontWeight.DISPLAY)
 
     self._exp_gradient = Gradient(
       start=(0.0, 1.0),  # Bottom of path
@@ -82,6 +111,8 @@ class ModelRenderer(Widget):
 
   def _render(self, rect: rl.Rectangle):
     sm = ui_state.sm
+
+    self._torque_filter.update(-ui_state.sm['carOutput'].actuatorsOutput.torque)
 
     # Check if data is up-to-date
     if (sm.recv_frame["liveCalibration"] < ui_state.started_frame or
@@ -119,16 +150,26 @@ class ModelRenderer(Widget):
 
       self._update_model(lead_one, path_x_array)
       if render_lead_indicator:
-        self._update_leads(radar_state, path_x_array)
+        self._update_leads_carrot(radar_state, path_x_array)
+        
+      if ui_state.show_radar_info > 0 and radar_state is not None:
+        self._update_radar_info(radar_state, path_x_array)
+      else:
+        self._radar_info_items = []
+        
       self._transform_dirty = False
 
     # Draw elements
     self._draw_lane_lines()
-    self._draw_path(sm)
+    if ui_state.status != UIStatus.DISENGAGED:
+      #self._draw_lane_lines()
+      self._draw_path(sm)
 
     if render_lead_indicator and radar_state:
       self._draw_lead_indicator()
-
+    if ui_state.show_radar_info > 0:
+      self._draw_radar_info()
+      
   def _update_raw_points(self, model):
     """Update raw 3D points from model data"""
     self._path.raw_points = np.array([model.position.x, model.position.y, model.position.z], dtype=np.float32).T
@@ -158,30 +199,110 @@ class ModelRenderer(Widget):
         point = self._map_to_screen(d_rel, -y_rel, z + self._path_offset_z)
         if point:
           self._lead_vehicles[i] = self._update_lead_vehicle(d_rel, v_rel, point, self._rect)
+          
+  def _update_leads_carrot(self, radar_state, path_x_array):
+    """Carrot: draw leadOne as outline rectangle."""
+    self._lead_vehicles = [LeadVehicle(), LeadVehicle()]
 
+    lead_one = radar_state.leadOne
+
+    def _filter_pt(slot: int, pt: tuple[float, float], alpha: float = 0.2):
+      prev = self._lead_pt_filt[slot]
+      if prev is None:
+        self._lead_pt_filt[slot] = (float(pt[0]), float(pt[1]))
+        return float(pt[0]), float(pt[1])
+
+      x = prev[0] + (float(pt[0]) - prev[0]) * alpha
+      y = prev[1] + (float(pt[1]) - prev[1]) * alpha
+      self._lead_pt_filt[slot] = (x, y)
+      return x, y
+
+    if lead_one and lead_one.status:
+      d_rel = float(lead_one.dRel)
+      y_rel = float(lead_one.yRel)
+
+      idx = self._get_path_length_idx(path_x_array, d_rel)
+      z = float(self._path.raw_points[idx, 2]) if idx < len(self._path.raw_points) else 0.0
+
+      pt_left = self._map_to_screen(d_rel, -y_rel - 1.2, z + self._path_offset_z)
+      pt_right = self._map_to_screen(d_rel, -y_rel + 1.2, z + self._path_offset_z)
+
+      if pt_left and pt_right:
+        # 중심은 좌/우 평균으로 잡아야 함
+        center_x = (pt_left[0] + pt_right[0]) * 0.5
+        center_y = (pt_left[1] + pt_right[1]) * 0.5
+
+        # 폭은 좌우 거리 기준, clamp는 유지
+        path_width = float(np.clip(abs(pt_right[0] - pt_left[0]), 60.0, 400.0))
+
+        # 중심 필터
+        pt_x, pt_y = _filter_pt(0, (center_x, center_y), alpha=0.2)
+
+        rect_x_min = self._rect.x
+        rect_x_max = self._rect.x + self._rect.width
+        rect_y_min = self._rect.y
+        rect_y_max = self._rect.y + self._rect.height
+
+        half_w = path_width * 0.5
+        rect_h = path_width * 0.8
+
+        left = float(np.clip(pt_x - half_w, rect_x_min, rect_x_max))
+        right = float(np.clip(pt_x + half_w, rect_x_min, rect_x_max))
+        bottom_y = float(np.clip(pt_y, rect_y_min, rect_y_max))
+        top = float(np.clip(pt_y - rect_h, rect_y_min, rect_y_max))
+
+        if not bool(lead_one.radar):
+          c = rl.Color(0, 120, 255, 255)   # BLUE
+        else:
+          track_id = int(getattr(lead_one, "radarTrackId", 0))
+          if track_id in (0, 1):
+            c = rl.Color(201, 34, 49, 255) # RED
+          else:
+            c = rl.Color(255, 115, 0, 255) # ORANGE
+
+        self._lead_vehicles[0] = LeadVehicle(
+          rect=[(left, top), (right, top), (right, bottom_y), (left, bottom_y)],
+          color=c,
+        )
+      else:
+        self._lead_pt_filt[0] = None
+        
   def _update_model(self, lead, path_x_array):
     """Update model visualization data based on model message"""
     max_distance = np.clip(path_x_array[-1], MIN_DRAW_DISTANCE, MAX_DRAW_DISTANCE)
     max_idx = self._get_path_length_idx(self._lane_lines[0].raw_points[:, 0], max_distance)
 
     # Update lane lines using raw points
+    line_width_factor = 0.025 # Kans: 차선 기본굵기 = 0.025
     for i, lane_line in enumerate(self._lane_lines):
+      width = line_width_factor * 5 if i in (1, 2) else line_width_factor * 3 # 좌우차선은 더 굵게
       lane_line.projected_points = self._map_line_to_polygon(
-        lane_line.raw_points, 0.025 * self._lane_line_probs[i], 0.0, max_idx, max_distance
+        lane_line.raw_points, width * self._lane_line_probs[i], 0.0, max_idx, max_distance
       )
 
     # Update road edges using raw points
     for road_edge in self._road_edges:
-      road_edge.projected_points = self._map_line_to_polygon(road_edge.raw_points, 0.025, 0.0, max_idx, max_distance)
+      road_edge.projected_points = self._map_line_to_polygon(road_edge.raw_points, line_width_factor * 2, 0.0, max_idx, max_distance)
 
     # Update path using raw points
     if lead and lead.status:
       lead_d = lead.dRel * 2.0
       max_distance = np.clip(lead_d - min(lead_d * 0.35, 10.0), 0.0, max_distance)
 
+    # Kans: Acceleration-based path width (experimental)
+    soon_acceleration = self._acceleration_x[len(self._acceleration_x) // 4] if len(self._acceleration_x) > 0 else 0
+    self._acceleration_x_filter.update(soon_acceleration)
+    self._acceleration_x_filter2.update(soon_acceleration)
+
+    if self._experimental_mode and False:
+      high_pass_acceleration = self._acceleration_x_filter.x - self._acceleration_x_filter2.x
+      y_off = np.interp(high_pass_acceleration, [-1, 0, 1], [0.9 * 2, 0.9, 0.9 / 2])
+    else:
+      y_off = 0.9
+
     max_idx = self._get_path_length_idx(path_x_array, max_distance)
     self._path.projected_points = self._map_line_to_polygon(
-      self._path.raw_points, 0.9, self._path_offset_z, max_idx, max_distance, allow_invert=False
+      self._path.raw_points, y_off, self._path_offset_z, max_idx, max_distance, allow_invert=False
     )
 
     self._update_experimental_gradient()
@@ -224,12 +345,8 @@ class ModelRenderer(Widget):
       i += 1 + (1 if (i + 2) < max_len else 0)
 
     # Store the gradient in the path object
-    self._exp_gradient = Gradient(
-      start=(0.0, 1.0),  # Bottom of path
-      end=(0.0, 0.0),  # Top of path
-      colors=segment_colors,
-      stops=gradient_stops,
-    )
+    self._exp_gradient.colors = segment_colors
+    self._exp_gradient.stops = gradient_stops
 
   def _update_lead_vehicle(self, d_rel, v_rel, point, rect):
     speed_buff, lead_buff = 10.0, 40.0
@@ -243,7 +360,7 @@ class ModelRenderer(Widget):
       fill_alpha = min(fill_alpha, 255)
 
     # Calculate size and position
-    sz = np.clip((25 * 30) / (d_rel / 3 + 30), 15.0, 30.0) * 2.35
+    sz = np.clip((25 * 30) / (d_rel / 3 + 30), 15.0, 30.0) * 1
     x = np.clip(point[0], 0.0, rect.width - sz / 2)
     y = min(point[1], rect.height - sz * 0.6)
 
@@ -255,22 +372,45 @@ class ModelRenderer(Widget):
 
     return LeadVehicle(glow=glow, chevron=chevron, fill_alpha=int(fill_alpha))
 
+  def _get_ll_color(self, prob: float, adjacent: bool, left: bool):
+    alpha = np.clip(prob, 0.0, 0.7)
+    if adjacent:
+      _base_color = LANE_LINE_COLORS.get(ui_state.status, LANE_LINE_COLORS[UIStatus.DISENGAGED if not ui_state.lat_active else UIStatus.ENGAGED])
+      color = rl.Color(_base_color.r, _base_color.g, _base_color.b, int(alpha * 255))
+
+      # turn adjacent lls orange if torque is high
+      torque = self._torque_filter.x
+      high_torque = abs(torque) > 0.6
+      if high_torque and (left == (torque > 0)):
+        color = blend_colors(
+          color,
+          rl.Color(255, 115, 0, int(alpha * 255)),  # orange
+          np.interp(abs(torque), [0.6, 0.8], [0.0, 1.0])
+        )
+    else:
+      color = rl.Color(255, 255, 255, int(alpha * 255))
+
+    if ui_state.status == UIStatus.DISENGAGED and not ui_state.lat_active:
+      color = rl.Color(0, 0, 0, int(alpha * 255))
+
+    return color
+
   def _draw_lane_lines(self):
     """Draw lane lines and road edges"""
+    """Two closest lines should be green (lane line or road edges)"""
     for i, lane_line in enumerate(self._lane_lines):
       if lane_line.projected_points.size == 0:
         continue
 
-      alpha = np.clip(self._lane_line_probs[i], 0.0, 0.7)
-      color = rl.Color(255, 255, 255, int(alpha * 255))
+      color = self._get_ll_color(float(self._lane_line_probs[i]), i in (1, 2), i in (0, 1))
       draw_polygon(self._rect, lane_line.projected_points, color)
 
     for i, road_edge in enumerate(self._road_edges):
       if road_edge.projected_points.size == 0:
         continue
 
-      alpha = np.clip(1.0 - self._road_edge_stds[i], 0.0, 1.0)
-      color = rl.Color(255, 0, 0, int(alpha * 255))
+      # if closest lane lines are not confident, make road edges green
+      color = self._get_ll_color(float(1.0 - self._road_edge_stds[i]), float(self._lane_line_probs[i + 1]) < 0.25, i == 0)
       draw_polygon(self._rect, road_edge.projected_points, color)
 
   def _draw_path(self, sm):
@@ -283,7 +423,9 @@ class ModelRenderer(Widget):
 
     if self._experimental_mode:
       # Draw with acceleration coloring
-      if len(self._exp_gradient.colors) > 1:
+      if ui_state.status == UIStatus.DISENGAGED:
+        draw_polygon(self._rect, self._path.projected_points, rl.Color(0, 0, 0, 90))
+      elif len(self._exp_gradient.colors) > 1:
         draw_polygon(self._rect, self._path.projected_points, gradient=self._exp_gradient)
       else:
         draw_polygon(self._rect, self._path.projected_points, rl.Color(255, 255, 255, 30))
@@ -297,9 +439,13 @@ class ModelRenderer(Widget):
         colors=blended_colors,
         stops=[0.0, 0.5, 1.0],
       )
-      draw_polygon(self._rect, self._path.projected_points, gradient=gradient)
 
-  def _draw_lead_indicator(self):
+      if ui_state.status == UIStatus.DISENGAGED:
+        draw_polygon(self._rect, self._path.projected_points, rl.Color(0, 0, 0, 90))
+      else:
+        draw_polygon(self._rect, self._path.projected_points, gradient=gradient)
+
+  def _draw_lead_indicator_old(self):
     # Draw lead vehicles if available
     for lead in self._lead_vehicles:
       if not lead.glow or not lead.chevron:
@@ -308,12 +454,28 @@ class ModelRenderer(Widget):
       rl.draw_triangle_fan(lead.glow, len(lead.glow), rl.Color(218, 202, 37, 255))
       rl.draw_triangle_fan(lead.chevron, len(lead.chevron), rl.Color(201, 34, 49, lead.fill_alpha))
 
+  def _draw_lead_indicator(self):
+    # Carrot: draw outline rectangles only (no fill)
+    thickness = 4.0  # 원하는 두께 (float)
+
+    for lead in self._lead_vehicles:
+      if not lead.rect or lead.color is None:
+        continue
+
+      pts = lead.rect
+      c = lead.color
+
+      rl.draw_line_ex(pts[0], pts[1], thickness, c)
+      rl.draw_line_ex(pts[1], pts[2], thickness, c)
+      rl.draw_line_ex(pts[2], pts[3], thickness, c)
+      rl.draw_line_ex(pts[3], pts[0], thickness, c)
+    
   @staticmethod
-  def _get_path_length_idx(pos_x_array: np.ndarray, path_distance: float) -> int:
-    """Get the index corresponding to the given path distance"""
+  def _get_path_length_idx(pos_x_array: np.ndarray, path_height: float) -> int:
+    """Get the index corresponding to the given path height"""
     if len(pos_x_array) == 0:
       return 0
-    indices = np.where(pos_x_array <= path_distance)[0]
+    indices = np.where(pos_x_array <= path_height)[0]
     return indices[-1] if indices.size > 0 else 0
 
   def _map_to_screen(self, in_x, in_y, in_z):
@@ -340,15 +502,17 @@ class ModelRenderer(Widget):
     # Slice points and filter non-negative x-coordinates
     points = line[:max_idx + 1]
 
-    # Interpolate around max_idx so path end is smooth (max_distance is always >= p0.x)
-    if 0 < max_idx < line.shape[0] - 1:
+    # Kans: Smoothly interpolate the endpoint if max_distance is provided
+    if max_distance is not None and 0 <= max_idx < line.shape[0] - 1:
       p0 = line[max_idx]
       p1 = line[max_idx + 1]
       x0, x1 = p0[0], p1[0]
-      interp_y = np.interp(max_distance, [x0, x1], [p0[1], p1[1]])
-      interp_z = np.interp(max_distance, [x0, x1], [p0[2], p1[2]])
-      interp_point = np.array([max_distance, interp_y, interp_z], dtype=points.dtype)
-      points = np.concatenate((points, interp_point[None, :]), axis=0)
+      # Kans
+      if x1 > x0 and x0 <= max_distance <= x1:
+        interp_y = np.interp(max_distance, [x0, x1], [p0[1], p1[1]])
+        interp_z = np.interp(max_distance, [x0, x1], [p0[2], p1[2]])
+        interp_point = np.array([max_distance, interp_y, interp_z], dtype=points.dtype)
+        points = np.concatenate((points, interp_point[None, :]), axis=0)
 
     points = points[points[:, 0] >= 0]
     if points.shape[0] == 0:
@@ -433,3 +597,176 @@ class ModelRenderer(Widget):
       int(inv_t * start.b + t * end.b),
       int(inv_t * start.a + t * end.a)
     ) for start, end in zip(begin_colors, end_colors, strict=True)]
+
+  def _draw_text_with_outline(self, text, pos, font_size,
+                              text_color,
+                              outline_color=rl.BLACK,
+                              thickness=2):
+    x, y = pos.x, pos.y
+    for dx in range(-thickness, thickness + 1):
+      for dy in range(-thickness, thickness + 1):
+        if dx == 0 and dy == 0:
+          continue
+        rl.draw_text_ex(
+          self._font_display,
+          text,
+          rl.Vector2(x + dx, y + dy),
+          font_size,
+          0,
+          outline_color
+        )
+
+    # main text
+    rl.draw_text_ex(
+      self._font_display,
+      text,
+      rl.Vector2(x, y),
+      font_size,
+      0,
+      text_color
+    )
+    
+  def _get_radar_info_color(self, lead, v_sum: float):
+    radar = bool(getattr(lead, "radar", False))
+    model_prob = float(getattr(lead, "modelProb", 0.0))
+
+    if not radar:
+      return rl.Color(0, 120, 255, 220)      # BLUE
+    elif abs(model_prob - 0.01) < 0.001:
+      return rl.Color(0, 200, 80, 220)       # GREEN
+    elif v_sum > 0.0:
+      return rl.Color(255, 190, 0, 220)      # ORANGE
+    else:
+      return rl.Color(255, 70, 70, 220)      # RED
+
+  def _update_radar_info(self, radar_state, path_x_array):
+    self._radar_info_items = []
+
+    if self._lane_lines[2].raw_points.shape[0] == 0:
+      return
+
+    leads_groups = [
+      radar_state.leadsLeft,
+      radar_state.leadsRight,
+      radar_state.leadsCenter,
+    ]
+
+    rect_x_min = self._rect.x
+    rect_x_max = self._rect.x + self._rect.width
+    rect_y_min = self._rect.y
+    rect_y_max = self._rect.y + self._rect.height
+
+    for leads in leads_groups:
+      for l in leads:
+        d_rel = float(getattr(l, "dRel", 0.0))
+        y_rel = float(getattr(l, "yRel", 0.0))
+
+        if d_rel <= 2.5:
+          continue
+
+        idx = self._get_path_length_idx(self._lane_lines[2].raw_points[:, 0], d_rel)
+        if idx >= len(self._lane_lines[2].raw_points):
+          continue
+
+        lane_z = float(self._lane_lines[2].raw_points[idx, 2]) - 0.61
+        pt = self._map_to_screen(d_rel, -y_rel, lane_z)
+        if not pt:
+          continue
+
+        x, y = float(pt[0]), float(pt[1])
+
+        v = float(getattr(l, "vLeadK", 0.0))
+        v_lat = float(getattr(l, "vLat", 0.0))
+        v_abs = float(np.sqrt(v * v + v_lat * v_lat))
+        v_sum = v_abs if v >= 0.0 else -v_abs
+
+        # 정지는 기존처럼 "*"
+        if v_abs <= 3.0:
+          self._radar_info_items.append(
+            RadarInfoItem(
+              x=x,
+              y=y,
+              w=18.0,
+              h=18.0,
+              text="*",
+              color=rl.Color(255, 255, 255, 230),
+              is_star=True,
+            )
+          )
+          continue
+
+        speed_val = v_sum * (3.6 if ui_state.is_metric else 2.2369363)
+        text = f"{speed_val:.0f}"
+
+        font_size = 22
+        pad_x = 6
+        pad_y = 2
+
+        text_w = rl.measure_text(text, font_size)
+        box_w = float(text_w + pad_x * 2)
+        box_h = float(font_size + pad_y * 2)
+
+        box_x = float(np.clip(x - box_w * 0.5, rect_x_min, rect_x_max - box_w))
+        box_y = float(np.clip(y - box_h * 0.5, rect_y_min, rect_y_max - box_h))
+
+        color = self._get_radar_info_color(l, v_sum)
+
+        self._radar_info_items.append(
+          RadarInfoItem(
+            x=box_x,
+            y=box_y,
+            w=float(box_w),
+            h=float(box_h),
+            text=text,
+            color=color,
+            is_star=False,
+          )
+        )
+
+
+  def _draw_radar_info(self):
+    if not self._radar_info_items:
+      return
+
+    font_size = 22
+
+    for item in self._radar_info_items:
+      if item.color is None:
+        continue
+
+      if item.is_star:
+        tw = rl.measure_text(item.text, font_size)
+        rl.draw_text(
+          item.text,
+          int(item.x - tw / 2),
+          int(item.y - font_size / 2),
+          font_size,
+          item.color,
+        )
+        continue
+
+      # 박스
+      rl.draw_rectangle_rounded(
+        rl.Rectangle(item.x, item.y, item.w, item.h),
+        0.28,
+        8,
+        item.color,
+      )
+
+      # 텍스트 중앙정렬
+      tw = rl.measure_text(item.text, font_size)
+      tx = int(item.x + (item.w - tw) / 2)
+      ty = int(item.y + (item.h - font_size) / 2 - 1)
+
+      #rl.draw_text(
+      #  item.text,
+      #  tx,
+      #  ty,
+      #  font_size,
+      #  rl.WHITE,
+      #)
+
+      self._draw_text_with_outline(item.text, rl.Vector2(tx, ty), font_size, rl.WHITE, rl.BLACK, thickness=1)
+
+
+

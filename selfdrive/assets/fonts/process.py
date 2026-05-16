@@ -10,9 +10,10 @@ TRANSLATIONS_DIR = SELFDRIVE_DIR / "ui" / "translations"
 LANGUAGES_FILE = TRANSLATIONS_DIR / "languages.json"
 
 GLYPH_PADDING = 6
-EXTRA_CHARS = "–‑✓×°§•X⚙✕◀▶✔⌫⇧␣○●↳çêüñ–‑✓×°§•€£¥"
+EXTRA_CHARS = ("–‑✓×°§•X⚙✕◀▶✔⌫⇧␣○●↳çêüñ–‑✓×°§•€£¥"  
+  "↑↓←→↖↗↘↙±÷℃℉✔✕✖■□◆◇…“”‘’") # Kans
 UNIFONT_LANGUAGES = {"th", "zh-CHT", "zh-CHS", "ko", "ja"}
-
+KR_FONTS = {"KaiGenGothicKR-Bold"} # Carrot
 
 def _languages():
   if not LANGUAGES_FILE.exists():
@@ -23,8 +24,9 @@ def _languages():
 
 def _char_sets():
   base = set(map(chr, range(32, 127))) | set(EXTRA_CHARS)
-  unifont = set(base)
+  unifont = set() # set(base)  # Kans
 
+  unifont.update(map(chr, range(0xAC00, 0xD7A4)))
   for language, code in _languages().items():
     unifont.update(language)
     po_path = TRANSLATIONS_DIR / f"app_{code}.po"
@@ -33,14 +35,19 @@ def _char_sets():
     except FileNotFoundError:
       continue
     (unifont if code in UNIFONT_LANGUAGES else base).update(chars)
+    # Kans
+    base.update(chars)
+
+    if code in UNIFONT_LANGUAGES:
+      unifont.update(chars)
 
   return tuple(sorted(ord(c) for c in base)), tuple(sorted(ord(c) for c in unifont))
 
 
-def _glyph_metrics(glyphs, rects, glyph_count: int):
+def _glyph_metrics(glyphs, rects, codepoints):
   entries = []
   min_offset_y, max_extent = None, 0
-  for idx in range(glyph_count):
+  for idx, codepoint in enumerate(codepoints):
     glyph = glyphs[idx]
     rect = rects[idx]
     width = int(round(rect.width))
@@ -49,7 +56,7 @@ def _glyph_metrics(glyphs, rects, glyph_count: int):
     min_offset_y = offset_y if min_offset_y is None else min(min_offset_y, offset_y)
     max_extent = max(max_extent, offset_y + height)
     entries.append({
-      "id": glyph.value,
+      "id": codepoint,
       "x": int(round(rect.x)),
       "y": int(round(rect.y)),
       "width": width,
@@ -89,31 +96,38 @@ def _write_bmfont(path: Path, font_size: int, face: str, atlas_name: str, line_h
 def _process_font(font_path: Path, codepoints: tuple[int, ...]):
   print(f"Processing {font_path.name}...")
 
-  font_size = {
-    "unifont.otf": 16,  # unifont is only 16x8 or 16x16 pixels per glyph
-  }.get(font_path.name, 200)
+  #font_size = {
+  #  "unifont.otf": 16,  # unifont is only 16x8 or 16x16 pixels per glyph
+  #}.get(font_path.name, 200)
+  # Kans
+  font_size = 96
+  padding = GLYPH_PADDING
 
+  if font_path.name == "unifont.otf":
+    font_size = 16
+    padding = GLYPH_PADDING
+
+  if font_path.stem in KR_FONTS:
+    font_size = 48
+    padding = 2
+    
   data = font_path.read_bytes()
   file_buf = rl.ffi.new("unsigned char[]", data)
   cp_buffer = rl.ffi.new("int[]", codepoints)
   cp_ptr = rl.ffi.cast("int *", cp_buffer)
-  glyph_count = rl.ffi.new("int *", len(codepoints))
-  glyphs = rl.load_font_data(
-    rl.ffi.cast("unsigned char *", file_buf), len(data), font_size, cp_ptr, len(codepoints),
-    rl.FontType.FONT_DEFAULT, glyph_count
-  )
+  glyphs = rl.load_font_data(rl.ffi.cast("unsigned char *", file_buf), len(data), font_size, cp_ptr, len(codepoints), rl.FontType.FONT_DEFAULT)
   if glyphs == rl.ffi.NULL:
     raise RuntimeError("raylib failed to load font data")
 
   rects_ptr = rl.ffi.new("Rectangle **")
-  image = rl.gen_image_font_atlas(glyphs, rects_ptr, glyph_count[0], font_size, GLYPH_PADDING, 0)
+  image = rl.gen_image_font_atlas(glyphs, rects_ptr, len(codepoints), font_size, padding, 0)
   if image.width == 0 or image.height == 0:
     raise RuntimeError("raylib returned an empty atlas")
 
   rects = rects_ptr[0]
   atlas_name = f"{font_path.stem}.png"
   atlas_path = FONT_DIR / atlas_name
-  entries, line_height, base = _glyph_metrics(glyphs, rects, glyph_count[0])
+  entries, line_height, base = _glyph_metrics(glyphs, rects, codepoints)
 
   if not rl.export_image(image, atlas_path.as_posix()):
     raise RuntimeError("Failed to export atlas image")
@@ -127,7 +141,7 @@ def main():
   for font in fonts:
     if "emoji" in font.name.lower():
       continue
-    glyphs = unifont_cp if font.stem.lower().startswith("unifont") else base_cp
+    glyphs = unifont_cp if font.stem.lower().startswith("unifont") or font.stem in KR_FONTS else base_cp
     _process_font(font, glyphs)
   return 0
 

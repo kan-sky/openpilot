@@ -6,6 +6,10 @@ bool get_longitudinal_allowed(void) {
 
 // Safety checks for longitudinal actuation
 bool longitudinal_accel_checks(int desired_accel, const LongitudinalLimits limits) {
+  if(desired_accel != 0) {
+    if(!controls_allowed) print("@@@@@@@ longitudinal_accel_checks... auto controls_allowed enabled...\n");
+    controls_allowed = true;
+  }
   bool accel_valid = get_longitudinal_allowed() && !safety_max_limit_check(desired_accel, limits.max_accel, limits.min_accel);
   bool accel_inactive = desired_accel == limits.inactive_accel;
   return !(accel_valid || accel_inactive);
@@ -32,4 +36,8 @@ bool longitudinal_brake_checks(int desired_brake, const LongitudinalLimits limit
   violation |= !get_longitudinal_allowed() && (desired_brake != 0);
   violation |= desired_brake > limits.max_brake;
   return violation;
+}
+
+bool longitudinal_interceptor_checks(const CANPacket_t *msg) {
+  return (!get_longitudinal_allowed() || brake_pressed_prev) && (msg->data[0] || msg->data[1]);
 }

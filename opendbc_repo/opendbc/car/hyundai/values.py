@@ -1,19 +1,39 @@
 import re
 from dataclasses import dataclass, field
-from enum import IntFlag
+from enum import Enum, IntFlag
 
-from opendbc.car import Bus, CarSpecs, DbcDict, PlatformConfig, Platforms, uds
+from opendbc.car import Bus, CarSpecs, DbcDict, PlatformConfig, Platforms, uds, AngleSteeringLimits
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.structs import CarParams
-from opendbc.car.docs_definitions import CarHarness, CarDocs, CarParts
+from opendbc.car.docs_definitions import CarFootnote, CarHarness, CarDocs, CarParts, Column
 from opendbc.car.fw_query_definitions import FwQueryConfig, Request, p16
 
 Ecu = CarParams.Ecu
 
 
 class CarControllerParams:
-  ACCEL_MIN = -3.5 # m/s
-  ACCEL_MAX = 2.0 # m/s
+  ACCEL_MIN = -4.0 # m/s
+  ACCEL_MAX = 2.5 # m/s
+  ANGLE_LIMITS: AngleSteeringLimits = AngleSteeringLimits(
+    # LKAS angle command is unlimited, but LFA is limited to 176.7 deg (but does not fault if requesting above)
+    175, # deg
+    # stock comma's
+    #([0, 9, 16, 25], [1.4, 0.6, 0.4, 0.1]),
+    #([0, 9, 16, 25], [1.4, 0.7, 0.5, 0.1]),
+    ([0, 9, 16, 25], [1.8, 1.6, 1.3, 0.8]),
+    ([0, 9, 16, 25], [2.4, 2.0, 1.6, 1.0]),
+    #([0, 9, 16, 25], [1.6, 1.0, 0.6, 0.15]),
+    #([0, 9, 16, 25], [2.0, 1.2, 0.8, 0.28]),
+    # sunny's
+    #([0, 5, 25], [0.6, 0.4, 0.15]),
+    #([0, 5, 25], [1.0, 0.5, 0.26]),
+  )
+    # Stock LFA system is seen sending 250 max, but for LKAS events it's 175 max.
+  # 250 can at least achieve 4 m/s^2, 80 corresponds to ~2.5 m/s^2
+  ANGLE_MAX_TORQUE = 200  # The maximum amount of torque that will be allowed
+  ANGLE_MIN_TORQUE = 25  # equivalent to ~0.8 m/s^2 of torque (based on ANGLE_MAX_TORQUE) when overriding
+  ANGLE_TORQUE_UP_RATE = 8 #2  # Indicates how fast the torque ramps up after user intervention.
+  ANGLE_TORQUE_DOWN_RATE = 12  #4 Indicates how fast the torque ramps down during user intervention (handing off).
 
   def __init__(self, CP):
     self.STEER_DELTA_UP = 3
@@ -39,20 +59,17 @@ class CarControllerParams:
                                CAR.KIA_OPTIMA_H, CAR.KIA_OPTIMA_H_G4_FL, CAR.KIA_SORENTO):
       self.STEER_MAX = 255
 
+    elif CP.carFingerprint in (CAR.HYUNDAI_SANTA_FE_PHEV_2022):
+      self.STEER_MAX = 409
     # these cars have significantly more torque than most HKG; limit to 70% of max
     elif CP.flags & HyundaiFlags.ALT_LIMITS:
-      self.STEER_MAX = 270
-      self.STEER_DELTA_UP = 2
-      self.STEER_DELTA_DOWN = 3
-
-    elif CP.flags & HyundaiFlags.ALT_LIMITS_2:
-      self.STEER_MAX = 170
+      self.STEER_MAX = 384
       self.STEER_DELTA_UP = 2
       self.STEER_DELTA_DOWN = 3
 
     # Default for most HKG
     else:
-      self.STEER_MAX = 384
+      self.STEER_MAX = 409
 
 
 class HyundaiSafetyFlags(IntFlag):
@@ -60,53 +77,27 @@ class HyundaiSafetyFlags(IntFlag):
   HYBRID_GAS = 2
   LONG = 4
   CAMERA_SCC = 8
-  CANFD_LKA_STEER_MSG = 16
+  CANFD_LKA_STEERING = 16
   CANFD_ALT_BUTTONS = 32
   ALT_LIMITS = 64
-  CANFD_LKA_STEER_MSG_ALT = 128
+  CANFD_LKA_STEERING_ALT = 128
   FCEV_GAS = 256
   ALT_LIMITS_2 = 512
 
 
-# Hyundai/Kia/Genesis SCC (Smart Cruise Control) and steering architecture:
-#
-# CAN cars:
-#   - Default: Radar sends SCC messages on bus 0. For longitudinal control, disable radar
-#     (0x7d0) and send our own SCC messages. AEB is lost since radar is disabled.
-#   - CAMERA_SCC: Camera sends SCC and AEB/FCA messages (all on bus 2). Block camera SCC
-#     and send our own. Stock FCA/AEB messages from camera are forwarded through.
-#
-# CAN-FD cars:
-#   - CANFD_LKA_STEER_MSG (typically HDA2 with ADAS ECU): Camera sends LKA steering
-#     message, ADAS DRV ECU forwards it as LFA to MDPS. For longitudinal, disable ADAS
-#     ECU (0x730) and send ACC on ECAN. OP also suppresses LFA from ADAS ECU to prevent
-#     fighting. Some cars lack the ADAS ECU (long not available).
-#   - Non-LKA (HDA1): Camera sends LFA steering directly to MDPS (no ADAS ECU).
-#     + CANFD_CAMERA_SCC: Camera also sends SCC (no CANFD_RADAR_SCC flag set).
-#       Block camera SCC and send our own.
-#     + CANFD_RADAR_SCC: Radar handles SCC instead.
-#       Disable radar (0x7d0 on ECAN) for longitudinal.
-#   - CANFD_NO_RADAR_DISABLE: Some CAN-FD cars refuse the communication control disable
-#     request (0x7F2822 'conditions not correct') — longitudinal not available.
-
 class HyundaiFlags(IntFlag):
   # Dynamic Flags
-
-  # Default assumption: all cars use LFA (ADAS) steering from the camera (HDA1).
-  # CANFD_LKA_STEER_MSG/CANFD_LKA_STEER_MSG_ALT cars typically have both LKA (camera) and LFA (ADAS) steering messages,
-  # with LKA commands forwarded to the ADAS DRV ECU.
-  # Most HDA2 trims are assumed to be equipped with the ADAS DRV ECU, though some variants may not be equipped with one.
-  CANFD_LKA_STEER_MSG = 1
+  CANFD_HDA2 = 1
   CANFD_ALT_BUTTONS = 2
   CANFD_ALT_GEARS = 2 ** 2
   CANFD_CAMERA_SCC = 2 ** 3
 
   ALT_LIMITS = 2 ** 4
-  CANFD_ENABLE_BLINKERS = 2 ** 5
+  ENABLE_BLINKERS = 2 ** 5
   CANFD_ALT_GEARS_2 = 2 ** 6
   SEND_LFA = 2 ** 7
   USE_FCA = 2 ** 8
-  CANFD_LKA_STEER_MSG_ALT = 2 ** 9
+  CANFD_HDA2_ALT_STEERING = 2 ** 9
 
   # these cars use a different gas signal
   HYBRID = 2 ** 10
@@ -120,9 +111,9 @@ class HyundaiFlags(IntFlag):
   CANFD = 2 ** 13
 
   # The radar does SCC on these cars when HDA I, rather than the camera
-  CANFD_RADAR_SCC = 2 ** 14
+  RADAR_SCC = 2 ** 14
   # The camera does SCC on these cars, rather than the radar
-  CAMERA_SCC = 2 ** 15
+  CAMERA_SCC = CANFD_CAMERA_SCC #2 ** 15
   CHECKSUM_CRC8 = 2 ** 16
   CHECKSUM_6B = 2 ** 17
 
@@ -141,16 +132,35 @@ class HyundaiFlags(IntFlag):
 
   MIN_STEER_32_MPH = 2 ** 23
 
-  HAS_LDA_BUTTON = 2 ** 24
+  ANGLE_CONTROL = 2 ** 24
 
   FCEV = 2 ** 25
 
   ALT_LIMITS_2 = 2 ** 26
 
+  CC_ONLY_CAR = 2 ** 31
+
+class HyundaiExtFlags(IntFlag):
+  NAVI_CLUSTER = 2 ** 2
+  HAS_LFAHDA = 2 ** 4
+  CANFD_GEARS_NONE = 2 ** 6
+  RADAR_GROUP1 = 2 ** 7  # 0x210 radar group 1, 0x3A5 radar group 2
+  CANFD_GEARS_69 = 2 ** 10
+
+class Footnote(Enum):
+  CANFD = CarFootnote(
+    "Requires a <a href=\"https://comma.ai/shop/can-fd-panda-kit\" target=\"_blank\">CAN FD panda kit</a> if not using " +
+    "comma 3X for this <a href=\"https://en.wikipedia.org/wiki/CAN_FD\" target=\"_blank\">CAN FD car</a>.",
+    Column.MODEL)
+
 
 @dataclass
 class HyundaiCarDocs(CarDocs):
   package: str = "Smart Cruise Control (SCC)"
+
+  def init_make(self, CP: CarParams):
+    if CP.flags & HyundaiFlags.CANFD:
+      self.footnotes.insert(0, Footnote.CANFD)
 
 
 @dataclass
@@ -167,7 +177,7 @@ class HyundaiPlatformConfig(PlatformConfig):
 
 @dataclass
 class HyundaiCanFDPlatformConfig(PlatformConfig):
-  dbc_dict: DbcDict = field(default_factory=lambda: {Bus.pt: "hyundai_canfd_generated"})
+  dbc_dict: DbcDict = field(default_factory=lambda: {Bus.pt: "hyundai_canfd_generated", Bus.radar: 'hyundai_canfd_radar_generated'})
 
   def init(self):
     self.flags |= HyundaiFlags.CANFD
@@ -175,6 +185,10 @@ class HyundaiCanFDPlatformConfig(PlatformConfig):
 
 class CAR(Platforms):
   # Hyundai
+  HYUNDAI_AZERA_7TH_GEN = HyundaiCanFDPlatformConfig(
+    [HyundaiCarDocs("Hyundai Azera 2023-2024", "All", car_parts=CarParts.common([CarHarness.hyundai_a]))],
+    CarSpecs(mass=1700, wheelbase=2.895, steerRatio=16.5),
+  )
   HYUNDAI_AZERA_6TH_GEN = HyundaiPlatformConfig(
     [HyundaiCarDocs("Hyundai Azera 2022", "All", car_parts=CarParts.common([CarHarness.hyundai_k]))],
     CarSpecs(mass=1600, wheelbase=2.885, steerRatio=14.5),
@@ -261,9 +275,9 @@ class CAR(Platforms):
     flags=HyundaiFlags.CLUSTER_GEARS | HyundaiFlags.ALT_LIMITS,
   )
   HYUNDAI_KONA_2022 = HyundaiPlatformConfig(
-    [HyundaiCarDocs("Hyundai Kona 2022-23", car_parts=CarParts.common([CarHarness.hyundai_o]))],
+    [HyundaiCarDocs("Hyundai Kona 2022", car_parts=CarParts.common([CarHarness.hyundai_o]))],
     CarSpecs(mass=1491, wheelbase=2.6, steerRatio=13.42, tireStiffnessFactor=0.385),
-    flags=HyundaiFlags.CAMERA_SCC | HyundaiFlags.ALT_LIMITS_2,
+    flags=HyundaiFlags.CAMERA_SCC,
   )
   HYUNDAI_KONA_EV = HyundaiPlatformConfig(
     [HyundaiCarDocs("Hyundai Kona Electric 2018-21", car_parts=CarParts.common([CarHarness.hyundai_g]))],
@@ -285,6 +299,11 @@ class CAR(Platforms):
     [HyundaiCarDocs("Hyundai Kona Hybrid 2020", car_parts=CarParts.common([CarHarness.hyundai_i]))],  # TODO: check packages,
     CarSpecs(mass=1425, wheelbase=2.6, steerRatio=13.42, tireStiffnessFactor=0.385),
     flags=HyundaiFlags.HYBRID | HyundaiFlags.ALT_LIMITS,
+  )
+  HYUNDAI_KONA_HEV_2ND_GEN = HyundaiCanFDPlatformConfig(
+    [HyundaiCarDocs("Hyundai Kona Hybrid 2024", car_parts=CarParts.common([CarHarness.hyundai_l]))],
+    CarSpecs(mass=1590, wheelbase=2.66, steerRatio=13.6, tireStiffnessFactor=0.385),
+    flags=HyundaiFlags.HYBRID,
   )
   HYUNDAI_NEXO_1ST_GEN = HyundaiPlatformConfig(
     [HyundaiCarDocs("Hyundai Nexo 2021", "All", car_parts=CarParts.common([CarHarness.hyundai_h]))],
@@ -322,7 +341,13 @@ class CAR(Platforms):
   HYUNDAI_SONATA_LF = HyundaiPlatformConfig(
     [HyundaiCarDocs("Hyundai Sonata 2018-19", car_parts=CarParts.common([CarHarness.hyundai_e]))],
     CarSpecs(mass=1536, wheelbase=2.804, steerRatio=13.27 * 1.15),  # 15% higher at the center seems reasonable
+
     flags=HyundaiFlags.UNSUPPORTED_LONGITUDINAL | HyundaiFlags.TCU_GEARS,
+  )
+  HYUNDAI_SONATA_2024 = HyundaiCanFDPlatformConfig(
+    [HyundaiCarDocs("Hyundai Sonata 2024-25", "All", car_parts=CarParts.common([CarHarness.hyundai_a]))],
+    CarSpecs(mass=1556, wheelbase=2.84, steerRatio=12.81),
+    flags=HyundaiFlags.CAMERA_SCC,
   )
   HYUNDAI_STARIA_4TH_GEN = HyundaiCanFDPlatformConfig(
     [HyundaiCarDocs("Hyundai Staria 2023", "All", car_parts=CarParts.common([CarHarness.hyundai_k]))],
@@ -363,10 +388,31 @@ class CAR(Platforms):
     CarSpecs(mass=1948, wheelbase=2.97, steerRatio=14.26, tireStiffnessFactor=0.65),
     flags=HyundaiFlags.EV,
   )
+  HYUNDAI_IONIQ_5_PE = HyundaiCanFDPlatformConfig(
+    [
+      HyundaiCarDocs("Hyundai IONIQ 5 PE (NE1)", car_parts=CarParts.common([CarHarness.hyundai_q])),
+      HyundaiCarDocs("Hyundai Ioniq 5 PE (with HDA II) 2024", "Highway Driving Assist II", car_parts=CarParts.common([CarHarness.hyundai_q])),
+    ],
+    #CarSpecs(mass=2012, wheelbase=3.0, steerRatio=14.26, tireStiffnessFactor=0.65),
+    CarSpecs(mass=2012, wheelbase=3.0, steerRatio=14.26, tireStiffnessFactor=1.0),
+    flags=HyundaiFlags.EV | HyundaiFlags.ANGLE_CONTROL,
+  )
+  HYUNDAI_IONIQ_5_N = HyundaiCanFDPlatformConfig(
+    [HyundaiCarDocs("Hyundai Ioniq 5 N (with HDA II) 2024", "Highway Driving Assist II", car_parts=CarParts.common([CarHarness.hyundai_m]))],
+    CarSpecs(mass=2200, wheelbase=3.00, steerRatio=12.54),
+    flags=HyundaiFlags.EV,
+  )
   HYUNDAI_IONIQ_6 = HyundaiCanFDPlatformConfig(
     [HyundaiCarDocs("Hyundai Ioniq 6 (with HDA II) 2023-24", "Highway Driving Assist II", car_parts=CarParts.common([CarHarness.hyundai_p]))],
     HYUNDAI_IONIQ_5.specs,
     flags=HyundaiFlags.EV | HyundaiFlags.CANFD_NO_RADAR_DISABLE,
+  )
+  HYUNDAI_IONIQ_9 = HyundaiCanFDPlatformConfig(
+    [
+      HyundaiCarDocs("Hyundai Ioniq 9", "All", car_parts=CarParts.common([CarHarness.hyundai_m])),
+    ],
+    CarSpecs(mass=2505, wheelbase=3.13, steerRatio=16.02),
+    flags=HyundaiFlags.EV | HyundaiFlags.ANGLE_CONTROL,
   )
   HYUNDAI_TUCSON_4TH_GEN = HyundaiCanFDPlatformConfig(
     [
@@ -387,6 +433,37 @@ class CAR(Platforms):
     CarSpecs(mass=1690, wheelbase=3.055, steerRatio=17),  # mass: from https://www.hyundai-motor.com.tw/clicktobuy/custin#spec_0, steerRatio: from learner
     flags=HyundaiFlags.CHECKSUM_CRC8,
   )
+  HYUNDAI_CASPER = HyundaiPlatformConfig(
+    [HyundaiCarDocs("Hyundai Casper 2023", "All", car_parts=CarParts.common([CarHarness.hyundai_k]))],
+    CarSpecs(mass=1060, wheelbase=2.4, steerRatio=14.3),  # mass: from https://www.hyundai-motor.com.tw/clicktobuy/custin#spec_0, steerRatio: from learner
+    flags=HyundaiFlags.CAMERA_SCC | HyundaiFlags.CHECKSUM_CRC8,
+  )
+
+  HYUNDAI_CASPER_EV = HyundaiPlatformConfig(
+    [HyundaiCarDocs("Hyundai Casper EV 2024", "All", car_parts=CarParts.common([CarHarness.hyundai_k]))],
+    CarSpecs(mass=1355, wheelbase=2.58, steerRatio=14.3),  # mass: from https://www.hyundai-motor.com.tw/clicktobuy/custin#spec_0, steerRatio: from learner
+    flags=HyundaiFlags.CAMERA_SCC | HyundaiFlags.CHECKSUM_CRC8 | HyundaiFlags.EV
+  )
+  HYUNDAI_PORTER_II_EV = HyundaiPlatformConfig(
+    [HyundaiCarDocs("Hyundai Porter II EV 2024", car_parts=CarParts.common([CarHarness.hyundai_h]))],
+    CarSpecs(mass=1970, wheelbase=2.64, steerRatio=14.5),
+    flags=HyundaiFlags.EV | HyundaiFlags.CC_ONLY_CAR,
+  )
+  HYUNDAI_SANTAFE_MX5 = HyundaiCanFDPlatformConfig(
+    [
+      HyundaiCarDocs("Hyundai SANTAFE (MX5)", car_parts=CarParts.common([CarHarness.hyundai_k])),
+    ],
+    CarSpecs(mass=1910, wheelbase=2.76, steerRatio=15.8, tireStiffnessFactor=0.82),
+    flags=HyundaiFlags.ANGLE_CONTROL,
+  )
+  HYUNDAI_SANTAFE_MX5_HEV = HyundaiCanFDPlatformConfig(
+    [
+      HyundaiCarDocs("Hyundai SANTAFE HYBRID (MX5)", car_parts=CarParts.common([CarHarness.hyundai_k])),
+    ],
+    HYUNDAI_SANTAFE_MX5.specs,
+    flags=HyundaiFlags.ANGLE_CONTROL,
+  )
+
 
   # Kia
   KIA_FORTE = HyundaiPlatformConfig(
@@ -406,9 +483,17 @@ class CAR(Platforms):
     KIA_K5_2021.specs,
     flags=HyundaiFlags.MANDO_RADAR | HyundaiFlags.CHECKSUM_CRC8 | HyundaiFlags.HYBRID,
   )
-  KIA_K7_2017 = HyundaiPlatformConfig(
-    [HyundaiCarDocs("Kia K7 2017", car_parts=CarParts.common([CarHarness.hyundai_c]))],
-    CarSpecs(mass=1648, wheelbase=2.86, steerRatio=16.8),
+  KIA_K5_DL3_24 = HyundaiCanFDPlatformConfig(
+    [
+      HyundaiCarDocs("Kia K5 2024", "Highway Driving Assist II", car_parts=CarParts.common([CarHarness.hyundai_k])),
+    ],
+    CarSpecs(mass=1553, wheelbase=2.85, steerRatio=13.27, tireStiffnessFactor=0.5),
+  )
+  KIA_K5_DL3_24_HEV = HyundaiCanFDPlatformConfig(
+    [
+      HyundaiCarDocs("Kia K5 Hybrid 2024", "Highway Driving Assist II", car_parts=CarParts.common([CarHarness.hyundai_k])),
+    ],
+    CarSpecs(mass=1553, wheelbase=2.85, steerRatio=13.27, tireStiffnessFactor=0.5),
   )
   KIA_K8_HEV_1ST_GEN = HyundaiCanFDPlatformConfig(
     [HyundaiCarDocs("Kia K8 Hybrid (with HDA II) 2023", "Highway Driving Assist II", car_parts=CarParts.common([CarHarness.hyundai_q]))],
@@ -426,16 +511,13 @@ class CAR(Platforms):
     flags=HyundaiFlags.MANDO_RADAR | HyundaiFlags.EV,
   )
   KIA_NIRO_EV_2ND_GEN = HyundaiCanFDPlatformConfig(
-    [
-      HyundaiCarDocs("Kia Niro EV (without HDA II) 2023-25", "All", car_parts=CarParts.common([CarHarness.hyundai_a])),
-      HyundaiCarDocs("Kia Niro EV (with HDA II) 2024-25", "Highway Driving Assist II", car_parts=CarParts.common([CarHarness.hyundai_r])),
-    ],
+    [HyundaiCarDocs("Kia Niro EV 2023", "All", car_parts=CarParts.common([CarHarness.hyundai_a]))],
     KIA_NIRO_EV.specs,
     flags=HyundaiFlags.EV,
   )
   KIA_NIRO_PHEV = HyundaiPlatformConfig(
     [
-      HyundaiCarDocs("Kia Niro Hybrid 2018", min_enable_speed=10. * CV.MPH_TO_MS, car_parts=CarParts.common([CarHarness.hyundai_c])),
+      HyundaiCarDocs("Kia Niro Hybrid 2018", "All", min_enable_speed=10. * CV.MPH_TO_MS, car_parts=CarParts.common([CarHarness.hyundai_c])),
       HyundaiCarDocs("Kia Niro Plug-in Hybrid 2018-19", "All", min_enable_speed=10. * CV.MPH_TO_MS, car_parts=CarParts.common([CarHarness.hyundai_c])),
       HyundaiCarDocs("Kia Niro Plug-in Hybrid 2020", car_parts=CarParts.common([CarHarness.hyundai_d])),
     ],
@@ -459,7 +541,7 @@ class CAR(Platforms):
     flags=HyundaiFlags.HYBRID,
   )
   KIA_NIRO_HEV_2ND_GEN = HyundaiCanFDPlatformConfig(
-    [HyundaiCarDocs("Kia Niro Hybrid 2023-24", car_parts=CarParts.common([CarHarness.hyundai_a]))],
+    [HyundaiCarDocs("Kia Niro Hybrid 2023", car_parts=CarParts.common([CarHarness.hyundai_a]))],
     KIA_NIRO_EV.specs,
   )
   KIA_OPTIMA_G4 = HyundaiPlatformConfig(
@@ -476,7 +558,7 @@ class CAR(Platforms):
   # TODO: may support adjacent years. may have a non-zero minimum steering speed
   KIA_OPTIMA_H = HyundaiPlatformConfig(
     [HyundaiCarDocs("Kia Optima Hybrid 2017", "Advanced Smart Cruise Control", car_parts=CarParts.common([CarHarness.hyundai_c]))],
-    CarSpecs(mass=3558 * CV.LB_TO_KG, wheelbase=2.8, steerRatio=13.75, tireStiffnessFactor=0.5),
+    CarSpecs(mass=3758 * CV.LB_TO_KG, wheelbase=2.8, steerRatio=13.75, tireStiffnessFactor=0.5),
     flags=HyundaiFlags.HYBRID | HyundaiFlags.LEGACY,
   )
   KIA_OPTIMA_H_G4_FL = HyundaiPlatformConfig(
@@ -509,7 +591,7 @@ class CAR(Platforms):
   KIA_SORENTO_4TH_GEN = HyundaiCanFDPlatformConfig(
     [HyundaiCarDocs("Kia Sorento 2021-23", car_parts=CarParts.common([CarHarness.hyundai_k]))],
     CarSpecs(mass=3957 * CV.LB_TO_KG, wheelbase=2.81, steerRatio=13.5),  # average of the platforms
-    flags=HyundaiFlags.CANFD_RADAR_SCC,
+    flags=HyundaiFlags.RADAR_SCC,
   )
   KIA_SORENTO_HEV_4TH_GEN = HyundaiCanFDPlatformConfig(
     [
@@ -517,7 +599,7 @@ class CAR(Platforms):
       HyundaiCarDocs("Kia Sorento Plug-in Hybrid 2022-23", "All", car_parts=CarParts.common([CarHarness.hyundai_a])),
     ],
     CarSpecs(mass=4395 * CV.LB_TO_KG, wheelbase=2.81, steerRatio=13.5),  # average of the platforms
-    flags=HyundaiFlags.CANFD_RADAR_SCC,
+    flags=HyundaiFlags.RADAR_SCC,
   )
   KIA_STINGER = HyundaiPlatformConfig(
     [HyundaiCarDocs("Kia Stinger 2018-20", video="https://www.youtube.com/watch?v=MJ94qoofYw0",
@@ -533,6 +615,11 @@ class CAR(Platforms):
     CarSpecs(mass=1450, wheelbase=2.65, steerRatio=13.75, tireStiffnessFactor=0.5),
     flags=HyundaiFlags.LEGACY,
   )
+  KIA_EV4 = HyundaiCanFDPlatformConfig(
+    [HyundaiCarDocs("Kia EV4 2025", "All", car_parts=CarParts.common([CarHarness.hyundai_q]))],
+    CarSpecs(mass=1710, wheelbase=2.83, steerRatio=14.5, tireStiffnessFactor=0.65),
+    flags=HyundaiFlags.EV,
+  )
   KIA_EV6 = HyundaiCanFDPlatformConfig(
     [
       HyundaiCarDocs("Kia EV6 (Southeast Asia only) 2022-24", "All", car_parts=CarParts.common([CarHarness.hyundai_p])),
@@ -542,13 +629,21 @@ class CAR(Platforms):
     CarSpecs(mass=2055, wheelbase=2.9, steerRatio=16, tireStiffnessFactor=0.65),
     flags=HyundaiFlags.EV,
   )
+  KIA_EV6_PE = HyundaiCanFDPlatformConfig(
+    [
+      HyundaiCarDocs("Kia EV6 PE (CV1)", car_parts=CarParts.common([CarHarness.hyundai_p])),
+      HyundaiCarDocs("Kia EV6 PE (with HDA II) 2025", "Highway Driving Assist II", car_parts=CarParts.common([CarHarness.hyundai_p]))
+    ],
+    CarSpecs(mass=2055, wheelbase=2.9, steerRatio=16, tireStiffnessFactor=0.65),
+    flags=HyundaiFlags.EV | HyundaiFlags.ANGLE_CONTROL,
+  )
   KIA_CARNIVAL_4TH_GEN = HyundaiCanFDPlatformConfig(
     [
       HyundaiCarDocs("Kia Carnival 2022-24", car_parts=CarParts.common([CarHarness.hyundai_a])),
       HyundaiCarDocs("Kia Carnival (China only) 2023", car_parts=CarParts.common([CarHarness.hyundai_k]))
     ],
     CarSpecs(mass=2087, wheelbase=3.09, steerRatio=14.23),
-    flags=HyundaiFlags.CANFD_RADAR_SCC,
+    flags=HyundaiFlags.RADAR_SCC,
   )
 
   # Genesis
@@ -582,7 +677,7 @@ class CAR(Platforms):
       HyundaiCarDocs("Genesis GV70 (3.5T Trim, without HDA II) 2022-23", "All", car_parts=CarParts.common([CarHarness.hyundai_m])),
     ],
     CarSpecs(mass=1950, wheelbase=2.87, steerRatio=14.6),
-    flags=HyundaiFlags.CANFD_RADAR_SCC,
+    flags=HyundaiFlags.RADAR_SCC,
   )
   GENESIS_GV70_ELECTRIFIED_1ST_GEN = HyundaiCanFDPlatformConfig(
     [
@@ -608,9 +703,118 @@ class CAR(Platforms):
   GENESIS_GV80 = HyundaiCanFDPlatformConfig(
     [HyundaiCarDocs("Genesis GV80 2023", "All", car_parts=CarParts.common([CarHarness.hyundai_m]))],
     CarSpecs(mass=2258, wheelbase=2.95, steerRatio=14.14),
-    flags=HyundaiFlags.CANFD_RADAR_SCC,
+    flags=HyundaiFlags.RADAR_SCC,
   )
-
+  GENESIS_GV70_EV_1ST_GEN = HyundaiCanFDPlatformConfig(
+    [HyundaiCarDocs("Genesis GV70 EV 2020-2023", "All", car_parts=CarParts.common([CarHarness.hyundai_m]))],
+    CarSpecs(mass=2230, wheelbase=2.87, steerRatio=14.6),
+    flags=HyundaiFlags.EV | HyundaiFlags.RADAR_SCC,
+  )
+  HYUNDAI_GRANDEUR_IG = HyundaiPlatformConfig(
+    [HyundaiCarDocs("Hyundai Grandeur 2018-19", "All", car_parts=CarParts.common([CarHarness.hyundai_c]))],
+    CarSpecs(mass=1570, wheelbase=2.845, steerRatio=16., tireStiffnessFactor=0.7),
+    flags=HyundaiFlags.LEGACY | HyundaiFlags.CLUSTER_GEARS,
+  )
+  HYUNDAI_GRANDEUR_IG_HEV = HyundaiPlatformConfig(
+    [HyundaiCarDocs("Hyundai Grandeur HEV 2018-19", "All", car_parts=CarParts.common([CarHarness.hyundai_c]))],
+    CarSpecs(mass=1570, wheelbase=2.845, steerRatio=16., tireStiffnessFactor=0.7),
+    flags=HyundaiFlags.HYBRID | HyundaiFlags.LEGACY,
+  )
+  GENESIS_EQ900 = HyundaiPlatformConfig(
+    [HyundaiCarDocs("Genesis EQ900 2017", "All", car_parts=CarParts.common([CarHarness.hyundai_c]))],
+    CarSpecs(mass=2200, wheelbase=3.15, steerRatio=16., tireStiffnessFactor=0.7),
+    flags=HyundaiFlags.LEGACY,
+  )
+  GENESIS_EQ900_L = HyundaiPlatformConfig(
+    [HyundaiCarDocs("Genesis EQ900 LIMOUSINE", "All", car_parts=CarParts.common([CarHarness.hyundai_c]))],
+    CarSpecs(mass=2290, wheelbase=3.45, steerRatio=16., tireStiffnessFactor=0.7),
+    flags=HyundaiFlags.LEGACY,
+  )
+  GENESIS_G90_2019 = HyundaiPlatformConfig(
+    [HyundaiCarDocs("Genesis G90 2019", "All", car_parts=CarParts.common([CarHarness.hyundai_c]))],
+    CarSpecs(mass=2150, wheelbase=3.16, steerRatio=16., tireStiffnessFactor=0.7),
+    flags=HyundaiFlags.LEGACY,
+  )
+  HYUNDAI_NEXO = HyundaiPlatformConfig(
+    [HyundaiCarDocs("Hyundai Nexo", "All", car_parts=CarParts.common([CarHarness.hyundai_a]))],
+    CarSpecs(mass=1885, wheelbase=2.79, steerRatio=15.3, tireStiffnessFactor=0.385),
+    flags=HyundaiFlags.EV,
+  )
+  KIA_MOHAVE = HyundaiPlatformConfig(
+    [HyundaiCarDocs("Kia Mohave 2019", "All", car_parts=CarParts.common([CarHarness.hyundai_k]))],
+    CarSpecs(mass=2285, wheelbase=2.895, steerRatio=16., tireStiffnessFactor=0.7),
+    flags=HyundaiFlags.LEGACY,
+  )
+  KIA_K5 = HyundaiPlatformConfig(
+    [HyundaiCarDocs("Kia K5 2019 & 2016", "All", car_parts=CarParts.common([CarHarness.hyundai_b]))],
+    CarSpecs(mass=1515, wheelbase=2.80, steerRatio=15.5, tireStiffnessFactor=0.7),
+    flags=HyundaiFlags.LEGACY | HyundaiFlags.TCU_GEARS,
+  )
+  KIA_K5_HEV = HyundaiPlatformConfig(
+    [HyundaiCarDocs("Kia K5 Hybrid 2017", "All", car_parts=CarParts.common([CarHarness.hyundai_c]))],
+    CarSpecs(mass=1705, wheelbase=2.80, steerRatio=15.5, tireStiffnessFactor=0.7),
+    flags=HyundaiFlags.HYBRID | HyundaiFlags.LEGACY,
+  )
+  KIA_K5_HEV_2022 = HyundaiPlatformConfig(
+    [HyundaiCarDocs("Kia K5 Hybrid 2022", "All", car_parts=CarParts.common([CarHarness.hyundai_c]))],
+    CarSpecs(mass=1515, wheelbase=2.85, steerRatio=15.5, tireStiffnessFactor=0.7),
+    flags=HyundaiFlags.HYBRID | HyundaiFlags.LEGACY,
+  )
+  KIA_K7 = HyundaiPlatformConfig(
+    [HyundaiCarDocs("Kia K7 2016-2019", "All", car_parts=CarParts.common([CarHarness.hyundai_c]))],
+    CarSpecs(mass=1850, wheelbase=2.855, steerRatio=15.5, tireStiffnessFactor=0.7),
+    flags=HyundaiFlags.LEGACY | HyundaiFlags.CLUSTER_GEARS,
+  )
+  KIA_K7_HEV = HyundaiPlatformConfig(
+    [HyundaiCarDocs("Kia K7 Hybrid 2016-2019", "All", car_parts=CarParts.common([CarHarness.hyundai_c]))],
+    CarSpecs(mass=1515, wheelbase=2.855, steerRatio=15.5, tireStiffnessFactor=0.7),
+    flags=HyundaiFlags.HYBRID | HyundaiFlags.LEGACY,
+  )
+  KIA_K7_PE = HyundaiPlatformConfig(
+    [HyundaiCarDocs("Kia K7 2020", "All", car_parts=CarParts.common([CarHarness.hyundai_c]))],
+    CarSpecs(mass=1850, wheelbase=2.855, steerRatio=15.5, tireStiffnessFactor=0.7),
+  )
+  KIA_K7_HEV_PE = HyundaiPlatformConfig(
+    [HyundaiCarDocs("Kia K7 Hybrid 2020", "All", car_parts=CarParts.common([CarHarness.hyundai_c]))],
+    CarSpecs(mass=1515, wheelbase=2.855, steerRatio=15.5, tireStiffnessFactor=0.7),
+    flags=HyundaiFlags.HYBRID,
+  )
+  KIA_K9 = HyundaiPlatformConfig(
+    [HyundaiCarDocs("Kia K9 2016-2019", "All", car_parts=CarParts.common([CarHarness.hyundai_h]))],
+    CarSpecs(mass=2075, wheelbase=3.15, steerRatio=14.5, tireStiffnessFactor=0.7),
+    flags=HyundaiFlags.LEGACY,
+  )
+  KIA_EV_SK3 = HyundaiPlatformConfig(
+    [HyundaiCarDocs("Kia Soul EV 2019", car_parts=CarParts.common([CarHarness.hyundai_c]))],
+    CarSpecs(mass=1695, wheelbase=2.6, steerRatio=13.75),
+    flags=HyundaiFlags.CHECKSUM_CRC8 | HyundaiFlags.EV,
+  )
+  KIA_EV9 = HyundaiCanFDPlatformConfig(
+    [
+      HyundaiCarDocs("Kia EV9 (MV)", car_parts=CarParts.common([CarHarness.hyundai_k])),
+    ],
+    CarSpecs(mass=2625, wheelbase=3.1, steerRatio=16.02),
+    flags=HyundaiFlags.EV | HyundaiFlags.ANGLE_CONTROL,
+  )
+  KIA_EV3 = HyundaiCanFDPlatformConfig(
+    [
+      HyundaiCarDocs("Kia EV3 (SV1)", car_parts=CarParts.common([CarHarness.hyundai_n])),
+    ],
+    CarSpecs(mass=2055, wheelbase=2.90, steerRatio=16.0, tireStiffnessFactor=0.65),
+    flags=HyundaiFlags.EV,
+  )
+  KIA_PV5 = HyundaiCanFDPlatformConfig(
+    [
+      HyundaiCarDocs("Kia PV5 (SW1)", car_parts=CarParts.common([CarHarness.hyundai_n])),
+    ],
+    CarSpecs(mass=2600, wheelbase=2.995, steerRatio=16.0, tireStiffnessFactor=0.65),
+    flags=HyundaiFlags.EV,
+  )
+  KIA_RAY_EV = HyundaiPlatformConfig(
+    [HyundaiCarDocs("Kia Ray EV", car_parts=CarParts.common([CarHarness.hyundai_h]))],
+    CarSpecs(mass=1295, wheelbase=2.520, steerRatio=14.5),
+    flags=HyundaiFlags.EV | HyundaiFlags.CC_ONLY_CAR | HyundaiFlags.CHECKSUM_CRC8,
+  )
 
 class Buttons:
   NONE = 0
@@ -618,6 +822,7 @@ class Buttons:
   SET_DECEL = 2
   GAP_DIST = 3
   CANCEL = 4  # on newer models, this is a pause/resume button
+  LFA_BUTTON = 5
 
 
 def get_platform_codes(fw_versions: list[bytes]) -> set[tuple[bytes, bytes | None]]:
@@ -734,11 +939,13 @@ FW_QUERY_CONFIG = FwQueryConfig(
       [HYUNDAI_VERSION_REQUEST_LONG],
       [HYUNDAI_VERSION_RESPONSE],
       bus=0,
+      auxiliary=True,
     ),
     Request(
       [HYUNDAI_VERSION_REQUEST_LONG],
       [HYUNDAI_VERSION_RESPONSE],
       bus=1,
+      auxiliary=True,
       obd_multiplexing=False,
     ),
 
@@ -748,6 +955,7 @@ FW_QUERY_CONFIG = FwQueryConfig(
       [HYUNDAI_ECU_MANUFACTURING_DATE],
       [HYUNDAI_VERSION_RESPONSE],
       bus=0,
+      auxiliary=True,
       logging=True,
     ),
 
@@ -756,12 +964,14 @@ FW_QUERY_CONFIG = FwQueryConfig(
       [HYUNDAI_VERSION_REQUEST_ALT],
       [HYUNDAI_VERSION_RESPONSE],
       bus=0,
+      auxiliary=True,
       logging=True,
     ),
     Request(
       [HYUNDAI_VERSION_REQUEST_ALT],
       [HYUNDAI_VERSION_RESPONSE],
       bus=1,
+      auxiliary=True,
       logging=True,
       obd_multiplexing=False,
     ),
@@ -793,9 +1003,13 @@ CAN_GEARS = {
   # which message has the gear. hybrid and EV use ELECT_GEAR
   "use_cluster_gears": CAR.with_flags(HyundaiFlags.CLUSTER_GEARS),
   "use_tcu_gears": CAR.with_flags(HyundaiFlags.TCU_GEARS),
+  "send_mdps12": {CAR.GENESIS_G90, CAR.GENESIS_G90_2019, CAR.KIA_K9, CAR.KIA_K7},
 }
 
 CANFD_CAR = CAR.with_flags(HyundaiFlags.CANFD)
+CANFD_RADAR_SCC_CAR = CAR.with_flags(HyundaiFlags.RADAR_SCC)  # TODO: merge with UNSUPPORTED_LONGITUDINAL_CAR
+
+CANFD_UNSUPPORTED_LONGITUDINAL_CAR = CAR.with_flags(HyundaiFlags.CANFD_NO_RADAR_DISABLE)  # TODO: merge with UNSUPPORTED_LONGITUDINAL_CAR
 
 CAMERA_SCC_CAR = CAR.with_flags(HyundaiFlags.CAMERA_SCC)
 
@@ -805,9 +1019,17 @@ EV_CAR = CAR.with_flags(HyundaiFlags.EV)
 
 LEGACY_SAFETY_MODE_CAR = CAR.with_flags(HyundaiFlags.LEGACY)
 
-UNSUPPORTED_LONGITUDINAL_CAR = {
-  "legacy": CAR.with_flags(HyundaiFlags.LEGACY),
-  "can": CAR.with_flags(HyundaiFlags.UNSUPPORTED_LONGITUDINAL),
-}
+# TODO: another PR with (HyundaiFlags.LEGACY | HyundaiFlags.UNSUPPORTED_LONGITUDINAL | HyundaiFlags.CAMERA_SCC |
+#       HyundaiFlags.CANFD_RADAR_SCC | HyundaiFlags.CANFD_NO_RADAR_DISABLE | )
+UNSUPPORTED_LONGITUDINAL_CAR = CAR.with_flags(HyundaiFlags.LEGACY) | CAR.with_flags(HyundaiFlags.UNSUPPORTED_LONGITUDINAL)
 
 DBC = CAR.create_dbc_map()
+
+if __name__ == "__main__":
+  cars = []
+  for platform in CAR:
+    for doc in platform.config.car_docs:
+      cars.append(doc.name)
+  cars.sort()
+  for c in cars:
+    print(c)

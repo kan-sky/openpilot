@@ -17,7 +17,8 @@ import numpy as np
 from numpy.linalg import solve
 
 from opendbc.car.structs import CarParams
-from opendbc.car import ACCELERATION_DUE_TO_GRAVITY
+
+ACCELERATION_DUE_TO_GRAVITY = 9.8
 
 
 class VehicleModel:
