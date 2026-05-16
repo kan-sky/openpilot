@@ -92,7 +92,9 @@ def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.
       [5.0, 15.0, 30.0],
       [0.08, 0.10, 0.18]))
 
-    base_lat_smooth_seconds = lat_smooth_seconds
+    # Kans: model uncertainty 기반 dynamic smoothing
+    dynamic_lat_smooth_seconds, y_std_1s, extra_smooth_seconds = get_lat_smooth_seconds_dynamic(model_output, lat_smooth_seconds)
+    base_lat_smooth_seconds = dynamic_lat_smooth_seconds
 
     applied_lat_smooth_seconds = float(np.clip(
       min(base_lat_smooth_seconds, curve_smooth_max, speed_smooth_max), 0.08, 0.18))
