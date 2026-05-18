@@ -77,8 +77,8 @@ def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.
     desired_curv_unscaled, desired_accel = model_output['action'][0]
     desired_curvature = desired_curv_unscaled / 100.0
 
-    # Kans: vEgoStopping기반 should_stop은 더이상 사용하지 않음.
-    should_stop = (v_ego < 0.3 and desired_accel < 0.1)
+    # Kans: vEgoStopping 파라미터 반영
+    should_stop = (v_ego < vEgoStopping and desired_accel < 0.1)
 
     # longitudinal smoothing
     desired_accel = smooth_value(desired_accel, prev_action.desiredAcceleration, LONG_SMOOTH_SECONDS)
