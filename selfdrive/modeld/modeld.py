@@ -18,116 +18,41 @@ from openpilot.common.transformations.camera import DEVICE_CAMERAS
 from openpilot.system.camerad.cameras.nv12_info import get_nv12_info
 from openpilot.common.transformations.model import get_warp_matrix
 from openpilot.selfdrive.controls.lib.desire_helper import DesireHelper
-from openpilot.selfdrive.controls.lib.drive_helpers import get_accel_from_plan, smooth_value, get_curvature_from_plan
+from openpilot.selfdrive.controls.lib.drive_helpers import smooth_value
 from openpilot.selfdrive.modeld.parse_model_outputs import Parser
 from openpilot.selfdrive.modeld.compile_modeld import make_input_queues
 from openpilot.selfdrive.modeld.fill_model_msg import fill_model_msg, fill_pose_msg, PublishState
 from openpilot.common.file_chunker import read_file_chunked
-from openpilot.selfdrive.modeld.constants import ModelConstants, Plan
+from openpilot.selfdrive.modeld.constants import ModelConstants
 
 
 PROCESS_NAME = "selfdrive.modeld.modeld"
 SEND_RAW_PRED = os.getenv('SEND_RAW_PRED')
 
-LAT_SMOOTH_SECONDS = 0.0
+LAT_SMOOTH_SECONDS = 0.13
 LONG_SMOOTH_SECONDS = 0.3
 MIN_LAT_CONTROL_SPEED = 0.3
 
-# carrot
-def get_lat_smooth_seconds_dynamic(model_output: dict[str, np.ndarray],
-                                   base_lat_smooth_seconds: float) -> tuple[float, float, float]:
-  if base_lat_smooth_seconds <= 0.0:
-    return 0.0, 0.0, 0.0
-
-  try:
-    y_std_1s = float(model_output['plan_stds'][0, 10, Plan.POSITION, 1])
-  except Exception:
-    y_std_1s = 0.0
-
-  # Kans: base_lat_smooth_seconds(LatSmoothSec)=0.1일 때 기준
-  # 최종 다이나믹값 범위: 0.1에서 0.2사이에 고정됨.
-  # y_std_1s = 0.01~0.15까지 LAT_SMOOTH_SECONDS=0.1로 안정적인 상태.
-  # y_std_1s = 0.18~0.25까지 LAT_SMOOTH_SECONDS=0.12~0.166으로 증가. 필터링 증가 
-  # y_std_1s = 0.30~0.40까지 LAT_SMOOTH_SECONDS=0.20으로 최대값 고정.
-
-  max_lat_smooth_seconds = 0.20
-  extra_max = max(0.0, max_lat_smooth_seconds - base_lat_smooth_seconds)
-
-  extra_smooth_seconds = float(np.interp(y_std_1s, [0.15, 0.30], [0.0, extra_max]))
-
-  extra_smooth_seconds = float(np.clip(extra_smooth_seconds, 0.0, extra_max))
-
-  dynamic_lat_smooth_seconds = float(np.clip(base_lat_smooth_seconds + extra_smooth_seconds, 0.0, max_lat_smooth_seconds))
-
-  return dynamic_lat_smooth_seconds, y_std_1s, extra_smooth_seconds
 
 def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.ModelDataV2.Action,
-                          lat_action_t: float, long_action_t: float, v_ego: float, lat_smooth_seconds: float, vEgoStopping: float) -> log.ModelDataV2.Action:
-    plan = model_output['plan'][0]
-    desired_accel, should_stop, _, desired_velocity_now = get_accel_from_plan(plan[:,Plan.VELOCITY][:,0],
-                                                     plan[:,Plan.ACCELERATION][:,0],
-                                                     ModelConstants.T_IDXS,
-                                                     action_t=long_action_t,
-                                                     vEgoStopping=vEgoStopping)
+                          v_ego: float, lat_smooth_seconds: float, vEgoStopping: float) -> log.ModelDataV2.Action:
+    desired_accel = float(model_output['action'][0, 1])
+    desired_curvature = float(model_output['action'][0,0] / (max(1.0, v_ego))**2)
+
+    should_stop = (v_ego < vEgoStopping and desired_accel < 0.1)
+
     desired_accel = smooth_value(desired_accel, prev_action.desiredAcceleration, LONG_SMOOTH_SECONDS)
-    desired_velocity_now = smooth_value(desired_velocity_now, prev_action.desiredVelocity, LONG_SMOOTH_SECONDS)
-
-    desired_curvature = get_curvature_from_plan(plan[:,Plan.T_FROM_CURRENT_EULER][:,2],
-                                                plan[:,Plan.ORIENTATION_RATE][:,2],
-                                                ModelConstants.T_IDXS,
-                                                v_ego,
-                                                lat_action_t)
-
-    # Kans: 큰 곡률로 이어지는 커브 판단
-    abs_curvature = abs(desired_curvature)
-
-    # Kans: 곡률에 따른 smoothing 상한.
-    # 기존 [0.15, 0.10, 0.08]은 변화폭이 커서 조향이 감겼다 풀렸다 할 수 있음.
-    curve_smooth_max = float(np.interp(abs_curvature,
-      [0.0005, 0.0015, 0.0040],
-      [0.13, 0.11, 0.10]))
-
-    # 속도에 따른 smoothing 상한값
-    speed_smooth_max = float(np.interp(v_ego,
-      [5.0, 15.0, 30.0],
-      [0.08, 0.10, 0.18]))
-
-    # Kans: model uncertainty 기반 dynamic smoothing
-    dynamic_lat_smooth_seconds, y_std_1s, extra_smooth_seconds = get_lat_smooth_seconds_dynamic(model_output, lat_smooth_seconds)
-    base_lat_smooth_seconds = dynamic_lat_smooth_seconds
-
-    applied_lat_smooth_seconds = float(np.clip(
-      min(base_lat_smooth_seconds, curve_smooth_max, speed_smooth_max), 0.08, 0.18))
-
+    desired_velocity_now = max(0.0, float(v_ego))
 
     if v_ego > MIN_LAT_CONTROL_SPEED:
-      desired_curvature = smooth_value(desired_curvature, prev_action.desiredCurvature, applied_lat_smooth_seconds)
+      desired_curvature = smooth_value(desired_curvature, prev_action.desiredCurvature, lat_smooth_seconds)
     else:
       desired_curvature = prev_action.desiredCurvature
 
-# Kans: nan protection
-    desired_curvature = float(np.nan_to_num(
-      desired_curvature,
-      nan=prev_action.desiredCurvature
-    ))
-
-    desired_accel = float(np.nan_to_num(
-      desired_accel,
-      nan=prev_action.desiredAcceleration
-    ))
-
-    desired_velocity_now = float(max(0.0, v_ego))
-
-    return(
-      log.ModelDataV2.Action(
-        desiredCurvature=desired_curvature,
-        desiredAcceleration=desired_accel,
-        shouldStop=bool(should_stop),
-        desiredVelocity=desired_velocity_now
-      ),
-      curve_smooth_max,
-      applied_lat_smooth_seconds
-    ) 
+    return log.ModelDataV2.Action(desiredCurvature=float(desired_curvature),
+                                  desiredAcceleration=float(desired_accel),
+                                  shouldStop=bool(should_stop),
+                                  desiredVelocity=float(desired_velocity_now))
 
 class FrameMeta:
   frame_id: int = 0
@@ -150,7 +75,10 @@ class ModelState:
     self.vision_input_names = list(self.vision_input_shapes.keys())
     self.vision_output_slices = vision_metadata['output_slices']
 
-    policy_metadata = jits['metadata']['policy']
+    off_policy_metadata = jits['metadata']['off_policy']
+    self.off_policy_output_slices = off_policy_metadata['output_slices']
+
+    policy_metadata = jits['metadata']['on_policy']
     self.policy_input_shapes =  policy_metadata['input_shapes']
     self.policy_output_slices = policy_metadata['output_slices']
 
@@ -189,6 +117,10 @@ class ModelState:
     self.npy['desire'][:] = np.where(inputs['desire_pulse'] - self.prev_desire > .99, inputs['desire_pulse'], 0)
     self.prev_desire[:] = inputs['desire_pulse']
     self.npy['traffic_convention'][:] = inputs['traffic_convention']
+    if 'action_t' in self.npy:
+      self.npy['action_t'][:] = inputs['action_t']
+    if 'prev_action' in self.npy:
+      self.npy['prev_action'][:] = inputs['prev_action']
     self.npy['tfm'][:,:] = transforms['img'][:,:]
     self.npy['big_tfm'][:,:] = transforms['big_img'][:,:]
 
@@ -196,18 +128,20 @@ class ModelState:
       self.warp_enqueue(**self.input_queues, frame=self.full_frames['img'], big_frame=self.full_frames['big_img'])
       return None
 
-    vision_output, policy_output = self.run_policy(
+    vision_output, policy_output, off_policy_output = self.run_policy(
       **self.input_queues, frame=self.full_frames['img'], big_frame=self.full_frames['big_img']
     )
 
     vision_output = vision_output.numpy().flatten()
+    off_policy_output = off_policy_output.numpy().flatten()
     policy_output = policy_output.numpy().flatten()
     vision_outputs_dict = self.parser.parse_vision_outputs(self.slice_outputs(vision_output, self.vision_output_slices))
+    off_policy_outputs_dict = self.parser.parse_off_policy_outputs(self.slice_outputs(off_policy_output, self.off_policy_output_slices))
     policy_outputs_dict = self.parser.parse_policy_outputs(self.slice_outputs(policy_output, self.policy_output_slices))
-    combined_outputs_dict = {**vision_outputs_dict, **policy_outputs_dict}
+    combined_outputs_dict = {**vision_outputs_dict, **off_policy_outputs_dict, **policy_outputs_dict}
 
     if SEND_RAW_PRED:
-      combined_outputs_dict['raw_pred'] = np.concatenate([vision_output.copy(), policy_output.copy()])
+      combined_outputs_dict['raw_pred'] = np.concatenate([vision_output.copy(), policy_output.copy(), off_policy_output.copy()])
     return combined_outputs_dict
 
 
@@ -363,9 +297,15 @@ def main(demo=False):
 
     bufs = {name: buf_extra if 'big' in name else buf_main for name in model.vision_input_names}
     transforms = {name: model_transform_extra if 'big' in name else model_transform_main for name in model.vision_input_names}
+    frame_delay = DT_MDL # compensate for time passed since the frame was captured: current_time - timestamp_eof is 50ms on average
+    action_delay = DT_MDL / 2 # middle of the interval between model output (current state) and next frame (expected state)
+    lat_action_t = lat_delay + frame_delay + action_delay
+    long_action_t = long_delay + frame_delay + action_delay
     inputs:dict[str, np.ndarray] = {
       'desire_pulse': vec_desire,
       'traffic_convention': traffic_convention,
+      'action_t': np.array([lat_action_t, long_action_t], dtype=np.float32),
+      'prev_action': np.array([prev_action.desiredCurvature * max(1.0, v_ego)**2, prev_action.desiredAcceleration], dtype=np.float32),
     }
 
     mt1 = time.perf_counter()
@@ -377,24 +317,14 @@ def main(demo=False):
       modelv2_send = messaging.new_message('modelV2')
       drivingdata_send = messaging.new_message('drivingModelData')
       posenet_send = messaging.new_message('cameraOdometry')
-      # Kans:
-      lat_smooth_seconds_dynamic, y_std_1s, lat_smooth_extra = get_lat_smooth_seconds_dynamic(
-          model_output,
-          lat_smooth_seconds,
-        )
-      if custom_lat_delay > 0.0:
-        lat_delay_dynamic = custom_lat_delay + lat_smooth_seconds_dynamic
-      else:
-        lat_delay_dynamic = sm["liveDelay"].lateralDelay + lat_smooth_seconds_dynamic
 
-      frame_delay = DT_MDL # compensate for time passed since the frame was captured: current_time - timestamp_eof is 50ms on average
-      action_delay = DT_MDL / 2 # middle of the interval between model output (current state) and next frame (expected state)
-      action, curve_smooth_max, applied_lat_smooth_seconds = get_action_from_model(model_output, prev_action, lat_delay_dynamic + frame_delay + action_delay, long_delay + frame_delay + action_delay, v_ego, lat_smooth_seconds_dynamic, vEgoStopping)
-      prev_action = action
+      # Kans: lat_smooth_sec
+      action = get_action_from_model(model_output, prev_action, v_ego, lat_smooth_seconds, vEgoStopping)
       # Kans: LatSmoothDebug
-      if frame % 20 == 0:
-        params.put_nonblocking("LatSmoothDebug", f"{curve_smooth_max:.3f}/{applied_lat_smooth_seconds:.3f}")
-
+      if frame % 100 == 0:
+        model_curv = float(model_output['action'][0, 0]) / (max(1.0, v_ego) ** 2)
+        params.put_nonblocking("LatSmoothDebug", f"in:{model_curv:.4f} out:{action.desiredCurvature:.4f}")
+      prev_action = action
       fill_model_msg(drivingdata_send, modelv2_send, model_output, action,
                      publish_state, meta_main.frame_id, meta_extra.frame_id, frame_id,
                      frame_drop_ratio, meta_main.timestamp_eof, model_execution_time, live_calib_seen)

@@ -161,7 +161,7 @@ cdef class Params:
       r = self.p.getFloat(k, block)
     return r
 
-  def put(self, key, dat, bool block = False):
+  def put(self, key, dat, bool block = True):
     """
     Warning: block=True blocks until the param is written to disk!
     In very rare cases this can take over a second, and your code will hang.
@@ -176,7 +176,7 @@ cdef class Params:
       else:
         self.p.putNonBlocking(k, dat_bytes)
 
-  def put_bool(self, key, bool val, bool block = False):
+  def put_bool(self, key, bool val, bool block = True):
     cdef string k = self.check_key(key)
     with nogil:
       if block:

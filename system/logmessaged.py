@@ -32,8 +32,8 @@ def main() -> NoReturn:
         record = dat[1:].decode("utf-8", errors="replace")
       except Exception as e:
         print(f"decode error: {e}, skipping log")
-        print(f"Raw bytes (hex): {raw_bytes.hex()[:200]}...")  # 앞부분만 출력
-        Params().put("CarrotException", "log")
+        print(f"Raw bytes (hex): {raw_bytes.hex()[:200]}...")
+        Params().put("CarrotException", "log", block=True)
         continue
 
       if level >= log_level:
