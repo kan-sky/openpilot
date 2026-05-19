@@ -72,6 +72,16 @@ class LanePlanner:
     self.params = Params()
     self.curvature = 0.0
 
+    # Kans
+    self.prev_lane_change_state = log.LaneChangeState.off
+    self.lane_change_recover_count = 0
+
+  def update_lane_change_recover(self, lane_change_state):
+    if self.prev_lane_change_state != log.LaneChangeState.off and lane_change_state == log.LaneChangeState.off:
+      self.lane_change_recover_count = int(2.0 / DT_MDL)
+
+    self.prev_lane_change_state = lane_change_state
+
   def parse_model(self, md):
 
     lane_lines = md.laneLines
@@ -180,6 +190,11 @@ class LanePlanner:
 
     self.d_prob *= self.lane_change_multiplier  ## 차선변경중에는 꺼버림.
 
+    # Kans: 차선변경 종료 직후에는 새 차선 중앙유지를 위해 d_prob 빠른 복구
+    #if self.lane_change_recover_count > 0:
+    #  self.lane_change_recover_count -= 1
+    #  recover_d_prob = 1.0 if both_lane_available else (0.65 if one_lane_good else 0.4)
+    #  self.d_prob = max(self.d_prob, recover_d_prob)
     # laneless at lowspeed
     self.d_prob *= np.interp(v_ego * 3.6, [5., 10.], [0.0, 1.0])
 

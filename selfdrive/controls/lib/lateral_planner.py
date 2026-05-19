@@ -127,6 +127,8 @@ class LateralPlanner:
 
     # Parse model predictions
     self.LP.parse_model(md)
+    # Kans: modeld에서 전달된 차선변경 상태를 lane_planner에 전달
+    self.LP.update_lane_change_recover(md.meta.laneChangeState)
     #lane_change_prob = self.LP.l_lane_change_prob + self.LP.r_lane_change_prob
     #self.DH.update(sm['carState'], md, sm['carControl'].latActive, lane_change_prob, sm)
 
@@ -139,9 +141,12 @@ class LateralPlanner:
 
     # Turn off lanes during lane change
     #if self.DH.desire == log.Desire.laneChangeRight or self.DH.desire == log.Desire.laneChangeLeft:
-      
-    if md.meta.desire != log.Desire.none or carrot.atc_active:
-      self.LP.lane_change_multiplier = 0.0 #md.meta.laneChangeProb
+      									   
+    # Kans: 차선변경중에는 차선 끄기.
+    lane_change_active = md.meta.laneChangeState != log.LaneChangeState.off
+										   
+    if lane_change_active or carrot.atc_active:  #md.meta.desire != log.Desire.none or carrot.atc_active
+      self.LP.lane_change_multiplier = 0.0  #md.meta.laneChangeProb
     else:
       self.LP.lane_change_multiplier = 1.0
 
