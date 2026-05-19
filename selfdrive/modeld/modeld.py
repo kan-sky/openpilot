@@ -211,7 +211,7 @@ def main(demo=False):
 
   # TODO this needs more thought, use .2s extra for now to estimate other delays
   # TODO Move smooth seconds to action function
-  lat_delay = CP.steerActuatorDelay + .2 + LAT_SMOOTH_SECONDS # carrot
+  lat_delay = CP.steerActuatorDelay + LAT_SMOOTH_SECONDS # carrot
   long_delay = CP.longitudinalActuatorDelay + LONG_SMOOTH_SECONDS
   prev_action = log.ModelDataV2.Action()
 
@@ -230,6 +230,11 @@ def main(demo=False):
       long_delay = params.get_float("LongActuatorDelay")*0.01
       vEgoStopping = params.get_float("VEgoStopping") * 0.01
 
+    # Kans:
+    if custom_lat_delay > 0.0:
+      lat_delay = custom_lat_delay + lat_smooth_seconds
+    else:
+      lat_delay = sm["liveDelay"].lateralDelay + lat_smooth_seconds
     # Keep receiving frames until we are at least 1 frame ahead of previous extra frame
     while meta_main.timestamp_sof < meta_extra.timestamp_sof + 25000000:
       buf_main = vipc_client_main.recv()
