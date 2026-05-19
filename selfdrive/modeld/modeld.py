@@ -269,8 +269,15 @@ def main(demo=False):
 
     sm.update(0)
     desire = DH.desire
+
+    # Kans: RL 모델 차선변경 중 desire 유지 보강
+    if DH.lane_change_state != log.LaneChangeState.off:
+      if DH.lane_change_direction == log.LaneChangeDirection.left:
+        desire = log.Desire.laneChangeLeft
+      elif DH.lane_change_direction == log.LaneChangeDirection.right:
+        desire = log.Desire.laneChangeRight
+
     is_rhd = sm["driverMonitoringState"].isRHD
-    frame_id = sm["roadCameraState"].frameId
     v_ego = max(sm["carState"].vEgo, 0.)
     #lat_delay = sm["liveDelay"].lateralDelay + LAT_SMOOTH_SECONDS
     if sm.updated["liveCalibration"] and sm.seen['roadCameraState'] and sm.seen['deviceState']:
