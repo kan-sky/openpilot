@@ -111,7 +111,6 @@ def make_input_queues(vision_input_shapes, policy_input_shapes, frame_skip, devi
     'big_img_q': Tensor(np.zeros(img_buf_shape, dtype=np.uint8), device=device).contiguous().realize(),
     'feat_q': Tensor(np.zeros((frame_skip * (fb[1] - 1) + 1, fb[0], fb[2]), dtype=np.float32), device=device).contiguous().realize(),
     'desire_q': Tensor(np.zeros((frame_skip * dp[1], dp[0], dp[2]), dtype=np.float32), device=device).contiguous().realize(),
-
     **{k: Tensor(v, device='NPY').realize() for k, v in npy.items()},
   }
   if 'prev_action' in policy_input_shapes:
