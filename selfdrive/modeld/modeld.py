@@ -34,11 +34,12 @@ LONG_SMOOTH_SECONDS = 0.3
 MIN_LAT_CONTROL_SPEED = 0.3
 
 
-def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.ModelDataV2.Action, v_ego: float,
-                          lat_smooth_seconds: float, vEgoStopping: float) -> log.ModelDataV2.Action:
-    desired_accel = model_output['action'][0,1]
-    desired_curvature = model_output['action'][0,0] / (max(1.0, v_ego))**2
-    should_stop = (v_ego < 0.3 and desired_accel < 0.1)
+def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.ModelDataV2.Action,
+                          v_ego: float, lat_smooth_seconds: float, vEgoStopping: float) -> log.ModelDataV2.Action:
+    desired_accel = float(model_output['action'][0, 1])
+    desired_curvature = float(model_output['action'][0,0] / (max(1.0, v_ego))**2)
+
+    should_stop = (v_ego < vEgoStopping and desired_accel < 0.1)
 
     desired_accel = smooth_value(desired_accel, prev_action.desiredAcceleration, LONG_SMOOTH_SECONDS)
     if v_ego > MIN_LAT_CONTROL_SPEED:
@@ -47,13 +48,10 @@ def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.
       desired_curvature = prev_action.desiredCurvature
 
     desired_velocity_now = float(max(0.0, v_ego))
-    return (
-      log.ModelDataV2.Action(
-        desiredCurvature=desired_curvature,
-        desiredAcceleration=desired_accel,
-        shouldStop=bool(should_stop),
-        desiredVelocity=desired_velocity_now
-      )) 
+    return log.ModelDataV2.Action(desiredCurvature=float(desired_curvature),
+                                  desiredAcceleration=float(desired_accel),
+                                  shouldStop=bool(should_stop),
+                                  desiredVelocity=float(desired_velocity_now)) 
 
 class FrameMeta:
   frame_id: int = 0
