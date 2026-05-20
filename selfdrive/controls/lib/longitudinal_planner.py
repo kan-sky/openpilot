@@ -241,12 +241,12 @@ class LongitudinalPlanner:
 
     # Kans: 정지 후 앞차 출발 직후 shouldStop이 순간적으로 다시 켜져 재브레이킹되는 현상 완화
     lead_one = sm['radarState'].leadOne
-    lead_starting = (lead_one.status and (lead_one.vLead > 0.5 or lead_one.vRel > 0.3))
+    lead_starting = (lead_one.status and lead_one.vLead > 0.3 and lead_one.vRel > 0.3)
 
-    if lead_starting and v_ego < 3.0 and not sm['carState'].brakePressed and not carrot.soft_hold_active:
+    if lead_starting and v_ego < 0.3 and not sm['carState'].brakePressed and not carrot.soft_hold_active:
       output_should_stop_mpc = False # 정지국면에 들어가지 않게 막고
-      output_v_target_mpc = max(output_v_target_mpc, 0.5) # 목표속도
-      output_a_target_mpc = max(output_a_target_mpc, 0.2) # 먹표가속도값이 너무 약하지 않게 max값으로 설정.
+      output_v_target_mpc = max(output_v_target_mpc, 0.7) # 목표속도
+      output_a_target_mpc = max(output_a_target_mpc, 0.5) # 먹표가속도값이 너무 약하지 않게 max값으로 설정.
 
     if self.mpc.mode == 'acc':
       output_a_target = output_a_target_mpc

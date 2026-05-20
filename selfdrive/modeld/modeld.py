@@ -39,7 +39,7 @@ def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.
     desired_accel = float(model_output['action'][0, 1])
     desired_curvature = float(model_output['action'][0,0] / (max(1.0, v_ego))**2)
 
-    should_stop = (v_ego < vEgoStopping and desired_accel < 0.1)
+    should_stop = (v_ego < 0.3 and desired_accel < 0.1)
 
     desired_accel = smooth_value(desired_accel, prev_action.desiredAcceleration, LONG_SMOOTH_SECONDS)
     if v_ego > MIN_LAT_CONTROL_SPEED:
@@ -118,8 +118,6 @@ class ModelState:
     self.npy['traffic_convention'][:] = inputs['traffic_convention']
     if 'action_t' in self.npy:
       self.npy['action_t'][:] = inputs['action_t']
-    if 'prev_action' in self.npy:
-      self.npy['prev_action'][:] = inputs['prev_action']
     self.npy['tfm'][:,:] = transforms['img'][:,:]
     self.npy['big_tfm'][:,:] = transforms['big_img'][:,:]
 
@@ -317,7 +315,6 @@ def main(demo=False):
       'desire_pulse': vec_desire,
       'traffic_convention': traffic_convention,
       'action_t': np.array([lat_action_t, long_action_t], dtype=np.float32),
-      'prev_action': np.array([prev_action.desiredCurvature * max(1.0, v_ego)**2, prev_action.desiredAcceleration], dtype=np.float32),
     }
 
     mt1 = time.perf_counter()
