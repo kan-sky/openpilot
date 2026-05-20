@@ -15,6 +15,7 @@ from opendbc.car.interfaces import CarInterfaceBase, TorqueFromLateralAccelCallb
 
 TransmissionType = structs.CarParams.TransmissionType
 NetworkLocation = structs.CarParams.NetworkLocation
+LongCtrlState = structs.CarControl.Actuators.LongControlState
 
 ACCELERATOR_POS_MSG = 0xbe
 TPMS_POS_MSG = 0x52B ## TPMS
@@ -351,3 +352,40 @@ class CarInterface(CarInterfaceBase):
       ret.flags |= GMFlags.NO_ACCELERATOR_POS_MSG.value
 
     return ret
+
+  ## GM autoHold
+  def update_auto_hold(self, actuators):
+    if not self.CS.autoHold:
+      self.CS.autoHoldActive = False
+      self.CS.out.autoHoldActivated = False
+      return
+
+    # 가스페달, 리제패들 해제
+    if self.CS.out.gasPressed or self.CS.out.regenBraking:
+      self.CS.autoHoldActive = False
+      self.CS.autoHoldActivated = False
+      return
+
+    # 이미 AutoHold 중이면 유지
+    if self.CS.autoHoldActive:
+      self.CS.autoHoldActivated = True
+      return
+
+    # 브레이크 압력 기준
+    if self.CP.flags & GMFlags.NO_ACCELERATOR_POS_MSG.value:
+      brake_hold_pressed = self.CS.out.brakePressed and self.CS.out.brake >= 0.04
+    else:
+      brake_hold_pressed = self.CS.out.brakePressed and self.CS.out.brake >= 8
+
+    # 운전자 브레이크로 충분히 정지했을 때만 AutoHold 진입
+    if self.CS.out.vEgo < 0.05 and brake_hold_pressed:
+      self.CS.autoHoldActive = True
+      self.CS.autoHoldActivated = True
+      return
+
+  def apply(self, c, now_nanos, MD=None):
+    self.CS.MD = MD
+    actuators = c.actuators
+    self.update_auto_hold(actuators)
+    can_sends = self.CC.update(c, self.CS, now_nanos)
+    return can_sends

@@ -53,6 +53,11 @@ class CarState(CarStateBase):
     self._dbg_op_printed = False
     self._cruise_off_cnt = 0
 
+    # Kans: autoHold
+    self.autoHold = False
+    self.autoHoldActive = False
+    self.autoHoldActivated = False
+
     # Kans: TPMS
     self.KPA_TO_PSI = 0.1450377377
     self.TPMS_GAIN = 1.125
@@ -283,6 +288,10 @@ class CarState(CarStateBase):
 
     if ret.vEgo < self.CP.minSteerSpeed:
       ret.lowSpeedAlert = True
+
+    # Kans: autoHold
+    self.autoHold = True
+    ret.autoHoldActivated = self.autoHoldActivated
 
     return ret
 
