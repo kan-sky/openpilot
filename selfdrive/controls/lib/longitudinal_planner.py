@@ -183,15 +183,11 @@ class LongitudinalPlanner:
     elif self.reset_decel_timer > 0:
       self.reset_decel_timer -= 1
 
-      # 2초타이머 중 마지막 1초 동안, 감속 하한을 현재 가속도 근처에서 원래 limit으로 천천히 복귀
-      t = np.clip(self.reset_decel_timer / max(1, int(1.0 / self.dt)), 0.0, 1.0)
-
+      # 2초 동안 감속 하한을 현재 가속도 근처에서 원래 limit으로 천천히 복귀
       soft_min_accel = min(0.0, self.reset_decel_start_a - 0.05)
+      ramped_min_accel = soft_min_accel * t + accel_limits_turns[0] * (1.0 - t)
 
-      accel_limits_turns[0] = max(
-        accel_limits_turns[0],
-        soft_min_accel * t + accel_limits_turns[0] * (1.0 - t)
-      )
+      accel_limits_turns[0] = max(accel_limits_turns[0], min(0.0, ramped_min_accel))
 
     # Prevent divergence, smooth in current v_ego
     self.v_desired_filter.x = max(0.0, self.v_desired_filter.update(v_ego))
@@ -246,7 +242,7 @@ class LongitudinalPlanner:
     if lead_starting and v_ego < 0.3 and not sm['carState'].brakePressed and not carrot.soft_hold_active:
       output_should_stop_mpc = False # 정지국면에 들어가지 않게 막고
       output_v_target_mpc = max(output_v_target_mpc, 0.7) # 목표속도
-      output_a_target_mpc = max(output_a_target_mpc, 0.5) # 먹표가속도값이 너무 약하지 않게 max값으로 설정.
+      output_a_target_mpc = max(output_a_target_mpc, 0.5) # 목표가속도값이 너무 약하지 않게 max값으로 설정.
 
     if self.mpc.mode == 'acc':
       output_a_target = output_a_target_mpc
