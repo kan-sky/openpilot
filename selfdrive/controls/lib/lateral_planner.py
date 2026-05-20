@@ -127,8 +127,6 @@ class LateralPlanner:
 
     # Parse model predictions
     self.LP.parse_model(md)
-    # Kans: modeld에서 전달된 차선변경 상태를 lane_planner에 전달
-    self.LP.update_lane_change_recover(md.meta.laneChangeState)
     #lane_change_prob = self.LP.l_lane_change_prob + self.LP.r_lane_change_prob
     #self.DH.update(sm['carState'], md, sm['carControl'].latActive, lane_change_prob, sm)
 

@@ -46,7 +46,6 @@ def long_control_state_trans(CP, active, long_control_state, v_ego,
         if not (long_control_state == LongCtrlState.starting and lead_starting):
           long_control_state = LongCtrlState.stopping
       elif started_condition:
-
         long_control_state = LongCtrlState.pid
   return long_control_state
 
@@ -99,7 +98,7 @@ class LongControl:
 
     self.long_control_state = long_control_state_trans(self.CP, active, self.long_control_state, CS.vEgo,
                                                        should_stop, CS.brakePressed,
-                                                       CS.cruiseState.standstill)
+                                                       CS.cruiseState.standstill, radarState)
 
     if self.long_control_state == LongCtrlState.stopping and active:
       print(

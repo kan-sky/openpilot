@@ -125,11 +125,6 @@ class SelfdriveD:
     self.last_functional_fan_frame = 0
     self.events_prev = []
     self.logged_comm_issue = None
-    # Kans:
-    self._dbg_prev_radar_tuple = None
-    self._startup_init_log_patch_frame = None
-    self._startup_init_log_patch_time = 30
-
     self.not_running_prev = None
     self.experimental_mode = False
     self.personality = self.read_personality_param()
@@ -140,8 +135,6 @@ class SelfdriveD:
     self.rk = Ratekeeper(100, print_delay_threshold=None)
 
     self.atc_type_last = ""
-    # Kans:
-    self._dbg_prev_radar_tuple = None
 
 
     # some comma three with NVMe experience NVMe dropouts mid-drive that
@@ -369,40 +362,12 @@ class SelfdriveD:
           self.events.add(EventName.cameraFrameRate)
     if not REPLAY and self.rk.lagging:
       self.events.add(EventName.selfdrivedLagging)
-    # Kans: fix radar faults
-    rs = self.sm['radarState']
-    radar_tuple = (
-      int(self.sm.alive['radarState']),
-      int(self.sm.valid['radarState']),
-      int(self.sm.freq_ok['radarState']) if 'radarState' in self.sm.freq_ok else -1,
-      int(rs.radarErrors.canError),
-      int(rs.radarErrors.radarFault),
-      int(rs.radarErrors.radarUnavailableTemporary),
-    )
-
-    if radar_tuple != self._dbg_prev_radar_tuple:
-      print(
-        f"SELF_RADAR "
-        f"frame={self.sm.frame} "
-        f"alive={radar_tuple[0]} "
-        f"valid={radar_tuple[1]} "
-        f"freq={radar_tuple[2]} "
-        f"can={radar_tuple[3]} "
-        f"fault={radar_tuple[4]} "
-        f"temp={radar_tuple[5]}"
-      )
-      self._dbg_prev_radar_tuple = radar_tuple
-
-    if rs.radarErrors.canError:
-      print(f"RADAR_EVENT_ADD canError frame={self.sm.frame}")
+    if self.sm['radarState'].radarErrors.canError:
       self.events.add(EventName.canError)
-    elif rs.radarErrors.radarUnavailableTemporary:
-      print(f"RADAR_EVENT_ADD radarTempUnavailable frame={self.sm.frame}")
+    elif self.sm['radarState'].radarErrors.radarUnavailableTemporary:
       self.events.add(EventName.radarTempUnavailable)
-    elif rs.radarErrors.radarFault:
-      print(f"RADAR_EVENT_ADD radarFault frame={self.sm.frame}")
+    elif any(self.sm['radarState'].radarErrors.to_dict().values()):
       self.events.add(EventName.radarFault)
-
     if not self.sm.valid['pandaStates']:
       self.events.add(EventName.usbError)
     if CS.canTimeout:
@@ -413,7 +378,6 @@ class SelfdriveD:
     # generic catch-all. ideally, a more specific event should be added above instead
     has_disable_events = self.events.contains(ET.NO_ENTRY) and (self.events.contains(ET.SOFT_DISABLE) or self.events.contains(ET.IMMEDIATE_DISABLE))
     no_system_errors = (not has_disable_events) or (len(self.events) == num_events)
-
     if not self.sm.all_checks() and no_system_errors:
       if not self.sm.all_alive():
         self.events.add(EventName.commIssue)
@@ -494,24 +458,6 @@ class SelfdriveD:
     if self.sm.frame == 550 and Params().get("NNFFModelName") is not None:
       self.events.add(EventName.torqueNNLoad)
 
-    # Debug: what event is actually shown at boot
-    dbg_events = []
-    if self.events.contains(EventName.selfdriveInitializing):
-      dbg_events.append("selfdriveInitializing")
-    if self.events.contains(EventName.commIssue):
-      dbg_events.append("commIssue")
-    if self.events.contains(EventName.commIssueAvgFreq):
-      dbg_events.append("commIssueAvgFreq")
-    if self.events.contains(EventName.canError):
-      dbg_events.append("canError")
-    if self.events.contains(EventName.radarFault):
-      dbg_events.append("radarFault")
-    if self.events.contains(EventName.radarTempUnavailable):
-      dbg_events.append("radarTempUnavailable")
-
-    if len(dbg_events):
-      print(f"BOOT_EVENT_DBG frame={self.sm.frame} events={dbg_events}")
-
     # decrement personality on distance button press
     #if self.CP.openpilotLongitudinalControl:
     #  if any(not be.pressed and be.type == ButtonType.gapAdjustCruise for be in CS.buttonEvents):
@@ -540,38 +486,15 @@ class SelfdriveD:
         if REPLAY and any(ps.controlsAllowed for ps in self.sm['pandaStates']):
           self.state_machine.state = State.enabled
 
-        if self._startup_init_log_patch_frame is None:
-          self._startup_init_log_patch_frame = self.sm.frame
-
         self.initialized = True
-
-        startup_patch = ((self.sm.frame - self._startup_init_log_patch_frame) < int(self._startup_init_log_patch_time / DT_CTRL))
-
-        init_log_excluded = set()
-        if startup_patch:
-          init_log_excluded = {
-            'driverMonitoringState',
-            'alertDebug',
-            'lateralManeuverPlan',
-            'gpsLocation',
-          }
-
-        invalid_filtered = [s for s, valid in self.sm.valid.items()
-                            if (not valid) and (s not in init_log_excluded)]
-        not_alive_filtered = [s for s, alive in self.sm.alive.items()
-                              if (not alive) and (s not in init_log_excluded)]
-        not_freq_ok_filtered = [s for s, freq_ok in self.sm.freq_ok.items()
-                                if (not freq_ok) and (s not in init_log_excluded)]
-
         cloudlog.event(
           "selfdrived.initialized",
-          dt=self.sm.frame * DT_CTRL,
+          dt=self.sm.frame*DT_CTRL,
           timeout=timed_out,
           canValid=CS.canValid,
-          invalid=invalid_filtered,
-          not_alive=not_alive_filtered,
-          not_freq_ok=not_freq_ok_filtered,
-          excluded=list(init_log_excluded),
+          invalid=[s for s, valid in self.sm.valid.items() if not valid],
+          not_alive=[s for s, alive in self.sm.alive.items() if not alive],
+          not_freq_ok=[s for s, freq_ok in self.sm.freq_ok.items() if not freq_ok],
           error=True,
         )
 
@@ -656,10 +579,6 @@ class SelfdriveD:
       self.is_metric = self.params.get_bool("IsMetric")
       self.experimental_mode = self.params.get_bool("ExperimentalMode") and self.CP.openpilotLongitudinalControl
       self.personality = self.read_personality_param()
-
-      safe_time = self.params.get_int("StartupServiceCheckTime")
-      self._startup_init_log_patch_time = safe_time if safe_time > 0 else 30
-
       time.sleep(0.1)
 
   def run(self):

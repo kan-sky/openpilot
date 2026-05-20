@@ -279,6 +279,7 @@ def match_vision_to_track(v_ego: float, lead: capnp._DynamicStructReader, lead_p
   # A) normal match
   if dist_sane(first_track) and vel_sane(first_track):
     select_second_track = False
+    # Kans: 리드2 끼어들기 판단조건에 거리 추가와 가운트4로.
     if second_track is not None and dist_sane(second_track) and vel_sane(second_track) and second_track.in_lane_prob > 0.25:
       if second_track.cnt > 4 and offset_vision_dist * 0.5 < second_track.dRel < first_track.dRel:
         select_second_track = True
@@ -908,8 +909,9 @@ def main() -> None:
   while 1:
     sm.update()
 
-    RD.update(sm, sm['liveTracks'])
-    RD.publish(pm)
+    if sm.updated['modelV2']:
+      RD.update(sm, sm['liveTracks'])
+      RD.publish(pm)
 
 
 if __name__ == "__main__":
