@@ -1225,6 +1225,13 @@ if HARDWARE.get_device_type() == 'mici':
       ET.USER_DISABLE: ImmediateDisableAlert("Reverse"),
       ET.NO_ENTRY: NoEntryAlert("Reverse"),
     },
+    EventName.autoHold: {
+      ET.WARNING: Alert(
+        "AutoHold Activated.",
+        "",
+        AlertStatus.normal, AlertSize.small,
+        Priority.LOW, VisualAlert.none, AudibleAlert.autoHold, 2.),
+    },
   })
 
 
