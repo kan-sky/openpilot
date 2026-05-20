@@ -73,7 +73,7 @@ class Tici(HardwareBase):
     try:
       with open(MODEM_STATE_PATH) as f:
         return json.load(f)
-    except F(FileNotFoundError, json.JSONDecodeError):
+    except (FileNotFoundError, json.JSONDecodeError):
       return {}
 
   def get_os_version(self):
