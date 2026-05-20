@@ -236,9 +236,20 @@ class CarController(CarControllerBase):
             if self.CP.carFingerprint in SDGM_CAR:
               friction_brake_bus = CanBus.CAMERA
 
+          # Kans: 크루즈 해제 직후 AutoHold 브레이크 명령 지연(1.5s)
+          if CC.enabled or CS.out.cruiseState.enabled:
+            self.autoHold_cruise_cancel_frame = self.frame
+
+          auto_hold_cruise_cancel_delay = (
+            hasattr(self, "autoHold_cruise_cancel_frame") and
+            (self.frame - self.autoHold_cruise_cancel_frame) * DT_CTRL < 1.5
+          )
           # Kans: AutoHold 조건
           auto_hold_cmd = (
             not CC.longActive and
+            not CC.enabled and
+            not CS.out.cruiseState.enabled and
+            not auto_hold_cruise_cancel_delay and
             CS.autoHold and
             CS.autoHoldActive and
             not CS.out.gasPressed and
@@ -291,7 +302,7 @@ class CarController(CarControllerBase):
           creep_dt = (self.frame - self.resume_frame) * DT_CTRL if (self.resume_frame != 0) else 999.0
 
           # follow 조건(정지/재출발 구간에서 vRel 흔들림 감안)
-          lead_follow_ok = has_lead and (2.0 < lead_drel < 15.0) and (lead_vrel > -1.0)
+          lead_follow_ok = has_lead and (2.0 < lead_drel < 15.0) and (lead_vrel > 0.3)
 
           # 앞차 출발: 근거리 + vRel 양수 + near stop
           raw_lead_start = has_lead and (4.0 < lead_drel < 10.0) and (lead_vrel > 0.4) and near_stop_ego
