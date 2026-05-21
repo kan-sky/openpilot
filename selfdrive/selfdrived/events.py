@@ -1161,6 +1161,13 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
   EventName.torqueNNLoad: {
     ET.PERMANENT: torque_nn_load_alert,
   },
+  EventName.autoHold: {
+    ET.WARNING: Alert(
+      "AutoHold Activated.",
+      "",
+      AlertStatus.normal, AlertSize.small,
+      Priority.LOW, VisualAlert.none, AudibleAlert.autoHold, 2.),
+  },
 
 }
 if HARDWARE.get_device_type() == 'mici':
@@ -1227,13 +1234,6 @@ if HARDWARE.get_device_type() == 'mici':
         Priority.LOWEST, VisualAlert.none, AudibleAlert.none, .2, creation_delay=0.5),
       ET.USER_DISABLE: ImmediateDisableAlert("Reverse"),
       ET.NO_ENTRY: NoEntryAlert("Reverse"),
-    },
-    EventName.autoHold: {
-      ET.WARNING: Alert(
-        "AutoHold Activated.",
-        "",
-        AlertStatus.normal, AlertSize.small,
-        Priority.LOW, VisualAlert.none, AudibleAlert.autoHold, 2.),
     },
   })
 
