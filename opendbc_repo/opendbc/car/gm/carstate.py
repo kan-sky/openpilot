@@ -54,7 +54,7 @@ class CarState(CarStateBase):
     self._cruise_off_cnt = 0
 
     # Kans: autoHold
-    self.autoHold = False
+    self.autoHold = True
     self.autoHoldActive = False
     self.autoHoldActivated = False
 
