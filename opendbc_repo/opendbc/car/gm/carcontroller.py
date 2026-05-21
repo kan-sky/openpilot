@@ -282,12 +282,17 @@ class CarController(CarControllerBase):
 
           # Kans: 오토크루즈 대기 플래그
           # autoHold용 추가
-          auto_hold_block_cruise = CS.autoHold and (CS.autoHoldActive or CS.autoHoldActivated)
+          auto_hold_block_cruise = CS.autoHold and (CS.autoHoldActive or CS.autoHoldActivated or CS.out.autoHoldActivated)
           if auto_hold_block_cruise:
             self._pending_activateCruise = False
             self.autoCruise_activate = False
             self.autoCruise_frame = 0
             self.autoCruise_try_count = 0
+
+            self.resume_frame = 0
+            self.resume_activate = False
+            self.resume_fault_guard = 0
+            self.activateCruise_after_brake = False
 
           if CS.out.activateCruise > 0 and not auto_hold_block_cruise and not CS.out.brakePressed:
             self._pending_activateCruise = True
@@ -451,7 +456,7 @@ class CarController(CarControllerBase):
           if auto_hold_cmd:
             hold_brake = max(self.apply_brake, self.params.NEAR_STOP_BRAKE_PHASE)
             hold_near_stop = CS.out.vEgo < self.params.NEAR_STOP_BRAKE_PHASE
-            can_sends.append(gmcan.create_friction_brake_command(self.packer_ch, friction_brake_bus, hold_brake, brk_idx_base, CC.enabled, hold_near_stop, True, self.CP))
+            can_sends.append(gmcan.create_friction_brake_command(self.packer_ch, friction_brake_bus, hold_brake, brk_idx_base, False, hold_near_stop, False, self.CP))
             CS.autoHoldActivated = True
           else:
             can_sends.append(gmcan.create_friction_brake_command(self.packer_ch, friction_brake_bus, self.apply_brake, brk_idx_base, CC.enabled, near_stop, at_full_stop, self.CP))
