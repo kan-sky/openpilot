@@ -247,6 +247,9 @@ class SelfdriveD:
       if CS.latEnabled != self.CS_prev.latEnabled:
         self.events.add(EventName.audioPrompt)
 
+      if CS.autoHoldActivated:
+        self.events.add(EventName.autoHold)
+
     # Create events for temperature, disk space, and memory
     if self.sm['deviceState'].thermalStatus >= ThermalStatus.overheated:
       self.events.add(EventName.overheat)
