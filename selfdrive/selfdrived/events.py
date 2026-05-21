@@ -83,7 +83,7 @@ class Events:
     ret = []
     for e in self.events:
       if e not in EVENTS:
-        cloudlog.error(f"Unknown event: {e}")
+        print(f"Unknown event: {e}")
         continue
       types = EVENTS[e].keys()
       for et in event_types:
