@@ -249,7 +249,6 @@ class CarController(CarControllerBase):
             not CC.longActive and
             not CC.enabled and
             not CS.out.cruiseState.enabled and
-            not auto_hold_cruise_cancel_delay and
             CS.autoHold and
             CS.autoHoldActive and
             not CS.out.gasPressed and
@@ -282,7 +281,7 @@ class CarController(CarControllerBase):
 
           # Kans: 오토크루즈 대기 플래그
           # autoHold용 추가
-          auto_hold_block_cruise = CS.autoHold and (CS.autoHoldActive or CS.autoHoldActivated or CS.out.autoHoldActivated)
+          auto_hold_block_cruise = CS.autoHold and (CS.autoHoldActive or CS.autoHoldActivated or CS.out.autoHoldActivated or auto_hold_cruise_cancel_delay)
           if auto_hold_block_cruise:
             self._pending_activateCruise = False
             self.autoCruise_activate = False
