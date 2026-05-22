@@ -279,9 +279,15 @@ class CarController(CarControllerBase):
             acc_engaged = True
             at_full_stop = False
 
-          # Kans: 오토크루즈 대기 플래그
-          # autoHold용 추가
-          auto_hold_block_cruise = CS.autoHold and (CS.autoHoldActive or CS.autoHoldActivated or CS.out.autoHoldActivated or auto_hold_cruise_cancel_delay)
+           # AutoHold가 실제 운전자 브레이크 개입으로 만들어진 상태인지
+           manual_auto_hold = (
+             CS.autoHold and
+             (CS.autoHoldActive or CS.autoHoldActivated or CS.out.autoHoldActivated) and
+             not CS.out.cruiseState.enabled and
+             not CC.enabled
+           )
+          # 오토크루즈/오토리쥼 차단은 수동 AutoHold일 때만
+          auto_hold_block_cruise = manual_auto_hold
           if auto_hold_block_cruise:
             self._pending_activateCruise = False
             self.autoCruise_activate = False
@@ -370,7 +376,7 @@ class CarController(CarControllerBase):
                 self.autoCruise_try_count = 0
                 self._pending_activateCruise = False
           # Kans: Auto Resume (RES only)
-          elif auto_resume_enabled and actuators.longControlState == LongCtrlState.starting and not auto_hold_block_cruise:
+          elif auto_resume_enabled and actuators.longControlState == LongCtrlState.starting and not manual_auto_hold:
             if self.resume_frame == 0 or self.resume_activate:
               self.resume_frame = self.frame
               self.resume_activate = False
