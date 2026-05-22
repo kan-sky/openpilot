@@ -279,13 +279,13 @@ class CarController(CarControllerBase):
             acc_engaged = True
             at_full_stop = False
 
-           # AutoHold가 실제 운전자 브레이크 개입으로 만들어진 상태인지
-           manual_auto_hold = (
-             CS.autoHold and
-             (CS.autoHoldActive or CS.autoHoldActivated or CS.out.autoHoldActivated) and
-             not CS.out.cruiseState.enabled and
-             not CC.enabled
-           )
+          # AutoHold가 실제 운전자 브레이크 개입으로 만들어진 상태인지
+          manual_auto_hold = (
+            CS.autoHold and
+            (CS.autoHoldActive or CS.autoHoldActivated or CS.out.autoHoldActivated) and
+            not CS.out.cruiseState.enabled and
+            not CC.enabled
+          )
           # 오토크루즈/오토리쥼 차단은 수동 AutoHold일 때만
           auto_hold_block_cruise = manual_auto_hold
           if auto_hold_block_cruise:
