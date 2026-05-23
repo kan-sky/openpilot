@@ -1195,7 +1195,7 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
       Priority.LOW, VisualAlert.none, AudibleAlert.autoHold, 2.),
   },
   EventName.autoResumeFailed: {
-    ET.USER_SOFT_DISABLE: user_soft_disable_silent_alert("auto resume failed"),
+    ET.SOFT_DISABLE: user_soft_disable_silent_alert("auto resume failed"),
   }
 
 }
