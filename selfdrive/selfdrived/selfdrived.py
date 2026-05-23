@@ -135,6 +135,7 @@ class SelfdriveD:
     self.rk = Ratekeeper(100, print_delay_threshold=None)
 
     self.atc_type_last = ""
+    self.params_memory = Params("/dev/shm/params")
 
 
     # some comma three with NVMe experience NVMe dropouts mid-drive that
@@ -249,6 +250,10 @@ class SelfdriveD:
 
       if CS.autoHoldActivated:
         self.events.add(EventName.autoHold)
+      # Kans: AutoResume failed alert
+      if self.params_memory.get_bool("AutoResumeFailed"):
+        self.events.add(EventName.autoResumeFailed)
+        self.params_memory.put_bool_nonblocking("AutoResumeFailed", False)
 
     # Create events for temperature, disk space, and memory
     if self.sm['deviceState'].thermalStatus >= ThermalStatus.overheated:

@@ -185,6 +185,14 @@ class ImmediateDisableAlert(Alert):
                      AudibleAlert.warningImmediate, 4.),
 
 
+class UserSoftDisableSilentAlert(Alert):
+  def __init__(self, alert_text_2: str):
+    super().__init__("openpilot will disengage", alert_text_2,
+                     AlertStatus.userPrompt, AlertSize.mid,
+                     Priority.MID, VisualAlert.none,
+                     AudibleAlert.none, 2.)
+
+
 class EngagementAlert(Alert):
   def __init__(self, audible_alert: car.CarControl.HUDControl.AudibleAlert):
     super().__init__("", "",
@@ -237,6 +245,25 @@ def user_soft_disable_alert(alert_text_2: str) -> AlertCallbackType:
     if soft_disable_time < int(0.5 / DT_CTRL):
       return ImmediateDisableAlert(alert_text_2)
     return UserSoftDisableAlert(alert_text_2)
+  return func
+
+def user_soft_disable_silent_alert(alert_text_2: str) -> AlertCallbackType:
+  def func(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
+    return UserSoftDisableSilentAlert(alert_text_2)
+  return func
+  
+def radar_fault_soft_disable_alert(alert_text_2: str) -> AlertCallbackType:
+  def func(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster,
+           metric: bool, soft_disable_time: int, personality) -> Alert:
+    auto_resume_recent = Params().get_bool("AutoResumeFailed")
+
+    if auto_resume_recent:
+      return UserSoftDisableSilentAlert(alert_text_2)
+
+    if soft_disable_time < int(0.5 / DT_CTRL):
+      return ImmediateDisableAlert(alert_text_2)
+
+    return SoftDisableAlert(alert_text_2)
   return func
 
 def startup_master_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
@@ -906,7 +933,7 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
   },
 
   EventName.radarFault: {
-    ET.SOFT_DISABLE: soft_disable_alert("Radar Error: Restart the Car"),
+    ET.SOFT_DISABLE: radar_fault_soft_disable_alert("Radar Error: Restart the Car"),
     ET.NO_ENTRY: NoEntryAlert("Radar Error: Restart the Car"),
   },
 
@@ -1064,7 +1091,6 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
   EventName.audioFeedback: {
     ET.PERMANENT: audio_feedback_alert,
   },
-
   EventName.softHold: {
     ET.WARNING: Alert(
       "SoftHold",
@@ -1168,6 +1194,9 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
       AlertStatus.normal, AlertSize.small,
       Priority.LOW, VisualAlert.none, AudibleAlert.autoHold, 2.),
   },
+  EventName.autoResumeFailed: {
+    ET.USER_SOFT_DISABLE: user_soft_disable_silent_alert("auto resume failed"),
+  }
 
 }
 if HARDWARE.get_device_type() == 'mici':

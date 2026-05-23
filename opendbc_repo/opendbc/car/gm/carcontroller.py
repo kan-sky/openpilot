@@ -78,6 +78,8 @@ class CarController(CarControllerBase):
     self.last_pulse_reset_frame = 0  # 리쥼펄스 최소유지"보장"용
     self.steerDeltaUpOrg = self.steerDeltaUp = self.steerDeltaUpLC = self.params.STEER_DELTA_UP
     self.steerDeltaDownOrg = self.steerDeltaDown = self.steerDeltaDownLC = self.params.STEER_DELTA_DOWN
+    self.auto_resume_failed_prev = False
+    self.params_memory = Params("/dev/shm/params")
 
   def update(self, CC, CS, now_nanos):
     params = Params()
@@ -375,6 +377,7 @@ class CarController(CarControllerBase):
                 self.autoCruise_frame = 0
                 self.autoCruise_try_count = 0
                 self._pending_activateCruise = False
+
           # Kans: Auto Resume (RES only)
           elif auto_resume_enabled and actuators.longControlState == LongCtrlState.starting and not manual_auto_hold:
             if self.resume_frame == 0 or self.resume_activate:
@@ -424,6 +427,20 @@ class CarController(CarControllerBase):
               # 리쥼버튼 중단까지 지연시간(0.16~0.20)
               if (self.frame - self.resume_frame) * DT_CTRL >= self.resumeDelay_time:
                 self.resume_activate = True
+
+            # Kans: AutoResume 실패 판정
+            # RES를 이미 시도했고, resume 창이 닫힐 시간이 지났는데도 크루즈가 활성화되지 않으면 실패로 판단
+            auto_resume_failed = (
+              self.resume_frame > 0 and
+              self.resume_fault_guard > 0 and
+              (self.frame - self.resume_frame) * DT_CTRL >= max(reopen_delay, self.resumeDelay_time) and
+              not CS.out.cruiseState.enabled
+            )
+
+            if auto_resume_failed and not self.auto_resume_failed_prev:
+              self.params_memory.put_bool_nonblocking("AutoResumeFailed", True)
+
+            self.auto_resume_failed_prev = auto_resume_failed
 
           else:
             self.activateCruise_after_brake = False
