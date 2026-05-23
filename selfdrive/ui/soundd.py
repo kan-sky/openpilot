@@ -55,7 +55,7 @@ sound_list: dict[int, tuple[str, int | None, float]] = {
   AudibleAlert.laneChange: ("audio_lane_change.wav", None, MAX_VOLUME),
   AudibleAlert.stopStop: ("audio_stopstop.wav", None, MAX_VOLUME),
   AudibleAlert.stopping: ("audio_stopping.wav", None, MAX_VOLUME),
-  AudibleAlert.autoHold: ("audio_auto_hold.wav", None, MAX_VOLUME),
+  AudibleAlert.autoHold: ("audio_auto_hold.wav", 1, MAX_VOLUME),
   AudibleAlert.engage2: ("audio_engage.wav", None, MAX_VOLUME),
   AudibleAlert.disengage2: ("audio_disengage.wav", None, MAX_VOLUME),
   AudibleAlert.speedDown: ("audio_speed_down.wav", None, MAX_VOLUME),
