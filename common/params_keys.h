@@ -341,5 +341,5 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"MaxLatAccelNoRollLowSpeed", {PERSISTENT, INT, "38"}},
     {"LatSmoothDebug", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION, STRING}},
     {"MemUsage", {PERSISTENT, INT, "0"}},
-    {"AutoResumeFailed", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION, BOOL},
+    {"AutoResumeFailed", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION, BOOL}},
 };
