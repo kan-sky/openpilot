@@ -188,8 +188,8 @@ class ImmediateDisableAlert(Alert):
 class UserSoftDisableSilentAlert(Alert):
   def __init__(self, alert_text_2: str):
     super().__init__("openpilot will disengage", alert_text_2,
-                     AlertStatus.userPrompt, AlertSize.mid,
-                     Priority.MID, VisualAlert.none,
+                     AlertStatus.normal, AlertSize.none,
+                     Priority.LOW, VisualAlert.none,
                      AudibleAlert.none, 2.)
 
 
