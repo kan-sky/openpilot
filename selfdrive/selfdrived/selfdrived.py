@@ -384,7 +384,7 @@ class SelfdriveD:
       self.events.add(EventName.canError)
 
     # Kans: forbid commIssue while AutoResume is trying
-    # generic catch-all. ideally, a more specific event should be added above instead
+
     auto_resume_trying = self.params_memory.get_bool("AutoResumeTrying")
     ignore_comm_issue_for_resume = auto_resume_trying and (CS.standstill or CS.vEgo < 0.5)
 
@@ -393,6 +393,19 @@ class SelfdriveD:
 
     if not self.sm.all_checks() and no_system_errors:
       if not ignore_comm_issue_for_resume:
+        invalid = [s for s in self.sm.data.keys() if not self.sm.valid[s]]
+        not_alive = [s for s in self.sm.data.keys() if not self.sm.alive[s]]
+        not_freq_ok = [s for s in self.sm.data.keys() if not self.sm.freq_ok[s]]
+
+        cloudlog.warning(
+          f"KANS_COMMISSUE vEgo={CS.vEgo:.2f} "
+          f"standstill={CS.standstill} "
+          f"auto_resume_trying={auto_resume_trying} "
+          f"invalid={invalid} "
+          f"not_alive={not_alive} "
+          f"not_freq_ok={not_freq_ok}"
+        )
+
         if not self.sm.all_alive():
           self.events.add(EventName.commIssue)
         elif not self.sm.all_freq_ok():
