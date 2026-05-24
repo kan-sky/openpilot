@@ -37,7 +37,17 @@ MIN_LAT_CONTROL_SPEED = 0.3
 def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.ModelDataV2.Action,
                           v_ego: float, lat_smooth_seconds: float, vEgoStopping: float) -> log.ModelDataV2.Action:
     desired_accel = float(model_output['action'][0, 1])
-    desired_curvature = float(model_output['action'][0,0] / (max(1.0, v_ego))**2)
+    raw_desired_curvature = float(model_output['action'][0, 0] / (max(1.0, v_ego))**2)
+    desired_curvature = raw_desired_curvature
+
+    prev_curvature = float(prev_action.desiredCurvature)
+
+    same_curve = desired_curvature * prev_curvature > 0.0
+    deep_curve = abs(prev_curvature) > 0.0025  # 같은 방향의 곡률이 .0025이상일때(램프)
+    curv_drop = abs(desired_curvature) < abs(prev_curvature) * 0.70  # 모델이 그 곡률값을 갑자기 70%이하로 확 떨어뜨리면,
+
+    if same_curve and deep_curve and curv_drop:
+      desired_curvature = prev_curvature * 0.8 + desired_curvature * 0.2  # 과하게 낮춘 값을 따라가지 않고 80%만 반영한다.
 
     should_stop = (v_ego < 0.3 and desired_accel < 0.1)
 
