@@ -383,6 +383,7 @@ class CarController(CarControllerBase):
           # Kans: Auto Resume (RES only)
           # 앞차가 없는 상황(=not lead_for_resume)에서는 RES spam 기반 AutoResume에 진입하지 않음.
           elif auto_resume_enabled and lead_for_resume and actuators.longControlState == LongCtrlState.starting and not manual_auto_hold:
+            self.params_memory.put_bool_nonblocking("AutoResumeTrying", True)
             if self.resume_frame == 0 or self.resume_activate:
               self.resume_frame = self.frame
               self.resume_activate = False
@@ -396,8 +397,16 @@ class CarController(CarControllerBase):
               self.apply_brake = max(self.apply_brake, int(self.params.NEAR_STOP_BRAKE_PHASE))
               self.activateCruise_after_brake = True
 
-            # starting이어도 satandstll 확정 전에는 RES 버튼을 보내지 않음. SoftDisableAlert(Alert) 방지용.
+            # starting이어도 standstill 확정 전에는 RES 버튼을 보내지 않음. SoftDisableAlert(Alert) 방지용.
             resume_ready_standstill = (CS.out.standstill or CS.out.cruiseState.standstill)
+
+            # Kans: 오토리쥼 성공 -> Trying 종료
+            if CS.out.cruiseState.enabled:
+              self.params_memory.put_bool_nonblocking("AutoResumeTrying", False)
+              self.resume_frame = 0
+              self.resume_activate = False
+              self.resume_fault_guard = 0
+
             if not resume_ready_standstill:
               self.resume_fault_guard = 0
               self.resume_activate = False
@@ -442,10 +451,15 @@ class CarController(CarControllerBase):
 
             if auto_resume_failed and not self.auto_resume_failed_prev:
               self.params_memory.put_bool_nonblocking("AutoResumeFailed", True)
+              self.params_memory.put_bool_nonblocking("AutoResumeTrying", False)
+              self.resume_frame = 0
+              self.resume_activate = False
+              self.resume_fault_guard = 0
 
             self.auto_resume_failed_prev = auto_resume_failed
 
           else:
+            self.params_memory.put_bool_nonblocking("AutoResumeTrying", False)
             self.activateCruise_after_brake = False
             if auto_resume_enabled:  # 오토리쥼이 진행중이면
               if self.resume_frame > 0 and (self.frame - self.resume_frame) * DT_CTRL > reopen_delay:

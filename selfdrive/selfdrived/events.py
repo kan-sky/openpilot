@@ -255,9 +255,11 @@ def user_soft_disable_silent_alert(alert_text_2: str) -> AlertCallbackType:
 def radar_fault_soft_disable_alert(alert_text_2: str) -> AlertCallbackType:
   def func(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster,
            metric: bool, soft_disable_time: int, personality) -> Alert:
-    auto_resume_recent = Params().get_bool("AutoResumeFailed")
+    params = Params()
+    auto_resume_trying = params.get_bool("AutoResumeTrying")
+    auto_resume_failed = params.get_bool("AutoResumeFailed")
 
-    if auto_resume_recent:
+    if auto_resume_trying or auto_resume_failed:
       return UserSoftDisableSilentAlert(alert_text_2)
 
     if soft_disable_time < int(0.5 / DT_CTRL):
