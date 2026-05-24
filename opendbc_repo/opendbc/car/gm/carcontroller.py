@@ -403,9 +403,6 @@ class CarController(CarControllerBase):
             # Kans: 오토리쥼 성공 -> Trying 종료
             if CS.out.cruiseState.enabled:
               self.params_memory.put_bool_nonblocking("AutoResumeTrying", False)
-              self.resume_frame = 0
-              self.resume_activate = False
-              self.resume_fault_guard = 0
 
             if not resume_ready_standstill:
               self.resume_fault_guard = 0
