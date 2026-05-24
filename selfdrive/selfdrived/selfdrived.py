@@ -392,11 +392,11 @@ class SelfdriveD:
     no_system_errors = (not has_disable_events) or (len(self.events) == num_events)
 
     if not self.sm.all_checks() and no_system_errors:
-      if not ignore_comm_issue_for_resume:
-        invalid = [s for s in self.sm.data.keys() if not self.sm.valid[s]]
-        not_alive = [s for s in self.sm.data.keys() if not self.sm.alive[s]]
-        not_freq_ok = [s for s in self.sm.data.keys() if not self.sm.freq_ok[s]]
+      invalid = [s for s in self.sm.data.keys() if not self.sm.valid[s]]
+      not_alive = [s for s in self.sm.data.keys() if not self.sm.alive[s]]
+      not_freq_ok = [s for s in self.sm.data.keys() if not self.sm.freq_ok[s]]
 
+      if not ignore_comm_issue_for_resume:
         cloudlog.warning(
           f"KANS_COMMISSUE vEgo={CS.vEgo:.2f} "
           f"standstill={CS.standstill} "
@@ -406,17 +406,19 @@ class SelfdriveD:
           f"not_freq_ok={not_freq_ok}"
         )
 
-        if not self.sm.all_alive():
+        if len(not_alive) > 0:
           self.events.add(EventName.commIssue)
-        elif not self.sm.all_freq_ok():
+        elif len(not_freq_ok) > 0:
           self.events.add(EventName.commIssueAvgFreq)
         else:
           self.events.add(EventName.commIssue)
+
       logs = {
-        'invalid': [s for s, valid in self.sm.valid.items() if not valid],
-        'not_alive': [s for s, alive in self.sm.alive.items() if not alive],
-        'not_freq_ok': [s for s, freq_ok in self.sm.freq_ok.items() if not freq_ok],
+        'invalid': invalid,
+        'not_alive': not_alive,
+        'not_freq_ok': not_freq_ok,
       }
+
       if logs != self.logged_comm_issue:
         cloudlog.event("commIssue", error=True, **logs)
         self.logged_comm_issue = logs
