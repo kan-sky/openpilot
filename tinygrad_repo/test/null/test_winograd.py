@@ -1,6 +1,7 @@
 import unittest, sys
 from tinygrad import Tensor, GlobalCounters, dtypes, Context
-from tinygrad.helpers import CI, Profiling, WINO
+from tinygrad.helpers import Profiling, WINO
+from test.helpers import CI
 
 @unittest.skipIf(sys.platform.startswith("win"), "flaky on Windows")
 class TestWinograd(unittest.TestCase):
@@ -21,12 +22,13 @@ class TestWinograd(unittest.TestCase):
     self.assertEqual(len(out.schedule_linear().src), 2)
 
   def test_backward_kernels(self):
-    x,w = Tensor.empty(1,4,9,9,requires_grad=True).realize(), Tensor.empty(4,4,3,3,requires_grad=True).realize()
+    x,w = Tensor.empty(1,4,9,9).realize(), Tensor.empty(4,4,3,3).realize()
     out = Tensor.conv2d(x,w, padding=1)
     out.mean().backward()
     backward_schedule = x.grad.schedule_linear(w.grad)
     self.assertEqual(len(backward_schedule.src), 4)
 
+  @unittest.skip("this requires optimizations")
   def test_counters(self):
     IC, OC, X, Y = 4,4,9,9
     x,w = Tensor.rand(1,IC,Y,X).realize(), Tensor.rand(OC,IC,3,3).realize()

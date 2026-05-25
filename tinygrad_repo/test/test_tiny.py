@@ -1,7 +1,8 @@
 # basic self-contained tests of the external functionality of tinygrad
 import unittest, random
 from tinygrad import Tensor, Context, Variable, TinyJit, dtypes, Device, nn
-from tinygrad.helpers import CI, getenv
+from tinygrad.helpers import getenv
+from test.helpers import CI
 
 class TestTiny(unittest.TestCase):
 
@@ -141,7 +142,6 @@ class TestTiny(unittest.TestCase):
     Tensor.realize(*[p.replace(Tensor.ones_like(p).contiguous()) for p in nn.state.get_parameters(layers)])
 
     # realize gradients
-    for x in nn.state.get_parameters(layers): x.requires_grad_()
     Tensor.empty(4, 1, 14, 14).sequential(layers).sum().backward()
     Tensor.realize(*[x.grad for x in nn.state.get_parameters(layers) if x.grad is not None])
 

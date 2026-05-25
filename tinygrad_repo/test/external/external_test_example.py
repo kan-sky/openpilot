@@ -1,7 +1,8 @@
 import unittest
 from tinygrad import Device
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import getenv, CI, OSX
+from tinygrad.helpers import getenv, OSX
+from test.helpers import CI
 
 def multidevice_test(fxn):
   exclude_devices = getenv("EXCLUDE_DEVICES", "").split(",")
@@ -40,8 +41,8 @@ class TestExample(unittest.TestCase):
 
   @multidevice_test
   def test_example_readme(self, device):
-    x = Tensor.eye(3, device=device, requires_grad=True)
-    y = Tensor([[2.0,0,-2.0]], device=device, requires_grad=True)
+    x = Tensor.eye(3).clone().to(device)
+    y = Tensor([[2.0,0,-2.0]], device=device)
     z = y.matmul(x).sum()
     z.backward()
 
@@ -59,8 +60,8 @@ class TestExample(unittest.TestCase):
       print(f"WARNING: {device} test isn't running")
       return
 
-    x = Tensor.eye(8, device=device, requires_grad=True)
-    y = Tensor.eye(8, device=device, requires_grad=True)
+    x = Tensor.eye(8).clone().to(device)
+    y = Tensor.eye(8).clone().to(device)
     z = y.matmul(x).sum()
     z.backward()
 
