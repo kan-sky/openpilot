@@ -208,7 +208,7 @@ class CarrotServ:
     self.turnSpeedControlMode= self.params.get_int("TurnSpeedControlMode")
     self.mapTurnSpeedFactor= self.params.get_float("MapTurnSpeedFactor") * 0.01
 
-    self.autoTurnControlSpeedTurn = self.params.get_int("AutoTurnControlSpeedTurn")
+    self.autoTurnControlSpeedTurn = self.params.get_int("AutoTurnControlSpeedTurn") * 0.01
     self.autoTurnMapChange = self.params.get_int("AutoTurnMapChange")
     self.autoTurnControl = self.params.get_int("AutoTurnControl")
     self.autoTurnControlTurnEnd = self.params.get_int("AutoTurnControlTurnEnd")
@@ -722,13 +722,18 @@ class CarrotServ:
     return new_lat, new_lon
 
   def update_auto_turn(self, v_ego_kph, sm, x_turn_info, x_dist_to_turn, check_steer=False):
-    turn_speed = self.autoTurnControlSpeedTurn
+    # Kans: 현재속도의 감속비로 적용, 최소 턴속도 25km/h 유지
+    if self.autoTurnControlSpeedTurn > 0:
+      turn_speed = max(25.0, v_ego_kph * self.autoTurnControlSpeedTurn)
+    else:
+      turn_speed = 0.0
     fork_speed = self.nRoadLimitSpeed
     stop_speed = 1
-    turn_dist_for_speed = self.autoTurnControlTurnEnd * turn_speed / 3.6 # 5
-    fork_dist_for_speed = self.autoTurnControlTurnEnd * fork_speed / 3.6 # 5
+    turn_dist_for_speed = self.autoTurnControlTurnEnd * turn_speed / 3.6 # autoTurnControlSpeedTurn(70%) 목표속도까지 감속 완료할 거리.
+    fork_dist_for_speed = self.autoTurnControlTurnEnd * fork_speed / 3.6 # fork_speed(=nRoadLimitSpeed) 목표속도까지 감속 완료할 거리.
     stop_dist_for_speed = 5
-    start_fork_dist = np.interp(self.nRoadLimitSpeed, [30, 50, 100], [160, 200, 350])
+    # Kans: AutoTurnControlTurnEnd 값을 ATC 차선변경 시작거리로 직접 사용. 3=30m, 4=40m, 5=50m
+    start_fork_dist = max(25.0, self.autoTurnControlTurnEnd * 10.0)
     start_turn_dist = np.interp(self.nTBTNextRoadWidth, [5, 10], [43, 60])
     turn_info_mapping = {
         1: {"type": "turn left", "speed": turn_speed, "dist": turn_dist_for_speed, "start": start_fork_dist},
