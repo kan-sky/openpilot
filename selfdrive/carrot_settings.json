@@ -309,7 +309,7 @@
       "group": "조향튜닝",
       "name": "SteerActuatorDelay",
       "title": "SteerActuatorDelay(30)",
-      "descr": "조향지연값=높을수록 모델이 더 먼 미래 기준으로 조향을 예측. \n 너무 높으면 과조향/커브 탈출 지연이 생길 수 있습니다. \n 0:LiveDelay",
+      "descr": "조향지연값, 0: 라이브값 사용. \n 높을수록 모델이 미래 값으로 조향을 예측하므로,\n 커브나 직선탈출시 너무 빨리 감,풀이 할 수 있음.",
       "egroup": "LAT",
       "etitle": "SteerActuatorDelay(30)",
       "edescr": "Steering Delay Value — Higher values make the model predict farther ahead. 0 means Live Delay",
