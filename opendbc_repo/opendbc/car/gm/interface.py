@@ -34,7 +34,6 @@ class CarInterface(CarInterfaceBase):
   CarState = CarState
   CarController = CarController
   RadarInterface = RadarInterface
-  params = Params()
 
   DRIVABLE_GEARS = (structs.CarState.GearShifter.sport, structs.CarState.GearShifter.low,
                     structs.CarState.GearShifter.eco, structs.CarState.GearShifter.manumatic)
@@ -106,6 +105,7 @@ class CarInterface(CarInterfaceBase):
     ret.startAccel = 1.0
     ret.radarTimeStep = 0.067
     ret.alternativeExperience = 0
+    params = Params()
 
     useEVTables = params.get_bool("EVTable")
 
