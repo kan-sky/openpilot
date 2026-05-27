@@ -34,6 +34,7 @@ class CarInterface(CarInterfaceBase):
   CarState = CarState
   CarController = CarController
   RadarInterface = RadarInterface
+  params = Params()
 
   DRIVABLE_GEARS = (structs.CarState.GearShifter.sport, structs.CarState.GearShifter.low,
                     structs.CarState.GearShifter.eco, structs.CarState.GearShifter.manumatic)
@@ -106,7 +107,7 @@ class CarInterface(CarInterfaceBase):
     ret.radarTimeStep = 0.067
     ret.alternativeExperience = 0
 
-    useEVTables = Params().get_bool("EVTable")
+    useEVTables = params.get_bool("EVTable")
 
     if PEDAL_MSG in fingerprint[0]:
       ret.enableGasInterceptorDEPRECATED = True
@@ -170,7 +171,8 @@ class CarInterface(CarInterfaceBase):
       ret.safetyConfigs[0].safetyParam |= GMSafetyFlags.HW_ASCM_LONG.value
       ret.openpilotLongitudinalControl = True
       ret.networkLocation = NetworkLocation.gateway
-      ret.radarUnavailable = False # kans
+      # LRR messages can take up to a few seconds to start sending after ignition, check camera data as well which starts earlier
+      ret.radarUnavailable = RADAR_HEADER_MSG not in fingerprint[CanBus.OBSTACLE] and CAMERA_DATA_HEADER_MSG not in fingerprint[CanBus.OBSTACLE] and not docs
       ret.pcmCruise = False  # stock non-adaptive cruise control is kept off
       # supports stop and go, but initial engage must (conservatively) be above 18mph
       ret.minEnableSpeed = -1 * CV.MPH_TO_MS
@@ -191,9 +193,10 @@ class CarInterface(CarInterfaceBase):
     ret.steerActuatorDelay = 0.1  # Default delay, not measured yet
 
     ret.steerLimitTimer = 0.4
-    ret.longitudinalActuatorDelay = Params().get_float("LongActuatorDelay")*0.01 # 0.5  # large delay to initially start braking
+    ret.longitudinalActuatorDelay = params.get_float("LongActuatorDelay")*0.01 # 0.5  # large delay to initially start braking
 
     if candidate == CAR.CHEVROLET_VOLT:
+      ret.radarUnavailable = (params.get_int("TurnSpeedControlMode") == 1)
       ret.steerActuatorDelay = 0.3 if useEVTables else 0.3
       ret.longitudinalTuning.kpBP = [0.]
       ret.longitudinalTuning.kpV = [1.0]
