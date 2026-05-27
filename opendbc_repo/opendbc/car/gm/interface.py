@@ -196,6 +196,7 @@ class CarInterface(CarInterfaceBase):
     ret.longitudinalActuatorDelay = params.get_float("LongActuatorDelay")*0.01 # 0.5  # large delay to initially start braking
 
     if candidate == CAR.CHEVROLET_VOLT:
+      ret.radarUnavailable = (params.get_int("TurnSpeedControlMode") == 1)
       ret.steerActuatorDelay = 0.3 if useEVTables else 0.3
       ret.longitudinalTuning.kpBP = [0.]
       ret.longitudinalTuning.kpV = [1.0]
