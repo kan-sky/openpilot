@@ -125,7 +125,7 @@ class LanePlanner:
     current_lane_width = abs(self.rll_y[0] - self.lll_y[0])
 
     both_lane_available = False
-    if l_prob > 0.5 and r_prob > 0.5:
+    if l_prob > 0.45 and r_prob > 0.45:
       both_lane_available = True
       self.lane_width_estimate.update(current_lane_width)
       self.lane_width_last = self.lane_width_estimate.x
@@ -139,7 +139,7 @@ class LanePlanner:
 
     # Kans: 좌/우 차선 모두 유효할 때만 차선 기반(=d_prob=lanemode)신뢰도값 사용.
     # 한쪽 차선만 강한 경우 max(l_prob, r_prob)로 끌려가는 현상 방지. 
-    one_lane_good = max(l_prob, r_prob) > 0.6
+    one_lane_good = max(l_prob, r_prob) > 0.55
     self.d_prob = 1.0 if both_lane_available else (0.65 if one_lane_good else 0.4)
 
     # 좌/우의 차선폭을 필터링
