@@ -7,6 +7,8 @@ if [ ! -f "./boot_finish" ]; then
   chmod 755 ./selfdrive/debug/clear_dtc.py
   chmod 755 ./selfdrive/debug/debug_console_carrot.py
   chmod 755 ./selfdrive/debug/debug_console.py
+  rm -f /data/params/d/Offroad_UnregisteredHardware
+  rm -f /data/params/d/DongleId
   touch ./boot_finish
 else
   chmod 644 ./boot_finish
