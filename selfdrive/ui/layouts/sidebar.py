@@ -209,7 +209,7 @@ class Sidebar(Widget):
         cloudlog.exception("invalid CalibrationParams")
     device_text_y = rect.y + 800
     device_text_pos = rl.Vector2(rect.x + 32, device_text_y)
-    rl.draw_text_ex(self._font_regular, desc, device_text_pos, FONT_SIZE-2, 0, Colors.WHITE)
+    rl.draw_text_ex(self._font_regular, desc, device_text_pos, (FONT_SIZE - 2) * FONT_SCALE, 0, Colors.WHITE)
 
   def _draw_network_indicator(self, rect: rl.Rectangle):
     # Signal strength dots
