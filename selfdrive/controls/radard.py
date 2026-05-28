@@ -72,6 +72,9 @@ class Track:
     self._vLead_last = 0.0
     self._vLead_filt = 0.0
     self._vLead_filt_init = False
+    # Kans: Cut-in tracking
+    self._prev_yRel = float('nan')
+    self.yRel_rate = 0.0
 
   def update(self, md, pt, ready, radar_reaction_factor, radar_lat_factor):
     prev_measured = self.measured
