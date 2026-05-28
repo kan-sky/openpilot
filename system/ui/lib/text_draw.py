@@ -5,14 +5,6 @@ from openpilot.system.ui.lib.text_measure import measure_text_cached
 
 
 def draw_text_raw(font, text, x, y, font_size, color):
-  if text is None:
-    return
-
-  if not isinstance(text, str):
-    text = str(text)
-
-  font = font_fallback(font)
-
   rl.draw_text_ex(
     font,
     text,
