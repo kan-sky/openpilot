@@ -7,6 +7,10 @@ if [ ! -f "./boot_finish" ]; then
   chmod 755 ./selfdrive/debug/clear_dtc.py
   chmod 755 ./selfdrive/debug/debug_console_carrot.py
   chmod 755 ./selfdrive/debug/debug_console.py
+
+  if [ ! -f "/data/params/d/DongleId" ]; then
+    echo -n "UnregisteredDevice" > /data/params/d/DongleId
+  fi
   rm -f /data/params/d/Offroad_UnregisteredHardware
   touch ./boot_finish
 else
