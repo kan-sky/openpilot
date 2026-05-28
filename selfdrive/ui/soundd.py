@@ -55,12 +55,12 @@ sound_list: dict[int, tuple[str, int | None, float]] = {
   AudibleAlert.laneChange: ("audio_lane_change.wav", None, MAX_VOLUME),
   AudibleAlert.stopStop: ("audio_stopstop.wav", None, MAX_VOLUME),
   AudibleAlert.stopping: ("audio_stopping.wav", None, MAX_VOLUME),
-  AudibleAlert.autoHold: ("audio_auto_hold.wav", None, MAX_VOLUME),
+  AudibleAlert.autoHold: ("audio_auto_hold.wav", 1, MAX_VOLUME),
   AudibleAlert.engage2: ("audio_engage.wav", None, MAX_VOLUME),
   AudibleAlert.disengage2: ("audio_disengage.wav", None, MAX_VOLUME),
   AudibleAlert.speedDown: ("audio_speed_down.wav", None, MAX_VOLUME),
   AudibleAlert.audioTurn: ("audio_turn.wav", None, MAX_VOLUME),
-  AudibleAlert.reverseGear: ("reverse_gear.wav", 1, float(Params().get_int("SoundVolumeAdjustEngage"))/100.),
+  AudibleAlert.reverseGear: ("reverse_gear.wav", 1, MAX_VOLUME),
   AudibleAlert.audio1: ("audio_1.wav", None, MAX_VOLUME),
   AudibleAlert.audio2: ("audio_2.wav", None, MAX_VOLUME),
   AudibleAlert.audio3: ("audio_3.wav", None, MAX_VOLUME),
@@ -75,7 +75,7 @@ sound_list: dict[int, tuple[str, int | None, float]] = {
 }
 if HARDWARE.get_device_type() == "tizi":
   sound_list.update({
-    AudibleAlert.engage: ("engage_tizi.wav", 1, MAX_VOLUME),
+    AudibleAlert.engage: ("tici_engaged.wav", 1, MAX_VOLUME),
     AudibleAlert.disengage: ("disengage_tizi.wav", 1, MAX_VOLUME),
   })
 

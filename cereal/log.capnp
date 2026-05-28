@@ -141,6 +141,8 @@ struct OnroadEvent @0xc4fa6047f024e718 {
     stopStop @120;
     audioLaneChange @121;
     audioTurn @122;
+    autoHold @123;
+    autoResumeFailed @124;
     trafficSignGreen @100;
     trafficSignChanged @101;
     turningLeft @102;

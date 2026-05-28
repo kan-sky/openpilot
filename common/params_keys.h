@@ -181,7 +181,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"AutoCurveSpeedAggressiveness", {PERSISTENT, INT, "85"}},
 
     {"AutoTurnControl", {PERSISTENT, INT, "1"}},
-    {"AutoTurnControlSpeedTurn", {PERSISTENT, INT, "25"}},
+    {"AutoTurnControlSpeedTurn", {PERSISTENT, INT, "70"}},
     {"AutoTurnControlTurnEnd", {PERSISTENT, INT, "10"}},
     {"AutoTurnMapChange", {PERSISTENT, INT, "0"}},
 
@@ -338,9 +338,11 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"CruiseDelay", {PERSISTENT, INT, "12"}},
     {"ResumeDelay", {PERSISTENT, INT, "6"}},
     {"AccelForce", {PERSISTENT, INT, "950"}},
-    {"PsiDampingStraight", {PERSISTENT, INT, "70"}},
-    {"PsiDampingSCurve", {PERSISTENT, INT, "60"}},
+    {"PsiDampingStraight", {PERSISTENT, INT, "85"}},
+    {"PsiDampingSCurve", {PERSISTENT, INT, "65"}},
     {"MaxLatAccelNoRollLowSpeed", {PERSISTENT, INT, "38"}},
     {"LatSmoothDebug", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION, STRING}},
     {"MemUsage", {PERSISTENT, INT, "0"}},
+    {"AutoResumeFailed", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION, BOOL}},
+    {"AutoResumeTrying", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION, BOOL}},
 };

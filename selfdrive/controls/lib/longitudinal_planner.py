@@ -24,6 +24,7 @@ A_CRUISE_MAX_BP = [0., 10.0, 25., 40.]
 CONTROL_N_T_IDX = ModelConstants.T_IDXS[:CONTROL_N]
 ALLOW_THROTTLE_THRESHOLD = 0.5
 MIN_ALLOW_THROTTLE_SPEED = 2.5
+RESET_DECEL_RAMP_TIME = 2.0
 
 # Lookup table for turns
 _A_TOTAL_MAX_V = [2.4, 4.8] #[1.7, 3.2]
@@ -177,20 +178,21 @@ class LongitudinalPlanner:
       
       self.mpc.prev_a = np.full(N+1, self.a_desired) ## carrot
 
-      self.reset_decel_timer = int(2.0 / self.dt)
+      self.reset_decel_timer = int(RESET_DECEL_RAMP_TIME / self.dt)
       self.reset_decel_start_a = self.a_desired
 
     elif self.reset_decel_timer > 0:
+      ramp_steps = max(1, int(RESET_DECEL_RAMP_TIME / self.dt))
+      t = float(np.clip(self.reset_decel_timer / ramp_steps, 0.0, 1.0))
       self.reset_decel_timer -= 1
 
-      # 2초타이머 중 마지막 1초 동안, 감속 하한을 현재 가속도 근처에서 원래 limit으로 천천히 복귀
-      t = np.clip(self.reset_decel_timer / max(1, int(1.0 / self.dt)), 0.0, 1.0)
-
+      # 2초 동안 감속 하한을 현재 가속도 근처에서 원래 limit으로 천천히 복귀
       soft_min_accel = min(0.0, self.reset_decel_start_a - 0.05)
+      ramped_min_accel = soft_min_accel * t + accel_limits_turns[0] * (1.0 - t)
 
       accel_limits_turns[0] = max(
         accel_limits_turns[0],
-        soft_min_accel * t + accel_limits_turns[0] * (1.0 - t)
+        min(0.0, ramped_min_accel)
       )
 
     # Prevent divergence, smooth in current v_ego
@@ -241,12 +243,13 @@ class LongitudinalPlanner:
 
     # Kans: 정지 후 앞차 출발 직후 shouldStop이 순간적으로 다시 켜져 재브레이킹되는 현상 완화
     lead_one = sm['radarState'].leadOne
-    lead_starting = (lead_one.status and (lead_one.vLead > 0.5 or lead_one.vRel > 0.3))
+    lead_starting = (lead_one.status and v_ego < 0.3 and lead_one.vLead > 0.3 and lead_one.vRel > 0.3)
 
-    if lead_starting and v_ego < 3.0 and not sm['carState'].brakePressed and not carrot.soft_hold_active:
+    if lead_starting and not sm['carState'].brakePressed and not carrot.soft_hold_active:
       output_should_stop_mpc = False # 정지국면에 들어가지 않게 막고
-      output_v_target_mpc = max(output_v_target_mpc, 0.5) # 목표속도,
-      output_a_target_mpc = max(output_a_target_mpc, 0.2) # 먹표가속도값이 너무 약하지 않게 max값으로 설정.
+      # 재정지 진입만 막고, 출발 가속은 충분하게
+      output_v_target_mpc = max(output_v_target_mpc, 0.7) # 목표속도
+      output_a_target_mpc = max(output_a_target_mpc, 0.5) # 목표가속도값이 너무 약하지 않게 max값으로 설정.
 
     if self.mpc.mode == 'acc':
       output_a_target = output_a_target_mpc

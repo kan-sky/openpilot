@@ -24,7 +24,7 @@ def _languages():
 
 def _char_sets():
   base = set(map(chr, range(32, 127))) | set(EXTRA_CHARS)
-  unifont = set() # set(base)  # Kans
+  unifont = set(base)  # Kans
 
   unifont.update(map(chr, range(0xAC00, 0xD7A4)))
   for language, code in _languages().items():
@@ -100,7 +100,7 @@ def _process_font(font_path: Path, codepoints: tuple[int, ...]):
   #  "unifont.otf": 16,  # unifont is only 16x8 or 16x16 pixels per glyph
   #}.get(font_path.name, 200)
   # Kans
-  font_size = 96
+  font_size = 200
   padding = GLYPH_PADDING
 
   if font_path.name == "unifont.otf":

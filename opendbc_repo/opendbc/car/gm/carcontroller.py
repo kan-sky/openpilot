@@ -78,6 +78,8 @@ class CarController(CarControllerBase):
     self.last_pulse_reset_frame = 0  # 리쥼펄스 최소유지"보장"용
     self.steerDeltaUpOrg = self.steerDeltaUp = self.steerDeltaUpLC = self.params.STEER_DELTA_UP
     self.steerDeltaDownOrg = self.steerDeltaDown = self.steerDeltaDownLC = self.params.STEER_DELTA_DOWN
+    self.auto_resume_failed_prev = False
+    self.params_memory = Params("/dev/shm/params")
 
   def update(self, CC, CS, now_nanos):
     params = Params()
@@ -236,6 +238,27 @@ class CarController(CarControllerBase):
             if self.CP.carFingerprint in SDGM_CAR:
               friction_brake_bus = CanBus.CAMERA
 
+          # Kans: 크루즈 해제 직후 AutoHold 브레이크 명령 지연(1.5s)
+          if CC.enabled or CS.out.cruiseState.enabled:
+            self.autoHold_cruise_cancel_frame = self.frame
+
+          auto_hold_cruise_cancel_delay = (
+            hasattr(self, "autoHold_cruise_cancel_frame") and
+            (self.frame - self.autoHold_cruise_cancel_frame) * DT_CTRL < 1.5
+          )
+          # Kans: AutoHold 조건
+          auto_hold_cmd = (
+            not CC.longActive and
+            not CC.enabled and
+            not CS.out.cruiseState.enabled and
+            CS.autoHold and
+            CS.autoHoldActive and
+            not CS.out.gasPressed and
+            CS.out.gearShifter in ['drive', 'low'] and
+            CS.out.vEgo < 0.05 and
+            not CS.out.regenBraking
+          )
+
           if self.CP.autoResumeSng:
             resume = actuators.longControlState != LongCtrlState.starting or CC.cruiseControl.resume
             at_full_stop = at_full_stop and not resume
@@ -258,8 +281,27 @@ class CarController(CarControllerBase):
             acc_engaged = True
             at_full_stop = False
 
-          # Kans: 오토크루즈 대기 플래그
-          if CS.out.activateCruise > 0:
+          # AutoHold가 실제 운전자 브레이크 개입으로 만들어진 상태인지
+          manual_auto_hold = (
+            CS.autoHold and
+            (CS.autoHoldActive or CS.autoHoldActivated or CS.out.autoHoldActivated) and
+            not CS.out.cruiseState.enabled and
+            not CC.enabled
+          )
+          # 오토크루즈/오토리쥼 차단은 수동 AutoHold일 때만
+          auto_hold_block_cruise = manual_auto_hold
+          if auto_hold_block_cruise:
+            self._pending_activateCruise = False
+            self.autoCruise_activate = False
+            self.autoCruise_frame = 0
+            self.autoCruise_try_count = 0
+
+            self.resume_frame = 0
+            self.resume_activate = False
+            self.resume_fault_guard = 0
+            self.activateCruise_after_brake = False
+
+          if CS.out.activateCruise > 0 and not auto_hold_block_cruise and not CS.out.brakePressed:
             self._pending_activateCruise = True
 
           # Kans: 리쥼 + 가속펄스
@@ -272,7 +314,7 @@ class CarController(CarControllerBase):
           creep_dt = (self.frame - self.resume_frame) * DT_CTRL if (self.resume_frame != 0) else 999.0
 
           # follow 조건(정지/재출발 구간에서 vRel 흔들림 감안)
-          lead_follow_ok = has_lead and (2.0 < lead_drel < 15.0) and (lead_vrel > -1.0)
+          lead_follow_ok = has_lead and (2.0 < lead_drel < 15.0) and (lead_vrel > 0.3)
 
           # 앞차 출발: 근거리 + vRel 양수 + near stop
           raw_lead_start = has_lead and (4.0 < lead_drel < 10.0) and (lead_vrel > 0.4) and near_stop_ego
@@ -288,7 +330,7 @@ class CarController(CarControllerBase):
           # resume_frame은 "리쥼윈도우" 의미. 크리핑 시작하면 유지하는 게 핵심.
 
           # 윈도우 시작: 기존 resume_frame이 0일 때만 새로 연다
-          if auto_resume_enabled and lead_start and (self.resume_frame == 0) and (not CS.out.brakePressed) and (not CS.out.gasPressed):
+          if auto_resume_enabled and lead_start and (self.resume_frame == 0) and (not CS.out.brakePressed) and (not CS.out.gasPressed) and not auto_hold_block_cruise:
             self.resume_frame = self.frame
             self.resume_fault_guard = -1  # -1: creep release 단계(브레이크 0)
             self.last_button_frame = self.frame - int(0.12 / DT_CTRL)  # starting 진입 시 즉시 RES 1회 가능
@@ -310,7 +352,9 @@ class CarController(CarControllerBase):
             else:
               self.resume_fault_guard = 0
               self.resume_frame = 0
-
+		  
+          # 앞차가 있을 때만 AutoResume 허용
+          lead_for_resume = (CS.lead_status and 1.0 < CS.lead_distance < 30.0)
           # AutoCruise: 크루즈 OFF 상태에서, 메인 활성(activateCruise) 신호가 있을 때
           if auto_cruise_enabled and self._pending_activateCruise and not CS.out.cruiseState.enabled:
             # Kans: AutoCruise (0.25초 윈도 안에 최대 2회 버튼 시도)
@@ -335,8 +379,11 @@ class CarController(CarControllerBase):
                 self.autoCruise_frame = 0
                 self.autoCruise_try_count = 0
                 self._pending_activateCruise = False
+
           # Kans: Auto Resume (RES only)
-          elif auto_resume_enabled and actuators.longControlState == LongCtrlState.starting:
+          # 앞차가 없는 상황(=not lead_for_resume)에서는 RES spam 기반 AutoResume에 진입하지 않음.
+          elif auto_resume_enabled and lead_for_resume and actuators.longControlState == LongCtrlState.starting and not manual_auto_hold:
+            self.params_memory.put_bool_nonblocking("AutoResumeTrying", True)
             if self.resume_frame == 0 or self.resume_activate:
               self.resume_frame = self.frame
               self.resume_activate = False
@@ -350,8 +397,13 @@ class CarController(CarControllerBase):
               self.apply_brake = max(self.apply_brake, int(self.params.NEAR_STOP_BRAKE_PHASE))
               self.activateCruise_after_brake = True
 
-            # starting이어도 satandstll 확정 전에는 RES 버튼을 보내지 않음. SoftDisableAlert(Alert) 방지용.
+            # starting이어도 standstill 확정 전에는 RES 버튼을 보내지 않음. SoftDisableAlert(Alert) 방지용.
             resume_ready_standstill = (CS.out.standstill or CS.out.cruiseState.standstill)
+
+            # Kans: 오토리쥼 성공 -> Trying 종료
+            if CS.out.cruiseState.enabled:
+              self.params_memory.put_bool_nonblocking("AutoResumeTrying", False)
+
             if not resume_ready_standstill:
               self.resume_fault_guard = 0
               self.resume_activate = False
@@ -385,7 +437,26 @@ class CarController(CarControllerBase):
               if (self.frame - self.resume_frame) * DT_CTRL >= self.resumeDelay_time:
                 self.resume_activate = True
 
+            # Kans: AutoResume 실패 판정
+            # RES를 이미 시도했고, resume 창이 닫힐 시간이 지났는데도 크루즈가 활성화되지 않으면 실패로 판단
+            auto_resume_failed = (
+              self.resume_frame > 0 and
+              self.resume_fault_guard > 0 and
+              (self.frame - self.resume_frame) * DT_CTRL >= max(reopen_delay, self.resumeDelay_time) and
+              not CS.out.cruiseState.enabled
+            )
+
+            if auto_resume_failed and not self.auto_resume_failed_prev:
+              self.params_memory.put_bool_nonblocking("AutoResumeFailed", True)
+              self.params_memory.put_bool_nonblocking("AutoResumeTrying", False)
+              self.resume_frame = 0
+              self.resume_activate = False
+              self.resume_fault_guard = 0
+
+            self.auto_resume_failed_prev = auto_resume_failed
+
           else:
+            self.params_memory.put_bool_nonblocking("AutoResumeTrying", False)
             self.activateCruise_after_brake = False
             if auto_resume_enabled:  # 오토리쥼이 진행중이면
               if self.resume_frame > 0 and (self.frame - self.resume_frame) * DT_CTRL > reopen_delay:
@@ -417,7 +488,15 @@ class CarController(CarControllerBase):
           # Kans: 정규 브레이크 로직
           self._brk_rc = (self._brk_rc + 1) & 0x3
           brk_idx_base = self._brk_rc
-          can_sends.append(gmcan.create_friction_brake_command(self.packer_ch, friction_brake_bus, self.apply_brake, brk_idx_base, CC.enabled, near_stop, at_full_stop, self.CP))
+
+          if auto_hold_cmd:
+            hold_brake = max(self.apply_brake, self.params.NEAR_STOP_BRAKE_PHASE)
+            hold_near_stop = CS.out.vEgo < self.params.NEAR_STOP_BRAKE_PHASE
+            can_sends.append(gmcan.create_friction_brake_command(self.packer_ch, friction_brake_bus, hold_brake, brk_idx_base, False, hold_near_stop, False, self.CP))
+            CS.autoHoldActivated = True
+          else:
+            can_sends.append(gmcan.create_friction_brake_command(self.packer_ch, friction_brake_bus, self.apply_brake, brk_idx_base, CC.enabled, near_stop, at_full_stop, self.CP))
+            CS.autoHoldActivated = False
 
           # Send dashboard UI commands (ACC status)
           send_fcw = hud_alert == VisualAlert.fcw

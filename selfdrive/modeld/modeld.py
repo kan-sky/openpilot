@@ -39,7 +39,7 @@ VISION_METADATA_PATH = MODELS_DIR / 'driving_vision_metadata.pkl'
 OFF_POLICY_METADATA_PATH = MODELS_DIR / 'driving_off_policy_metadata.pkl'
 ON_POLICY_METADATA_PATH = MODELS_DIR / 'driving_on_policy_metadata.pkl'
 
-LAT_SMOOTH_SECONDS = 0.0
+LAT_SMOOTH_SECONDS = 0.13
 LONG_SMOOTH_SECONDS = 0.3
 MIN_LAT_CONTROL_SPEED = 0.3
 
@@ -77,8 +77,16 @@ def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.
     desired_curv_unscaled, desired_accel = model_output['action'][0]
     desired_curvature = desired_curv_unscaled / 100.0
 
-    # Kans: vEgoStopping 파라미터 반영
-    should_stop = (v_ego < vEgoStopping and desired_accel < 0.1)
+    prev_curvature = float(prev_action.desiredCurvature)
+
+    same_curve = desired_curvature * prev_curvature > 0.0
+    deep_curve = abs(prev_curvature) > 0.0025  # 같은 방향의 곡률이 .0025이상일때(램프)
+    curv_drop = abs(desired_curvature) < abs(prev_curvature) * 0.70  # 모델이 그 곡률값을 갑자기 70%이하로 확 떨어뜨리면,
+
+    if same_curve and deep_curve and curv_drop:
+      desired_curvature = prev_curvature * 0.8 + desired_curvature * 0.2  # 과하게 낮춘 값을 따라가지 않고 80%만 반영한다.
+
+    should_stop = (v_ego < 0.3 and desired_accel < 0.1)
 
     # longitudinal smoothing
     desired_accel = smooth_value(desired_accel, prev_action.desiredAcceleration, LONG_SMOOTH_SECONDS)
@@ -198,8 +206,6 @@ class ModelState:
     self.npy['traffic_convention'][:] = inputs['traffic_convention']
     if 'action_t' in self.npy:
       self.npy['action_t'][:] = inputs['action_t']
-    if 'prev_action' in self.npy:
-      self.npy['prev_action'][:] = inputs['prev_action']
     self.npy['tfm'][:,:] = transforms['img'][:,:]
     self.npy['big_tfm'][:,:] = transforms['big_img'][:,:]
 
@@ -289,7 +295,7 @@ def main(demo=False):
 
   # TODO this needs more thought, use .2s extra for now to estimate other delays
   # TODO Move smooth seconds to action function
-  lat_delay = CP.steerActuatorDelay + .2 + LAT_SMOOTH_SECONDS # carrot
+  lat_delay = CP.steerActuatorDelay + LAT_SMOOTH_SECONDS # carrot
   long_delay = CP.longitudinalActuatorDelay + LONG_SMOOTH_SECONDS
   prev_action = log.ModelDataV2.Action()
 
@@ -308,6 +314,11 @@ def main(demo=False):
       long_delay = params.get_float("LongActuatorDelay")*0.01
       vEgoStopping = params.get_float("VEgoStopping") * 0.01
 
+    # Kans:
+    if custom_lat_delay > 0.0:
+      lat_delay = custom_lat_delay # + lat_smooth_seconds
+    else:
+      lat_delay = sm["liveDelay"].lateralDelay # + lat_smooth_seconds
     # Keep receiving frames until we are at least 1 frame ahead of previous extra frame
     while meta_main.timestamp_sof < meta_extra.timestamp_sof + 25000000:
       buf_main = vipc_client_main.recv()
@@ -342,6 +353,14 @@ def main(demo=False):
 
     sm.update(0)
     desire = DH.desire
+
+    # Kans: RL 모델 차선변경 중 desire 유지 보강
+    if DH.lane_change_state != log.LaneChangeState.off:
+      if DH.lane_change_direction == log.LaneChangeDirection.left:
+        desire = log.Desire.laneChangeLeft
+      elif DH.lane_change_direction == log.LaneChangeDirection.right:
+        desire = log.Desire.laneChangeRight
+
     is_rhd = sm["driverMonitoringState"].isRHD
     frame_id = sm["roadCameraState"].frameId
     v_ego = max(sm["carState"].vEgo, 0.)
@@ -383,7 +402,6 @@ def main(demo=False):
       'desire_pulse': vec_desire,
       'traffic_convention': traffic_convention,
       'action_t': np.array([lat_action_t, long_action_t], dtype=np.float32),
-      'prev_action': np.array([prev_action.desiredCurvature * max(1.0, v_ego)**2, prev_action.desiredAcceleration], dtype=np.float32),
     }
 
     mt1 = time.perf_counter()
@@ -411,7 +429,7 @@ def main(demo=False):
       action, curve_smooth_max, applied_lat_smooth_seconds = get_action_from_model(model_output, prev_action, lat_delay_dynamic + frame_delay + action_delay, long_delay + frame_delay + action_delay, v_ego, lat_smooth_seconds_dynamic, vEgoStopping)
       prev_action = action
       # Kans: LatSmoothDebug
-      if frame % 20 == 0:
+      if frame % 100 == 0:
         params.put_nonblocking("LatSmoothDebug", f"{curve_smooth_max:.3f}/{applied_lat_smooth_seconds:.3f}")
 
       fill_model_msg(drivingdata_send, modelv2_send, model_output, action,
