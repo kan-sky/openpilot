@@ -715,7 +715,7 @@ class RadarD:
           ld['modelProb'] = 0.01
           center_list.append(ld)
 
-      # left/right
+      # left/right Kans: 컷인 판단이 너무 늦으면 int(2.0/DT_MDL) 조정(2.0 ->1.5 ->1.0 ...)
       elif y_rel_neg < 0: #left_lane_y:
         ld = c.get_RadarState(0, 0)
         if self.lane_line_available and c.in_lane_prob_future > 0.1 and c.cnt > int(2.0/DT_MDL):
