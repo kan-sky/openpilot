@@ -13,7 +13,7 @@ output_files = [
 ]
 env.Command(
   target=output_files,
-  source=[generator] + source_files,
+  source=[generator, source_files],
   action=f"python3 {generator}",
 )
 

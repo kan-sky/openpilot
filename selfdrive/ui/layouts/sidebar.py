@@ -198,18 +198,16 @@ class Sidebar(Widget):
     if calib_bytes:
       try:
         calib = messaging.log_from_bytes(calib_bytes, log.Event).liveCalibration
-
-        if calib.calStatus != log.LiveCalibrationData.Status.uncalibrated:
-          pitch = math.degrees(calib.rpyCalib[1])
-          yaw = math.degrees(calib.rpyCalib[2])
-          desc += str("{:.2f}° {} | {:.2f}° {}").format(
-            abs(pitch), str("↓") if pitch > 0 else str("↑"),
-            abs(yaw), str("←") if yaw > 0 else str("→"))
+        pitch = math.degrees(calib.rpyCalib[1])
+        yaw = math.degrees(calib.rpyCalib[2])
+        desc += str("{:.2f}° {} | {:.2f}° {}").format(
+          abs(pitch), str("↓") if pitch > 0 else str("↑"),
+          abs(yaw), str("←") if yaw > 0 else str("→"))
       except Exception:
         cloudlog.exception("invalid CalibrationParams")
     device_text_y = rect.y + 800
     device_text_pos = rl.Vector2(rect.x + 32, device_text_y)
-    rl.draw_text_ex(self._font_regular, desc, device_text_pos, (FONT_SIZE - 2) * FONT_SCALE, 0, Colors.WHITE)
+    rl.draw_text_ex(self._font_regular, desc, device_text_pos, FONT_SIZE-2, 0, Colors.WHITE)
 
   def _draw_network_indicator(self, rect: rl.Rectangle):
     # Signal strength dots

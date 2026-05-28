@@ -17,7 +17,7 @@ def draw_text_raw(font, text, x, y, font_size, color):
     font,
     text,
     rl.Vector2(float(x), float(y)),
-    float(font_size) * FONT_SCALE,
+    float(font_size),
     0,
     color,
   )
