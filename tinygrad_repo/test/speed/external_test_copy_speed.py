@@ -1,6 +1,7 @@
-import unittest, numpy as np, os
+import unittest, numpy as np
 from tinygrad import Tensor, Device, TinyJit
-from tinygrad.helpers import Timing, getenv
+from tinygrad.helpers import Timing, OSX, getenv
+from test.helpers import CI
 import multiprocessing.shared_memory as shared_memory
 
 N = getenv("NSZ", 256)
@@ -11,7 +12,7 @@ class TestCopySpeed(unittest.TestCase):
   def testCopySHMtoDefault(self):
     s = shared_memory.SharedMemory(name="test_X", create=True, size=N*N*4)
     s.close()
-    if os.path.exists("/dev/shm"):
+    if CI and not OSX:
       t = Tensor.empty(N, N, device="disk:/dev/shm/test_X").realize()
     else:
       t = Tensor.empty(N, N, device="disk:shm:test_X").realize()
@@ -76,8 +77,11 @@ class TestCopySpeed(unittest.TestCase):
         Device[Device.DEFAULT].synchronize()
       np.testing.assert_equal(t.numpy(), x.numpy())
 
-  @unittest.skipIf(Device.DEFAULT != "CL" or Device[Device.DEFAULT].count() != 6, "only test this on CL, with 6 gpus")
+  @unittest.skipIf(CI, "CI doesn't have 6 GPUs")
+  @unittest.skipIf(Device.DEFAULT != "CL", "only test this on CL")
   def testCopyCPUto6GPUs(self):
+    from tinygrad.runtime.ops_cl import CLDevice
+    if len(CLDevice.device_ids) != 6: raise unittest.SkipTest("computer doesn't have 6 GPUs")
     t = Tensor.ones(N, N, device="CPU").contiguous().realize()
     print(f"buffer: {t.nbytes()*1e-9:.2f} GB")
     for _ in range(3):

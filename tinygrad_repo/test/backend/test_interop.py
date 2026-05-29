@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-import unittest, os
+import unittest
 import torch
 import numpy as np
 
@@ -7,6 +7,7 @@ from tinygrad.helpers import DEV
 from tinygrad.tensor import Tensor
 from tinygrad.device import Device
 from tinygrad.dtype import _from_torch_dtype, _to_torch_dtype
+from test.helpers import CI
 
 MOCKGPU = DEV.interface.startswith("MOCK")
 
@@ -27,7 +28,7 @@ class TestInterop(unittest.TestCase):
     tg_out = tg_data[:, :, 0] * 0.2989 + tg_data[:, :, 1] * 0.5870 + tg_data[:, :, 2] * 0.1140
     tg_res = tg_out.numpy()
 
-    if self.torch_device == "mps" and os.getenv("CI", "") != "":
+    if self.torch_device == "mps" and CI:
       # MPS backend out of memory: https://discuss.pytorch.org/t/mps-back-end-out-of-memory-on-github-action/189773
       # Calculate expected value on cpu.
       inp = inp.cpu()
