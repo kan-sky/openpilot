@@ -724,9 +724,9 @@ class CarrotServ:
   def update_auto_turn(self, v_ego_kph, sm, x_turn_info, x_dist_to_turn, check_steer=False):
     # Kans: 현재속도의 감속비로 적용, 최소 턴속도 25km/h 유지
     if self.autoTurnControlSpeedTurn > 0:
-      turn_speed = max(25.0, v_ego_kph * self.autoTurnControlSpeedTurn)
+      turn_speed = max(v_ego_kph * 0.55, v_ego_kph * self.autoTurnControlSpeedTurn)
     else:
-      turn_speed = 0.0
+      turn_speed = v_ego_kph * 1.0 
     fork_speed = self.nRoadLimitSpeed
     stop_speed = 1
     turn_dist_for_speed = self.autoTurnControlTurnEnd * turn_speed / 3.6 # autoTurnControlSpeedTurn(70%) 목표속도까지 감속 완료할 거리.
@@ -744,19 +744,19 @@ class CarrotServ:
 
     # Kans: fork/off-ramp 계열 시작거리
     if is_off_ramp:
-      start_fork_dist = 110.0
+      start_fork_dist = 90.0
     elif is_fork and is_highway_like:
-      start_fork_dist = 100.0
+      start_fork_dist = 110.0
     elif is_fork:
-      start_fork_dist = 25.0
+      start_fork_dist = 35.0
     else:
       start_fork_dist = max(25.0, self.autoTurnControlTurnEnd * 10.0)
 
     # Kans: 일반 턴/로터리 시작거리
     if is_city_turn:
-      start_turn_dist = 25.0
+      start_turn_dist = 35.0
     elif is_rotary:
-      start_turn_dist = 30.0
+      start_turn_dist = 25.0
     else:
       start_turn_dist = 25.0
 
