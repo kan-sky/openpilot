@@ -1046,8 +1046,8 @@ class CarrotMan:
     max_index = np.argmax(np.abs(orientation_rate))
     curv_direction = np.sign(orientation_rate[max_index])
 
-    # Kans: 피크값 대신 상위 90% 사용, 과도한 감속 방지
-    max_pred_lat_acc = np.percentile(pred_lat_acc, 90)
+    # Kans: 피크값 대신 상위 83% 사용, 과도한 감속 방지
+    max_pred_lat_acc = np.percentile(pred_lat_acc, 83)
 
     # Get the maximum curve based on the current velocity
     max_curve = max_pred_lat_acc / (v_ego ** 2)

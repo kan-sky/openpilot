@@ -748,13 +748,13 @@ class CarrotServ:
     elif is_fork and is_highway_like:
       start_fork_dist = 110.0
     elif is_fork:
-      start_fork_dist = 35.0
+      start_fork_dist = 30.0
     else:
       start_fork_dist = max(25.0, self.autoTurnControlTurnEnd * 10.0)
 
     # Kans: 일반 턴/로터리 시작거리
     if is_city_turn:
-      start_turn_dist = 35.0
+      start_turn_dist = 30.0
     elif is_rotary:
       start_turn_dist = 25.0
     else:
