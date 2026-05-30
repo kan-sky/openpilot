@@ -743,7 +743,7 @@ class CarrotServ:
     is_rotary = self.navType == "rotary"  # 회전교차로
     is_city_turn = self.navType == "turn"  # 일반 좌/우회전
     # 고속도로/고속국도/자동차전용도로 계열
-    is_highway_like = self.roadcate in [0, 1]
+    is_highway_like = self.roadcate in [0, 1] or self.nRoadLimitSpeed >= 70
 
     # Kans: fork/off-ramp 계열 시작거리
     if is_off_ramp:
@@ -751,17 +751,17 @@ class CarrotServ:
     elif is_fork and is_highway_like:
       start_fork_dist = 110.0
     elif is_fork:
-      start_fork_dist = 30.0
+      start_fork_dist = 40.0
     else:
       start_fork_dist = max(25.0, self.autoTurnControlTurnEnd * 10.0)
 
     # Kans: 일반 턴/로터리 시작거리
     if is_city_turn:
-      start_turn_dist = 30.0
+      start_turn_dist = 40.0
     elif is_rotary:
-      start_turn_dist = 25.0
+      start_turn_dist = 35.0
     else:
-      start_turn_dist = 25.0
+      start_turn_dist = 35.0
 
 
     turn_info_mapping = {
