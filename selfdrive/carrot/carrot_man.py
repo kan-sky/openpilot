@@ -1026,6 +1026,7 @@ class CarrotMan:
 
   def vturn_speed(self, CS, sm):
     TARGET_LAT_A = 1.9  # m/s^2
+
     # Kans: 저속이나 정지중에는 무시
     if CS.vEgo < (5.0 / 3.6):
       return 250
@@ -1035,28 +1036,30 @@ class CarrotMan:
     # Set the curve sensitivity
     orientation_rate = np.array(modelData.orientationRate.z) * self.autoCurveSpeedFactor
     velocity = np.array(modelData.velocity.x)
-    # Kans: apply "or"
+
+    # Kans: apply "or" 둘 중 하나라도 비어 있으면 무시
     if len(orientation_rate) == 0 or len(velocity) == 0:
       return 250
 
     pred_lat_acc = np.abs(orientation_rate) * velocity
-
+    # Get the maximum lat accel from the model
     max_index = np.argmax(np.abs(orientation_rate))
     curv_direction = np.sign(orientation_rate[max_index])
 
-    # Kans: 피크값 대신 상위 85% 사용 (과도한 감속 방지)
-    max_pred_lat_acc = np.percentile(pred_lat_acc, 85)
+    # Kans: 피크값 대신 상위 90% 사용, 과도한 감속 방지
+    max_pred_lat_acc = np.percentile(pred_lat_acc, 90)
 
+    # Get the maximum curve based on the current velocity
     max_curve = max_pred_lat_acc / (v_ego ** 2)
-    # Kans
-    if max_curve < 1e-6:
-      return 250
 
+    # Kans: 비정상 곡률(Nan) 방지
+    if not np.isfinite(max_curve) or max_curve < 1e-6:
+      return 250
+    # Set the target lateral acceleration
     adjusted_target_lat_a = TARGET_LAT_A * self.autoCurveSpeedAggressiveness
 
-    # Kans
+    # Get the target velocity for the maximum curve
     turnSpeed = abs(adjusted_target_lat_a / max_curve) ** 0.5 * 3.6
-
     # 하한/상한 적용
     turnSpeed = max(turnSpeed, self.autoCurveSpeedLowerLimit)
     turnSpeed = min(turnSpeed, 250)
