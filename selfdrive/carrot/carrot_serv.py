@@ -722,9 +722,13 @@ class CarrotServ:
     return new_lat, new_lon
 
   def update_auto_turn(self, v_ego_kph, sm, x_turn_info, x_dist_to_turn, check_steer=False):
-    # Kans: 현재속도의 감속비로 적용, 최소 턴속도 25km/h 유지
+    # Kans: 현재속도의 감속비로 적용, 최소 김속비 65%로 유지
     if self.autoTurnControlSpeedTurn > 0:
-      turn_speed = max(v_ego_kph * 0.55, v_ego_kph * self.autoTurnControlSpeedTurn)
+      turn_ratio = max(0.65, self.autoTurnControlSpeedTurn)
+      turn_speed = v_ego_kph * turn_ratio
+      # Kans: 회전교차로/교차로에서는 과도한 저속 진입 방지
+      if self.navType in ["rotary", "turn"]:
+        turn_speed = max(30.0, turn_speed)
     else:
       turn_speed = v_ego_kph * 1.0 
     fork_speed = self.nRoadLimitSpeed
@@ -733,14 +737,13 @@ class CarrotServ:
     fork_dist_for_speed = self.autoTurnControlTurnEnd * fork_speed / 3.6 # fork_speed(=nRoadLimitSpeed) 목표속도까지 감속 완료할 거리.
     stop_dist_for_speed = 5
 
-    # Kans: 차선변경 카테고리
+    # Kans: 네비 주행안내(회전/분기/램프) 카테고리
     is_off_ramp = self.navType == "off ramp"  # 진출/진입 램프
     is_fork = self.navType == "fork"  # 갈림길/분기
     is_rotary = self.navType == "rotary"  # 회전교차로
     is_city_turn = self.navType == "turn"  # 일반 좌/우회전
-
-    # Kans: 고속도로/고속국도/자동차전용도로 계열
-    is_highway_like = self.roadcate in [0, 1] or self.nRoadLimitSpeed >= 70
+    # 고속도로/고속국도/자동차전용도로 계열
+    is_highway_like = self.roadcate in [0, 1]
 
     # Kans: fork/off-ramp 계열 시작거리
     if is_off_ramp:
@@ -764,9 +767,10 @@ class CarrotServ:
     turn_info_mapping = {
         1: {"type": "turn left", "speed": turn_speed, "dist": turn_dist_for_speed, "start": start_turn_dist},
         2: {"type": "turn right", "speed": turn_speed, "dist": turn_dist_for_speed, "start": start_turn_dist},
+        5: {"type": "straight", "speed": turn_speed, "dist": turn_dist_for_speed, "start": start_turn_dist},
         3: {"type": "fork left", "speed": fork_speed, "dist": fork_dist_for_speed, "start": start_fork_dist},
         4: {"type": "fork right", "speed": fork_speed, "dist": fork_dist_for_speed, "start": start_fork_dist},
-        5: {"type": "straight", "speed": turn_speed, "dist": turn_dist_for_speed, "start": start_turn_dist},
+
         6: {"type": "straight", "speed": fork_speed, "dist": fork_dist_for_speed, "start": start_fork_dist},
         7: {"type": "straight", "speed": stop_speed, "dist": stop_dist_for_speed, "start": 1000},
         8: {"type": "straight", "speed": stop_speed, "dist": stop_dist_for_speed, "start": 1000},
