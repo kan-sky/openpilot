@@ -724,11 +724,11 @@ class CarrotServ:
   def update_auto_turn(self, v_ego_kph, sm, x_turn_info, x_dist_to_turn, check_steer=False):
     # Kans: 현재속도의 감속비로 적용, 최소 김속비 65%로 유지
     if self.autoTurnControlSpeedTurn > 0:
-      turn_ratio = max(0.65, self.autoTurnControlSpeedTurn)
+      turn_ratio = max(0.75, self.autoTurnControlSpeedTurn)
       turn_speed = v_ego_kph * turn_ratio
       # Kans: 회전교차로/교차로에서는 과도한 저속 진입 방지
       if self.navType in ["rotary", "turn"]:
-        turn_speed = max(30.0, turn_speed)
+        turn_speed = max(40.0, turn_speed)
     else:
       turn_speed = v_ego_kph * 1.0 
     fork_speed = self.nRoadLimitSpeed
