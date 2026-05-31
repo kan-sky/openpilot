@@ -738,6 +738,10 @@ class CarrotServ:
     stop_dist_for_speed = 5
 
     # Kans: 네비 주행안내(회전/분기/램프) 카테고리
+    is_turn_group = x_turn_info in [1, 2, 5]  # 좌/우회전, 로터리/직진성 턴
+    is_fork_group = x_turn_info in [3, 4, 6]  # 분기/램프/TG 계열
+    is_stop_group = x_turn_info in [7, 8]  # 도착/유턴/정지성 안내
+
     is_off_ramp = self.navType == "off ramp"  # 진출/진입 램프
     is_fork = self.navType == "fork"  # 갈림길/분기
     is_rotary = self.navType == "rotary"  # 회전교차로
@@ -748,18 +752,16 @@ class CarrotServ:
     # Kans: fork/off-ramp 계열 시작거리
     if is_off_ramp:
       start_fork_dist = 90.0
-    elif is_fork and is_highway_like:
+    elif is_fork_group and is_highway_like:
       start_fork_dist = 110.0
-    elif is_fork:
+    elif is_fork_group:
       start_fork_dist = 40.0
     else:
       start_fork_dist = max(25.0, self.autoTurnControlTurnEnd * 10.0)
 
     # Kans: 일반 턴/로터리 시작거리
-    if is_city_turn:
-      start_turn_dist = 40.0
-    elif is_rotary:
-      start_turn_dist = 35.0
+    if is_rotary:
+      start_turn_dist = 30.0
     else:
       start_turn_dist = 35.0
 
@@ -770,7 +772,6 @@ class CarrotServ:
         5: {"type": "straight", "speed": turn_speed, "dist": turn_dist_for_speed, "start": start_turn_dist},
         3: {"type": "fork left", "speed": fork_speed, "dist": fork_dist_for_speed, "start": start_fork_dist},
         4: {"type": "fork right", "speed": fork_speed, "dist": fork_dist_for_speed, "start": start_fork_dist},
-
         6: {"type": "straight", "speed": fork_speed, "dist": fork_dist_for_speed, "start": start_fork_dist},
         7: {"type": "straight", "speed": stop_speed, "dist": stop_dist_for_speed, "start": 1000},
         8: {"type": "straight", "speed": stop_speed, "dist": stop_dist_for_speed, "start": 1000},
