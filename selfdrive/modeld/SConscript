@@ -46,7 +46,8 @@ else:
 
 tg_devices = { # which device to put jit inputs to at runtime
   'selfdrive.modeld.modeld': {
-    'default': {'WARP_DEV': tg_backend, 'QUEUE_DEV': tg_backend}
+    'default': {'WARP_DEV': tg_backend, 'QUEUE_DEV': tg_backend},
+    'usbgpu': {'WARP_DEV': tg_backend, 'QUEUE_DEV': 'AMD'}
   },
   'selfdrive.modeld.dmonitoringmodeld': {
     'default': {'DEV': tg_backend}
@@ -55,7 +56,6 @@ tg_devices = { # which device to put jit inputs to at runtime
 
 USBGPU = usbgpu_present() # or release # TODO always build big model on release
 if USBGPU:
-  tg_devices['selfdrive.modeld.modeld']['usbgpu'] = {'WARP_DEV': tg_backend, 'QUEUE_DEV': 'AMD'}
   usbgpu_tg_flags = f'DEBUG=2 DEV=USB+AMD:LLVM WARP_DEV={tg_backend} FLOAT16=1 JIT_BATCH_SIZE=0 GMMU=0'
   # the USB+AMD GPU takes an exclusive flock; serialize all targets that touch it
   usbgpu_lock = File("models/.usb_gpu.lock").abspath
@@ -83,20 +83,19 @@ compile_modeld_script = [
 ]
 model_w, model_h = MEDMODEL_INPUT_SIZE
 frame_skip = ModelConstants.MODEL_RUN_FREQ // ModelConstants.MODEL_CONTEXT_FREQ
-driving_model_names = ['driving_vision', 'driving_off_policy', 'driving_on_policy']
-camera_res_args = ' '.join(f'{cw}x{ch}' for cw, ch in CAMERA_CONFIGS)
 
 for usbgpu in [False, True] if USBGPU else [False]:
   target_pkl_path = File(modeld_pkl_path(usbgpu)).abspath
-  cmd_flags = usbgpu_tg_flags if usbgpu else tg_flags
-  driving_onnx_deps = [p for m in driving_model_names
+  file_prefix, cmd_flags = ('big_', usbgpu_tg_flags) if usbgpu else ('', tg_flags)
+  driving_onnx_deps = [p for m in [f'{file_prefix}driving_vision', f'{file_prefix}driving_on_policy', f'{file_prefix}driving_off_policy']
                        for p in get_existing_chunks(File(f"models/{m}.onnx").abspath)]
+  camera_res_args = ' '.join(f'{cw}x{ch}' for cw, ch in CAMERA_CONFIGS)
   cmd = (f'{cmd_flags} {mac_brew_string} python3 {modeld_dir}/compile_modeld.py '
         f'--model-size {model_w}x{model_h} '
         f'--camera-resolutions {camera_res_args} '
-        f'--vision-onnx {File("models/driving_vision.onnx").abspath} '
-        f'--off-policy-onnx {File("models/driving_off_policy.onnx").abspath} '
-        f'--on-policy-onnx {File("models/driving_on_policy.onnx").abspath} '
+        f'--vision-onnx {File(f"models/{file_prefix}driving_vision.onnx").abspath} '
+        f'--off-policy-onnx {File(f"models/{file_prefix}driving_off_policy.onnx").abspath} '
+        f'--on-policy-onnx {File(f"models/{file_prefix}driving_on_policy.onnx").abspath} '
         f'--output {target_pkl_path} --frame-skip {frame_skip}')
   onnx_sizes_sum = sum(os.path.getsize(f) for f in driving_onnx_deps)
   chunk_targets = get_chunk_targets(target_pkl_path, estimate_pickle_max_size(onnx_sizes_sum))
