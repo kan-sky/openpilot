@@ -190,6 +190,7 @@ class CarrotServ:
     self.source_last = "none"
 
     self.debugText = ""
+    self.atcDebugText = ""
 
     # 默认语言，稍后在 update_params 中从 Params 读取覆盖，
     # 规则：main_ko -> 韩语；main_zh-CHS -> 中文；其他 -> 英文
@@ -734,9 +735,6 @@ class CarrotServ:
     if self.autoTurnControlSpeedTurn > 0:
       turn_ratio = max(0.75, self.autoTurnControlSpeedTurn)
       turn_speed = v_ego_kph * turn_ratio
-      # Kans: 회전교차로/교차로에서는 과도한 저속 진입 방지
-      if x_turn_info in [1, 2, 5]:
-        turn_speed = max(40.0, turn_speed)
     else:
       turn_speed = v_ego_kph * 1.0 
 
@@ -778,7 +776,7 @@ class CarrotServ:
 
     # Kans: debug
     if check_steer:
-      self.debugText += (
+      self.atcDebugText = (
         f"ATC:{atc_debug} "
         f"NT:{self.navType} "
         f"XI:{x_turn_info} "
@@ -1075,8 +1073,7 @@ class CarrotServ:
       if desired_speed < self.gas_override_speed:
         source = "gas"
         desired_speed = self.gas_override_speed
-
-      self.debugText += f"route={route_speed:.1f}"#f"desired={desired_speed:.1f},{source},g={self.gas_override_speed:.0f}"
+      self.debugText = f"{self.atcDebugText} route={route_speed:.1f}"
 
     left_spd_sec = 100
     left_tbt_sec = 100
@@ -1111,7 +1108,6 @@ class CarrotServ:
         self.carrot_left_sec = left_sec
 
       self.left_sec = left_sec
-
 
     self._update_cmd()
     msg = messaging.new_message('carrotMan')
