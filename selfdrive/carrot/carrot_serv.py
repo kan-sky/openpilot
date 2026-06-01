@@ -755,14 +755,19 @@ class CarrotServ:
     if is_lane_change:
       if self.navType == "off ramp":
         start_fork_dist = 90.0
+        atc_debug = "OFF"
       elif is_highway_like:
         start_fork_dist = 110.0
+        atc_debug = "HWY"
       else:
         start_fork_dist = 30.0
+        atc_debug = "LC"
     elif is_tg:
       start_fork_dist = 40.0
+      atc_debug = "TG"
     else:
       start_fork_dist = max(25.0, self.autoTurnControlTurnEnd * 10.0)
+      atc_debug = "DEF"
 
     if is_rotary_info:
       start_turn_dist = 35.0
@@ -770,6 +775,17 @@ class CarrotServ:
       start_turn_dist = 20.0
     else:
       start_turn_dist = 25.0
+
+    # Kans: debug
+    if check_steer:
+      self.debugText += (
+        f"ATC:{atc_debug} "
+        f"NT:{self.navType} "
+        f"XI:{x_turn_info} "
+        f"D:{x_dist_to_turn:.0f} "
+        f"SF:{start_fork_dist:.0f} "
+        f"ST:{start_turn_dist:.0f}"
+      )
 
     turn_info_mapping = {
         1: {"type": "turn left", "speed": turn_speed, "dist": turn_dist_for_speed, "start": start_turn_dist},
@@ -790,14 +806,6 @@ class CarrotServ:
     atc_speed = mapping["speed"]
     atc_dist = mapping["dist"]
     atc_start_dist = mapping["start"]
-
-    # Kans: debug
-    self.debugText += (
-      f"ATC:{self.navType},"
-      f"{x_turn_info},"
-      f"SF:{start_fork_dist:.0f},"
-      f"ST:{start_turn_dist:.0f} "
-    )
 
     if x_dist_to_turn > atc_start_dist:
       atc_type += " prepare"
@@ -999,9 +1007,6 @@ class CarrotServ:
     if self.atcType == "none" or self.atcType.endswith("prepare"):
       if 0 < self.xDistToTurnNext < 250 and not atc_type_next.endswith("prepare"):
         self.atcType = atc_type_next
-
-
-
 
     if self.nSdiType  >= 0: # or self.active_carrot > 0:
       pass
