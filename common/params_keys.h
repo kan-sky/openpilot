@@ -152,7 +152,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"CarSelected3", {PERSISTENT, STRING, "MOCK"}},
     {"SupportedCars", {PERSISTENT, STRING}},
     {"SupportedCars_gm", {PERSISTENT, STRING}},
-    {"ShowDebugUI", {PERSISTENT, INT, "0"}},
+    {"ShowDebugUI", {PERSISTENT, INT, "1"}},
     {"ShowDateTime", {PERSISTENT, INT, "1"}},
     {"ShowLaneInfo", {PERSISTENT, INT, "1"}},
     {"ShowRadarInfo", {PERSISTENT, INT, "1"}},

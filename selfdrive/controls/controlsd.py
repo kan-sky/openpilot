@@ -47,7 +47,7 @@ class Controls:
     self.disable_dm = False # carrot
 
     self.sm = messaging.SubMaster(['liveDelay', 'liveParameters', 'liveTorqueParameters', 'modelV2', 'selfdriveState',
-                                   'liveCalibration', 'livePose', 'longitudinalPlan', 'lateralManeuverPlan', 'carState', 'carOutput',
+                                   'liveCalibration', 'livePose', 'longitudinalPlan', 'carState', 'carOutput',
                                    'carrotMan', 'lateralPlan', 'radarState',
                                    'driverMonitoringState', 'onroadEvents', 'driverAssistance'], poll='selfdriveState')
     self.pm = messaging.PubMaster(['carControl', 'controlsState'])
@@ -168,8 +168,6 @@ class Controls:
       else:
         curvature = get_lag_adjusted_curvature(self.CP, CS.vEgo, lat_plan.psis, lat_plan.curvatures, steer_actuator_delay + lat_smooth_seconds, lat_plan.distances)
         new_desired_curvature = smooth_value(curvature, self.desired_curvature, lat_smooth_seconds)
-    elif self.sm.valid['lateralManeuverPlan']:
-      new_desired_curvature = self.sm['lateralManeuverPlan'].desiredCurvature
     else:
       new_desired_curvature = smooth_value(model_v2.action.desiredCurvature, self.desired_curvature, 0.1)
 

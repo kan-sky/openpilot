@@ -76,9 +76,6 @@ class DeveloperLayoutMici(NavScroller):
     self._long_maneuver_toggle = BigToggle("longitudinal maneuver mode",
                                            initial_state=ui_state.params.get_bool("LongitudinalManeuverMode"),
                                            toggle_callback=self._on_long_maneuver_mode)
-    self._lat_maneuver_toggle = BigToggle("lateral maneuver mode",
-                                          initial_state=ui_state.params.get_bool("LateralManeuverMode"),
-                                          toggle_callback=self._on_lat_maneuver_mode)
     self._alpha_long_toggle = BigToggle("alpha longitudinal",
                                         initial_state=ui_state.params.get_bool("AlphaLongitudinalEnabled"),
                                         toggle_callback=self._on_alpha_long_enabled)
@@ -92,7 +89,6 @@ class DeveloperLayoutMici(NavScroller):
       self._ssh_keys_btn,
       self._joystick_toggle,
       self._long_maneuver_toggle,
-      self._lat_maneuver_toggle,
       self._alpha_long_toggle,
       self._debug_mode_toggle,
     ])
@@ -103,13 +99,12 @@ class DeveloperLayoutMici(NavScroller):
       ("SshEnabled", self._ssh_toggle),
       ("JoystickDebugMode", self._joystick_toggle),
       ("LongitudinalManeuverMode", self._long_maneuver_toggle),
-      ("LateralManeuverMode", self._lat_maneuver_toggle),
       ("AlphaLongitudinalEnabled", self._alpha_long_toggle),
       ("ShowDebugInfo", self._debug_mode_toggle),
     )
     onroad_blocked_toggles = (self._adb_toggle, self._joystick_toggle)
-    release_blocked_toggles = (self._joystick_toggle, self._long_maneuver_toggle, self._lat_maneuver_toggle, self._alpha_long_toggle)
-    engaged_blocked_toggles = (self._long_maneuver_toggle, self._lat_maneuver_toggle, self._alpha_long_toggle)
+    release_blocked_toggles = (self._joystick_toggle, self._long_maneuver_toggle, self._alpha_long_toggle)
+    engaged_blocked_toggles = (self._long_maneuver_toggle, self._alpha_long_toggle)
 
     # Hide non-release toggles on release builds
     for item in release_blocked_toggles:
@@ -165,24 +160,11 @@ class DeveloperLayoutMici(NavScroller):
     ui_state.params.put_bool("JoystickDebugMode", state, block=True)
     ui_state.params.put_bool("LongitudinalManeuverMode", False, block=True)
     self._long_maneuver_toggle.set_checked(False)
-    ui_state.params.put_bool("LateralManeuverMode", False, block=True)
-    self._lat_maneuver_toggle.set_checked(False)
 
   def _on_long_maneuver_mode(self, state: bool):
     ui_state.params.put_bool("LongitudinalManeuverMode", state, block=True)
     ui_state.params.put_bool("JoystickDebugMode", False, block=True)
     self._joystick_toggle.set_checked(False)
-    ui_state.params.put_bool("LateralManeuverMode", False, block=True)
-    self._lat_maneuver_toggle.set_checked(False)
-    restart_needed_callback()
-
-  def _on_lat_maneuver_mode(self, state: bool):
-    ui_state.params.put_bool("LateralManeuverMode", state, block=True)
-    ui_state.params.put_bool("ExperimentalMode", False, block=True)
-    ui_state.params.put_bool("JoystickDebugMode", False, block=True)
-    self._joystick_toggle.set_checked(False)
-    ui_state.params.put_bool("LongitudinalManeuverMode", False, block=True)
-    self._long_maneuver_toggle.set_checked(False)
     restart_needed_callback()
 
   def _on_alpha_long_enabled(self, state: bool):
