@@ -770,16 +770,6 @@ class CarrotServ:
       start_turn_dist = 20.0
     else:
       start_turn_dist = 25.0
-    # Kans: debug
-    print(
-      f"ATC navType={self.navType}, "
-      f"xTurnInfo={x_turn_info}, "
-      f"dist={x_dist_to_turn:.0f}, "
-      f"roadcate={self.roadcate}, "
-      f"limit={self.nRoadLimitSpeed}, "
-      f"fork={start_fork_dist:.0f}, "
-      f"turn={start_turn_dist:.0f}"
-    )
 
     turn_info_mapping = {
         1: {"type": "turn left", "speed": turn_speed, "dist": turn_dist_for_speed, "start": start_turn_dist},
@@ -800,6 +790,14 @@ class CarrotServ:
     atc_speed = mapping["speed"]
     atc_dist = mapping["dist"]
     atc_start_dist = mapping["start"]
+
+    # Kans: debug
+    self.debugText += (
+      f"ATC:{self.navType},"
+      f"{x_turn_info},"
+      f"SF:{start_fork_dist:.0f},"
+      f"ST:{start_turn_dist:.0f} "
+    )
 
     if x_dist_to_turn > atc_start_dist:
       atc_type += " prepare"
