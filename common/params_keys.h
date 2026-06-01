@@ -313,7 +313,6 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"DisableDM", {PERSISTENT, INT, "1"}},
     {"MuteDoor", {PERSISTENT, INT, "1"}},
     {"MuteSeatbelt", {PERSISTENT, INT, "1"}},
-    {"StartupServiceCheckTime", {PERSISTENT, INT, "40"}},
 
     {"CarrotException", {CLEAR_ON_MANAGER_START, STRING}},
 
@@ -343,6 +342,9 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"MaxLatAccelNoRollLowSpeed", {PERSISTENT, INT, "42"}},
     {"LatSmoothDebug", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION, STRING}},
     {"MemUsage", {PERSISTENT, INT, "0"}},
-    {"AutoResumeFailed", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION, BOOL}},
+
     {"AutoResumeTrying", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION, BOOL}},
+    {"AutoResumeFailed", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION, BOOL}},
+    {"AutoCruiseTrying", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION, BOOL}},
+    {"AutoCruiseFailed", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION, BOOL}},
 };

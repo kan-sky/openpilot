@@ -362,6 +362,8 @@ class CarController(CarControllerBase):
               self.autoCruise_activate = True
               self.autoCruise_frame = self.frame
               self.autoCruise_try_count = 0
+              self.params_memory.put_bool_nonblocking("AutoCruiseTrying", True)
+              self.params_memory.put_bool_nonblocking("AutoCruiseFailed", False)
 
             if self.autoCruise_activate:
               within_window = (self.frame - self.autoCruise_frame) * DT_CTRL <= self.cruiseDelay_time  # 예: 0.25초
@@ -374,7 +376,18 @@ class CarController(CarControllerBase):
                   self.autoCruise_try_count += 1
 
               # 종료 조건: 시간 초과 / 2회 시도 완료 / 크루즈 실제 ON
+              auto_cruise_failed = (
+                not CS.out.cruiseState.enabled and
+                self.autoCruise_try_count > 0 and
+                ((not within_window) or (self.autoCruise_try_count >= 2))
+              )
               if (not within_window) or (self.autoCruise_try_count >= 2) or CS.out.cruiseState.enabled:
+                self.params_memory.put_bool_nonblocking("AutoCruiseTrying", False)
+                if auto_cruise_failed:
+                  self.params_memory.put_bool_nonblocking("AutoCruiseFailed", True)
+                else:
+                  self.params_memory.put_bool_nonblocking("AutoCruiseFailed", False)
+
                 self.autoCruise_activate = False
                 self.autoCruise_frame = 0
                 self.autoCruise_try_count = 0
@@ -467,6 +480,7 @@ class CarController(CarControllerBase):
             self.autoCruise_try_count = 0
             self.autoCruise_frame = 0
             self.autoCruise_activate = False
+            self.params_memory.put_bool_nonblocking("AutoCruiseTrying", False)
 
           # RES 로직 이후에 dt/lead_ok/resume_active 계산 (윈도우 갱신 반영)
           resume_dt = (self.frame - self.resume_frame) * DT_CTRL if (self.resume_frame != 0) else 999.0

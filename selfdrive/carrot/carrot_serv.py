@@ -722,7 +722,7 @@ class CarrotServ:
     return new_lat, new_lon
 
   def update_auto_turn(self, v_ego_kph, sm, x_turn_info, x_dist_to_turn, check_steer=False):
-    # Kans: 현재속도의 감속비로 적용, 최소 김속비 65%로 유지
+    # Kans: 현재속도의 감속비로 적용, 최소 김속비 75%로 유지
     if self.autoTurnControlSpeedTurn > 0:
       turn_ratio = max(0.75, self.autoTurnControlSpeedTurn)
       turn_speed = v_ego_kph * turn_ratio
@@ -755,15 +755,15 @@ class CarrotServ:
     elif is_fork_group and is_highway_like:
       start_fork_dist = 110.0
     elif is_fork_group:
-      start_fork_dist = 40.0
+      start_fork_dist = 30.0
     else:
       start_fork_dist = max(25.0, self.autoTurnControlTurnEnd * 10.0)
 
     # Kans: 일반 턴/로터리 시작거리
     if is_rotary:
-      start_turn_dist = 30.0
+      start_turn_dist = 45.0
     else:
-      start_turn_dist = 35.0
+      start_turn_dist = 25.0
 
 
     turn_info_mapping = {

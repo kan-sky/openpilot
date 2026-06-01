@@ -1264,22 +1264,6 @@
       "cdescr": ""
     },
     {
-      "group": "시작",
-      "name": "StartupServiceCheckTime",
-      "title": "통신이슈 감지안함",
-      "descr": "",
-      "egroup": "START",
-      "etitle": "exclude Service Check",
-      "edescr": "",
-      "min": 10,
-      "max": 300,
-      "default": 30,
-      "unit": 10,
-      "cgroup": "启动设置",
-      "ctitle": "屏蔽安全带感应",
-      "cdescr": ""
-    },
-    {
       "group": "크루즈",
       "name": "AutoSpeedUptoRoadSpeedLimit",
       "title": "자동속도증가 (100)%",

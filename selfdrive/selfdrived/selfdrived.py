@@ -392,7 +392,8 @@ class SelfdriveD:
     has_disable_events = self.events.contains(ET.NO_ENTRY) and (self.events.contains(ET.SOFT_DISABLE) or self.events.contains(ET.IMMEDIATE_DISABLE))
     no_system_errors = (not has_disable_events) or (len(self.events) == num_events)
 
-    if not self.sm.all_checks() and no_system_errors:
+    if not self.sm.all_checks() and no_system_errors:          
+      # Kans: restore snapshot valid/alive/freq state before commIssue evaluation
       invalid = [s for s in self.sm.data.keys() if not self.sm.valid[s]]
       not_alive = [s for s in self.sm.data.keys() if not self.sm.alive[s]]
       not_freq_ok = [s for s in self.sm.data.keys() if not self.sm.freq_ok[s]]

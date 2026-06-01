@@ -60,7 +60,10 @@ class CarSpecificEvents:
     self.mute_door = False
     self.mute_seatbelt = False
     self.vCruise_prev = 250
-    self.carrotCruise_prev = False
+    self.carrotCruise_prev = False 
+
+    # Kans:
+    self.params_memory = Params("/dev/shm/params")
 
   def update_params(self):
     if self.frame % 100 == 0:
@@ -228,7 +231,15 @@ class CarSpecificEvents:
       events.add(EventName.brakeHold)
     if CS.parkingBrake:
       events.add(EventName.parkBrake)
-    if CS.accFaulted and not CS.brakePressed:
+
+    # Kans: ignore accFauled while autoResume/autoCruise trying & failed
+    ignore_acc_fault = (
+      self.params_memory.get_bool("AutoResumeTrying") or
+      self.params_memory.get_bool("AutoResumeFailed") or
+      self.params_memory.get_bool("AutoCruiseTrying") or
+      self.params_memory.get_bool("AutoCruiseFailed"))
+
+    if CS.accFaulted and not CS.brakePressed and not ignore_acc_fault:
       events.add(EventName.accFaulted)
     if CS.steeringPressed:
       events.add(EventName.steerOverride)

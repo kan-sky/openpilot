@@ -8,6 +8,7 @@ from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.interfaces import CarStateBase
 from opendbc.car.gm.values import DBC, AccState, CruiseButtons, STEER_THRESHOLD, CAR, GMFlags, CAMERA_ACC_CAR, EV_CAR, SDGM_CAR, ALT_ACCS
 import cereal.messaging as messaging
+import time
 
 ButtonType = structs.CarState.ButtonEvent.Type
 TransmissionType = structs.CarParams.TransmissionType
@@ -57,6 +58,9 @@ class CarState(CarStateBase):
     self.autoHold = True
     self.autoHoldActive = False
     self.autoHoldActivated = False
+
+    # Kans: accFault delay
+    self.startup_time = time.monotonic()
 
     # Kans: TPMS
     self.KPA_TO_PSI = 0.1450377377
@@ -229,9 +233,15 @@ class CarState(CarStateBase):
     ret.cruiseState.available = ecu_cruise_main
     self.cruiseMain_on = ret.cruiseState.available
 
-    ret.espDisabled = pt_cp.vl["ESPStatus"]["TractionControlOn"] != 1
-    ret.accFaulted = (pt_cp.vl["AcceleratorPedal2"]["CruiseState"] == AccState.FAULTED or
-                      pt_cp.vl["EBCMFrictionBrakeStatus"]["FrictionBrakeUnavailable"] == 1)
+    # Kans: 부팅초기 레이더/ACC 웜업 중 Cruise FAULT 무시
+    cruise_faulted = pt_cp.vl["AcceleratorPedal2"]["CruiseState"] == AccState.FAULTED
+    friction_brake_unavailable = pt_cp.vl["EBCMFrictionBrakeStatus"]["FrictionBrakeUnavailable"] == 1
+
+    volt_startup_fault_ignore = (self.CP.carFingerprint == CAR.CHEVROLET_VOLT and
+      (time.monotonic() - self.startup_time) < 60.0)
+
+    ret.accFaulted = ((cruise_faulted and not volt_startup_fault_ignore) or
+      friction_brake_unavailable)
     if self.CP.carFingerprint in CAR.CHEVROLET_TRAILBLAZER:
       ret.accFaulted = False
 
