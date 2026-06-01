@@ -999,10 +999,16 @@ class CarrotServ:
 
     #print(f"sdi_speed: {sdi_speed}, hda_active: {hda_active}, xSpdType: {self.xSpdType}, xSpdDist: {self.xSpdDist}, active_carrot: {self.active_carrot}, v_ego_kph: {v_ego_kph}, nRoadLimitSpeed: {self.nRoadLimitSpeed}")
     ### TBT 속도제어
-    atc_desired, self.atcType, self.atcSpeed, self.atcDist = self.update_auto_turn(v_ego*3.6, sm, self.xTurnInfo, self.xDistToTurn, True)
-    atc_desired_next, _, _, _ = self.update_auto_turn(v_ego*3.6, sm, self.xTurnInfoNext, self.xDistToTurnNext, False)
+    atc_desired, atc_type, self.atcSpeed, self.atcDist = self.update_auto_turn(
+      v_ego * 3.6, sm, self.xTurnInfo, self.xDistToTurn, True
+    )
+
+    atc_desired_next, atc_type_next, _, _ = self.update_auto_turn(
+      v_ego * 3.6, sm, self.xTurnInfoNext, self.xDistToTurnNext, False
+    )
 
     self.atcType = atc_type
+
     # Kans: 현재 안내가 없거나 prepare 상태이면, 가까운 다음 안내를 조향 타입으로 사용
     if self.atcType == "none" or self.atcType.endswith("prepare"):
       if 0 < self.xDistToTurnNext < 250 and not atc_type_next.endswith("prepare"):
