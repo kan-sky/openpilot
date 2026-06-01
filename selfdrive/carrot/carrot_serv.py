@@ -722,49 +722,64 @@ class CarrotServ:
     return new_lat, new_lon
 
   def update_auto_turn(self, v_ego_kph, sm, x_turn_info, x_dist_to_turn, check_steer=False):
+    # Kans: 차선변경 카테고리
+    is_left_turn = x_turn_info == 1
+    is_right_turn = x_turn_info == 2
+    is_lane_change = x_turn_info in [3, 4]
+    is_rotary_info = x_turn_info == 5
+    is_tg = x_turn_info == 6
+    is_arrive_or_uturn = x_turn_info in [7, 8]
+
     # Kans: 현재속도의 감속비로 적용, 최소 김속비 75%로 유지
     if self.autoTurnControlSpeedTurn > 0:
       turn_ratio = max(0.75, self.autoTurnControlSpeedTurn)
       turn_speed = v_ego_kph * turn_ratio
       # Kans: 회전교차로/교차로에서는 과도한 저속 진입 방지
-      if self.navType in ["rotary", "turn"]:
+      if x_turn_info in [1, 2, 5]:
         turn_speed = max(40.0, turn_speed)
     else:
       turn_speed = v_ego_kph * 1.0 
+
+    # Kans: 차선변경/분기/TG는 네비 제한속도 기준
     fork_speed = self.nRoadLimitSpeed
     stop_speed = 1
+
     turn_dist_for_speed = self.autoTurnControlTurnEnd * turn_speed / 3.6 # autoTurnControlSpeedTurn(70%) 목표속도까지 감속 완료할 거리.
     fork_dist_for_speed = self.autoTurnControlTurnEnd * fork_speed / 3.6 # fork_speed(=nRoadLimitSpeed) 목표속도까지 감속 완료할 거리.
     stop_dist_for_speed = 5
 
-    # Kans: 네비 주행안내(회전/분기/램프) 카테고리
-    is_turn_group = x_turn_info in [1, 2, 5]  # 좌/우회전, 로터리/직진성 턴
-    is_fork_group = x_turn_info in [3, 4, 6]  # 분기/램프/TG 계열
-    is_stop_group = x_turn_info in [7, 8]  # 도착/유턴/정지성 안내
-
-    is_off_ramp = self.navType == "off ramp"  # 진출/진입 램프
-    is_fork = self.navType == "fork"  # 갈림길/분기
-    is_rotary = self.navType == "rotary"  # 회전교차로
-    is_city_turn = self.navType == "turn"  # 일반 좌/우회전
-    # 고속도로/고속국도/자동차전용도로 계열
+    # Kans: 고속도로/고속국도/자동차전용도로 계열
     is_highway_like = self.roadcate in [0, 1] or self.nRoadLimitSpeed >= 70
 
     # Kans: fork/off-ramp 계열 시작거리
-    if is_off_ramp:
-      start_fork_dist = 90.0
-    elif is_fork_group and is_highway_like:
-      start_fork_dist = 110.0
-    elif is_fork_group:
-      start_fork_dist = 30.0
+    if is_lane_change:
+      if self.navType == "off ramp":
+        start_fork_dist = 90.0
+      elif is_highway_like:
+        start_fork_dist = 110.0
+      else:
+        start_fork_dist = 30.0
+    elif is_tg:
+      start_fork_dist = 40.0
     else:
       start_fork_dist = max(25.0, self.autoTurnControlTurnEnd * 10.0)
 
-    # Kans: 일반 턴/로터리 시작거리
-    if is_rotary:
-      start_turn_dist = 45.0
+    if is_rotary_info:
+      start_turn_dist = 35.0
+    elif is_left_turn or is_right_turn:
+      start_turn_dist = 20.0
     else:
       start_turn_dist = 25.0
-
+    # Kans: debug
+    print(
+      f"ATC navType={self.navType}, "
+      f"xTurnInfo={x_turn_info}, "
+      f"dist={x_dist_to_turn:.0f}, "
+      f"roadcate={self.roadcate}, "
+      f"limit={self.nRoadLimitSpeed}, "
+      f"fork={start_fork_dist:.0f}, "
+      f"turn={start_turn_dist:.0f}"
+    )
 
     turn_info_mapping = {
         1: {"type": "turn left", "speed": turn_speed, "dist": turn_dist_for_speed, "start": start_turn_dist},
@@ -980,6 +995,15 @@ class CarrotServ:
     ### TBT 속도제어
     atc_desired, self.atcType, self.atcSpeed, self.atcDist = self.update_auto_turn(v_ego*3.6, sm, self.xTurnInfo, self.xDistToTurn, True)
     atc_desired_next, _, _, _ = self.update_auto_turn(v_ego*3.6, sm, self.xTurnInfoNext, self.xDistToTurnNext, False)
+
+    self.atcType = atc_type
+    # Kans: 현재 안내가 없거나 prepare 상태이면, 가까운 다음 안내를 조향 타입으로 사용
+    if self.atcType == "none" or self.atcType.endswith("prepare"):
+      if 0 < self.xDistToTurnNext < 250 and not atc_type_next.endswith("prepare"):
+        self.atcType = atc_type_next
+
+
+
 
     if self.nSdiType  >= 0: # or self.active_carrot > 0:
       pass
