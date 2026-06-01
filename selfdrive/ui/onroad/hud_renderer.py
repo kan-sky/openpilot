@@ -377,7 +377,7 @@ class HudRenderer(Widget):
 
         draw_text_ui_style(
           date_text, date_x, date_y, date_font,
-          rl.Color(255, 255, 255, 220),
+          rl.Color(255, 255, 255, 235),
           font=self._font_display,
           border_width=1.0,
           shadow_offset=3.0,
@@ -413,7 +413,7 @@ class HudRenderer(Widget):
 
         draw_text_ui_style(
           date_text, time_x, date_y, text_font,
-          rl.Color(255, 255, 255, 220),
+          rl.Color(255, 255, 255, 235),
           font=self._font_display,
           border_width=1.0,
           shadow_offset=3.0,
@@ -467,12 +467,12 @@ class HudRenderer(Widget):
     sr_y = cpu_y + cpu_size.y + line_gap
     road_y = sr_y + sr_size.y + line_gap
 
-    draw_text_ui_style(cpu_text, info_x, cpu_y, side_font, rl.Color(255, 255, 255, 210), font=self._font_display, border_width=1.0, shadow_offset=8.0, align="left_top", y_offset=0.0)
+    draw_text_ui_style(cpu_text, info_x, cpu_y, side_font, rl.Color(255, 255, 255, 235), font=self._font_display, border_width=1.0, shadow_offset=8.0, align="left_top", y_offset=0.0)
 
-    draw_text_ui_style(sr_text, info_x, sr_y, side_font, rl.Color(255, 255, 255, 210), font=self._font_display, border_width=1.0, shadow_offset=8.0, align="left_top", y_offset=0.0)
+    draw_text_ui_style(sr_text, info_x, sr_y, side_font, rl.Color(255, 255, 255, 235), font=self._font_display, border_width=1.0, shadow_offset=8.0, align="left_top", y_offset=0.0)
 
     if road_name:
-      draw_text_ui_style(road_name, info_x, road_y, side_font, rl.Color(255, 255, 255, 210), font=self._font_display, border_width=1.0, shadow_offset=8.0, align="left_top", y_offset=0.0)
+      draw_text_ui_style(road_name, info_x, road_y, side_font, rl.Color(255, 255, 255, 235), font=self._font_display, border_width=1.0, shadow_offset=8.0, align="left_top", y_offset=0.0)
 
 
   def _get_gear_text(self) -> str:
