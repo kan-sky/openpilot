@@ -82,9 +82,6 @@ class Events:
 
     ret = []
     for e in self.events:
-      if e not in EVENTS:
-        print(f"Unknown event: {e}")
-        continue
       types = EVENTS[e].keys()
       for et in event_types:
         if et in types:
@@ -185,14 +182,6 @@ class ImmediateDisableAlert(Alert):
                      AudibleAlert.warningImmediate, 4.),
 
 
-class UserSoftDisableSilentAlert(Alert):
-  def __init__(self, alert_text_2: str):
-    super().__init__("openpilot will disengage", alert_text_2,
-                     AlertStatus.normal, AlertSize.none,
-                     Priority.LOW, VisualAlert.none,
-                     AudibleAlert.none, 2.)
-
-
 class EngagementAlert(Alert):
   def __init__(self, audible_alert: car.CarControl.HUDControl.AudibleAlert):
     super().__init__("", "",
@@ -245,27 +234,6 @@ def user_soft_disable_alert(alert_text_2: str) -> AlertCallbackType:
     if soft_disable_time < int(0.5 / DT_CTRL):
       return ImmediateDisableAlert(alert_text_2)
     return UserSoftDisableAlert(alert_text_2)
-  return func
-
-def user_soft_disable_silent_alert(alert_text_2: str) -> AlertCallbackType:
-  def func(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
-    return UserSoftDisableSilentAlert(alert_text_2)
-  return func
-  
-def radar_fault_soft_disable_alert(alert_text_2: str) -> AlertCallbackType:
-  def func(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster,
-           metric: bool, soft_disable_time: int, personality) -> Alert:
-    params = Params()
-    auto_resume_trying = params.get_bool("AutoResumeTrying")
-    auto_resume_failed = params.get_bool("AutoResumeFailed")
-
-    if auto_resume_trying or auto_resume_failed:
-      return UserSoftDisableSilentAlert(alert_text_2)
-
-    if soft_disable_time < int(0.5 / DT_CTRL):
-      return ImmediateDisableAlert(alert_text_2)
-
-    return SoftDisableAlert(alert_text_2)
   return func
 
 def startup_master_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
@@ -935,7 +903,7 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
   },
 
   EventName.radarFault: {
-    ET.SOFT_DISABLE: radar_fault_soft_disable_alert("Radar Error: Restart the Car"),
+    ET.SOFT_DISABLE: soft_disable_alert("Radar Error: Restart the Car"),
     ET.NO_ENTRY: NoEntryAlert("Radar Error: Restart the Car"),
   },
 
