@@ -205,17 +205,6 @@ class HudRenderer(Widget):
     self._wheel_y_filter = FirstOrderFilter(0, 0.1, 1 / gui_app.target_fps)
     self._set_speed_alpha_filter = FirstOrderFilter(0.0, 0.1, 1 / gui_app.target_fps)
 
-  def _draw_text_with_outline(self, text, pos, font_size, text_color, outline_color=rl.BLACK, thickness=1):
-    x, y = pos.x, pos.y
-    for dx in range(-thickness, thickness + 1):
-      for dy in range(-thickness, thickness + 1):
-        if dx == 0 and dy == 0:
-          continue
-        rl.draw_text_ex(self._font_display, text, rl.Vector2(x + dx, y + dy), font_size, 0, outline_color)
-
-    # main text
-    rl.draw_text_ex(self._font_display, text, rl.Vector2(x, y), font_size, 0, text_color)
-
   def set_can_draw_top_icons(self, can_draw_top_icons: bool):
     """Set whether to draw the top part of the HUD."""
     self._can_draw_top_icons = can_draw_top_icons
@@ -742,8 +731,6 @@ class HudRenderer(Widget):
     sm = ui_state.sm
     carrot_man = sm['carrotMan']
     active_carrot = carrot_man.activeCarrot
-    limit_speed = carrot_man.xSpdLimit
-    limit_dist = carrot_man.xSpdDist
 
     s_center_x = rect.x + UI_CONFIG.border_size + 110
     s_center_y = rect.y + 700
@@ -758,24 +745,28 @@ class HudRenderer(Widget):
     }
 
     sl_opacity = 1
-    limit_spd, limit_dist = ui_state.limitSpeed, ui_state.limitDist
+    limit_speed, limit_dist = ui_state.limitSpeed, ui_state.limitDist
 
-    if limit_spd <= 21 and limit_dist == 0:
+    if limit_speed <= 21 and limit_dist == 0:
       return
-    alpha = lambda v: int(255 / sl_opacity * v)
+
     visual_offset = 1.2
 
     if active_carrot >= 2:
       cx, cy = int(rects["inner"].x + rects["inner"].width / 2), int(rects["inner"].y + rects["inner"].height / 2)
       rl.draw_circle(cx, cy, int(diameters[0] / 2), rl.RED)
       rl.draw_circle(cx, cy, int(diameters[1] / 2), rl.WHITE)
-      text = str(int(limit_spd))
-      font_size = 110 if limit_spd < 100 else 90
-      text_size = rl.measure_text_ex(self._font_bold, text, font_size, 0)
-      text_x = rects["inner"].x + (rects["inner"].width - text_size.x*visual_offset) / 2
-      text_y = rects["inner"].y + (rects["inner"].height - text_size.y*visual_offset) / 2
-      rl.draw_text_ex(self._font_bold, text, rl.Vector2(text_x, text_y), font_size, 0, rl.BLACK)
 
+      text = str(int(limit_speed))
+      font_size = 110 if limit_speed < 100 else 90
+
+      text_size = rl.measure_text_ex(self._font_display, text, font_size, 0)
+      text_x = rects["inner"].x + (rects["inner"].width - text_size.x * visual_offset) / 2
+      text_y = rects["inner"].y + (rects["inner"].height - text_size.y * visual_offset) / 2
+
+      draw_text_ui_style(text, text_x, text_y, font_size, rl.BLACK,
+        font=self._font_display, border_width=0.0, shadow_offset=0.0,
+        align="left_top", y_offset=0.0)
     if limit_dist == 0:
       return
 
@@ -794,10 +785,13 @@ class HudRenderer(Widget):
       dist_text = f"{dist_ft:.0f}ft" if dist_ft < 1000 else f"{limit_dist * 0.000621:.2f}mi"
 
     font_size = 55
-    text_size = rl.measure_text_ex(self._font_bold, dist_text, font_size, 0)
-    text_x = rects["limit_dist"].x + (rects["limit_dist"].width - text_size.x*visual_offset) / 2
-    text_y = rects["limit_dist"].y + (rects["limit_dist"].height - text_size.y*visual_offset) / 2
-    rl.draw_text_ex(self._font_bold, dist_text, rl.Vector2(text_x, text_y), font_size, 0, rl.WHITE)
+    text_size = rl.measure_text_ex(self._font_display, dist_text, font_size, 0)
+
+    text_x = rects["limit_dist"].x + (rects["limit_dist"].width - text_size.x * visual_offset) / 2
+    text_y = rects["limit_dist"].y + (rects["limit_dist"].height - text_size.y * visual_offset) / 2
+
+    draw_text_ui_style(dist_text, text_x, text_y, font_size, rl.WHITE,
+      font=self._font_display, border_width=1.0, shadow_offset=4.0, align="left_top", y_offset=0.0)
 
   def _get_traffic_light_info(self):
     # debug demo
