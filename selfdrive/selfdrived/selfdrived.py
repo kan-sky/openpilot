@@ -245,11 +245,6 @@ class SelfdriveD:
 
       if CS.autoHoldActivated:
         self.events.add(EventName.autoHold)
-      # Kans: AutoResume failed alert
-      if self.params_memory.get_bool("AutoResumeFailed"):
-        self.events.add(EventName.autoResumeFailed)
-        self.params_memory.put_bool_nonblocking("AutoResumeFailed", False)
-
     # Create events for temperature, disk space, and memory
     if self.sm['deviceState'].thermalStatus >= ThermalStatus.overheated:
       self.events.add(EventName.overheat)
