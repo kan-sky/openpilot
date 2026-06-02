@@ -374,11 +374,6 @@ class SelfdriveD:
     elif not CS.canValid:
       self.events.add(EventName.canError)
 
-    # Kans: forbid commIssue while AutoResume is trying
-
-    auto_resume_trying = self.params_memory.get_bool("AutoResumeTrying")
-    ignore_comm_issue_for_resume = auto_resume_trying and (CS.standstill or CS.vEgo < 0.5)
-
     has_disable_events = self.events.contains(ET.NO_ENTRY) and (self.events.contains(ET.SOFT_DISABLE) or self.events.contains(ET.IMMEDIATE_DISABLE))
     no_system_errors = (not has_disable_events) or (len(self.events) == num_events)
 
@@ -388,22 +383,20 @@ class SelfdriveD:
       not_alive = [s for s in self.sm.data.keys() if not self.sm.alive[s]]
       not_freq_ok = [s for s in self.sm.data.keys() if not self.sm.freq_ok[s]]
 
-      if not ignore_comm_issue_for_resume:
-        cloudlog.warning(
-          f"KANS_COMMISSUE vEgo={CS.vEgo:.2f} "
-          f"standstill={CS.standstill} "
-          f"auto_resume_trying={auto_resume_trying} "
-          f"invalid={invalid} "
-          f"not_alive={not_alive} "
-          f"not_freq_ok={not_freq_ok}"
-        )
+      cloudlog.warning(
+        f"KANS_COMMISSUE vEgo={CS.vEgo:.2f} "
+        f"standstill={CS.standstill} "
+        f"invalid={invalid} "
+        f"not_alive={not_alive} "
+        f"not_freq_ok={not_freq_ok}"
+      )
 
-        if len(not_alive) > 0:
-          self.events.add(EventName.commIssue)
-        elif len(not_freq_ok) > 0:
-          self.events.add(EventName.commIssueAvgFreq)
-        else:
-          self.events.add(EventName.commIssue)
+      if len(not_alive) > 0:
+        self.events.add(EventName.commIssue)
+      elif len(not_freq_ok) > 0:
+        self.events.add(EventName.commIssueAvgFreq)
+      else:
+        self.events.add(EventName.commIssue)
 
       logs = {
         'invalid': invalid,
