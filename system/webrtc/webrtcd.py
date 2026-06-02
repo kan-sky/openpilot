@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+from abc import abstractmethod
+import os
 import time
 import argparse
 import asyncio
@@ -21,11 +23,39 @@ if TYPE_CHECKING:
   from aiortc.rtcdatachannel import RTCDataChannel
 
 from openpilot.system.webrtc.schema import generate_field
+from openpilot.common.params import Params
 from cereal import messaging, log
 
 
-class CerealOutgoingMessageProxy:
+class AsyncTaskRunner:
+  def __init__(self):
+    self.is_running = False
+    self.task = None
+    self.logger = logging.getLogger("webrtcd")
+
+  def start(self):
+    assert self.task is None
+    self.task = asyncio.create_task(self.run())
+
+  async def stop(self):
+    if self.task is None:
+      return
+    task = self.task
+    self.task = None
+    if task.done():
+      return
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+      await task
+
+  @abstractmethod
+  async def run(self):
+    pass
+
+
+class CerealOutgoingMessageProxy(AsyncTaskRunner):
   def __init__(self, sm: messaging.SubMaster):
+    super().__init__()
     self.sm = sm
     self.channels: list[RTCDataChannel] = []
 
@@ -57,6 +87,19 @@ class CerealOutgoingMessageProxy:
       for channel in self.channels:
         channel.send(encoded_msg)
 
+  async def run(self):
+    from aiortc.exceptions import InvalidStateError
+
+    while True:
+      try:
+        self.update()
+      except InvalidStateError:
+        self.logger.warning("Cereal outgoing proxy invalid state (connection closed)")
+        break
+      except Exception:
+        self.logger.exception("Cereal outgoing proxy failure")
+      await asyncio.sleep(0.01)
+
 
 class CerealIncomingMessageProxy:
   def __init__(self, pm: messaging.PubMaster):
@@ -74,42 +117,6 @@ class CerealIncomingMessageProxy:
     self.pm.send(msg_type, msg)
 
 
-class CerealProxyRunner:
-  def __init__(self, proxy: CerealOutgoingMessageProxy):
-    self.proxy = proxy
-    self.is_running = False
-    self.task = None
-    self.logger = logging.getLogger("webrtcd")
-
-  def start(self):
-    assert self.task is None
-    self.task = asyncio.create_task(self.run())
-
-  async def stop(self):
-    if self.task is None:
-      return
-    task = self.task
-    self.task = None
-    if task.done():
-      return
-    task.cancel()
-    with contextlib.suppress(asyncio.CancelledError):
-      await task
-
-  async def run(self):
-    from aiortc.exceptions import InvalidStateError
-
-    while True:
-      try:
-        self.proxy.update()
-      except InvalidStateError:
-        self.logger.warning("Cereal outgoing proxy invalid state (connection closed)")
-        break
-      except Exception:
-        self.logger.exception("Cereal outgoing proxy failure")
-      await asyncio.sleep(0.01)
-
-
 class DynamicPubMaster(messaging.PubMaster):
   def __init__(self, *args, **kwargs):
     super().__init__(*args, **kwargs)
@@ -120,6 +127,78 @@ class DynamicPubMaster(messaging.PubMaster):
       for service in services:
         if service not in self.sock:
           self.sock[service] = messaging.pub_sock(service)
+
+
+class LivestreamBitrateController(AsyncTaskRunner):
+  bitrates = [500_000, 1_500_000, int(os.environ.get("STREAM_BITRATE", 5_000_000))]
+  label_to_bitrate = { "high": bitrates[2], "med": bitrates[1], "low": bitrates[0]}
+  sample_interval = 0.2
+  high_level = 0.1 # drop immediately
+  med_level = 0.05 # drop after # of samples
+  low_level = 0 # raise after # of samples
+  down_samples = 5 # 1s
+  param_name = "LivestreamEncoderBitrate"
+
+  def __init__(self, peer_connection: Any):
+    super().__init__()
+    self.pc = peer_connection
+    self.params = Params()
+
+    self.level = 0
+    self.prev_lost, self.prev_sent = None, None
+    self.counter = 0
+    self.up_samples = 5 # 1s
+    self._auto = True
+
+  async def run(self):
+    while True:
+      await asyncio.sleep(self.sample_interval)
+      if not self._auto:
+        continue
+
+      loss_rate = await self._sample()
+      if loss_rate is None:
+        continue
+      if loss_rate >= self.med_level and self.level > 0:
+        self.counter += 1
+        if self.counter >= self.down_samples or loss_rate >= self.high_level:
+          self.level -= 1
+          self.up_samples *= 2 # exponential backoff before raising again
+          self.counter = 0
+          self._publish(self.bitrates[self.level])
+      elif loss_rate <= self.low_level and self.level < len(self.bitrates) - 1:
+        self.counter -= 1
+        if -self.counter >= self.up_samples:
+          self.level += 1
+          self.counter = 0
+          self._publish(self.bitrates[self.level])
+
+  async def _sample(self) -> float | None:
+    report = await self.pc.getStats()
+    packets_lost = packets_sent = 0
+    for s in report.values():
+      if s.type == "remote-inbound-rtp":
+        packets_lost += s.packetsLost
+      elif s.type == "outbound-rtp":
+        packets_sent += s.packetsSent
+
+    if self.prev_lost is None:
+      self.prev_lost, self.prev_sent = packets_lost, packets_sent
+      return None
+    lost_delta = max(0, packets_lost - self.prev_lost)
+    sent_delta = max(0, packets_sent - self.prev_sent)
+    self.prev_lost, self.prev_sent = packets_lost, packets_sent
+    return lost_delta / sent_delta if sent_delta else 0.0
+
+  def _publish(self, bitrate: float):
+    self.params.put(self.param_name, bitrate)
+
+  def set_quality(self, quality):
+    if quality in self.label_to_bitrate:
+      self._publish(self.label_to_bitrate[quality])
+      self._auto = False
+    elif quality == "auto":
+      self._auto = True
 
 
 class StreamSession:
@@ -141,12 +220,12 @@ class StreamSession:
     self.incoming_bridge: CerealIncomingMessageProxy | None = None
     self.incoming_bridge_services = incoming_services
     self.outgoing_bridge: CerealOutgoingMessageProxy | None = None
-    self.outgoing_bridge_runner: CerealProxyRunner | None = None
+    self.bitrate_controller: LivestreamBitrateController | None = None
     if len(incoming_services) > 0:
       self.incoming_bridge = CerealIncomingMessageProxy(self.shared_pub_master)
     if len(outgoing_services) > 0:
       self.outgoing_bridge = CerealOutgoingMessageProxy(messaging.SubMaster(outgoing_services))
-      self.outgoing_bridge_runner = CerealProxyRunner(self.outgoing_bridge)
+    self.bitrate_controller = LivestreamBitrateController(self.stream.peer_connection)
 
     self.run_task: asyncio.Task | None = None
     self._cleanup_lock = asyncio.Lock()
@@ -178,27 +257,23 @@ class StreamSession:
       if isinstance(payload, dict):
         msg_type = payload.get("type")
 
-        if msg_type == "livestreamCameraSwitch":
-          self.video_track.switch_camera(payload["data"]["camera"])
-          return
-
-        if msg_type == "clockSync":
-          data = payload.get("data", {})
-          pong = json.dumps({"type": "clockSync", "data": {
-            "action": "pong", "browserSendTime": data.get("browserSendTime"), "deviceTime": time.time() * 1000, # noqa: TID251
-          }})
-          self.stream.get_messaging_channel().send(pong)
-          return
-
-        if msg_type == "enableTimingSei":
-          enabled = bool(payload.get("data", {}).get("enabled"))
-          if hasattr(self.video_track, 'timing_sei_enabled'):
-            self.video_track.timing_sei_enabled = enabled
-          return
-
-      if payload.get("type") not in self.incoming_bridge_services:
-        return
-      self.incoming_bridge.send(message)
+        match msg_type:
+          case "livestreamCameraSwitch":
+            self.video_track.switch_camera(payload["data"]["camera"])
+          case "livestreamSettings":
+            self.bitrate_controller.set_quality(payload["data"]["quality"])
+          case "clockSync":
+            pong = json.dumps({"type": "clockSync", "data": {
+              "action": "pong", "browserSendTime": payload["data"]["browserSendTime"], "deviceTime": time.time() * 1000, # noqa: TID251
+            }})
+            self.stream.get_messaging_channel().send(pong)
+          case "enableTimingSei":
+            if hasattr(self.video_track, 'timing_sei_enabled'):
+              self.video_track.timing_sei_enabled = bool(payload["data"]["enabled"])
+          case _:
+            if payload.get("type") not in self.incoming_bridge_services:
+              return
+            self.incoming_bridge.send(message)
     except Exception:
       self.logger.exception("Cereal incoming proxy failure")
 
@@ -209,10 +284,12 @@ class StreamSession:
         if self.incoming_bridge is not None:
           await self.shared_pub_master.add_services_if_needed(self.incoming_bridge_services)
           self.stream.set_message_handler(self.message_handler)
-        if self.outgoing_bridge_runner is not None:
+        if self.outgoing_bridge is not None:
           channel = self.stream.get_messaging_channel()
-          self.outgoing_bridge_runner.proxy.add_channel(channel)
-          self.outgoing_bridge_runner.start()
+          self.outgoing_bridge.add_channel(channel)
+          self.outgoing_bridge.start()
+      self.bitrate_controller.start()
+
       self.logger.info("Stream session (%s) connected", self.identifier)
 
       await self.stream.wait_for_disconnection()
@@ -228,8 +305,10 @@ class StreamSession:
       if self._cleanup_done:
         return
       self._cleanup_done = True
-      if self.outgoing_bridge_runner is not None:
-        await self.outgoing_bridge_runner.stop()
+      if self.bitrate_controller is not None:
+        await self.bitrate_controller.stop()
+      if self.outgoing_bridge is not None:
+        await self.outgoing_bridge.stop()
       await self.stream.stop()
 
 

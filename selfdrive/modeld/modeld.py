@@ -37,32 +37,30 @@ MIN_LAT_CONTROL_SPEED = 0.3
 
 def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.ModelDataV2.Action,
                           v_ego: float, lat_smooth_seconds: float, vEgoStopping: float) -> log.ModelDataV2.Action:
-    desired_accel = float(model_output['action'][0, 1])
-    raw_desired_curvature = float(model_output['action'][0, 0] / (max(1.0, v_ego))**2)
-    desired_curvature = raw_desired_curvature
+  desired_accel = float(model_output['action'][0, 1])
+  raw_desired_curvature = float(model_output['action'][0, 0] / (max(1.0, v_ego))**2)
+  desired_curvature = raw_desired_curvature
 
-    prev_curvature = float(prev_action.desiredCurvature)
+  prev_curvature = float(prev_action.desiredCurvature)
 
-    same_curve = desired_curvature * prev_curvature > 0.0
-    deep_curve = abs(prev_curvature) > 0.0025  # 같은 방향의 곡률이 .0025이상일때(램프)
-    curv_drop = abs(desired_curvature) < abs(prev_curvature) * 0.70  # 모델이 그 곡률값을 갑자기 70%이하로 확 떨어뜨리면,
+  same_curve = desired_curvature * prev_curvature > 0.0
+  deep_curve = abs(prev_curvature) > 0.0025  # 같은 방향의 곡률이 .0025이상일때(램프)
+  curv_drop = abs(desired_curvature) < abs(prev_curvature) * 0.70  # 모델이 그 곡률값을 갑자기 70%이하로 확 떨어뜨리면,
 
-    if same_curve and deep_curve and curv_drop:
-      desired_curvature = prev_curvature * 0.8 + desired_curvature * 0.2  # 과하게 낮춘 값을 따라가지 않고 80%만 반영한다.
+  if same_curve and deep_curve and curv_drop:
+    desired_curvature = prev_curvature * 0.8 + desired_curvature * 0.2  # 과하게 낮춘 값을 따라가지 않고 80%만 반영한다.
 
-    should_stop = (v_ego < 0.3 and desired_accel < 0.1)
+  should_stop = (v_ego < 0.3 and desired_accel < 0.1)
 
-    desired_accel = smooth_value(desired_accel, prev_action.desiredAcceleration, LONG_SMOOTH_SECONDS)
-    if v_ego > MIN_LAT_CONTROL_SPEED:
-      desired_curvature = smooth_value(desired_curvature, prev_action.desiredCurvature, lat_smooth_seconds)
-    else:
-      desired_curvature = prev_action.desiredCurvature
+  desired_accel = smooth_value(desired_accel, prev_action.desiredAcceleration, LONG_SMOOTH_SECONDS)
+  if v_ego > MIN_LAT_CONTROL_SPEED:
+    desired_curvature = smooth_value(desired_curvature, prev_action.desiredCurvature, lat_smooth_seconds)
+  else:
+    desired_curvature = prev_action.desiredCurvature
 
-    desired_velocity_now = float(max(0.0, v_ego))
-    return log.ModelDataV2.Action(desiredCurvature=float(desired_curvature),
-                                  desiredAcceleration=float(desired_accel),
-                                  shouldStop=bool(should_stop),
-                                  desiredVelocity=float(desired_velocity_now)) 
+  return log.ModelDataV2.Action(desiredCurvature=float(desired_curvature),
+                                desiredAcceleration=float(desired_accel),
+                                shouldStop=bool(should_stop))
 
 class FrameMeta:
   frame_id: int = 0
@@ -109,7 +107,7 @@ class ModelState:
     return parsed_model_outputs
 
   def run(self, bufs: dict[str, VisionBuf], transforms: dict[str, np.ndarray],
-                inputs: dict[str, np.ndarray], prepare_only: bool) -> dict[str, np.ndarray] | None:
+          inputs: dict[str, np.ndarray], prepare_only: bool) -> dict[str, np.ndarray] | None:
     for key in bufs.keys():
       ptr = np.frombuffer(bufs[key].data, dtype=np.uint8).ctypes.data
       yuv_size = self.frame_buf_params[key][3]
