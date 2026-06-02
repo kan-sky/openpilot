@@ -1164,10 +1164,6 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
       AlertStatus.normal, AlertSize.small,
       Priority.LOW, VisualAlert.none, AudibleAlert.autoHold, 2.),
   },
-  EventName.autoResumeFailed: {
-    ET.SOFT_DISABLE: user_soft_disable_silent_alert("auto resume failed"),
-  }
-
 }
 if HARDWARE.get_device_type() == 'mici':
   EVENTS.update({
