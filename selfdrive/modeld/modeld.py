@@ -140,7 +140,7 @@ def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.
     nan=prev_action.desiredVelocity,
     posinf=prev_action.desiredVelocity,
     neginf=0.0))
-    desired_velocity_now = max(0.0, desired_velocity_now)
+  desired_velocity_now = max(0.0, desired_velocity_now)
 
   return(
     log.ModelDataV2.Action(
