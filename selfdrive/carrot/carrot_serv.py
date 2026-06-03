@@ -727,7 +727,7 @@ class CarrotServ:
     is_left_turn = x_turn_info == 1
     is_right_turn = x_turn_info == 2
     is_lane_change = x_turn_info in [3, 4]
-    is_rotary_info = x_turn_info == 5
+    is_rotary = x_turn_info == 5
     is_tg = x_turn_info == 6
     is_arrive_or_uturn = x_turn_info in [7, 8]
 
@@ -735,6 +735,9 @@ class CarrotServ:
     if self.autoTurnControlSpeedTurn > 0:
       turn_ratio = max(0.75, self.autoTurnControlSpeedTurn)
       turn_speed = v_ego_kph * turn_ratio
+      # Kans: 회전교차로/교차로에서는 과도한 저속 진입 방지
+      if x_turn_info in [1, 2, 5]:
+        turn_speed = max(30.0, turn_speed)
     else:
       turn_speed = v_ego_kph * 1.0 
 
@@ -786,8 +789,8 @@ class CarrotServ:
       )
 
     turn_info_mapping = {
-        1: {"type": "turn left", "speed": turn_speed, "dist": turn_dist_for_speed, "start": start_turn_dist},
-        2: {"type": "turn right", "speed": turn_speed, "dist": turn_dist_for_speed, "start": start_turn_dist},
+        1: {"type": "turn left", "speed": turn_speed, "dist": turn_dist_for_speed, "start": start_fork_dist},
+        2: {"type": "turn right", "speed": turn_speed, "dist": turn_dist_for_speed, "start": start_fork_dist},
         5: {"type": "straight", "speed": turn_speed, "dist": turn_dist_for_speed, "start": start_turn_dist},
         3: {"type": "fork left", "speed": fork_speed, "dist": fork_dist_for_speed, "start": start_fork_dist},
         4: {"type": "fork right", "speed": fork_speed, "dist": fork_dist_for_speed, "start": start_fork_dist},
@@ -997,13 +1000,9 @@ class CarrotServ:
 
     #print(f"sdi_speed: {sdi_speed}, hda_active: {hda_active}, xSpdType: {self.xSpdType}, xSpdDist: {self.xSpdDist}, active_carrot: {self.active_carrot}, v_ego_kph: {v_ego_kph}, nRoadLimitSpeed: {self.nRoadLimitSpeed}")
     ### TBT 속도제어
-    atc_desired, atc_type, self.atcSpeed, self.atcDist = self.update_auto_turn(
-      v_ego * 3.6, sm, self.xTurnInfo, self.xDistToTurn, True
-    )
+    atc_desired, atc_type, self.atcSpeed, self.atcDist = self.update_auto_turn(v_ego * 3.6, sm, self.xTurnInfo, self.xDistToTurn, True)
 
-    atc_desired_next, atc_type_next, _, _ = self.update_auto_turn(
-      v_ego * 3.6, sm, self.xTurnInfoNext, self.xDistToTurnNext, False
-    )
+    atc_desired_next, atc_type_next, _, _ = self.update_auto_turn(v_ego * 3.6, sm, self.xTurnInfoNext, self.xDistToTurnNext, False)
 
     self.atcType = atc_type
 
