@@ -236,12 +236,8 @@ class CarState(CarStateBase):
     # Kans: 부팅초기 레이더/ACC 웜업 중 Cruise FAULT 무시
     cruise_faulted = pt_cp.vl["AcceleratorPedal2"]["CruiseState"] == AccState.FAULTED
     friction_brake_unavailable = pt_cp.vl["EBCMFrictionBrakeStatus"]["FrictionBrakeUnavailable"] == 1
-
-    volt_startup_fault_ignore = (self.CP.carFingerprint == CAR.CHEVROLET_VOLT and
-      (time.monotonic() - self.startup_time) < 60.0)
-
-    ret.accFaulted = ((cruise_faulted and not volt_startup_fault_ignore) or
-      friction_brake_unavailable)
+    startup_fault_ignore = (time.monotonic() - self.startup_time) < 60.0)
+    ret.accFaulted = ((cruise_faulted and not startup_fault_ignore) or friction_brake_unavailable)
     if self.CP.carFingerprint in CAR.CHEVROLET_TRAILBLAZER:
       ret.accFaulted = False
 
