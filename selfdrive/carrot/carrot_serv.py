@@ -770,7 +770,7 @@ class CarrotServ:
       start_fork_dist = max(25.0, self.autoTurnControlTurnEnd * 10.0)
       atc_debug = "DEF"
 
-    if is_rotary_info:
+    if is_rotary:
       start_turn_dist = 35.0
     elif is_left_turn or is_right_turn:
       start_turn_dist = 20.0
