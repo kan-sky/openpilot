@@ -203,7 +203,7 @@ class SelfdriveD:
     if not self.CP.notCar and self.params.get_int("DisableDM") == 0:
       # Block engaging until ignition cycle after max number or time of distractions
       if self.sm['driverMonitoringState'].lockout and not self.dm_lockout_set:
-        self.params.put_bool_nonblocking("DriverTooDistracted", True)
+        self.params.put_bool("DriverTooDistracted", True)
         self.dm_lockout_set = True
       # No entry conditions
       if self.sm['driverMonitoringState'].lockout or self.sm['driverMonitoringState'].alwaysOnLockout:
@@ -464,7 +464,7 @@ class SelfdriveD:
       #  self.distance_traveled = 0
       self.distance_traveled += abs(CS.vEgo) * DT_CTRL
 
-      if self.sm['modelV2'].frameDropPerc > 20:
+      if self.sm['modelV2'].frameDropPerc > 1:
         self.events.add(EventName.modeldLagging)
 
     # NNFF

@@ -60,7 +60,7 @@ class CarSpecificEvents:
     self.mute_door = False
     self.mute_seatbelt = False
     self.vCruise_prev = 250
-    self.carrotCruise_prev = False 
+    self.carrotCruise_prev = False
 
   def update_params(self):
     if self.frame % 100 == 0:

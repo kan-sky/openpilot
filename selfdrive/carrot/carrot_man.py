@@ -1060,6 +1060,7 @@ class CarrotMan:
 
     # Get the target velocity for the maximum curve
     turnSpeed = abs(adjusted_target_lat_a / max_curve) ** 0.5 * 3.6
+
     # 하한/상한 적용
     turnSpeed = max(turnSpeed, self.autoCurveSpeedLowerLimit)
     turnSpeed = min(turnSpeed, 250)
