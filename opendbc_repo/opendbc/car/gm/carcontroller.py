@@ -350,9 +350,7 @@ class CarController(CarControllerBase):
             else:
               self.resume_fault_guard = 0
               self.resume_frame = 0
-		  
-          # 앞차가 있을 때만 AutoResume 허용
-          lead_for_resume = (CS.lead_status and 1.0 < CS.lead_distance < 30.0)
+
           # AutoCruise: 크루즈 OFF 상태에서, 메인 활성(activateCruise) 신호가 있을 때
           if auto_cruise_enabled and self._pending_activateCruise and not CS.out.cruiseState.enabled:
             # Kans: AutoCruise (0.25초 윈도 안에 최대 2회 버튼 시도)
@@ -379,8 +377,7 @@ class CarController(CarControllerBase):
                 self._pending_activateCruise = False
 
           # Kans: Auto Resume (RES only)
-          # 앞차가 없는 상황(=not lead_for_resume)에서는 RES spam 기반 AutoResume에 진입하지 않음.
-          elif auto_resume_enabled and lead_for_resume and actuators.longControlState == LongCtrlState.starting and not manual_auto_hold:
+          elif auto_resume_enabled and actuators.longControlState == LongCtrlState.starting and not manual_auto_hold:
             if self.resume_frame == 0 or self.resume_activate:
               self.resume_frame = self.frame
               self.resume_activate = False
