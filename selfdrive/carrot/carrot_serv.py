@@ -732,17 +732,19 @@ class CarrotServ:
     is_arrive_or_uturn = x_turn_info in [7, 8]
 
     # Kans: 현재속도의 감속비로 적용, 최소 김속비 75%로 유지
+    fork_speed = self.nRoadLimitSpeed
     if self.autoTurnControlSpeedTurn > 0:
       turn_ratio = max(0.75, self.autoTurnControlSpeedTurn)
       turn_speed = v_ego_kph * turn_ratio
       # Kans: 회전교차로/교차로에서는 과도한 저속 진입 방지
       if x_turn_info in [1, 2, 5]:
         turn_speed = max(30.0, turn_speed)
+      # Kans: fork/lane-change도 감속비 적용
+      if x_turn_info in [3, 4]:
+        fork_speed = max(30.0, v_ego_kph * turn_ratio)
     else:
       turn_speed = v_ego_kph * 1.0 
 
-    # Kans: 차선변경/분기/TG는 네비 제한속도 기준
-    fork_speed = self.nRoadLimitSpeed
     stop_speed = 1
 
     turn_dist_for_speed = self.autoTurnControlTurnEnd * turn_speed / 3.6 # autoTurnControlSpeedTurn(70%) 목표속도까지 감속 완료할 거리.
@@ -1006,9 +1008,12 @@ class CarrotServ:
 
     self.atcType = atc_type
 
-    # Kans: 현재 안내가 없거나 prepare 상태이면, 가까운 다음 안내를 조향 타입으로 사용
-    if self.atcType == "none" or self.atcType.endswith("prepare"):
-      if 0 < self.xDistToTurnNext < 250 and not atc_type_next.endswith("prepare"):
+    # Kans: 현재 안내가 없거나/지났거나/아직 prepare 상태이면, 가까운 다음 안내를 조향 타입으로 사용
+    use_next_atc = (self.atcType == "none" or self.atcType.endswith(" prepare") or self.xDistToTurn < 0)
+    next_ready = (0 < self.xDistToTurnNext < 250 and atc_type_next != "none" and not atc_type_next.endswith(" prepare"))
+
+    if use_next_atc and next_ready:
+      if 0 < self.xDistToTurnNext < 250 and not atc_type_next.endswith(" prepare"):
         self.atcType = atc_type_next
 
     if self.nSdiType  >= 0: # or self.active_carrot > 0:
@@ -1047,7 +1052,7 @@ class CarrotServ:
     if self.turnSpeedControlMode == 2:
       if -500 < self.xDistToTurn < 500:
         speed_n_sources.append((route_speed, "route"))
-    elif self.turnSpeedControlMode in [3, 4]:
+    elif self.turnSpeedControlMode == 3:
       speed_n_sources.append((route_speed, "route"))
       #speed_n_sources.append((self.calculate_current_speed(dist, speed * self.mapTurnSpeedFactor, 0, 1.2), "route"))
 
