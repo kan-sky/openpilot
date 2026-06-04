@@ -775,7 +775,7 @@ class CarrotServ:
         start_fork_dist = max(25.0, self.autoTurnControlTurnEnd * 10.0)
         atc_debug = "Def"
 
-    elif is_uturn:
+    elif is_Uturn:
       start_turn_dist = 5.0
       atc_debug = "Utn"
 
