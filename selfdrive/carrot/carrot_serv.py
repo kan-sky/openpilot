@@ -336,7 +336,7 @@ class CarrotServ:
     return max(safe_speed_kph, min(250, speed_mps * 3.6))
 
   def _update_tbt(self):
-    #xTurnInfo : 1: left turn, 2: right turn, 3: left lane change, 4: right lane change, 5: rotary, 6: tg, 7: arrive or uturn
+    #xTurnInfo : 1: left turn, 2: right turn, 3: left lane change, 4: right lane change, 5: rotary, 6: tg, 7: uturn, 8: arrive
     turn_type_mapping = {
       12: ("turn", "left", 1),
       16: ("turn", "sharp left", 1),
@@ -724,70 +724,82 @@ class CarrotServ:
 
   def update_auto_turn(self, v_ego_kph, sm, x_turn_info, x_dist_to_turn, check_steer=False):
     # Kans: 차선변경 카테고리
-    is_left_turn = x_turn_info == 1
-    is_right_turn = x_turn_info == 2
-    is_lane_change = x_turn_info in [3, 4]
+    is_Uturn = x_turn_info == 7
+    is_turn = x_turn_info in [1, 2]
+    is_lane_change = x_turn_info in [3, 4, 5]
     is_rotary = x_turn_info == 5
     is_tg = x_turn_info == 6
-    is_arrive_or_uturn = x_turn_info in [7, 8]
+    is_arrive = x_turn_info == 8
 
     # Kans: 현재속도의 감속비로 적용, 최소 김속비 75%로 유지
     fork_speed = self.nRoadLimitSpeed
+    turn_speed = v_ego_kph
+
     if self.autoTurnControlSpeedTurn > 0:
       turn_ratio = max(0.75, self.autoTurnControlSpeedTurn)
       turn_speed = v_ego_kph * turn_ratio
       # Kans: 회전교차로/교차로에서는 과도한 저속 진입 방지
-      if x_turn_info in [1, 2, 5]:
+      if x_turn_info in [1, 2]:
         turn_speed = max(30.0, turn_speed)
       # Kans: fork/lane-change도 감속비 적용
-      if x_turn_info in [3, 4]:
-        fork_speed = max(30.0, v_ego_kph * turn_ratio)
-    else:
-      turn_speed = v_ego_kph * 1.0 
+      if x_turn_info in [3, 4, 5]:
+        fork_speed = max(30.0, turn_speed)
 
     stop_speed = 1
-
     turn_dist_for_speed = self.autoTurnControlTurnEnd * turn_speed / 3.6 # autoTurnControlSpeedTurn(70%) 목표속도까지 감속 완료할 거리.
     fork_dist_for_speed = self.autoTurnControlTurnEnd * fork_speed / 3.6 # fork_speed(=nRoadLimitSpeed) 목표속도까지 감속 완료할 거리.
     stop_dist_for_speed = 5
 
-    # Kans: 고속도로/고속국도/자동차전용도로 계열
     is_highway_like = self.roadcate in [0, 1] or self.nRoadLimitSpeed >= 70
 
     # Kans: fork/off-ramp 계열 시작거리
+    start_fork_dist = max(25.0, self.autoTurnControlTurnEnd * 10.0)
+    start_turn_dist = 5.0
+    atc_debug = "Def"
+
+    if is_rotary:
+      turn_dist_for_speed = 5.0
+      atc_debug = "Rty"
+
     if is_lane_change:
       if self.navType == "off ramp":
         start_fork_dist = 90.0
-        atc_debug = "OFF"
+        atc_debug = "Rmp"
       elif is_highway_like:
         start_fork_dist = 110.0
-        atc_debug = "HWY"
+        atc_debug = "Hwy"
+      elif is_rotary:
+        start_fork_dist = 5.0
+        atc_debug = "Rty"
       else:
-        start_fork_dist = 30.0
-        atc_debug = "LC"
-    elif is_tg:
-      start_fork_dist = 40.0
-      atc_debug = "TG"
-    else:
-      start_fork_dist = max(25.0, self.autoTurnControlTurnEnd * 10.0)
-      atc_debug = "DEF"
+        start_fork_dist = max(25.0, self.autoTurnControlTurnEnd * 10.0)
+        atc_debug = "Def"
 
-    if is_rotary:
-      start_turn_dist = 35.0
-    elif is_left_turn or is_right_turn:
-      start_turn_dist = 20.0
-    else:
-      start_turn_dist = 25.0
+    elif is_uturn:
+      start_turn_dist = 5.0
+      atc_debug = "Utn"
+
+    elif is_turn:
+      start_turn_dist = 7.0
+      atc_debug = "Trn"
+
+    elif is_tg:
+      start_fork_dist = 8.0
+      atc_debug = "TG"
+
+    elif is_arrive:
+      start_turn_dist = 5.0
+      atc_debug = "Arv"
 
     # Kans: debug
     if check_steer:
       self.atcDebugText = (
         f"ATC:{atc_debug} "
-        f"NT:{self.navType} "
-        f"XI:{x_turn_info} "
+        f"TYP:{self.navType} "
+        f"TI:{x_turn_info} "
         f"D:{x_dist_to_turn:.0f} "
-        f"SF:{start_fork_dist:.0f} "
-        f"ST:{start_turn_dist:.0f}"
+        f"FD:{start_fork_dist:.0f} "
+        f"TD:{start_turn_dist:.0f}"
       )
 
     turn_info_mapping = {
