@@ -738,11 +738,11 @@ class CarrotServ:
     if self.autoTurnControlSpeedTurn > 0:
       turn_ratio = max(0.75, self.autoTurnControlSpeedTurn)
       turn_speed = v_ego_kph * turn_ratio
-      # Kans: 회전교차로/교차로에서는 과도한 저속 진입 방지
-      if x_turn_info in [1, 2]:
+      # 일반 좌/우회전은 과도한 저속 진입 방지
+      if is_turn:
         turn_speed = max(30.0, turn_speed)
-      # Kans: fork/lane-change도 감속비 적용
-      if x_turn_info in [3, 4, 5]:
+      # 차선변경/로터리도 감속비 적용
+      if is_lane_change or is_rotary:
         fork_speed = max(30.0, turn_speed)
 
     stop_speed = 1
@@ -752,36 +752,38 @@ class CarrotServ:
 
     is_highway_like = self.roadcate in [0, 1] or self.nRoadLimitSpeed >= 70
 
-    # Kans: fork/off-ramp 계열 시작거리
-    start_fork_dist = max(25.0, self.autoTurnControlTurnEnd * 10.0)
-    start_turn_dist = 5.0
+    # Kans: 차선변경 기본값
+    start_fork_dist = max(20.0, self.autoTurnControlTurnEnd * 10.0)
+    start_turn_dist = 10.0
     atc_debug = "Def"
 
-    if is_rotary:
+    #일반 좌/우회전: start_fork_dist ~ start_turn_dist 구간에서 atc left/right 발생"
+    if is_turn:
+      start_fork_dist = 25.0
+      start_turn_dist = 8.0
+      atc_debug = "Trn"
+
+    elif is_Uturn:
+      start_fork_dist = 15.0
+      start_turn_dist = 5.0
+      atc_debug = "Utn
+  
+    elif is_rotary:
+      start_fork_dist = 12.0
+      start_turn_dist = 5.0
       turn_dist_for_speed = 5.0
       atc_debug = "Rty"
 
-    if is_lane_change:
+    elif is_lane_change:
       if self.navType == "off ramp":
         start_fork_dist = 90.0
         atc_debug = "Rmp"
       elif is_highway_like:
         start_fork_dist = 110.0
         atc_debug = "Hwy"
-      elif is_rotary:
-        start_fork_dist = 5.0
-        atc_debug = "Rty"
       else:
-        start_fork_dist = max(25.0, self.autoTurnControlTurnEnd * 10.0)
-        atc_debug = "Def"
-
-    elif is_Uturn:
-      start_turn_dist = 5.0
-      atc_debug = "Utn"
-
-    elif is_turn:
-      start_turn_dist = 7.0
-      atc_debug = "Trn"
+        start_fork_dist = 30
+        atc_debug = "LC"
 
     elif is_tg:
       start_fork_dist = 8.0
@@ -1089,7 +1091,7 @@ class CarrotServ:
       if desired_speed < self.gas_override_speed:
         source = "gas"
         desired_speed = self.gas_override_speed
-      self.debugText = f"{self.atcDebugText} route={route_speed:.1f}"
+      self.debugText = f"{self.atcDebugText}"
 
     left_spd_sec = 100
     left_tbt_sec = 100
