@@ -174,17 +174,6 @@ def manager_thread() -> None:
 
     ensure_running(managed_processes.values(), started, params=params, CP=sm['carParams'], not_run=ignore)
 
-    # Kans: 메모리사용파악
-    if params.get_bool("MemUsage") and now - mem_print_t > 10.0:
-      mem_print_t = now
-      mem_lines = []
-      for p in managed_processes.values():
-        if p.proc and p.proc.is_alive():
-          pid = p.proc.pid
-          rss_kb = read_rss_kb(pid)
-          mem_lines.append(f"{p.name}[{pid}]={rss_kb/1024:.1f}MB")
-      print("PROC_MEM " + " | ".join(mem_lines))    
-
     running = ' '.join("{}{}\u001b[0m".format("\u001b[32m" if p.proc.is_alive() else "\u001b[31m", p.name)
                        for p in managed_processes.values() if p.proc)
     print_timer = (print_timer + 1)%10

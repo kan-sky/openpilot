@@ -341,5 +341,4 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"PsiDampingSCurve", {PERSISTENT, INT, "65"}},
     {"MaxLatAccelNoRollLowSpeed", {PERSISTENT, INT, "42"}},
     {"LatSmoothDebug", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION, STRING}},
-    {"MemUsage", {PERSISTENT, INT, "0"}},
 };
