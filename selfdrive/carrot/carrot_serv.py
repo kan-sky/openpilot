@@ -731,19 +731,19 @@ class CarrotServ:
     is_tg = x_turn_info == 6
     is_arrive = x_turn_info == 8
 
-    # Kans: 현재속도의 감속비로 적용, 최소 김속비 75%로 유지
+    # Kans: 현재속도 값 설정
     fork_speed = self.nRoadLimitSpeed
     turn_speed = v_ego_kph
-
+    # Kans: 현재속도의 감속비(당근맨=85%) 적용,
     if self.autoTurnControlSpeedTurn > 0:
-      turn_ratio = max(0.75, self.autoTurnControlSpeedTurn)
+      turn_ratio = max(0.75, self.autoTurnControlSpeedTurn)  # 최소값 75%
       turn_speed = v_ego_kph * turn_ratio
-      # 일반 좌/우회전은 과도한 저속 진입 방지
+      # 일반 좌/우회전은 과도한 저속 진입 방지로 15km/h
       if is_turn:
-        turn_speed = max(30.0, turn_speed)
-      # 차선변경/로터리도 감속비 적용
+        turn_speed = max(15.0, turn_speed)
+      # 차선변경/로터리도는 27km/h
       if is_lane_change or is_rotary:
-        fork_speed = max(30.0, turn_speed)
+        fork_speed = max(27.0, turn_speed)
 
     stop_speed = 1
     turn_dist_for_speed = self.autoTurnControlTurnEnd * turn_speed / 3.6 # autoTurnControlSpeedTurn(70%) 목표속도까지 감속 완료할 거리.
@@ -754,24 +754,23 @@ class CarrotServ:
 
     # Kans: 차선변경 기본값
     start_fork_dist = max(20.0, self.autoTurnControlTurnEnd * 10.0)
-    start_turn_dist = 10.0
+    start_turn_dist = min(8.0, self.autoTurnControlTurnEnd * 10.0)
     atc_debug = "Def"
 
     #일반 좌/우회전: start_fork_dist ~ start_turn_dist 구간에서 atc left/right 발생"
     if is_turn:
-      start_fork_dist = 25.0
+      start_fork_dist = 10.0
       start_turn_dist = 8.0
       atc_debug = "Trn"
 
     elif is_Uturn:
-      start_fork_dist = 15.0
+      start_fork_dist = 8.0
       start_turn_dist = 5.0
       atc_debug = "Utn"
   
     elif is_rotary:
-      start_fork_dist = 12.0
+      start_fork_dist = 5.0
       start_turn_dist = 5.0
-      turn_dist_for_speed = 5.0
       atc_debug = "Rty"
 
     elif is_lane_change:
@@ -782,11 +781,11 @@ class CarrotServ:
         start_fork_dist = 110.0
         atc_debug = "Hwy"
       else:
-        start_fork_dist = 30
+        start_fork_dist = 50
         atc_debug = "LC"
 
     elif is_tg:
-      start_fork_dist = 8.0
+      start_fork_dist = 15.0
       atc_debug = "TG"
 
     elif is_arrive:
