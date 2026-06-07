@@ -6,6 +6,7 @@ import cereal.messaging as messaging
 from openpilot.common.logging_extra import SwagLogFileFormatter
 from openpilot.system.hardware.hw import Paths
 from openpilot.common.swaglog import get_file_handler
+from openpilot.common.params import Params
 
 
 def main() -> NoReturn:
@@ -25,7 +26,16 @@ def main() -> NoReturn:
     while True:
       dat = b''.join(sock.recv_multipart())
       level = dat[0]
-      record = dat[1:].decode("utf-8")
+      raw_bytes = dat[1:]
+
+      try:
+        record = dat[1:].decode("utf-8", errors="replace")
+      except Exception as e:
+        print(f"decode error: {e}, skipping log")
+        print(f"Raw bytes (hex): {raw_bytes.hex()[:200]}...")
+        Params().put("CarrotException", "log", block=True)
+        continue
+
       if level >= log_level:
         log_handler.emit(record)
 

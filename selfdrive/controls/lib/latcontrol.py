@@ -1,6 +1,10 @@
 import numpy as np
 from abc import abstractmethod, ABC
 
+from openpilot.common.realtime import DT_CTRL
+
+MIN_LATERAL_CONTROL_SPEED = 0.3  # m/s
+
 
 class LatControl(ABC):
   def __init__(self, CP, CI, dt):
@@ -13,7 +17,7 @@ class LatControl(ABC):
     self.steer_max = 1.0
 
   @abstractmethod
-  def update(self, active: bool, CS, VM, params, steer_limited_by_safety: bool, desired_curvature: float, curvature_limited: bool, lat_delay: float):
+  def update(self, active: bool, CS, VM, params, steer_limited_by_safety: bool, desired_curvature: float, CC, curvature_limited, model_data=None):
     pass
 
   def reset(self):

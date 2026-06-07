@@ -1,5 +1,22 @@
 #!/usr/bin/env bash
 
+if [ ! -f "./boot_finish" ]; then
+  mount -o rw,remount /system
+  chmod 755 ./restart.sh
+  chmod 755 ./selfdrive/apilot.py
+  chmod 755 ./selfdrive/debug/clear_dtc.py
+  chmod 755 ./selfdrive/debug/debug_console_carrot.py
+  chmod 755 ./selfdrive/debug/debug_console.py
+
+  if [ ! -f "/data/params/d/DongleId" ]; then
+    echo -n "UnregisteredDevice" > /data/params/d/DongleId
+  fi
+  rm -f /data/params/d/Offroad_UnregisteredHardware
+  touch ./boot_finish
+else
+  chmod 644 ./boot_finish
+fi
+
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null && pwd )"
 
 source "$DIR/launch_env.sh"
@@ -76,7 +93,42 @@ function launch {
   fi
 
   # write tmux scrollback to a file
-  tmux capture-pane -pq -S-1000 > /tmp/launch_log
+  tmux capture-pane -pq -S-1500 > /tmp/launch_log
+  if python -c "import flask" > /dev/null 2>&1; then
+    echo "Flask already installed."
+  else
+    echo "Flask installing."
+    pip install flask
+  fi
+  if python -c "import shapely" > /dev/null 2>&1; then
+    echo "shapely already installed."
+  else
+    echo "shapely installing."
+    pip install shapely
+  fi
+  if python -c "import kaitaistruct" > /dev/null 2>&1; then
+    echo "kaitaistruct already installed."
+  else
+    echo "kaitaistruct installing."
+    pip install kaitaistruct
+  fi
+
+  # events language init
+  #LANG=$(cat ${PARAMS_ROOT}/d/LanguageSetting)
+  LANG=$(cat /data/params/d/LanguageSetting)
+  EVENTSTAT=$(git status)
+
+  # events.py
+  if [ "${LANG}" = "main_ko" ] && [[ ! "${EVENTSTAT}" == *"modified:   selfdrive/controls/lib/events.py"* ]]; then
+    cp -f $DIR/selfdrive/selfdrived/events.py $DIR/scripts/add/events_en.py
+    cp -f $DIR/scripts/add/events_ko.py $DIR/selfdrive/selfdrived/events.py
+  elif [ "${LANG}" = "main_zh-CHS" ] && [[ ! "${EVENTSTAT}" == *"modified:   selfdrive/controls/lib/events.py"* ]]; then
+    # Backup current events.py (assumed English) and install Simplified Chinese events
+    cp -f $DIR/selfdrive/selfdrived/events.py $DIR/scripts/add/events_en.py
+    cp -f $DIR/scripts/add/events_zh.py $DIR/selfdrive/selfdrived/events.py
+  elif [ "${LANG}" = "main_en" ] && [[ "${EVENTSTAT}" == *"modified:   selfdrive/controls/lib/events.py"* ]]; then
+    cp -f $DIR/scripts/add/events_en.py $DIR/selfdrive/selfdrived/events.py
+  fi
 
   # start manager
   cd system/manager

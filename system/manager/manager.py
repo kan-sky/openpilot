@@ -21,6 +21,16 @@ from openpilot.common.swaglog import cloudlog, add_file_handler
 from openpilot.system.version import get_build_metadata
 from openpilot.system.hardware.hw import Paths
 
+def set_default_params():
+  params = Params()
+  for k in params.all_keys():
+    default_value = params.get_default_value(k)
+    if default_value is not None:
+      params.put(k, default_value)
+      print(f"SetToDefault[{k}]={default_value}")
+
+def get_default_params_key():
+  return Params().all_keys()
 
 def manager_init() -> None:
   save_bootlog()
@@ -182,6 +192,12 @@ def manager_thread() -> None:
 
 def main() -> None:
   manager_init()
+  print(f"python ../../opendbc/car/hyundai/values.py > {Params().get_param_path()}/SupportedCars")
+  os.system(f"python ../../opendbc/car/hyundai/values.py > {Params().get_param_path()}/SupportedCars")
+  os.system(f"python ../../opendbc/car/gm/values.py > {Params().get_param_path()}/SupportedCars_gm")
+  os.system(f"python ../../opendbc/car/toyota/values.py > {Params().get_param_path()}/SupportedCars_toyota")
+  os.system(f"python ../../opendbc/car/mazda/values.py > {Params().get_param_path()}/SupportedCars_mazda")
+
   if os.getenv("PREPAREONLY") is not None:
     return
 

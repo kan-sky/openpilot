@@ -1,6 +1,13 @@
 import numpy as np
 from openpilot.common.constants import ACCELERATION_DUE_TO_GRAVITY
 from openpilot.common.realtime import DT_CTRL, DT_MDL
+# carrot
+from cereal import log
+from openpilot.selfdrive.modeld.constants import ModelConstants
+import numpy as np
+# Kans
+from openpilot.common.params import Params
+params = Params()
 
 MIN_SPEED = 1.0
 CONTROL_N = 17
@@ -13,7 +20,66 @@ MIN_STABLE_DELAY = 0.3
 # EU guidelines
 MAX_LATERAL_JERK = 5.0  # m/s^3
 MAX_LATERAL_ACCEL_NO_ROLL = 3.0  # m/s^2
+# Carrot
+MAX_LATERAL_ACCEL_NO_ROLL_LOW_SPEED = 4.5  # m/s^2
 
+# Kans:
+def apply_deadzone(error, deadzone):
+  if error > deadzone:
+    error -= deadzone
+  elif error < - deadzone:
+    error += deadzone
+  else:
+    error = 0.
+  return error
+
+# Carrot
+def get_lag_adjusted_curvature(CP, v_ego, psis, curvatures, steer_actuator_delay, distances):
+  if len(psis) != CONTROL_N:
+    psis = [0.0] * CONTROL_N
+    curvatures = [0.0] * CONTROL_N
+    distances = [0.0] * CONTROL_N
+  v_ego = max(MIN_SPEED, v_ego)
+
+  delay = max(0.01, steer_actuator_delay)
+
+  current_curvature_desired = curvatures[0]
+  delayed_curvature_desired = np.interp(delay, ModelConstants.T_IDXS[:CONTROL_N], curvatures)
+  future_curvature_desired = np.interp(1.2, ModelConstants.T_IDXS[:CONTROL_N], curvatures)
+
+  psi = np.interp(delay, ModelConstants.T_IDXS[:CONTROL_N], psis)
+  distance = max(np.interp(delay, ModelConstants.T_IDXS[:CONTROL_N], distances), 0.001)
+
+  psi_damping_straight = params.get_int("PsiDampingStraight") * 0.01
+  psi_damping_s_curve = params.get_int("PsiDampingSCurve") * 0.01
+
+  # 기본값 보정
+  if psi_damping_straight <= 0.0:
+    psi_damping_straight = 0.7  # 곡선 탈출시 heading변화량(psi)의 70% 정도만 풀어주고 유지.
+  if psi_damping_s_curve <= 0.0:
+    psi_damping_s_curve = 0.5  # 반대방향 곡선 전환시 heading변화량(psi)의 50%만 반영해서 좀더 빨리 풀어줌.
+
+  # 전환구간 출렁임 방지용
+  psis_damping = 1.0  # 기본은 미래 heading 변화량을 그대로 반영 
+  if v_ego > 5 and abs(current_curvature_desired) > 0.0001:
+    # 커브 -> 직선
+    if abs(future_curvature_desired) < 0.0004:
+      psis_damping = psi_damping_straight
+    # S자 곡선
+    elif np.sign(current_curvature_desired) != np.sign(future_curvature_desired):
+      psis_damping = psi_damping_s_curve
+
+  psi *= psis_damping
+
+  average_curvature_desired = psi / distance
+  desired_curvature = 2 * average_curvature_desired - current_curvature_desired
+
+  max_curvature_rate = MAX_LATERAL_JERK / (v_ego ** 2)
+
+  safe_desired_curvature = np.clip(desired_curvature,
+                                current_curvature_desired - max_curvature_rate * DT_MDL,
+                                current_curvature_desired + max_curvature_rate * DT_MDL)
+  return safe_desired_curvature
 
 def clamp(val, min_val, max_val):
   clamped_val = float(np.clip(val, min_val, max_val))
@@ -31,15 +97,24 @@ def clip_curvature(v_ego, prev_curvature, new_curvature, roll) -> tuple[float, b
                           prev_curvature - max_curvature_rate * DT_CTRL,
                           prev_curvature + max_curvature_rate * DT_CTRL)
 
+  # Kans: 저속(100Km/h이하)에서 허용하는 최대횡가속값. MaxLatAccelNoRollLowSpeed 높으면 오버스티어 낮으면 언더스티어.
+  max_lat_accel_low_speed = params.get_int("MaxLatAccelNoRollLowSpeed") * 0.1
+  if max_lat_accel_low_speed <= 0.0:
+    max_lat_accel_low_speed = MAX_LATERAL_ACCEL_NO_ROLL
+
   roll_compensation = roll * ACCELERATION_DUE_TO_GRAVITY
-  max_lat_accel = MAX_LATERAL_ACCEL_NO_ROLL + roll_compensation
-  min_lat_accel = -MAX_LATERAL_ACCEL_NO_ROLL + roll_compensation
+  max_lateral_accel_no_roll = MAX_LATERAL_ACCEL_NO_ROLL
+  if v_ego < 100 / 3.6:  # 100 km/h
+    max_lateral_accel_no_roll = max_lat_accel_low_speed
+
+  max_lat_accel = max_lateral_accel_no_roll + roll_compensation
+  min_lat_accel = -max_lateral_accel_no_roll + roll_compensation
   new_curvature, limited_accel = clamp(new_curvature, min_lat_accel / v_ego ** 2, max_lat_accel / v_ego ** 2)
 
   new_curvature, limited_max_curv = clamp(new_curvature, -MAX_CURVATURE, MAX_CURVATURE)
   return float(new_curvature), limited_accel or limited_max_curv
 
-
+# Carrot: model에 v_max 추가
 def get_accel_from_plan(speeds, accels, t_idxs, action_t=DT_MDL, vEgoStopping=0.3):
   if len(speeds) == len(t_idxs):
     v_now = speeds[0]
@@ -49,12 +124,15 @@ def get_accel_from_plan(speeds, accels, t_idxs, action_t=DT_MDL, vEgoStopping=0.
     else:
       v_target = np.interp(action_t, t_idxs, speeds)
     a_target = 2 * (v_target - v_now) / (action_t) - a_now
+    v_max = np.max(speeds) # carrot
   else:
     v_now = 0.0
     v_target = 0.0
     a_target = 0.0
+    a_now = 0.0
+    v_max = 0.0 # carrot
   should_stop = (v_now < vEgoStopping and a_target < 0.1)
-  return a_target, should_stop
+  return a_target, should_stop, v_now, v_max # carrot
 
 def curv_from_psis(psi_target, psi_rate, vego, action_t):
   vego = np.clip(vego, MIN_SPEED, np.inf)

@@ -18,6 +18,13 @@ ACCELERATION_DUE_TO_GRAVITY = 9.81  # m/s^2
 ButtonType = structs.CarState.ButtonEvent.Type
 
 
+@dataclass
+class AngleSteeringLimits:
+  STEER_ANGLE_MAX: float
+  ANGLE_RATE_LIMIT_UP: tuple[list[float], list[float]]
+  ANGLE_RATE_LIMIT_DOWN: tuple[list[float], list[float]]
+
+
 def apply_hysteresis(val: float, val_steady: float, hyst_gap: float) -> float:
   if val > val_steady + hyst_gap:
     val_steady = val - hyst_gap
@@ -94,6 +101,17 @@ class Bus(StrEnum):
 
 def rate_limit(new_value, last_value, dw_step, up_step):
   return float(np.clip(new_value, last_value + dw_step, last_value + up_step))
+
+
+def get_friction(lateral_accel_error: float, lateral_accel_deadzone: float, friction_threshold: float,
+                 torque_params: structs.CarParams.LateralTorqueTuning, friction_compensation: bool) -> float:
+  friction_interp = np.interp(
+    apply_center_deadzone(lateral_accel_error, lateral_accel_deadzone),
+    [-friction_threshold, friction_threshold],
+    [-torque_params.friction, torque_params.friction]
+  )
+  friction = float(friction_interp) if friction_compensation else 0.0
+  return friction
 
 
 def make_tester_present_msg(addr, bus, subaddr=None, suppress_response=False):

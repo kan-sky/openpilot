@@ -2,14 +2,24 @@ import numpy as np
 from numbers import Number
 
 class PIDController:
-  def __init__(self, k_p, k_i, k_d=0., pos_limit=1e308, neg_limit=-1e308, rate=100):
-    self._k_p: list[list[float]] = [[0], [k_p]] if isinstance(k_p, Number) else k_p
-    self._k_i: list[list[float]] = [[0], [k_i]] if isinstance(k_i, Number) else k_i
-    self._k_d: list[list[float]] = [[0], [k_d]] if isinstance(k_d, Number) else k_d
+  def __init__(self, k_p, k_i, k_f=0., k_d=0., pos_limit=1e308, neg_limit=-1e308, rate=100):
+    self._k_p = k_p
+    self._k_i = k_i
+    self._k_d = k_d
+    self.k_f = float(k_f) if isinstance(k_f, Number) else k_f
 
-    self.set_limits(pos_limit, neg_limit)
+    if isinstance(self._k_p, Number):
+      self._k_p = [[0.0], [float(self._k_p)]]
+    if isinstance(self._k_i, Number):
+      self._k_i = [[0.0], [float(self._k_i)]]
+    if isinstance(self._k_d, Number):
+      self._k_d = [[0.0], [float(self._k_d)]]
 
-    self.i_dt = 1.0 / rate
+    self.pos_limit = pos_limit
+    self.neg_limit = neg_limit
+
+    self.i_unwind_rate = 0.3 / rate
+    self.i_rate = 1.0 / rate
     self.speed = 0.0
 
     self.reset()
@@ -26,6 +36,10 @@ class PIDController:
   def k_d(self):
     return np.interp(self.speed, self._k_d[0], self._k_d[1])
 
+  @property
+  def error_integral(self):
+    return self.i / self.k_i
+
   def reset(self):
     self.p = 0.0
     self.i = 0.0
@@ -33,24 +47,22 @@ class PIDController:
     self.f = 0.0
     self.control = 0
 
-  def set_limits(self, pos_limit, neg_limit):
-    self.pos_limit = pos_limit
-    self.neg_limit = neg_limit
-
-  def update(self, error, error_rate=0.0, speed=0.0, feedforward=0., freeze_integrator=False):
+  def update(self, error, error_rate=0.0, speed=0.0, override=False, feedforward=0., freeze_integrator=False):
     self.speed = speed
-    self.p = self.k_p * float(error)
-    self.d = self.k_d * error_rate
-    self.f = feedforward
 
-    if not freeze_integrator:
-      i = self.i + self.k_i * self.i_dt * error
+    self.p = float(error) * self.k_p
+    self.f = float(feedforward) * float(self.k_f)
+    self.d = float(error_rate) * self.k_d
 
-      # Don't allow windup if already clipping
-      test_control = self.p + i + self.d + self.f
-      i_upperbound = self.i if test_control > self.pos_limit else self.pos_limit
-      i_lowerbound = self.i if test_control < self.neg_limit else self.neg_limit
-      self.i = np.clip(i, i_lowerbound, i_upperbound)
+    if override:
+      self.i -= self.i_unwind_rate * float(np.sign(self.i))
+    else:
+      if not freeze_integrator:
+        self.i = self.i + float(error) * self.k_i * self.i_rate
+
+        control_no_i = self.p + self.d + self.f
+        control_no_i = np.clip(control_no_i, self.neg_limit, self.pos_limit)
+        self.i = np.clip(self.i, self.neg_limit - control_no_i, self.pos_limit - control_no_i)
 
     control = self.p + self.i + self.d + self.f
     self.control = np.clip(control, self.neg_limit, self.pos_limit)
