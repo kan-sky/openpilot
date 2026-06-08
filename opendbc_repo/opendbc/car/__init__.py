@@ -102,6 +102,31 @@ class Bus(StrEnum):
 def rate_limit(new_value, last_value, dw_step, up_step):
   return float(np.clip(new_value, last_value + dw_step, last_value + up_step))
 
+def create_gas_interceptor_command(packer, gas_amount, idx):
+  # Common gas pedal msg generator
+  enable = gas_amount > 0.001
+
+  values = {
+    "ENABLE": enable,
+    "COUNTER_PEDAL": idx & 0xF,
+  }
+
+  if enable:
+    values["GAS_COMMAND"] = gas_amount * 255.
+    values["GAS_COMMAND2"] = gas_amount * 255.
+
+  dat = packer.make_can_msg("GAS_COMMAND", 0, values)[1]
+
+  checksum = crc8_pedal(dat[:-1])
+  values["CHECKSUM_PEDAL"] = checksum
+
+  return packer.make_can_msg("GAS_COMMAND", 0, values)
+
+
+def apply_center_deadzone(error, deadzone):
+  if (error > - deadzone) and (error < deadzone):
+    error = 0.
+  return error
 
 def get_friction(lateral_accel_error: float, lateral_accel_deadzone: float, friction_threshold: float,
                  torque_params: structs.CarParams.LateralTorqueTuning, friction_compensation: bool) -> float:

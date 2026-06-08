@@ -141,7 +141,7 @@ def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.
     nan=prev_action.desiredVelocity,
     posinf=prev_action.desiredVelocity,
     neginf=0.0))
-    desired_velocity_now = max(0.0, desired_velocity_now)
+  desired_velocity_now = max(0.0, desired_velocity_now)
 
   return(
     log.ModelDataV2.Action(
@@ -438,14 +438,14 @@ def main(demo=False):
 
       # Kans: LatSmoothDebug
       if frame % 100 == 0:
-      if 'action' in model_output:
-        model_curv = float(model_output['action'][0, 0]) / (max(1.0, v_ego) ** 2)
-        params.put_nonblocking("LatSmoothDebug",
-          f"in:{model_curv:.4f} out:{action.desiredCurvature:.4f} "
-          f"s:{applied_lat_smooth_seconds:.3f} c:{curve_smooth_max:.3f}")
-      else:
-        params.put_nonblocking("LatSmoothDebug",
-          f"s:{applied_lat_smooth_seconds:.3f} c:{curve_smooth_max:.3f}")
+        if 'action' in model_output:
+          model_curv = float(model_output['action'][0, 0]) / (max(1.0, v_ego) ** 2)
+          params.put_nonblocking("LatSmoothDebug",
+            f"in:{model_curv:.4f} out:{action.desiredCurvature:.4f} "
+            f"s:{applied_lat_smooth_seconds:.3f} c:{curve_smooth_max:.3f}")
+        else:
+          params.put_nonblocking("LatSmoothDebug",
+            f"s:{applied_lat_smooth_seconds:.3f} c:{curve_smooth_max:.3f}")
 
       prev_action = action
       fill_model_msg(drivingdata_send, modelv2_send, model_output, action,

@@ -2,6 +2,7 @@
 import os
 import time
 
+from cereal import messaging
 from openpilot.system.hardware import TICI
 from openpilot.common.realtime import Priority, config_realtime_process, set_core_affinity
 from openpilot.system.ui.lib.application import gui_app
@@ -36,6 +37,11 @@ def main():
         except OSError:
           pass
 
+      extra_cpu = time.monotonic() - extra_start
+      msg = messaging.new_message('uiDebug')
+      msg.uiDebug.cpuTimeMillis = (cpu_time + extra_cpu) * 1000
+      msg.uiDebug.frameTimeMillis = frame_time * 1000
+      pm.send('uiDebug', msg)
 
 
 if __name__ == "__main__":
