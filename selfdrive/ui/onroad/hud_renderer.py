@@ -1136,7 +1136,7 @@ class HudRenderer(Widget):
         line_thickness=0,
       )
       self._draw_text_left_bottom(
-        info["sdi_descr"], label_x, label_y, 40, rl.WHITE,
+        info["sdi_descr"], label_x, label_y, 34, rl.WHITE,
         font=self._font_bold, border_width=1.5, shadow_offset=3.0,
       )
     elif info["road_name"]:
