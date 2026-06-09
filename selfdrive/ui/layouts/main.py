@@ -37,7 +37,7 @@ class MainLayout(Widget):
 
     # Custom onroad widgets
     self._onroad_layout = AugmentedRoadView()
-    self._debug_plot = DebugPlot()
+    self._debug_layout = DebugPlot()
 
     self._layouts = {
       MainState.HOME: HomeLayout(),
@@ -59,12 +59,47 @@ class MainLayout(Widget):
     # Start onboarding if terms or training not completed, make sure to push after self
     if not self._onboarding_window.completed:
       gui_app.push_widget(self._onboarding_window)
+    # carrot_man    
+    self._last_carrot_cmd_idx = -1
+
+  def _handle_carrot_record_cmd(self, sm) -> bool:
+    try:
+      cm = sm['carrotMan']
+      cmd_idx = int(cm.carrotCmdIndex)
+      cmd = str(cm.carrotCmd)
+      arg = str(cm.carrotArg)
+    except Exception as e:
+      print(f"Error reading carrotMan message: {e}")
+      return gui_app.is_recording()
+
+    if not ui_state.started:
+      if gui_app.is_recording():
+        gui_app.stop_recording()
+      return gui_app.is_recording()
+
+    if cmd_idx == self._last_carrot_cmd_idx:
+      return gui_app.is_recording()
+    self._last_carrot_cmd_idx = cmd_idx
+
+    if cmd != "RECORD":
+      return gui_app.is_recording()
+
+    arg = arg.upper()
+    if arg == "START":
+      gui_app.start_recording()
+    elif arg == "STOP":
+      gui_app.stop_recording()
+    elif arg == "TOGGLE":
+      gui_app.toggle_recording()
+
+    ui_state.params.put_bool_nonblocking("ScreenRecord", gui_app.is_recording())
+    return gui_app.is_recording()
     
   def _render(self, _):
     self._handle_transitions()
     self._update_layout_rects()
     self._render_main_content()
-
+    self._handle_carrot_record_cmd(ui_state.sm)
 
   def _setup_callbacks(self):
     self._sidebar.set_callbacks(on_settings=self._on_settings_clicked,
@@ -208,6 +243,6 @@ class MainLayout(Widget):
 
       show_plot_mode = int(ui_state.params.get_int("ShowPlotMode"))
       if show_plot_mode > 0:
-        self._debug_plot.render(content_rect)
+        self._debug_layout.render(content_rect)
     else:
       self._layouts[self._current_mode].render(content_rect)

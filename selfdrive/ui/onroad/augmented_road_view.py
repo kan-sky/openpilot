@@ -1,3 +1,4 @@
+import time
 import numpy as np
 import pyray as rl
 from cereal import log
@@ -10,12 +11,9 @@ from openpilot.selfdrive.ui.onroad.hud_renderer import HudRenderer
 from openpilot.selfdrive.ui.onroad.model_renderer import ModelRenderer
 from openpilot.selfdrive.ui.onroad.cameraview import CameraView
 from openpilot.system.ui.lib.application import gui_app
-from openpilot.common.filter_simple import BounceFilter, FirstOrderFilter
 from openpilot.common.transformations.camera import DEVICE_CAMERAS, DeviceCameraConfig, view_frame_from_device_frame
 from openpilot.common.transformations.orientation import rot_from_euler
 # mici
-from openpilot.selfdrive.ui.onroad.confidence_ball import ConfidenceBall
-from openpilot.selfdrive.ui.onroad.traffic_light import TrafficLight
 from openpilot.system.ui.lib.text_draw import draw_text_ui_style
 
 OpState = log.SelfdriveState.OpenpilotState
@@ -52,16 +50,6 @@ class AugmentedRoadView(CameraView):
     self._hud_renderer = HudRenderer()
     self.alert_renderer = AlertRenderer()
     self.driver_state_renderer = DriverStateRenderer()
-    # mici
-    self._confidence_ball = ConfidenceBall()
-    self._traffic_light = TrafficLight()
-    self._fade_texture = gui_app.texture("icons_mici/onroad/onroad_fade.png")
-    self._fade_alpha_filter = FirstOrderFilter(0, 0.1, 1 / gui_app.target_fps)
-
-    # Kans: Scr Recording
-    self._rec_x = 0
-    self._rec_y = 0
-    self._rec_r = 75
 
   def _render(self, rect):
     # Only render when system is started to avoid invalid data access
@@ -90,25 +78,13 @@ class AugmentedRoadView(CameraView):
       int(self._content_rect.height)
     )
 
-    # Kans: Render the base camera view
-    super()._render(self._content_rect) # super()._render(rect)
+    # Render the base camera view
+    super()._render(rect)
 
     # Draw all UI overlays
     self.model_renderer.render(self._content_rect)
-
-    # Fade out bottom of overlays for looks
-    rl.draw_texture_ex(self._fade_texture, rl.Vector2(self._content_rect.x, self._content_rect.y), 0.0, 1.0, rl.WHITE)
-
-    alert_to_render = self.alert_renderer.will_render()
-    self._hud_renderer.set_can_draw_top_icons(alert_to_render is None)
-    # TODO: have alert renderer draw offroad tizi label below
     self._hud_renderer.render(self._content_rect)
-    if ui_state.started:
-      self.alert_renderer.render(self._content_rect)
-
-    # Draw fake rounded border
-    rl.draw_rectangle_rounded_lines_ex(self._content_rect, 0.2 * 1.02, 10, 50, rl.BLACK)
-
+    self.alert_renderer.render(self._content_rect)
     self.driver_state_renderer.render(self._content_rect)
 
     # End clipping region
@@ -117,86 +93,7 @@ class AugmentedRoadView(CameraView):
     # Draw colored border based on driving state
     self._draw_border_carrot(rect)
 
-    # Custom UI extension point - add custom overlays here
-    # Use self._content_rect for positioning within camera bounds
-    self._traffic_light.render(rect)
-    if not self._traffic_light.is_visible():
-      self._confidence_ball.render(rect)
-
-    # Kans: Scr recording
-    self._rec_x = int(rect.x + 160)
-    self._rec_y = int(rect.y + rect.height - 670)
-    self._rec_r = 75
-
-    is_rec = gui_app.is_recording()
-    elapsed = gui_app.recording_elapsed()
-
-    R = 75
-    self._rec_r = R
-
-    # 2초 깜박임
-    blink_on = (int(elapsed / 2.0) % 2 == 0) if is_rec else True
-    # 평상시
-    idle_ring = rl.Color(190, 190, 190, 180)
-    idle_fill = rl.Color(90, 90, 90, 120)
-    idle_dot = rl.Color(170, 170, 170, 180)
-    # 녹화중 채움색
-    rec_fill_on = rl.Color(90, 20, 20, 120)
-    rec_fill_off = rl.Color(0, 0, 0, 120)
-    # 녹화중 테두리색
-    rec_ring_on = rl.Color(210, 90, 90, 220)
-    rec_ring_off = rl.Color(120, 70, 70, 170)
-    # 녹화중 Dot color
-    rec_dot_on = rl.Color(220, 95, 95, 230)
-    rec_dot_off = rl.Color(110, 55, 55, 170)
-
-    # 바깥 원 배경 + 테두리
-    if is_rec:
-      fill_color = rec_fill_on if blink_on else rec_fill_off
-      ring_color = rec_ring_on if blink_on else rec_ring_off
-    else:
-      fill_color = idle_fill
-      ring_color = idle_ring
-
-    rl.draw_circle(self._rec_x, self._rec_y, R, fill_color)
-    rl.draw_circle_lines(self._rec_x, self._rec_y, R, ring_color)
-
-    # 녹화중 반경(dot_r)
-    dot_y = self._rec_y 
-    dot_r = 51
-    if is_rec:
-      dot_color = rec_dot_on if blink_on else rec_dot_off
-    else:
-      dot_color = idle_dot
-    rl.draw_circle(self._rec_x, dot_y, dot_r, dot_color)
-
-    # REC 텍스트
-    text_color = rl.Color(240, 240, 240, 220) if not is_rec else rl.Color(255, 235, 235, 230)
-    rl.draw_text("REC", self._rec_x - 28, self._rec_y - 10, 30, text_color)
-
-    # 경과시간
-    if is_rec:
-      total_sec = int(elapsed)
-      mm = total_sec // 60
-      ss = total_sec % 60
-      timer_text = f"{mm:02d}:{ss:02d}"
-      rl.draw_text(timer_text, self._rec_x - 30, self._rec_y + 24, 24, rl.Color(255, 255, 255, 220))
-
-  def _handle_mouse_press(self, mouse_event):
-    mx = mouse_event.x
-    my = mouse_event.y
-
-    dx = mx - self._rec_x
-    dy = my - self._rec_y
-    hit = (dx * dx + dy * dy) <= (self._rec_r * self._rec_r)
-
-    print(f"[RECDBG] touch=({mx}, {my}) rec=({self._rec_x}, {self._rec_y}) r={self._rec_r} dx={dx} dy={dy} hit={hit}")
-
-    if hit:
-      gui_app.toggle_recording()
-      print(f"[REC] toggled -> {gui_app.is_recording()}")
-      return
-
+  def _handle_mouse_press(self, _):
     if not self._hud_renderer.user_interacting() and self._click_callback is not None:
       self._click_callback()
 
@@ -484,6 +381,32 @@ class AugmentedRoadView(CameraView):
 
     top_left = car_name
 
+    try:
+      top_right_parts = []
+
+      if sm.alive["liveDelay"]:
+        live_delay = sm["liveDelay"]
+        top_right_parts.append(
+          f"LD[{live_delay.calPerc:.0f}%,{live_delay.lateralDelay:.2f}]"
+        )
+
+      if sm.alive["liveTorqueParameters"]:
+        ltp = sm["liveTorqueParameters"]
+        live_valid = "ON" if ltp.liveValid else "OFF"
+        top_right_parts.append(
+          f"LT[{ltp.calPerc:.0f}%,{live_valid}]({ltp.latAccelFactorFiltered:.2f}/{ltp.frictionCoefficientFiltered:.2f})"
+        )
+
+      if sm.alive["liveParameters"]:
+        lp = sm["liveParameters"]
+        custom_sr = ui_state.params.get_float("CustomSR") / 10.0
+        top_right_parts.append(f"SR({lp.steerRatio:.1f},{custom_sr:.1f})")
+
+      top_right = ", ".join(top_right_parts)
+    except Exception:
+      print("Error accessing live debug data for top right text")
+      top_right = ""
+
     if sm.alive["lateralPlan"]:
       lat_plan = sm["lateralPlan"]
       bottom = str(lat_plan.latDebugText)
@@ -521,6 +444,5 @@ if __name__ == "__main__":
         if WIDE_CAM in road_camera_view.available_streams:
           stream = ROAD_CAM if road_camera_view.stream_type == WIDE_CAM else WIDE_CAM
           road_camera_view.switch_stream(stream)
-      road_camera_view.render(rl.Rectangle(0, 0, gui_app.width, gui_app.height))
   finally:
     road_camera_view.close()
