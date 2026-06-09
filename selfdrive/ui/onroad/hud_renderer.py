@@ -1141,7 +1141,7 @@ class HudRenderer(Widget):
       )
     elif info["road_name"]:
       self._draw_text_left_bottom(
-        info["road_name"], tbt_x + 100, tbt_y + 200, 40, rl.WHITE,
+        info["road_name"], tbt_x + 10, tbt_y + 200, 40, rl.WHITE,
         font=self._font_bold, border_width=1.5, shadow_offset=3.0,
       )
 
