@@ -399,7 +399,7 @@ class ModelRenderer(Widget):
 
     N = points.shape[0]
     # Generate left and right 3D points in one array using broadcasting
-    offsets = np.array([[0, -y_off, z_off], [0, y_off, z_off]], dtype=np.float32)
+    offsets = np.array([[0, -y_off + y_shift, z_off], [0, y_off + y_shift, z_off]], dtype=np.float32)
     points_3d = points[None, :, :] + offsets[:, None, :]  # Shape: 2xNx3
     points_3d = points_3d.reshape(2 * N, 3)  # Shape: (2*N)x3
 
