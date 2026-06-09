@@ -759,18 +759,18 @@ class CarrotServ:
 
     #일반 좌/우회전: start_fork_dist ~ start_turn_dist 구간에서 atc left/right 발생"
     if is_turn:
-      start_fork_dist = 10.0
-      start_turn_dist = 8.0
+      start_fork_dist = 15.0
+      start_turn_dist = 15.0
       atc_debug = "Trn"
 
     elif is_Uturn:
-      start_fork_dist = 8.0
+      start_fork_dist = 5.0
       start_turn_dist = 5.0
       atc_debug = "Utn"
   
     elif is_rotary:
-      start_fork_dist = 5.0
-      start_turn_dist = 5.0
+      start_fork_dist = 15.0
+      start_turn_dist = 15.0
       atc_debug = "Rty"
 
     elif is_lane_change:
