@@ -268,7 +268,7 @@ class HudRenderer(Widget):
 
     time_font = int(wheel_txt.height * 1.1)
     small_dt_font = max(20, int(time_font * 0.65))   # date+time 2줄용
-    side_font = max(20, int(time_font * 0.35))
+    side_font = max(20, int(time_font * 0.45))
 
     time_x = pos_x + wheel_txt.width / 2 + 15
 
@@ -411,7 +411,7 @@ class HudRenderer(Widget):
     draw_text_ui_style(sr_text, info_x, sr_y, side_font, rl.Color(255, 255, 255, 235), font=self._font_display, border_width=1.0, shadow_offset=8.0, align="left_top", y_offset=0.0)
 
     if road_name:
-      draw_text_ui_style(road_name, info_x, road_y, side_font, rl.Color(255, 255, 255, 235), font=self._font_display, border_width=1.0, shadow_offset=8.0, align="left_top", y_offset=0.0)
+      draw_text_ui_style(road_name, info_x-250, road_y, side_font, rl.Color(255, 255, 255, 235), font=self._font_display, border_width=1.0, shadow_offset=8.0, align="left_top", y_offset=0.0)
 
 
   def _get_gear_text(self) -> str:
