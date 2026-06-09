@@ -19,8 +19,6 @@ EventName = log.OnroadEvent.EventName
 SET_SPEED_NA = 255
 KM_TO_MILE = 0.621371
 CRUISE_DISABLED_CHAR = '–'
-# Kans
-SET_SPEED_PERSISTENCE = 2.5  # seconds
 
 # Carrot
 @dataclass(frozen=True)
@@ -125,53 +123,6 @@ UI_CONFIG = UIConfig()
 FONT_SIZES = FontSizes()
 COLORS = Colors()
 
-# Carrot
-class TurnIntent(Widget):
-  FADE_IN_ANGLE = 30  # degrees
-
-  def __init__(self):
-    super().__init__()
-    self._pre = False
-    self._turn_intent_direction: int = 0
-
-    self._turn_intent_alpha_filter = FirstOrderFilter(0, 0.05, 1 / gui_app.target_fps)
-
-    self._txt_turn_intent_left: rl.Texture = gui_app.texture('icons_mici/turn_intent_left.png', 50, 20)
-    self._txt_turn_intent_right: rl.Texture = gui_app.texture('icons_mici/turn_intent_left.png', 50, 20, flip_x=True)
-
-  def _render(self, _):
-    if self._turn_intent_alpha_filter.x > 1e-2:
-      turn_intent_texture = self._txt_turn_intent_right if self._turn_intent_direction == 1 else self._txt_turn_intent_left
-      src_rect = rl.Rectangle(0, 0, turn_intent_texture.width, turn_intent_texture.height)
-      dest_rect = rl.Rectangle(self._rect.x + self._rect.width / 2, self._rect.y + self._rect.height / 2,
-                               turn_intent_texture.width, turn_intent_texture.height)
-
-      origin = (turn_intent_texture.width / 2, self._rect.height / 2)
-      color = rl.Color(255, 255, 255, int(255 * self._turn_intent_alpha_filter.x))
-      rl.draw_texture_pro(turn_intent_texture, src_rect, dest_rect, origin, 0.0, color)
-
-  def _update_state(self) -> None:
-    sm = ui_state.sm
-
-    left = any(e.name == EventName.preLaneChangeLeft for e in sm['onroadEvents'])
-    right = any(e.name == EventName.preLaneChangeRight for e in sm['onroadEvents'])
-
-    if left or right:
-      self._pre = True
-      self._turn_intent_direction = -1 if left else 1
-      self._turn_intent_alpha_filter.update(1)
-    elif any(e.name == EventName.laneChange for e in sm['onroadEvents']):
-      # fade out only, keep last direction
-      self._pre = False
-      self._turn_intent_alpha_filter.update(0)
-
-    else:
-      # didn't complete lane change, just hide
-      self._pre = False
-      self._turn_intent_direction = 0
-      self._turn_intent_alpha_filter.update(0)
-
-
 class HudRenderer(Widget):
   def __init__(self):
     super().__init__()
@@ -195,7 +146,6 @@ class HudRenderer(Widget):
     # Carrot
     self._font_display: rl.Font = gui_app.font(FontWeight.DISPLAY)
 
-    self._turn_intent = TurnIntent()
     self._debug_traffic_light = False
     self._set_speed_override = SetSpeedOverride()
     self._txt_wheel: rl.Texture = gui_app.texture('icons/wheel.png', 60, 60) # 이미지 사이즈용으로 사용
@@ -662,31 +612,6 @@ class HudRenderer(Widget):
       0,
       rl.WHITE,
     )
-
-    # 기존 레인모드/레인리스 출력 코드 제거
-    """
-    if self._debug_speed_panel:
-      active_lane_line = True
-    else:
-      active_lane_line = bool(ui_state.sm['controlsState'].activeLaneLine)
-
-    line1 = "lane"
-    line2 = "mode" if active_lane_line else "less"
-
-    lane_font = 26  # 원하면 22~30 사이로 조절
-    lane_color = rl.Color(255, 255, 255, 220)  # 흰색
-
-    lane_x = box_x + box_w + 80
-    lane_y1 = box_y + 2
-    lane_y2 = box_y + 2 + lane_font + 2
-
-    # 오른쪽 정렬(gear box 옆에 딱 붙게)
-    s1 = measure_text_cached(self._font_semi_bold, line1, lane_font)
-    s2 = measure_text_cached(self._font_semi_bold, line2, lane_font)
-
-    draw_text_ui_style(line1, lane_x - s1.x, lane_y1, lane_font, lane_color, font=self._font_display, border_width=1.0, shadow_offset=8.0, align="left_top", y_offset=0.0)
-    draw_text_ui_style(line2, lane_x - s2.x, lane_y2, lane_font, lane_color, font=self._font_display, border_width=1.0, shadow_offset=8.0, align="left_top", y_offset=0.0)
-    """
 
   def _get_driving_mode_text_and_color(self) -> tuple[str, rl.Color]:
     # Carrot
