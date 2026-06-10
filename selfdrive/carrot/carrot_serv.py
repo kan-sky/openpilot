@@ -745,7 +745,7 @@ class CarrotServ:
       elif is_lane_change:
         fork_speed = max(30.0, turn_speed)
       elif is_rotary:
-        fork_speed = min(27.0, turn_speed)
+        fork_speed = max(27.0, turn_speed)
 
     stop_speed = 1
     turn_dist_for_speed = self.autoTurnControlTurnEnd * turn_speed / 3.6 # autoTurnControlSpeedTurn(70%) 목표속도까지 감속 완료할 거리.
