@@ -736,14 +736,16 @@ class CarrotServ:
     turn_speed = v_ego_kph
     # Kans: 현재속도의 감속비(당근맨=85%) 적용,
     if self.autoTurnControlSpeedTurn > 0:
-      turn_ratio = max(0.75, self.autoTurnControlSpeedTurn)  # 최소값 75%
+      turn_ratio = min(0.85, self.autoTurnControlSpeedTurn)  # 최소값=당근맨값(75%)
       turn_speed = v_ego_kph * turn_ratio
       # 일반 좌/우회전은 과도한 저속 진입 방지로 15km/h
       if is_turn:
-        turn_speed = min(15.0, turn_speed)
+        turn_speed = min(17.0, turn_speed)
       # 차선변경/로터리는 27km/h
-      if is_lane_change or is_rotary:
-        fork_speed = max(27.0, turn_speed)
+      elif is_lane_change:
+        fork_speed = max(30.0, turn_speed)
+      elif is_rotary:
+        fork_speed = min(27.0, turn_speed)
 
     stop_speed = 1
     turn_dist_for_speed = self.autoTurnControlTurnEnd * turn_speed / 3.6 # autoTurnControlSpeedTurn(70%) 목표속도까지 감속 완료할 거리.
@@ -753,14 +755,14 @@ class CarrotServ:
     is_highway_like = self.roadcate in [0, 1] or self.nRoadLimitSpeed >= 70
 
     # Kans: 차선변경 기본값
-    start_fork_dist = max(20.0, self.autoTurnControlTurnEnd * 10.0)
-    start_turn_dist = min(10.0, self.autoTurnControlTurnEnd * 10.0)
+    start_fork_dist = max(50.0, self.autoTurnControlTurnEnd * 10.0)
+    start_turn_dist = min(25.0, self.autoTurnControlTurnEnd * 10.0)
     atc_debug = "Def"
 
     #일반 좌/우회전: start_fork_dist ~ start_turn_dist 구간에서 atc left/right 발생"
     if is_turn:
-      start_fork_dist = 25.0
-      start_turn_dist = 20.0
+      start_fork_dist = 30.0
+      start_turn_dist = 27.0
       atc_debug = "Trn"
     elif is_Uturn:
       start_fork_dist = 5.0
@@ -775,10 +777,10 @@ class CarrotServ:
         start_fork_dist = 90.0
         atc_debug = "Lc"
       elif is_highway_like:
-        start_fork_dist = 110.0
+        start_fork_dist = 100.0
         atc_debug = "Lc"
       else:
-        start_fork_dist = 15
+        start_fork_dist = 20
         atc_debug = "LC"
 
     elif is_tg:
