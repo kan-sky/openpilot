@@ -760,7 +760,7 @@ class CarrotServ:
     #일반 좌/우회전: start_fork_dist ~ start_turn_dist 구간에서 atc left/right 발생"
     if is_turn:
       start_fork_dist = 25.0
-      start_turn_dist = 8.0
+      start_turn_dist = 20.0
       atc_debug = "Trn"
     elif is_Uturn:
       start_fork_dist = 5.0
