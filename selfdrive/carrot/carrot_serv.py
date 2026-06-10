@@ -740,8 +740,8 @@ class CarrotServ:
       turn_speed = v_ego_kph * turn_ratio
       # 일반 좌/우회전은 과도한 저속 진입 방지로 15km/h
       if is_turn:
-        turn_speed = max(15.0, turn_speed)
-      # 차선변경/로터리도는 27km/h
+        turn_speed = min(15.0, turn_speed)
+      # 차선변경/로터리는 27km/h
       if is_lane_change or is_rotary:
         fork_speed = max(27.0, turn_speed)
 
@@ -759,18 +759,18 @@ class CarrotServ:
 
     #일반 좌/우회전: start_fork_dist ~ start_turn_dist 구간에서 atc left/right 발생"
     if is_turn:
-      start_fork_dist = 10.0
-      start_turn_dist = 8.0
+      start_fork_dist = 15.0
+      start_turn_dist = 15.0
       atc_debug = "Trn"
 
     elif is_Uturn:
-      start_fork_dist = 8.0
+      start_fork_dist = 5.0
       start_turn_dist = 5.0
       atc_debug = "Utn"
   
     elif is_rotary:
-      start_fork_dist = 5.0
-      start_turn_dist = 5.0
+      start_fork_dist = 15.0
+      start_turn_dist = 15.0
       atc_debug = "Rty"
 
     elif is_lane_change:
@@ -781,7 +781,7 @@ class CarrotServ:
         start_fork_dist = 110.0
         atc_debug = "Hwy"
       else:
-        start_fork_dist = 50
+        start_fork_dist = 10
         atc_debug = "LC"
 
     elif is_tg:

@@ -57,7 +57,6 @@ class UIState:
         "carOutput",
         "carControl",
         "liveParameters",
-        "testJoystick",
         "rawAudioData",
         "carrotMan",
         "peripheralState",
