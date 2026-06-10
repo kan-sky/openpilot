@@ -726,7 +726,7 @@ class CarrotServ:
     # Kans: 차선변경 카테고리
     is_Uturn = x_turn_info == 7
     is_turn = x_turn_info in [1, 2]
-    is_lane_change = x_turn_info in [3, 4, 5]
+    is_lane_change = x_turn_info in [3, 4]
     is_rotary = x_turn_info == 5
     is_tg = x_turn_info == 6
     is_arrive = x_turn_info == 8
@@ -754,34 +754,31 @@ class CarrotServ:
 
     # Kans: 차선변경 기본값
     start_fork_dist = max(20.0, self.autoTurnControlTurnEnd * 10.0)
-    start_turn_dist = min(8.0, self.autoTurnControlTurnEnd * 10.0)
+    start_turn_dist = min(10.0, self.autoTurnControlTurnEnd * 10.0)
     atc_debug = "Def"
 
     #일반 좌/우회전: start_fork_dist ~ start_turn_dist 구간에서 atc left/right 발생"
     if is_turn:
-      start_fork_dist = 15.0
-      start_turn_dist = 15.0
+      start_fork_dist = 25.0
+      start_turn_dist = 8.0
       atc_debug = "Trn"
-
     elif is_Uturn:
       start_fork_dist = 5.0
       start_turn_dist = 5.0
       atc_debug = "Utn"
-  
-    elif is_rotary:
-      start_fork_dist = 15.0
-      start_turn_dist = 15.0
+      elif is_rotary:
+      start_fork_dist = 65.0
+      start_turn_dist = 65.0
       atc_debug = "Rty"
-
     elif is_lane_change:
       if self.navType == "off ramp":
         start_fork_dist = 90.0
-        atc_debug = "Rmp"
+        atc_debug = "Lc"
       elif is_highway_like:
         start_fork_dist = 110.0
-        atc_debug = "Hwy"
+        atc_debug = "Lc"
       else:
-        start_fork_dist = 10
+        start_fork_dist = 15
         atc_debug = "LC"
 
     elif is_tg:
