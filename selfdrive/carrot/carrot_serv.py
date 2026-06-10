@@ -710,7 +710,6 @@ class CarrotServ:
 
     return float(bearing_calculated)
 
-
   def estimate_position(self, lat, lon, speed, angle, dt):
     R = 6371000
     angle_rad = math.radians(angle)
