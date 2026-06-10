@@ -213,7 +213,7 @@ class HudRenderer(Widget):
     button_x = rect.x + rect.width - UI_CONFIG.border_size - UI_CONFIG.button_size
     button_y = rect.y + UI_CONFIG.border_size
     self._exp_button.render(rl.Rectangle(button_x, button_y, UI_CONFIG.button_size, UI_CONFIG.button_size))
-    self._draw_wheel_side_info(wheel_txt, pos_x, pos_y)
+    self._draw_wheel_side_info(rect)
 
   def user_interacting(self) -> bool:
     return self._exp_button.is_pressed
@@ -364,7 +364,7 @@ class HudRenderer(Widget):
     unit_pos = rl.Vector2(rect.x + rect.width / 2 - unit_text_size.x / 2, rect.y + 290 - unit_text_size.y / 2)
     rl.draw_text_ex(self._font_medium, unit_text, unit_pos, FONT_SIZES.speed_unit, 0, COLORS.WHITE_TRANSLUCENT)
 
-  def _draw_wheel_side_info(self, wheel_txt, pos_x: int, pos_y: int) -> None:
+  def _draw_wheel_side_info(self, rect: rl.Rectangle) -> None:
     # 기본 좌표(Top_left)
     wheel_txt = self._txt_wheel
     margin_x = 20
