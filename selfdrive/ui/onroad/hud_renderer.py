@@ -528,7 +528,7 @@ class HudRenderer(Widget):
     draw_text_ui_style(sr_text, info_x, sr_y, side_font, rl.Color(255, 255, 255, 235), font=self._font_display, border_width=1.0, shadow_offset=8.0, align="left_top", y_offset=0.0)
 
     if road_name:
-      draw_text_ui_style(road_name, info_x-250, road_y, side_font, rl.Color(255, 255, 255, 235), font=self._font_display, border_width=1.0, shadow_offset=8.0, align="left_top", y_offset=0.0)
+      draw_text_ui_style(road_name, info_x, road_y, side_font, rl.Color(255, 255, 255, 235), font=self._font_display, border_width=1.0, shadow_offset=8.0, align="left_top", y_offset=0.0)
 
   def _get_cpu_temp_text(self) -> str:
     try:
