@@ -21,9 +21,10 @@ from openpilot.common.swaglog import cloudlog
 from openpilot.system.hardware import HARDWARE, PC
 from openpilot.system.ui.lib.multilang import multilang
 from openpilot.common.realtime import Ratekeeper
-import datetime # mici
+import datetime # carrot
 
-_DEFAULT_FPS = int(os.getenv("FPS", {'tizi': 20}.get(HARDWARE.get_device_type(), 60)))
+#_DEFAULT_FPS = int(os.getenv("FPS", {'tizi': 20}.get(HARDWARE.get_device_type(), 60)))
+_DEFAULT_FPS = 20 
 FPS_LOG_INTERVAL = 5  # Seconds between logging FPS drops
 FPS_DROP_THRESHOLD = 0.9  # FPS drop threshold for triggering a warning
 FPS_CRITICAL_THRESHOLD = 0.5  # Critical threshold for triggering strict actions
@@ -100,6 +101,7 @@ class FontWeight(StrEnum):
   MEDIUM = "Inter-Medium.fnt"
   BOLD = "Inter-Bold.fnt"
   SEMI_BOLD = "Inter-SemiBold.fnt"
+  PRETENDARD = "Pretendard-SemiBold.fnt"
   UNIFONT = "unifont.fnt"
 
   # Small UI fonts
@@ -243,19 +245,13 @@ class GuiApplication:
     self._profile_render_frames = PROFILE_RENDER
     self._render_profiler = None
     self._render_profile_start_time = None
-    # mici
+    # carrot record
     self._record_enabled = False
     self._record_dir = Path("/data/media/0/videos")
     self._record_max_sec = 60
     self._record_t0 = 0.0
     self._record_every_n = 3
     self._record_frame_idx = 0
-
-  # Kans: 
-  def recording_elapsed(self) -> float:
-    if not self._record_enabled:
-      return 0.0
-    return max(0.0, time.monotonic() - self._record_t0)
 
   def _new_record_path(self) -> Path:
     self._record_dir.mkdir(parents=True, exist_ok=True)
@@ -281,7 +277,7 @@ class GuiApplication:
     if not self._record_enabled:
       return
     self._record_enabled = False
-    self.close_ffmpeg()  # application.py¿¡ ÀÌ¹Ì ÀÖ´Â close_ffmpeg ±×´ë·Î »ç¿ë
+    self.close_ffmpeg()  # application.pyì— ì´ë¯¸ ìˆëŠ” close_ffmpeg ê·¸ëŒ€ë¡œ ì‚¬ìš©
     print("[REC] stop")
 
   def toggle_recording(self):
@@ -301,10 +297,10 @@ class GuiApplication:
   def _init_ffmpeg(self, out_path: Path):
     self.close_ffmpeg()
 
-    # ³»ºÎ Æ©´×(¿øÇÏ¸é ¿©±â¸¸ Á¶Àı)
+    # ë‚´ë¶€ íŠœë‹(ì›í•˜ë©´ ì—¬ê¸°ë§Œ ì¡°ì ˆ)
     record_quality = 23          # CRF
-    record_bitrate = ""          # e.g. "2000k" (¿øÇÏ¸é »ç¿ë)
-    record_speed = 1             # ¹è¼Ó(Ãâ·Â fps = ÀÔ·Â fps * speed)
+    record_bitrate = ""          # e.g. "2000k" (ì›í•˜ë©´ ì‚¬ìš©)
+    record_speed = 1             # ë°°ì†(ì¶œë ¥ fps = ì…ë ¥ fps * speed)
     preset = "ultrafast"
 
     fps = self._target_fps if self._target_fps > 0 else _DEFAULT_FPS
@@ -448,9 +444,8 @@ class GuiApplication:
         self._ffmpeg_thread = threading.Thread(target=self._ffmpeg_writer_thread, daemon=True)
         self._ffmpeg_thread.start()
 
-      # four display runs slightly faster than 60 FPS, let it dictate rate so we don't drift and drop frames
-      vblank_control = HARDWARE.get_device_type() == 'mici'
-      rl.set_target_fps(0 if OFFSCREEN or vblank_control else fps)
+      # OFFSCREEN disables FPS limiting for fast offline rendering (e.g. clips)
+      rl.set_target_fps(0 if OFFSCREEN else fps)
 
       self._target_fps = fps
       self._set_styles()
@@ -658,29 +653,13 @@ class GuiApplication:
     rl.unload_image(image)
     return texture
 
-  def close_ffmpeg_origin(self):
-    if self._ffmpeg_thread is not None:
-      # Signal thread to stop, send sentinel, then wait for it to drain
-      self._ffmpeg_stop_event.set()
-      self._ffmpeg_queue.put(None)
-      self._ffmpeg_thread.join(timeout=30)
-
-    if self._ffmpeg_proc is not None:
-      self._ffmpeg_proc.stdin.flush()
-      self._ffmpeg_proc.stdin.close()
-      try:
-        self._ffmpeg_proc.wait(timeout=30)
-      except subprocess.TimeoutExpired:
-        self._ffmpeg_proc.terminate()
-        self._ffmpeg_proc.wait()
-
   def close_ffmpeg(self):
     th = self._ffmpeg_thread
     q = self._ffmpeg_queue
     ev = self._ffmpeg_stop_event
     proc = self._ffmpeg_proc
 
-    # ¸ÕÀú ÂüÁ¶ ²÷±â(ÀçÁøÀÔ/Áßº¹ È£Ãâ ¹æÁö)
+    # ë¨¼ì € ì°¸ì¡° ëŠê¸°(ì¬ì§„ì…/ì¤‘ë³µ í˜¸ì¶œ ë°©ì§€)
     self._ffmpeg_thread = None
     self._ffmpeg_queue = None
     self._ffmpeg_stop_event = None
@@ -705,7 +684,7 @@ class GuiApplication:
         stdin = proc.stdin
         if stdin is not None:
           try:
-            # ÀÌ¹Ì ´İÇûÀ¸¸é flush ±İÁö
+            # ì´ë¯¸ ë‹«í˜”ìœ¼ë©´ flush ê¸ˆì§€
             if not getattr(stdin, "closed", False):
               try:
                 stdin.flush()
@@ -900,7 +879,7 @@ class GuiApplication:
 
         font = rl.load_font(fnt_path.as_posix())
 
-        # ½ÇÆĞ/ÀÇ½É Å½Áö: texture id / width/height
+        # ì‹¤íŒ¨/ì˜ì‹¬ íƒì§€: texture id / width/height
         try:
           tex_id = int(font.texture.id)
           tw = int(font.texture.width)
