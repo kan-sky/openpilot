@@ -93,6 +93,65 @@ class AugmentedRoadView(CameraView):
     # Draw colored border based on driving state
     self._draw_border_carrot(rect)
 
+    # Kans: Scr recording
+    self._rec_x = int(rect.x + 160)
+    self._rec_y = int(rect.y + rect.height - 670)
+    self._rec_r = 75
+
+    is_rec = gui_app.is_recording()
+    elapsed = gui_app.recording_elapsed()
+
+    R = 75
+    self._rec_r = R
+
+    # 1초 깜박임
+    blink_on = (int(elapsed / 1.0) % 2 == 0) if is_rec else True
+    # 평상시
+    idle_ring = rl.Color(190, 190, 190, 180)
+    idle_fill = rl.Color(90, 90, 90, 120)
+    idle_dot = rl.Color(170, 170, 170, 180)
+    # 녹화중 채움색
+    rec_fill_on = rl.Color(90, 20, 20, 120)
+    rec_fill_off = rl.Color(0, 0, 0, 120)
+    # 녹화중 테두리색
+    rec_ring_on = rl.Color(210, 90, 90, 220)
+    rec_ring_off = rl.Color(120, 70, 70, 170)
+    # 녹화중 Dot color
+    rec_dot_on = rl.Color(220, 95, 95, 230)
+    rec_dot_off = rl.Color(110, 55, 55, 170)
+
+    # 바깥 원 배경 + 테두리
+    if is_rec:
+      fill_color = rec_fill_on if blink_on else rec_fill_off
+      ring_color = rec_ring_on if blink_on else rec_ring_off
+    else:
+      fill_color = idle_fill
+      ring_color = idle_ring
+
+    rl.draw_circle(self._rec_x, self._rec_y, R, fill_color)
+    rl.draw_circle_lines(self._rec_x, self._rec_y, R, ring_color)
+
+    # 녹화중 반경(dot_r)
+    dot_y = self._rec_y 
+    dot_r = 51
+    if is_rec:
+      dot_color = rec_dot_on if blink_on else rec_dot_off
+    else:
+      dot_color = idle_dot
+    rl.draw_circle(self._rec_x, dot_y, dot_r, dot_color)
+
+    # REC 텍스트
+    text_color = rl.Color(240, 240, 240, 220) if not is_rec else rl.Color(255, 235, 235, 230)
+    rl.draw_text("REC", self._rec_x - 28, self._rec_y - 10, 30, text_color)
+
+    # 경과시간
+    if is_rec:
+      total_sec = int(elapsed)
+      mm = total_sec // 60
+      ss = total_sec % 60
+      timer_text = f"{mm:02d}:{ss:02d}"
+      rl.draw_text(timer_text, self._rec_x - 30, self._rec_y + 24, 24, rl.Color(255, 255, 255, 220))
+
   def _handle_mouse_press(self, _):
     if not self._hud_renderer.user_interacting() and self._click_callback is not None:
       self._click_callback()
