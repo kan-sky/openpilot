@@ -736,16 +736,21 @@ class CarrotServ:
     turn_speed = v_ego_kph
     # Kans: 현재속도의 감속비(당근맨=85%) 적용,
     if self.autoTurnControlSpeedTurn > 0:
-      turn_ratio = min(0.85, self.autoTurnControlSpeedTurn)  # 최소값=당근맨값(75%)
-      turn_speed = v_ego_kph * turn_ratio
-      # 일반 좌/우회전은 과도한 저속 진입 방지로 15km/h
+      turn_ratio = min(0.9, self.autoTurnControlSpeedTurn)  # 최소값=당근맨값(75%)
+      ratio_speed = v_ego_kph * turn_ratio
+      # 일반 좌/우회전은 과도한 고속 진입 방지로 17km/h
       if is_turn:
-        turn_speed = min(17.0, turn_speed)
-      # 차선변경/로터리는 27km/h
-      elif is_lane_change:
-        fork_speed = max(30.0, turn_speed)
+        turn_speed = min(17.0, ratio_speed)
+        fork_speed = turn_speed
+      # 로터리: 좌우회전보다 약간 빠르게 
       elif is_rotary:
-        fork_speed = max(27.0, turn_speed)
+        turn_speed = max(30.0, min(40.0, ratio_speed))
+        fork_speed = turn_speed
+      # 고속/분기 차선변경: 현재속도 감속비 적용
+      elif is_lane_change:
+        turn_speed = max(30.0, ratio_speed)
+        fork_speed = turn_speed
+
 
     stop_speed = 1
     turn_dist_for_speed = self.autoTurnControlTurnEnd * turn_speed / 3.6 # autoTurnControlSpeedTurn(70%) 목표속도까지 감속 완료할 거리.
@@ -757,20 +762,20 @@ class CarrotServ:
     # Kans: 차선변경 기본값
     start_fork_dist = max(50.0, self.autoTurnControlTurnEnd * 10.0)
     start_turn_dist = min(25.0, self.autoTurnControlTurnEnd * 10.0)
-    atc_debug = "Def"
+    atc_debug = "Df"
 
     #일반 좌/우회전: start_fork_dist ~ start_turn_dist 구간에서 atc left/right 발생"
     if is_turn:
       start_fork_dist = 30.0
-      start_turn_dist = 27.0
+      start_turn_dist = 30.0
       atc_debug = "Trn"
     elif is_Uturn:
       start_fork_dist = 5.0
       start_turn_dist = 5.0
       atc_debug = "Utn"
     elif is_rotary:
-      start_fork_dist = 65.0
-      start_turn_dist = 65.0
+      start_turn_dist = 5.0
+      turn_dist_for speed = 5.0
       atc_debug = "Rty"
     elif is_lane_change:
       if self.navType == "off ramp":
@@ -781,7 +786,7 @@ class CarrotServ:
         atc_debug = "Lc"
       else:
         start_fork_dist = 20
-        atc_debug = "LC"
+        atc_debug = "Lc"
 
     elif is_tg:
       start_fork_dist = 15.0
