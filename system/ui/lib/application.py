@@ -253,6 +253,12 @@ class GuiApplication:
     self._record_every_n = 3
     self._record_frame_idx = 0
 
+  # Kans: 
+  def recording_elapsed(self) -> float:
+    if not self._record_enabled:
+      return 0.0
+    return max(0.0, time.monotonic() - self._record_t0)
+
   def _new_record_path(self) -> Path:
     self._record_dir.mkdir(parents=True, exist_ok=True)
     name = datetime.datetime.now().strftime("%Y%m%d-%H%M%S") + ".mp4"
