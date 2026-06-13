@@ -760,18 +760,18 @@ class CarrotServ:
     is_highway_like = self.roadcate in [0, 1] or self.nRoadLimitSpeed >= 70
 
     # Kans: 차선변경 기본값
-    start_fork_dist = max(50.0, self.autoTurnControlTurnEnd * 10.0)
-    start_turn_dist = min(25.0, self.autoTurnControlTurnEnd * 10.0)
+    start_fork_dist = max(60.0, self.autoTurnControlTurnEnd * 10.0)
+    start_turn_dist = min(28.0, self.autoTurnControlTurnEnd * 10.0)
     atc_debug = "Df"
 
     #일반 좌/우회전: start_fork_dist ~ start_turn_dist 구간에서 atc left/right 발생"
     if is_turn:
-      start_fork_dist = 30.0
       start_turn_dist = 30.0
+      start_gork_dist = 30.0
       atc_debug = "Trn"
     elif is_Uturn:
-      start_fork_dist = 5.0
       start_turn_dist = 5.0
+      start_fork_dist = 5.0
       atc_debug = "Utn"
     elif is_rotary:
       start_turn_dist = 5.0
@@ -785,7 +785,7 @@ class CarrotServ:
         start_fork_dist = 100.0
         atc_debug = "Lc"
       else:
-        start_fork_dist = 20
+        start_fork_dist = 40
         atc_debug = "Lc"
 
     elif is_tg:
