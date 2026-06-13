@@ -775,7 +775,7 @@ class CarrotServ:
       atc_debug = "Utn"
     elif is_rotary:
       start_turn_dist = 5.0
-      turn_dist_for speed = 5.0
+      turn_dist_for_speed = 5.0
       atc_debug = "Rty"
     elif is_lane_change:
       if self.navType == "off ramp":
