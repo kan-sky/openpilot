@@ -388,7 +388,7 @@ class DesireHelper:
           self.lane_change_ll_prob = max(self.lane_change_ll_prob - 1.5 * DT_MDL, 0.0)
           # Kans: lane_change_prob가 너무 빨리 낮아질 수 있으므로
           # 최소 시작 유지시간(2.5s) 이후에만 finishing 허용
-          if self.lane_change_timer > 2.4 and lane_change_prob < 0.01 and self.lane_change_ll_prob < 0.01:
+          if self.lane_change_timer > 2.0 and lane_change_prob < 0.03 and self.lane_change_ll_prob < 0.01:
             self.lane_change_state = LaneChangeState.laneChangeFinishing
 
         elif self.lane_change_state == LaneChangeState.laneChangeFinishing:
