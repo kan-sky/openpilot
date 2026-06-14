@@ -751,7 +751,6 @@ class CarrotServ:
         turn_speed = max(30.0, ratio_speed)
         fork_speed = turn_speed
 
-
     stop_speed = 1
     turn_dist_for_speed = self.autoTurnControlTurnEnd * turn_speed / 3.6 # autoTurnControlSpeedTurn(70%) 목표속도까지 감속 완료할 거리.
     fork_dist_for_speed = self.autoTurnControlTurnEnd * fork_speed / 3.6 # fork_speed(=nRoadLimitSpeed) 목표속도까지 감속 완료할 거리.
