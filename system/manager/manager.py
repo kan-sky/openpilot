@@ -113,16 +113,6 @@ def manager_cleanup() -> None:
 
   cloudlog.info("everything is dead")
 
-#Kans: 메모리사용파악
-def read_rss_kb(pid: int) -> int:
-  try:
-    with open(f"/proc/{pid}/status") as f:
-      for line in f:
-        if line.startswith("VmRSS:"):
-          return int(line.split()[1])  # kB
-  except Exception:
-    pass
-  return 0
 
 def manager_thread() -> None:
   cloudlog.bind(daemon="manager")
@@ -144,15 +134,11 @@ def manager_thread() -> None:
   write_onroad_params(False, params)
   ensure_running(managed_processes.values(), False, params=params, CP=sm['carParams'], not_run=ignore)
 
-  print_timer = 0
-
   started_prev = False
   ignition_prev = False
 
-  mem_print_t = 0.0
   while True:
     sm.update(1000)
-    now = time.monotonic()
 
     started = sm['deviceState'].started
 
@@ -176,9 +162,7 @@ def manager_thread() -> None:
 
     running = ' '.join("{}{}\u001b[0m".format("\u001b[32m" if p.proc.is_alive() else "\u001b[31m", p.name)
                        for p in managed_processes.values() if p.proc)
-    print_timer = (print_timer + 1)%10
-    if print_timer == 0:
-      print(running)
+    print(running)
     cloudlog.debug(running)
 
     # send managerState

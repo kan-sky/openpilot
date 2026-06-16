@@ -135,8 +135,6 @@ class SelfdriveD:
 
     self.atc_type_last = ""
 
-
-
     # some comma three with NVMe experience NVMe dropouts mid-drive that
     # cause loggerd to crash on write, so ignore it only on that platform
     self.ignored_processes = set()

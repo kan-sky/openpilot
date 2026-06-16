@@ -248,7 +248,7 @@ class GuiApplication:
     # carrot record
     self._record_enabled = False
     self._record_dir = Path("/data/media/0/videos")
-    self._record_max_sec = 60
+    self._record_max_sec = 120
     self._record_t0 = 0.0
     self._record_every_n = 3
     self._record_frame_idx = 0
@@ -840,14 +840,18 @@ class GuiApplication:
         if RECORD or self._record_enabled:
           self._record_frame_idx += 1
           if self._record_frame_idx % self._record_every_n == 0:
-            image = rl.load_image_from_texture(self._render_texture.texture)
-            data_size = image.width * image.height * 4
-            data = bytes(rl.ffi.buffer(image.data, data_size))
-            try:
-              self._ffmpeg_queue.put_nowait(data)  # Async write via background thread
-            except queue.Full:
-              pass          
-            rl.unload_image(image)
+            if self._ffmpeg_queue is not None and not self._ffmpeg_queue.full():
+              image = None
+              try:
+                image = rl.load_image_from_texture(self._render_texture.texture)
+                data_size = image.width * image.height * 4
+                data = bytes(rl.ffi.buffer(image.data, data_size))
+                self._ffmpeg_queue.put_nowait(data)
+              except Exception as e:
+                print(f"[REC] capture error: {e}")
+              finally:
+                if image is not None:
+                  rl.unload_image(image)
             
           if self._record_enabled:
             if (time.monotonic() - self._record_t0) >= self._record_max_sec:
