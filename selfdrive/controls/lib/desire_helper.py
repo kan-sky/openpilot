@@ -50,9 +50,6 @@ class DesireHelper:
     self.auto_lane_change_enable = False
     self.next_lane_change = False
 
-    # keep pulse
-    self.keep_pulse_timer = 0.0
-
     # params
     self.laneChangeNeedTorque = 0
     self.laneChangeBsd = 0
@@ -241,6 +238,11 @@ class DesireHelper:
 
     # 선택된 side (FSM은 이 side만 참고)
     side = self._get_selected_side(blinker_state) if blinker_state in (BLINKER_LEFT, BLINKER_RIGHT) else None
+    atc_lane_change_manual_only = (
+      atc_enabled and
+      not driver_enabled and
+      self.atc_type in ("fork left", "atc left")
+    )
 
     # auto lane change trigger (기존 로직 유지하되 side 기반)
     auto_lane_change_trigger = False
@@ -252,6 +254,7 @@ class DesireHelper:
         # 기존 조건: edge_available + (trigger or appeared) + not side_object_detected
         auto_lane_change_trigger = (
           self.auto_lane_change_enable and
+          (not atc_lane_change_manual_only) and
           side.edge_available and
           (side.lane_available_trigger or side.lane_appeared) and
           (not side.side_object_detected) and
@@ -379,7 +382,7 @@ class DesireHelper:
                   if side.lane_change_available:
                     self.lane_change_state = LaneChangeState.laneChangeStarting
                 else:
-                  if torque_applied or auto_lane_change_trigger or side.lane_line_info_edge_detect:
+                  if torque_applied or ((not atc_lane_change_manual_only) and (auto_lane_change_trigger or side.lane_line_info_edge_detect)):
                     # 여기서는 시작 직전 안전성 체크
                     if side.lane_change_available:
                       self.lane_change_state = LaneChangeState.laneChangeStarting
@@ -429,15 +432,5 @@ class DesireHelper:
       self.lane_change_direction = self.turn_direction
     else:
       self.desire = DESIRES[self.lane_change_direction][self.lane_change_state]
-
-    # keep pulse
-    if self.lane_change_state in (LaneChangeState.off, LaneChangeState.laneChangeStarting):
-      self.keep_pulse_timer = 0.0
-    elif self.lane_change_state == LaneChangeState.preLaneChange:
-      self.keep_pulse_timer += DT_MDL
-      if self.keep_pulse_timer > 1.0:
-        self.keep_pulse_timer = 0.0
-      elif self.desire in (log.Desire.keepLeft, log.Desire.keepRight):
-        self.desire = log.Desire.none
 
     return self.desire

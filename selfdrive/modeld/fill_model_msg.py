@@ -3,8 +3,6 @@ import capnp
 import numpy as np
 from cereal import log
 from openpilot.selfdrive.modeld.constants import ModelConstants, Plan, Meta
-# Carrot
-import math
 
 SEND_RAW_PRED = os.getenv('SEND_RAW_PRED')
 
@@ -57,26 +55,29 @@ def fill_lane_line_meta(builder, lane_lines, lane_line_probs):
   builder.rightY = lane_lines[2].y[0]
   builder.rightProb = lane_line_probs[2]
 
-def fill_model_msg(base_msg: capnp._DynamicStructBuilder, extended_msg: capnp._DynamicStructBuilder,
-                   net_output_data: dict[str, np.ndarray], action: log.ModelDataV2.Action,
+def fill_driving_model_data(msg: capnp._DynamicStructBuilder, modelv2_send: capnp._DynamicStructBuilder) -> None:
+  msg.valid = modelv2_send.valid
+  modelV2 = modelv2_send.modelV2
+  driving_model_data = msg.drivingModelData
+  driving_model_data.frameId = modelV2.frameId
+  driving_model_data.frameIdExtra = modelV2.frameIdExtra
+  driving_model_data.frameDropPerc = modelV2.frameDropPerc
+  driving_model_data.modelExecutionTime = modelV2.modelExecutionTime
+  driving_model_data.action = modelV2.action
+  driving_model_data.meta.laneChangeState = modelV2.meta.laneChangeState
+  driving_model_data.meta.laneChangeDirection = modelV2.meta.laneChangeDirection
+  fill_lane_line_meta(driving_model_data.laneLineMeta, modelV2.laneLines, modelV2.laneLineProbs)
+  fill_xyz_poly(driving_model_data.path, ModelConstants.POLY_PATH_DEGREE, modelV2.position.x, modelV2.position.y, modelV2.position.z)
+
+def fill_model_msg(msg: capnp._DynamicStructBuilder, net_output_data: dict[str, np.ndarray], action: log.ModelDataV2.Action,
                    publish_state: PublishState, vipc_frame_id: int, vipc_frame_id_extra: int,
                    frame_id: int, frame_drop: float, timestamp_eof: int, model_execution_time: float,
                    valid: bool) -> None:
   frame_age = frame_id - vipc_frame_id if frame_id > vipc_frame_id else 0
   frame_drop_perc = frame_drop * 100
-  extended_msg.valid = valid
-  base_msg.valid = valid
+  msg.valid = valid
 
-  driving_model_data = base_msg.drivingModelData
-
-  driving_model_data.frameId = vipc_frame_id
-  driving_model_data.frameIdExtra = vipc_frame_id_extra
-  driving_model_data.frameDropPerc = frame_drop_perc
-  driving_model_data.modelExecutionTime = model_execution_time
-
-  driving_model_data.action = action
-
-  modelV2 = extended_msg.modelV2
+  modelV2 = msg.modelV2
   modelV2.frameId = vipc_frame_id
   modelV2.frameIdExtra = vipc_frame_id_extra
   modelV2.frameAge = frame_age
@@ -91,52 +92,11 @@ def fill_model_msg(base_msg: capnp._DynamicStructBuilder, extended_msg: capnp._D
   fill_xyzt(modelV2.orientation, ModelConstants.T_IDXS, *net_output_data['plan'][0,:,Plan.T_FROM_CURRENT_EULER].T)
   fill_xyzt(modelV2.orientationRate, ModelConstants.T_IDXS, *net_output_data['plan'][0,:,Plan.ORIENTATION_RATE].T)
 
-  # poly path
-  fill_xyz_poly(driving_model_data.path, ModelConstants.POLY_PATH_DEGREE, *net_output_data['plan'][0,:,Plan.POSITION].T)
-
   # action
   modelV2.action = action
 
   # times at X_IDXS of edges and lines aren't used
-  # Carrot: 모델이 예측한 시간별 전진거리(plan_x)를 이용해, 각 고정거리 X_IDXS에 대응하는 도달시간 LINE_T_IDXS를 안전하게 보간해서 만드는 로직
-  # LINE_T_IDXS: list[float] = [] <- 이렇게 빈 곳을 시간대별로 예측되는 거리에 값을 저장하기 위한 
-  # times at X_IDXS according to model plan
-  plan_x = net_output_data['plan'][0, :, Plan.POSITION][:, 0]
-  Tmax = ModelConstants.T_IDXS[ModelConstants.IDX_N - 1]
-
-  LINE_T_IDXS = [0.0] * ModelConstants.IDX_N
-
-  tidx = 0
-  for xidx in range(1, ModelConstants.IDX_N):
-    x_target = ModelConstants.X_IDXS[xidx]
-
-    while tidx < ModelConstants.IDX_N - 1 and plan_x[tidx + 1] < x_target:
-      tidx += 1
-
-    if tidx >= ModelConstants.IDX_N - 1:
-      LINE_T_IDXS[xidx] = Tmax
-      continue
-
-    x0 = float(plan_x[tidx])
-    x1 = float(plan_x[tidx + 1])
-    t0 = ModelConstants.T_IDXS[tidx]
-    t1 = ModelConstants.T_IDXS[tidx + 1]
-
-    dx = x1 - x0
-    if dx <= 1e-9:
-      LINE_T_IDXS[xidx] = t0
-    else:
-      p = (x_target - x0) / dx
-      p = min(max(p, 0.0), 1.0)
-      LINE_T_IDXS[xidx] = t0 + p * (t1 - t0)
-
-  # Kans: 시간값이 뒤로 갈수록 단순 감소하지 않도록 보정
-  running = LINE_T_IDXS[0]
-  for i in range(1, len(LINE_T_IDXS)):
-    if LINE_T_IDXS[i] < running:
-      LINE_T_IDXS[i] = running
-    else:
-      running = LINE_T_IDXS[i]
+  LINE_T_IDXS: list[float] = []
 
   # lane lines
   modelV2.init('laneLines', 4)
@@ -145,8 +105,6 @@ def fill_model_msg(base_msg: capnp._DynamicStructBuilder, extended_msg: capnp._D
     fill_xyzt(lane_line, LINE_T_IDXS, np.array(ModelConstants.X_IDXS), net_output_data['lane_lines'][0,i,:,0], net_output_data['lane_lines'][0,i,:,1])
   modelV2.laneLineStds = net_output_data['lane_lines_stds'][0,:,0,0].tolist()
   modelV2.laneLineProbs = net_output_data['lane_lines_prob'][0,1::2].tolist()
-
-  fill_lane_line_meta(driving_model_data.laneLineMeta, modelV2.laneLines, modelV2.laneLineProbs)
 
   # road edges
   modelV2.init('roadEdges', 2)

@@ -24,15 +24,15 @@ class StateMachine:
     # ENABLED, SOFT DISABLING, PRE ENABLING, OVERRIDING
     if self.state != State.disabled:
       # user and immediate disable always have priority in a non-disabled state
-      if events.contains(ET.USER_DISABLE):
-        print("####ET.USER_DISABLE", events.events)
-        self.state = State.disabled
-        self.current_alert_types.append(ET.USER_DISABLE)
-
-      elif events.contains(ET.IMMEDIATE_DISABLE):
+      if events.contains(ET.IMMEDIATE_DISABLE):
         print("####ET.IMMEDIATE_DISABLE", events.events)
         self.state = State.disabled
         self.current_alert_types.append(ET.IMMEDIATE_DISABLE)
+
+      elif events.contains(ET.USER_DISABLE):
+        print("####ET.USER_DISABLE", events.events)
+        self.state = State.disabled
+        self.current_alert_types.append(ET.USER_DISABLE)
 
       else:
         # ENABLED

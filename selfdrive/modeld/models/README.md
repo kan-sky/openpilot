@@ -17,7 +17,7 @@ To view the architecture of the ONNX networks, you can use [netron](https://netr
       * Channel 5 represents the half-res V channel
 ### Policy inputs
 * **desire**
-  * one-hot encoded buffer to command model to execute certain actions, bit needs to be sent for the past 5 seconds (at 20FPS) : 100 * 8
+  * per-desire frames-since-pulse buffer to command model to execute certain actions. 0 means no recent pulse; positive values are 1-indexed frames since the pulse over the past 5 seconds (at 20 FPS) : 100 * 8
 * **traffic convention**
   * one-hot encoded vector to tell model whether traffic is right-hand or left-hand traffic : 2
 * **lateral control params**

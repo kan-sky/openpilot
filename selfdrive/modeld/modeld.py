@@ -21,7 +21,7 @@ from openpilot.selfdrive.controls.lib.desire_helper import DesireHelper
 from openpilot.selfdrive.controls.lib.drive_helpers import get_accel_from_plan, smooth_value, get_curvature_from_plan
 from openpilot.selfdrive.modeld.parse_model_outputs import Parser
 from openpilot.selfdrive.modeld.compile_modeld import make_input_queues, WARP_INPUTS, POLICY_INPUTS
-from openpilot.selfdrive.modeld.fill_model_msg import fill_model_msg, fill_pose_msg, PublishState
+from openpilot.selfdrive.modeld.fill_model_msg import fill_model_msg, fill_driving_model_data, fill_pose_msg, PublishState
 from openpilot.common.file_chunker import read_file_chunked, get_manifest_path
 from openpilot.selfdrive.modeld.constants import ModelConstants, Plan
 from openpilot.selfdrive.modeld.helpers import usbgpu_present, modeld_pkl_path, get_tg_input_devices
@@ -29,7 +29,7 @@ from openpilot.selfdrive.modeld.helpers import usbgpu_present, modeld_pkl_path, 
 PROCESS_NAME = "selfdrive.modeld.modeld"
 SEND_RAW_PRED = os.getenv('SEND_RAW_PRED')
 
-LAT_SMOOTH_SECONDS = 0.13
+LAT_SMOOTH_SECONDS = 0.0
 LONG_SMOOTH_SECONDS = 0.3
 MIN_LAT_CONTROL_SPEED = 0.3
 
@@ -81,44 +81,12 @@ def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.
     should_stop = (v_ego < 0.3 and desired_accel < 0.1)
     desired_velocity_now = max(0.0, float(v_ego))
 
-  # Kans: 깊은 커브에서 모델 곡률이 갑자기 줄어들 때 핸들 급풀림 방지
-  raw_desired_curvature = float(desired_curvature)
-  prev_curvature = float(prev_action.desiredCurvature)
-
-  same_curve = raw_desired_curvature * prev_curvature > 0.0
-  deep_curve = abs(prev_curvature) > 0.0025  # 같은 방향의 곡률이 .0025이상일때(램프)
-  curv_drop = abs(raw_desired_curvature) < abs(prev_curvature) * 0.70  # 모델이 그 곡률값을 갑자기 70%이하로 확 떨어뜨리면,
-
-  if same_curve and deep_curve and curv_drop:
-    desired_curvature = prev_curvature * 0.8 + raw_desired_curvature * 0.2  # 과하게 낮춘 값을 따라가지 않고 80%만 반영한다.
-
-  # Kans: 큰 곡률로 이어지는 커브 판단
-  abs_curvature = abs(desired_curvature)
-
-  # Kans: 곡률에 따른 smoothing 상한.
-  # 기존 [0.15, 0.10, 0.08]은 변화폭이 커서 조향이 감겼다 풀렸다 할 수 있음.
-  curve_smooth_max = float(np.interp(abs_curvature,
-    [0.0005, 0.0015, 0.0040],
-    [0.13, 0.11, 0.10]))
-
-  # 속도에 따른 smoothing 상한값
-  speed_smooth_max = float(np.interp(v_ego,
-    [5.0, 15.0, 30.0],
-    [0.08, 0.10, 0.18]))
-
-  # Kans: model uncertainty 기반 dynamic smoothing
-  dynamic_lat_smooth_seconds, y_std_1s, extra_smooth_seconds = get_lat_smooth_seconds_dynamic(model_output, lat_smooth_seconds)
-  base_lat_smooth_seconds = dynamic_lat_smooth_seconds
-
-  applied_lat_smooth_seconds = float(np.clip(
-    min(base_lat_smooth_seconds, curve_smooth_max, speed_smooth_max), 0.08, 0.18))
-
   # Kans: common smoothing
   desired_accel = smooth_value(desired_accel, prev_action.desiredAcceleration, LONG_SMOOTH_SECONDS)
   desired_velocity_now = smooth_value(desired_velocity_now, prev_action.desiredVelocity, LONG_SMOOTH_SECONDS)
 
   if v_ego > MIN_LAT_CONTROL_SPEED:
-    desired_curvature = smooth_value(desired_curvature, prev_action.desiredCurvature, applied_lat_smooth_seconds)
+    desired_curvature = smooth_value(desired_curvature, prev_action.desiredCurvature, lat_smooth_seconds)
   else:
     desired_curvature = prev_action.desiredCurvature
 
@@ -142,16 +110,11 @@ def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.
     neginf=0.0))
   desired_velocity_now = max(0.0, desired_velocity_now)
 
-  return(
-    log.ModelDataV2.Action(
-      desiredCurvature=float(desired_curvature),
-      desiredAcceleration=float(desired_accel),
-      shouldStop=bool(should_stop),
-      desiredVelocity=desired_velocity_now
-    ),
-    curve_smooth_max,
-    applied_lat_smooth_seconds
-  ) 
+  return log.ModelDataV2.Action(
+    desiredCurvature=float(desired_curvature),
+    desiredAcceleration=float(desired_accel),
+    shouldStop=bool(should_stop),
+    desiredVelocity=float(desired_velocity_now)) 
 
 class FrameMeta:
   frame_id: int = 0
@@ -164,28 +127,23 @@ class FrameMeta:
 
 
 class ModelState:
-  prev_desire: np.ndarray  # for tracking the rising edge of the pulse
+  prev_desire: np.ndarray  # for tracking rising edges
+  desire_frames: np.ndarray  # 1-indexed frames since each recent desire pulse
 
   def __init__(self, cam_w: int, cam_h: int, usbgpu: bool):
     input_devices = get_tg_input_devices(PROCESS_NAME, usbgpu)
     self.WARP_DEV, self.QUEUE_DEV = input_devices['WARP_DEV'], input_devices['QUEUE_DEV']
     jits = pickle.loads(read_file_chunked(modeld_pkl_path(usbgpu)))
-    vision_metadata = jits['metadata']['vision']
-    self.vision_input_shapes = vision_metadata['input_shapes']
-    self.vision_input_names = list(self.vision_input_shapes.keys())
-    self.vision_output_slices = vision_metadata['output_slices']
-
-    off_policy_metadata = jits['metadata']['off_policy']
-    self.off_policy_output_slices = off_policy_metadata['output_slices']
-
-    policy_metadata = jits['metadata']['on_policy']
-    self.policy_input_shapes = policy_metadata['input_shapes']
-    self.policy_output_slices = policy_metadata['output_slices']
+    metadata = jits['metadata']
+    self.input_shapes = metadata['input_shapes']
+    self.vision_input_names = [k for k in self.input_shapes if 'img' in k]
+    self.output_slices = metadata['output_slices']
 
     self.prev_desire = np.zeros(ModelConstants.DESIRE_LEN, dtype=np.float32)
+    self.desire_frames = np.zeros(ModelConstants.DESIRE_LEN, dtype=np.float32)
 
     self.frame_skip = ModelConstants.MODEL_RUN_FREQ // ModelConstants.MODEL_CONTEXT_FREQ
-    self.input_queues, self.npy = make_input_queues(self.vision_input_shapes, self.policy_input_shapes, self.frame_skip, device=self.QUEUE_DEV)
+    self.input_queues, self.npy = make_input_queues(self.input_shapes, self.frame_skip, device=self.QUEUE_DEV)
     self.full_frames: dict[str, Tensor] = {}
     self._blob_cache: dict[int, Tensor] = {}
     self.parser = Parser()
@@ -208,9 +166,12 @@ class ModelState:
         self._blob_cache[cache_key] = Tensor.from_blob(ptr, (yuv_size,), dtype='uint8', device=self.WARP_DEV)
       self.full_frames[key] = self._blob_cache[cache_key]
 
-    # Model decides when action is completed, so desire input is just a pulse triggered on rising edge
     inputs['desire_pulse'][0] = 0
-    self.npy['desire'][:] = np.where(inputs['desire_pulse'] - self.prev_desire > .99, inputs['desire_pulse'], 0)
+    desire_pulse = inputs['desire_pulse'] - self.prev_desire > .99
+    self.desire_frames[:] = np.where(self.desire_frames > 0, self.desire_frames + 1, 0)
+    self.desire_frames[desire_pulse] = 1
+    self.desire_frames[self.desire_frames > 5 * ModelConstants.MODEL_RUN_FREQ] = 0
+    self.npy['desire'][:] = self.desire_frames
     self.prev_desire[:] = inputs['desire_pulse']
     self.npy['traffic_convention'][:] = inputs['traffic_convention']
     self.npy['action_t'][:] = inputs['action_t']
@@ -222,21 +183,16 @@ class ModelState:
     if prepare_only:
       return None
 
-    vision_output, on_policy_output, off_policy_output = self.run_policy(
+    outs, = self.run_policy(
       **{k: self.input_queues[k] for k in POLICY_INPUTS if k in self.input_queues}, img=img, big_img=big_img
     )
-
-    vision_output = vision_output.numpy().flatten()
-    off_policy_output = off_policy_output.numpy().flatten()
-    on_policy_output = on_policy_output.numpy().flatten()
-    vision_outputs_dict = self.parser.parse_vision_outputs(self.slice_outputs(vision_output, self.vision_output_slices))
-    off_policy_outputs_dict = self.parser.parse_off_policy_outputs(self.slice_outputs(off_policy_output, self.off_policy_output_slices))
-    policy_outputs_dict = self.parser.parse_policy_outputs(self.slice_outputs(on_policy_output, self.policy_output_slices))
-    combined_outputs_dict = {**vision_outputs_dict, **off_policy_outputs_dict, **policy_outputs_dict}
+    model_output = outs.numpy()[0]
+    outputs_dict = self.parser.parse_outputs(self.slice_outputs(model_output, self.output_slices))
+    self.npy['prev_feat'][:] = model_output[self.output_slices['hidden_state']]
 
     if SEND_RAW_PRED:
-      combined_outputs_dict['raw_pred'] = np.concatenate([vision_output.copy(), on_policy_output.copy(), off_policy_output.copy()])
-    return combined_outputs_dict
+      outputs_dict['raw_pred'] = model_output.copy()
+    return outputs_dict
 
 
 def main(demo=False):
@@ -249,10 +205,7 @@ def main(demo=False):
   params.put_bool("UsbGpuPresent", _present)
   params.put_bool("UsbGpuCompiled", _compiled)
 
-  if not USBGPU:
-    # USB GPU currently saturates a core so can't do this yet,
-    # also need to move the aux USB interrupts for good timings
-    config_realtime_process(7, 54)
+  config_realtime_process(7, 54)
 
   # visionipc clients
   while True:
@@ -368,14 +321,6 @@ def main(demo=False):
 
     sm.update(0)
     desire = DH.desire
-
-    # Kans: RL 모델 차선변경 중 desire 유지 보강
-    if DH.lane_change_state != log.LaneChangeState.off:
-      if DH.lane_change_direction == log.LaneChangeDirection.left:
-        desire = log.Desire.laneChangeLeft
-      elif DH.lane_change_direction == log.LaneChangeDirection.right:
-        desire = log.Desire.laneChangeRight
-
     is_rhd = sm["driverMonitoringState"].isRHD
     frame_id = sm["roadCameraState"].frameId
     v_ego = max(sm["carState"].vEgo, 0.)
@@ -428,30 +373,29 @@ def main(demo=False):
       modelv2_send = messaging.new_message('modelV2')
       drivingdata_send = messaging.new_message('drivingModelData')
       posenet_send = messaging.new_message('cameraOdometry')
-      # Kans:
+
+      # Kans: dynamic lateral smoothing
       lat_smooth_seconds_dynamic, y_std_1s, lat_smooth_extra = get_lat_smooth_seconds_dynamic(
           model_output, lat_smooth_seconds)
-      if custom_lat_delay > 0.0:
-        lat_delay_dynamic = custom_lat_delay + lat_smooth_seconds_dynamic
-      else:
-        lat_delay_dynamic = sm["liveDelay"].lateralDelay + lat_smooth_seconds_dynamic
 
-      action, curve_smooth_max, applied_lat_smooth_seconds = get_action_from_model(model_output, prev_action, lat_delay_dynamic + frame_delay + action_delay,
+      if custom_lat_delay > 0.0:
+        lat_delay_dynamic = custom_lat_delay
+      else:
+        lat_delay_dynamic = sm["liveDelay"].lateralDelay
+
+      action = get_action_from_model(model_output, prev_action, lat_delay_dynamic + frame_delay + action_delay,
         long_delay + frame_delay + action_delay, v_ego, lat_smooth_seconds_dynamic, vEgoStopping)
 
       # Kans: LatSmoothDebug
       if frame % 100 == 0:
-        if 'action' in model_output:
-          model_curv = float(model_output['action'][0, 0]) / (max(1.0, v_ego) ** 2)
-          params.put_nonblocking("LatSmoothDebug",
-            f"in:{model_curv:.4f} out:{action.desiredCurvature:.4f} "
-            f"s:{applied_lat_smooth_seconds:.3f} c:{curve_smooth_max:.3f}")
-        else:
-          params.put_nonblocking("LatSmoothDebug",
-            f"s:{applied_lat_smooth_seconds:.3f} c:{curve_smooth_max:.3f}")
-
+        params.put_nonblocking("LatSmoothDebug",
+          f"s:{lat_smooth_seconds_dynamic:.3f} "
+          f"ystd:{y_std_1s:.3f} "
+          f"extra:{lat_smooth_extra:.3f}")
       prev_action = action
-      fill_model_msg(drivingdata_send, modelv2_send, model_output, action,
+
+      # modelV2 생성
+      fill_model_msg(modelv2_send, model_output, action,
                      publish_state, meta_main.frame_id, meta_extra.frame_id, frame_id,
                      frame_drop_ratio, meta_main.timestamp_eof, model_execution_time, live_calib_seen)
 
@@ -460,11 +404,11 @@ def main(demo=False):
       r_lane_change_prob = desire_state[log.Desire.laneChangeRight]
       lane_change_prob = l_lane_change_prob + r_lane_change_prob
       DH.update(sm['carState'], modelv2_send.modelV2, sm['carControl'].latActive, lane_change_prob, sm['carrotMan'], sm['radarState'])
+
+      # desire_helper 결과를 modelV2에 반영
       modelv2_send.modelV2.meta.laneChangeState = DH.lane_change_state
       modelv2_send.modelV2.meta.laneChangeDirection = DH.lane_change_direction
       modelv2_send.modelV2.meta.desireLog = DH.desireLog #carrot
-      drivingdata_send.drivingModelData.meta.laneChangeState = DH.lane_change_state
-      drivingdata_send.drivingModelData.meta.laneChangeDirection = DH.lane_change_direction
       # carrot
       modelv2_send.modelV2.meta.laneWidthLeft = float(DH.left.lane_width)
       modelv2_send.modelV2.meta.laneWidthRight = float(DH.right.lane_width)
@@ -475,8 +419,14 @@ def main(demo=False):
       modelv2_send.modelV2.meta.modelTurnSpeed = float(DH.model_turn_speed)
       modelv2_send.modelV2.meta.laneChangeAvailableLeft = DH.lane_change_available_left
       modelv2_send.modelV2.meta.laneChangeAvailableRight = DH.lane_change_available_right
+
+      # drivingModelData 생성 (반드시 DH 반영 후)
+      fill_driving_model_data(drivingdata_send, modelv2_send)
+
+      # Kans: carrot execution time override
       mt3 = time.perf_counter()
       drivingdata_send.drivingModelData.modelExecutionTime = mt3 - mt1
+
 
       fill_pose_msg(posenet_send, model_output, meta_main.frame_id, vipc_dropped_frames, meta_main.timestamp_eof, live_calib_seen)
       pm.send('modelV2', modelv2_send)

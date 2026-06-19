@@ -153,9 +153,23 @@ class LateralPlanner:
     self.LP.lane_width_left = md.meta.laneWidthLeft
     self.LP.lane_width_right = md.meta.laneWidthRight
     self.LP.curvature = measured_curvature
-    self.path_xyz, self.lanelines_active = self.LP.get_d_path(sm['carState'], v_ego_car, self.t_idxs, self.path_xyz, self.curve_speed)
 
+    # Kans: get_d_path()호출전에 원본 model path보존
+    model_path_xyz = self.path_xyz.copy()
+
+    self.path_xyz, self.lanelines_active = self.LP.get_d_path(sm['carState'], v_ego_car, self.t_idxs, self.path_xyz, self.curve_speed)
+    # Kans: lane mode에서 lane path가 커브를 직선화하는 현상 방지
+    # 레인리스 model path를 일부 섞어 커브 곡률을 보존
     if self.lanelines_active:
+      model_y = model_path_xyz[:, 1]
+      lane_y = self.path_xyz[:, 1]
+      curve_hint = abs(model_y[min(len(model_y) - 1, 20)] - model_y[0])
+      model_blend = float(np.interp(curve_hint,
+        [0.10, 0.50, 1.00],
+        [0.20, 0.45, 0.65]))
+      lane_blend = 1.0 - model_blend
+      self.path_xyz[:, 1] = lane_y * lane_blend + model_y * model_blend
+
       self.plan_yaw, self.plan_yaw_rate = yaw_from_path_no_scipy(
         self.path_xyz, self.v_plan,
         smooth_window=5,
