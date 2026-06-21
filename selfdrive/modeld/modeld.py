@@ -127,8 +127,7 @@ class FrameMeta:
 
 
 class ModelState:
-  prev_desire: np.ndarray  # for tracking rising edges
-  desire_frames: np.ndarray  # 1-indexed frames since each recent desire pulse
+  prev_desire: np.ndarray  # for tracking the rising edge of the pulse
 
   def __init__(self, cam_w: int, cam_h: int, usbgpu: bool):
     input_devices = get_tg_input_devices(PROCESS_NAME, usbgpu)
@@ -140,7 +139,6 @@ class ModelState:
     self.output_slices = metadata['output_slices']
 
     self.prev_desire = np.zeros(ModelConstants.DESIRE_LEN, dtype=np.float32)
-    self.desire_frames = np.zeros(ModelConstants.DESIRE_LEN, dtype=np.float32)
 
     self.frame_skip = ModelConstants.MODEL_RUN_FREQ // ModelConstants.MODEL_CONTEXT_FREQ
     self.input_queues, self.npy = make_input_queues(self.input_shapes, self.frame_skip, device=self.QUEUE_DEV)
@@ -166,12 +164,9 @@ class ModelState:
         self._blob_cache[cache_key] = Tensor.from_blob(ptr, (yuv_size,), dtype='uint8', device=self.WARP_DEV)
       self.full_frames[key] = self._blob_cache[cache_key]
 
+    # Model decides when action is completed, so desire input is just a pulse triggered on rising edge
     inputs['desire_pulse'][0] = 0
-    desire_pulse = inputs['desire_pulse'] - self.prev_desire > .99
-    self.desire_frames[:] = np.where(self.desire_frames > 0, self.desire_frames + 1, 0)
-    self.desire_frames[desire_pulse] = 1
-    self.desire_frames[self.desire_frames > 5 * ModelConstants.MODEL_RUN_FREQ] = 0
-    self.npy['desire'][:] = self.desire_frames
+    self.npy['desire'][:] = np.where(inputs['desire_pulse'] - self.prev_desire > .99, inputs['desire_pulse'], 0)
     self.prev_desire[:] = inputs['desire_pulse']
     self.npy['traffic_convention'][:] = inputs['traffic_convention']
     self.npy['action_t'][:] = inputs['action_t']
