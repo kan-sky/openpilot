@@ -81,12 +81,44 @@ def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.
     should_stop = (v_ego < 0.3 and desired_accel < 0.1)
     desired_velocity_now = max(0.0, float(v_ego))
 
+  # Kans: 깊은 커브에서 모델 곡률이 갑자기 줄어들 때 핸들 급풀림 방지
+  raw_desired_curvature = float(desired_curvature)
+  prev_curvature = float(prev_action.desiredCurvature)
+
+  same_curve = raw_desired_curvature * prev_curvature > 0.0
+  deep_curve = abs(prev_curvature) > 0.0025  # 같은 방향의 곡률이 .0025이상일때(램프)
+  curv_drop = abs(raw_desired_curvature) < abs(prev_curvature) * 0.70  # 모델이 그 곡률값을 갑자기 70%이하로 확 떨어뜨리면,
+
+  if same_curve and deep_curve and curv_drop:
+    desired_curvature = prev_curvature * 0.7 + raw_desired_curvature * 0.3  # 과하게 낮춘 값을 따라가지 않고 80%만 반영한다.
+
+  # Kans: 큰 곡률로 이어지는 커브 판단
+  abs_curvature = abs(desired_curvature)
+
+  # Kans: 곡률에 따른 smoothing 상한.
+  # 기존 [0.15, 0.10, 0.08]은 변화폭이 커서 조향이 감겼다 풀렸다 할 수 있음.
+  curve_smooth_max = float(np.interp(abs_curvature,
+    [0.0005, 0.0015, 0.0040],
+    [0.13, 0.11, 0.10]))
+
+  # 속도에 따른 smoothing 상한값
+  speed_smooth_max = float(np.interp(v_ego,
+    [5.0, 15.0, 30.0],
+    [0.08, 0.10, 0.18]))
+
+  # Kans: model uncertainty 기반 dynamic smoothing
+  dynamic_lat_smooth_seconds, y_std_1s, extra_smooth_seconds = get_lat_smooth_seconds_dynamic(model_output, lat_smooth_seconds)
+  base_lat_smooth_seconds = dynamic_lat_smooth_seconds
+
+  applied_lat_smooth_seconds = float(np.clip(
+    min(base_lat_smooth_seconds, curve_smooth_max, speed_smooth_max), 0.08, 0.18))
+
   # Kans: common smoothing
   desired_accel = smooth_value(desired_accel, prev_action.desiredAcceleration, LONG_SMOOTH_SECONDS)
   desired_velocity_now = smooth_value(desired_velocity_now, prev_action.desiredVelocity, LONG_SMOOTH_SECONDS)
 
   if v_ego > MIN_LAT_CONTROL_SPEED:
-    desired_curvature = smooth_value(desired_curvature, prev_action.desiredCurvature, lat_smooth_seconds)
+    desired_curvature = smooth_value(desired_curvature, prev_action.desiredCurvature, applied_lat_smooth_seconds)
   else:
     desired_curvature = prev_action.desiredCurvature
 
@@ -110,11 +142,16 @@ def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.
     neginf=0.0))
   desired_velocity_now = max(0.0, desired_velocity_now)
 
-  return log.ModelDataV2.Action(
-    desiredCurvature=float(desired_curvature),
-    desiredAcceleration=float(desired_accel),
-    shouldStop=bool(should_stop),
-    desiredVelocity=float(desired_velocity_now)) 
+  return(log.ModelDataV2.Action(
+      desiredCurvature=float(desired_curvature),
+      desiredAcceleration=float(desired_accel),
+      shouldStop=bool(should_stop),
+      desiredVelocity=desired_velocity_now
+    ),
+    curve_smooth_max,
+    applied_lat_smooth_seconds
+  ) 
+ 
 
 class FrameMeta:
   frame_id: int = 0
@@ -378,15 +415,19 @@ def main(demo=False):
       else:
         lat_delay_dynamic = sm["liveDelay"].lateralDelay
 
-      action = get_action_from_model(model_output, prev_action, lat_delay_dynamic + frame_delay + action_delay,
+      action, curve_smooth_max, applied_lat_smooth_seconds = get_action_from_model(model_output, prev_action, lat_delay_dynamic + frame_delay + action_delay,
         long_delay + frame_delay + action_delay, v_ego, lat_smooth_seconds_dynamic, vEgoStopping)
 
       # Kans: LatSmoothDebug
       if frame % 100 == 0:
-        params.put_nonblocking("LatSmoothDebug",
-          f"s:{lat_smooth_seconds_dynamic:.3f} "
-          f"ystd:{y_std_1s:.3f} "
-          f"extra:{lat_smooth_extra:.3f}")
+        if 'action' in model_output:
+          model_curv = float(model_output['action'][0, 0]) / (max(1.0, v_ego) ** 2)
+          params.put_nonblocking("LatSmoothDebug",
+            f"in:{model_curv:.4f} out:{action.desiredCurvature:.4f} "
+            f"s:{applied_lat_smooth_seconds:.3f} c:{curve_smooth_max:.3f}")
+        else:
+          params.put_nonblocking("LatSmoothDebug",
+            f"s:{applied_lat_smooth_seconds:.3f} c:{curve_smooth_max:.3f}")
       prev_action = action
 
       # modelV2 생성
