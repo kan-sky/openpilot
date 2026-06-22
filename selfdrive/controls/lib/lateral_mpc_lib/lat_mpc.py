@@ -19,7 +19,7 @@ X_DIM = 4
 P_DIM = 2
 COST_E_DIM = 3
 COST_DIM = COST_E_DIM + 2
-SPEED_OFFSET = 4.5
+SPEED_OFFSET = 5.5
 MODEL_NAME = 'lat'
 ACADOS_SOLVER_TYPE = 'SQP_RTI'
 N = 32
@@ -169,7 +169,7 @@ class LateralMpc:
   # Kans: spped offset
   def get_speed_offset(self, v_ego):
     v = np.clip(v_ego, 10.0, 27.0)
-    return float(np.interp(v, [10.0, 15.0, 27.0], [4.3, 4.0, 3.1]))
+    return float(np.interp(v, [10.0, 15.0, 27.0], [5.5, 5.0, 4.1]))
 
   def run(self, x0, p, y_pts, heading_pts, yaw_rate_pts):
     x0_cp = np.copy(x0)

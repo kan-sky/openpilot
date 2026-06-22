@@ -1168,23 +1168,6 @@
     },
     {
       "group": "시작",
-      "name": "MemUsage",
-      "title": "메모리사용량 파악",
-      "descr": "manager에서 각 프로세스의 RSS 메모리 사용량을 10초마다 tmux/log로 출력. \n 메모리 누수및 과도한 RAM 추적용 디버그옵션.",
-      "egroup": "START",
-      "etitle": "Memory Usage Debug",
-      "edescr": "Print RSS memory usage of each process .",
-      "min": 0,
-      "max": 1,
-      "default": 0,
-      "unit": 1,
-      "cgroup": "启动设置",
-      "ctitle": "内存使用量调试",
-      "cdescr": "每10秒输出一次各进程RSS内存使用量，用于内存泄漏及RAM占用调试。"
-    },
-
-    {
-      "group": "시작",
       "name": "SpeedFromPCM",
       "title": "PCM차량속도제어",
       "descr": "PCM(비롱컨)속도제어방법\n0:커브/카메라 감속+롱컨\n1:버튼스패밍안함(순정SCC)\n2:커브/카메라 감속\n3: Honda/Toyota",

@@ -91,16 +91,16 @@ def apply_std_steer_angle_limits(apply_angle: float, apply_angle_last: float, v_
   return float(np.clip(new_apply_angle, -limits.STEER_ANGLE_MAX, limits.STEER_ANGLE_MAX))
 
 
-def get_max_angle_delta_vm(v_ego_raw: float, VM: VehicleModel, limits):
-  """Calculate the maximum steering angle rate based on lateral jerk limits."""
-  max_curvature_rate_sec = limits.ANGLE_LIMITS.MAX_LATERAL_JERK / (v_ego_raw ** 2)  # (1/m)/s
+def get_max_angle_delta_vm(v_ego_raw: float, steer_step: int, VM: VehicleModel, max_lateral_jerk: float):
+  """ Calculate the maximum steering angle rate based on lateral jerk limits. """
+  max_curvature_rate_sec = max_lateral_jerk / (v_ego_raw ** 2)  # (1/m)/s
   max_angle_rate_sec = math.degrees(VM.get_steer_from_curvature(max_curvature_rate_sec, v_ego_raw, 0))  # deg/s
-  return max_angle_rate_sec * (DT_CTRL * limits.STEER_STEP)
+  return max_angle_rate_sec * (DT_CTRL * steer_step)
 
 
-def get_max_angle_vm(v_ego_raw: float, VM: VehicleModel, limits):
-  """Calculate the maximum steering angle based on lateral acceleration limits."""
-  max_curvature = limits.ANGLE_LIMITS.MAX_LATERAL_ACCEL / (v_ego_raw ** 2)  # 1/m
+def get_max_angle_vm(v_ego_raw: float, VM: VehicleModel, max_lateral_accel: float):
+  """ Calculate the maximum steering angle based on lateral acceleration limits. """
+  max_curvature = max_lateral_accel / (v_ego_raw ** 2)  # 1/m
   return math.degrees(VM.get_steer_from_curvature(max_curvature, v_ego_raw, 0))  # deg
 
 
@@ -167,5 +167,4 @@ def get_friction(lateral_accel_error: float, lateral_accel_deadzone: float, fric
   )
   friction = float(friction_interp) if friction_compensation else 0.0
   return friction
-
   return float(friction_interp)
