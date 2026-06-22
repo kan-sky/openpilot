@@ -206,7 +206,7 @@ class LanePlanner:
     if self.lanefull_mode and self.d_prob_count > int(1 / DT_MDL):
       laneline_active = True
 
-      # Kans: 시간축 보간에서 위치축 보간으로 변경
+      # Kans: 시간축 보간에서 위치축 보간으로 변경; supercombo로 통한된후 곡선 시간축을 반영하지 못하는 것으로 판단.
       safe_idxs = np.isfinite(self.ll_x) & np.isfinite(lane_path_y)
       if safe_idxs[0]:
         path_x = path_xyz[:, 0]
