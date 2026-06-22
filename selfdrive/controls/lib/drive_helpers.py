@@ -55,9 +55,9 @@ def get_lag_adjusted_curvature(CP, v_ego, psis, curvatures, steer_actuator_delay
 
   # 기본값 보정
   if psi_damping_straight <= 0.0:
-    psi_damping_straight = 0.7  # 곡선 탈출시 heading변화량(psi)의 70% 정도만 풀어주고 유지.
+    psi_damping_straight = 0.8  # 곡선 탈출시 heading변화량(psi)의 80% 정도만 풀어주고 유지.
   if psi_damping_s_curve <= 0.0:
-    psi_damping_s_curve = 0.5  # 반대방향 곡선 전환시 heading변화량(psi)의 50%만 반영해서 좀더 빨리 풀어줌.
+    psi_damping_s_curve = 0.6  # 반대방향 곡선 전환시 heading변화량(psi)의 60%만 반영해서 좀더 빨리 풀어줌.
 
   # 전환구간 출렁임 방지용
   psis_damping = 1.0  # 기본은 미래 heading 변화량을 그대로 반영 
@@ -115,7 +115,7 @@ def clip_curvature(v_ego, prev_curvature, new_curvature, roll) -> tuple[float, b
   return float(new_curvature), limited_accel or limited_max_curv
 
 # Carrot: model에 v_max 추가
-def get_accel_from_plan(speeds, accels, t_idxs, action_t=DT_MDL, vEgoStopping=0.3):
+def get_accel_from_plan(speeds, accels, t_idxs, action_t=DT_MDL, vEgoStopping=0.05):
   if len(speeds) == len(t_idxs):
     v_now = speeds[0]
     a_now = accels[0]

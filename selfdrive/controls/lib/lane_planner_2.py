@@ -156,8 +156,8 @@ class LanePlanner:
         lane_path_y = path_from_left_lane
       else:
         lane_path_y = path_from_left_lane if l_prob > 0.5 or l_prob > r_prob else path_from_right_lane
-    if l_prob > 0.7 and r_prob > 0.7:
-      lane_path_y = (self.lll_y + self.rll_y) / 2.0
+    elif l_prob > 0.7 and r_prob > 0.7:
+      lane_path_y = (path_from_left_lane + path_from_right_lane) / 2.
     else:
       lane_path_y = (l_prob * path_from_left_lane + r_prob * path_from_right_lane) / (l_prob + r_prob + 0.0001)
 
@@ -195,12 +195,12 @@ class LanePlanner:
     curvature_abs = abs(curvature)
     curve_blend_limit = float(np.interp(curvature_abs,
       [0.0003, 0.0012],
-      [0.35, 0.85]))
+      [0.20, 0.60]))
 
     lane_blend = min(lane_blend, curve_blend_limit)
 
     if inside_margin_active and both_lane_available:
-      lane_blend = max(lane_blend, 0.85)
+      lane_blend = max(lane_blend, 0.55)
 
 
     if self.lanefull_mode and self.d_prob_count > int(1 / DT_MDL):
