@@ -17,7 +17,7 @@ To view the architecture of the ONNX networks, you can use [netron](https://netr
       * Channel 5 represents the half-res V channel
 ### Policy inputs
 * **desire**
-  * per-desire frames-since-pulse buffer to command model to execute certain actions. 0 means no recent pulse; positive values are 1-indexed frames since the pulse over the past 5 seconds (at 20 FPS) : 100 * 8
+  * one-hot encoded buffer to command model to execute certain actions, bit needs to be sent for the past 5 seconds (at 20FPS) : 100 * 8
 * **traffic convention**
   * one-hot encoded vector to tell model whether traffic is right-hand or left-hand traffic : 2
 * **lateral control params**
@@ -43,7 +43,7 @@ Refer to **slice_outputs** and **parse_vision_outputs/parse_policy_outputs** in 
 * camera calibration angles (roll, pitch, yaw) from liveCalibration: 3 x float32 inputs
 
 ### output format
-* 84 x float32 outputs = 2 + 41 * 2 ([parsing example](https://github.com/commaai/openpilot/blob/22ce4e17ba0d3bfcf37f8255a4dd1dc683fe0c38/selfdrive/modeld/models/dmonitoring.cc#L33))
+* 84 x float32 outputs = 2 + 41 * 2 ([parsing example](https://github.com/commaai/openpilot/blob/22ce4e17ba0d3bfcf37f8255a4dd1dc683fe0c38/openpilot/selfdrive/modeld/models/dmonitoring.cc#L33))
   * for each person in the front seats (2 * 41)
     * face pose: 12 = 6 + 6
       * face orientation [pitch, yaw, roll] in camera frame: 3
