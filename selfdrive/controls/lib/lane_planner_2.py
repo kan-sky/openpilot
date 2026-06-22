@@ -156,8 +156,8 @@ class LanePlanner:
         lane_path_y = path_from_left_lane
       else:
         lane_path_y = path_from_left_lane if l_prob > 0.5 or l_prob > r_prob else path_from_right_lane
-    elif l_prob > 0.7 and r_prob > 0.7:
-      lane_path_y = (path_from_left_lane + path_from_right_lane) / 2.
+    if l_prob > 0.7 and r_prob > 0.7:
+      lane_path_y = (self.lll_y + self.rll_y) / 2.0
     else:
       lane_path_y = (l_prob * path_from_left_lane + r_prob * path_from_right_lane) / (l_prob + r_prob + 0.0001)
 
