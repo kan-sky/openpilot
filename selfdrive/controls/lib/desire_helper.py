@@ -243,13 +243,28 @@ class DesireHelper:
       not driver_enabled and
       self.atc_type in ("fork left", "atc left")
     )
-
+    # Kans: ATC 자동 차선변경. 레인리스에서도 이 조건이면 lane line 없이 시작 허용
+    is_atc_lane_change = (
+      atc_enabled and
+      not driver_enabled and
+      self.atc_type in ("fork left", "fork right", "atc left", "atc right")
+    )
     # auto lane change trigger (기존 로직 유지하되 side 기반)
     auto_lane_change_trigger = False
+    atc_safe = False
     if desire_enabled and side is not None:
+      # Kans: BSD/object는 ATC에서도 우회하지 않음
+      atc_safe = (
+        is_atc_lane_change and
+        (not side.side_object_detected) and
+        (side.bsd_hold_counter == 0)
+      )
       # carrot_lane_change_count>0이면 강제 허용
       if self.carrot_lane_change_count > 0:
-        auto_lane_change_trigger = side.lane_change_available
+        auto_lane_change_trigger = side.lane_change_available or atc_safe
+      elif is_atc_lane_change:
+        # Kans: 레인리스 ATC 허용. lane/edge 조건 대신 object/BSD만 확인
+        auto_lane_change_trigger = atc_safe
       else:
         # 기존 조건: edge_available + (trigger or appeared) + not side_object_detected
         auto_lane_change_trigger = (
@@ -330,7 +345,13 @@ class DesireHelper:
             # (원본 유지: 차선 존재하거나 geom 가능하면 auto off, 아니면 on)
             lane_exist_counter_side = side.lane_exist_count.counter
             lane_change_available_geom = side.lane_change_available_geom
-            self.auto_lane_change_enable = False if (lane_exist_counter_side > 0 or lane_change_available_geom) else True
+
+            # Kans: ATC 레인리스에서는 차선 존재/geom 조건으로 auto off 하지 않음
+            if is_atc_lane_change:
+              self.auto_lane_change_enable = True
+            else:
+              self.auto_lane_change_enable = False if (lane_exist_counter_side > 0 or lane_change_available_geom) else True
+
             self.next_lane_change = False
 
         elif self.lane_change_state == LaneChangeState.preLaneChange:
@@ -363,6 +384,10 @@ class DesireHelper:
               # LaneLineCheck=2: 실선에서도 토크 override 허용
               solid_line_blocked = (self.laneLineCheck >= 2) and (not side.lane_change_available_geom) and \
                                    (side.lane_available or side.edge_available)
+
+              # Kans: ATC 레인리스 시작 게이트
+              atc_start_gate = is_atc_lane_change and self.lane_change_delay == 0 and atc_safe
+
               start_gate = (side.lane_change_available_geom and self.lane_change_delay == 0) or \
                            side.lane_line_info_edge_detect or solid_line_blocked
 
@@ -384,7 +409,8 @@ class DesireHelper:
                 else:
                   if torque_applied or ((not atc_lane_change_manual_only) and (auto_lane_change_trigger or side.lane_line_info_edge_detect)):
                     # 여기서는 시작 직전 안전성 체크
-                    if side.lane_change_available:
+                    # Kans: ATC 레인리스는 lane_change_available 대신 atc_safe 허용
+                    if side.lane_change_available or atc_safe:
                       self.lane_change_state = LaneChangeState.laneChangeStarting
 
         elif self.lane_change_state == LaneChangeState.laneChangeStarting:
