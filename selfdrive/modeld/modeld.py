@@ -318,6 +318,7 @@ def main(demo=False):
   custom_lat_delay = 0.0
   lat_smooth_seconds = LAT_SMOOTH_SECONDS
   vEgoStopping = params.get_float("VEgoStopping") * 0.01
+  lat_delay_dynamic = lat_smooth_seconds
   while True:
     # carrot params
     frame += 1
