@@ -183,7 +183,7 @@ class LanePlanner:
     # laneless at lowspeed
     self.d_prob *= np.interp(v_ego * 3.6, [5., 10.], [0.0, 1.0])
 
-    adjustLaneTime = self.params.get_float("LatMpcInputOffset") * 0.01
+    adjustLane_xPos = self.params.get_float("LatMpcInputOffset") * 0.01
     laneline_active = False
     self.d_prob_count = self.d_prob_count + 1 if self.d_prob > 0.3 else 0
 
@@ -193,20 +193,29 @@ class LanePlanner:
 
     # Kans: 직선에서는 lane line 보정을 약하게, 커브에서는 강하게
     curvature_abs = abs(curvature)
-    curve_blend_limit = float(np.interp(curvature_abs,
-      [0.0003, 0.0012],
-      [0.30, 0.80]))
-
+    curve_blend_limit = float(np.interp(curvature_abs, [0.0003, 0.0012], [0.30, 0.65]))
     lane_blend = min(lane_blend, curve_blend_limit)
-
+    # Kans: 한쪽 차선쏠림 방지용
     if inside_margin_active and both_lane_available:
-      lane_blend = max(lane_blend, 0.80)
+      lane_blend = max(lane_blend, 0.65)
 
     if self.lanefull_mode and self.d_prob_count > int(1 / DT_MDL):
       laneline_active = True
-      safe_idxs = np.isfinite(self.ll_t)
-      if safe_idxs[0]:
-        lane_path_y_interp = np.interp(path_t * (1.0 + adjustLaneTime), self.ll_t[safe_idxs], lane_path_y[safe_idxs])
+      safe_idxs = (np.isfinite(self.ll_x) & np.isfinite(lane_path_y))
+      if np.any(safe_idxs):
+        lane_path_y_interp = np.interp(path_xyz[:, 0], self.ll_x[safe_idxs], lane_path_y[safe_idxs])
+        # Kans: 커브에서 차선 경로가 순간적으로 직선화되는 현상 완화
+        curvature_abs = abs(curvature)
+        if curvature_abs > 0.0008:
+          if hasattr(self, "prev_lane_path_y_interp"):
+            if (self.prev_lane_path_y_interp is not None and
+                len(self.prev_lane_path_y_interp) == len(lane_path_y_interp)):
+              near_idxs = path_xyz[:, 0] < 30.0  # 30m
+              delta = np.nanmax(np.abs(lane_path_y_interp[near_idxs] - self.prev_lane_path_y_interp[near_idxs]))
+              if delta > 0.30:
+                lane_path_y_interp = 0.25 * self.prev_lane_path_y_interp + 0.75 * lane_path_y_interp  # 이전 경로 25% 반영
+        self.prev_lane_path_y_interp = lane_path_y_interp.copy()
+
         path_xyz[:, 1] = lane_blend * lane_path_y_interp + (1.0 - lane_blend) * path_xyz[:, 1]
 
     return path_xyz, laneline_active
