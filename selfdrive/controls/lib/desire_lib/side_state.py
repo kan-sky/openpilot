@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+ï»¿from dataclasses import dataclass, field
 from collections import deque
 from typing import Optional
 
@@ -56,9 +56,11 @@ class SideState:
   bsd_hold_counter: int = 0
   bsd_detected_now: bool = False
 
-  # computed ¡°lane change available¡± (includes BSD+object)
+  # computed â€œlane change availableâ€ (includes BSD+object)
   lane_change_available_geom: bool = False
   lane_change_available: bool = False
+  lane_change_available_last: bool = False
+  lane_change_available_released: bool = False
   lane_width_sum: float = 0.0
 
   def update_lane_geometry(self,
@@ -98,7 +100,7 @@ class SideState:
   def update_lane_line_info(self, lane_line_info_raw: int):
     self.lane_line_info_raw = int(lane_line_info_raw)
     mod = self.lane_line_info_raw % 10
-    # edge_detect: 0/5·Î ¹Ù²î´Â ¼ø°£ (±âÁ¸Àº ÁÂ/¿ì°¡ °°Àº self.lane_line_info °øÀ¯¶ó ¹ö±×¼º)
+    # edge_detect: 0/5ë¡œ ë°”ë€ŒëŠ” ìˆœê°„ (ê¸°ì¡´ì€ ì¢Œ/ìš°ê°€ ê°™ì€ self.lane_line_info ê³µìœ ë¼ ë²„ê·¸ì„±)
     self.lane_line_info_edge_detect = (mod in (0, 5)) and (self.last_lane_line_mod not in (0, 5))
     self.last_lane_line_mod = mod
     self.lane_line_info_mod = mod
@@ -109,7 +111,7 @@ class SideState:
                        blindspot: bool,      # carstate.leftBlindspot/rightBlindspot
                        ignore_bsd: bool,
                        bsd_hold_sec: float = 2.0):
-    # object_detected (radar ±â¹Ý)
+    # object_detected (radar ê¸°ë°˜)
     if radar_obj is not None and radar_obj.status:
       d = radar_obj.dRel
       v = radar_obj.vLead
@@ -125,7 +127,7 @@ class SideState:
 
     self.side_object_detected = self.object_detected_count > int(-0.3 / DT_MDL)
 
-    # BSD hold (¿ä±¸»çÇ×: °ËÃâ ÈÄ 2ÃÊ À¯Áö)
+    # BSD hold (ìš”êµ¬ì‚¬í•­: ê²€ì¶œ í›„ 2ì´ˆ ìœ ì§€)
     self.bsd_detected_now = bool(blindspot)
     if self.bsd_detected_now and not ignore_bsd:
       self.bsd_hold_counter = int(bsd_hold_sec / DT_MDL)
@@ -136,21 +138,23 @@ class SideState:
     # geometric availability
     self.lane_change_available_geom = (self.lane_available or self.edge_available) and lane_line_info_lt_20
 
-    # include bsd/object into lane_change_available (¿ä±¸»çÇ×)
+    # include bsd/object into lane_change_available (ìš”êµ¬ì‚¬í•­)
     bsd_active = (self.bsd_hold_counter > 0) and (not ignore_bsd)
     self.lane_change_available = self.lane_change_available_geom and (not self.side_object_detected) and (not bsd_active)
+    self.lane_change_available_released = self.lane_change_available and not self.lane_change_available_last
 
   def update_triggers(self):
-    # lane_available_trigger (±âÁ¸ ·ÎÁ÷ À¯Áö)
+    # lane_available_trigger (ê¸°ì¡´ ë¡œì§ ìœ ì§€)
     self.lane_available_trigger = False
     if self.lane_width_diff > 0.8 and (self.lane_width < self.dist_to_edge):
       self.lane_available_trigger = True
 
-    # lane_appeared (bugfix: == ¸»°í >=°¡ ÀÚ¿¬½º·¯¿ò)
-    # + edge°¡ ³Ê¹« ¸Ö¸é(±³Â÷·Î) lane_appeared¸¦ °úµµÇÏ°Ô true·Î ¸¸µéÁö ¾Ê°Ô Á¦ÇÑ
+    # lane_appeared (bugfix: == ë§ê³  >=ê°€ ìžì—°ìŠ¤ëŸ¬ì›€)
+    # + edgeê°€ ë„ˆë¬´ ë©€ë©´(êµì°¨ë¡œ) lane_appearedë¥¼ ê³¼ë„í•˜ê²Œ trueë¡œ ë§Œë“¤ì§€ ì•Šê²Œ ì œí•œ
     appeared_now = self.lane_exist_count.counter >= int(0.2 / DT_MDL)
     self.lane_appeared = (self.lane_appeared or appeared_now) and (self.dist_to_edge < 4.0)
 
   def commit_last(self):
     self.lane_available_last = self.lane_available
     self.edge_available_last = self.edge_available
+    self.lane_change_available_last = self.lane_change_available

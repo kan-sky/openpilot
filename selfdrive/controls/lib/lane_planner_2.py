@@ -161,8 +161,8 @@ class LanePlanner:
     else:
       lane_path_y = (l_prob * path_from_left_lane + r_prob * path_from_right_lane) / (l_prob + r_prob + 0.0001)
 
-    # Kans: 안쪽차선 마진 .6m, 최소곡률 .0008(=완만한 커브에도 적용), 차선폭 2.8미터 미만은 미적용.
-    INSIDE_LANE_MARGIN = 0.6
+    # Kans: 안쪽차선 마진 .5m, 최소곡률 .0008(=완만한 커브에도 적용), 차선폭 2.8미터 미만은 미적용.
+    INSIDE_LANE_MARGIN = 0.5
     CURVE_THRESHOLD = 0.0008
     MIN_LANE_WIDTH_FOR_MARGIN = 2.8
     curvature = getattr(self, "curvature", 0.0)
@@ -171,11 +171,11 @@ class LanePlanner:
     if inside_margin_active:
       # +값=왼쪽 커브, 좌측 차선이 안쪽 -> +마진 더해주기
       if curvature > 0.0:
-        if l_prob > 0.6:
+        if l_prob > 0.5:
           lane_path_y = np.maximum(lane_path_y, self.lll_y + INSIDE_LANE_MARGIN)
       # -값=오른쪽 커브, 우측 차선이 안쪽 -> -마진 더해주기
       else:
-        if r_prob > 0.6:
+        if r_prob > 0.5:
           lane_path_y = np.minimum(lane_path_y, self.rll_y - INSIDE_LANE_MARGIN)
 
     self.d_prob *= self.lane_change_multiplier  ## 차선변경중에는 꺼버림.
@@ -195,12 +195,12 @@ class LanePlanner:
     curvature_abs = abs(curvature)
     curve_blend_limit = float(np.interp(curvature_abs,
       [0.0003, 0.0012],
-      [0.20, 0.60]))
+      [0.30, 0.80]))
 
     lane_blend = min(lane_blend, curve_blend_limit)
 
     if inside_margin_active and both_lane_available:
-      lane_blend = max(lane_blend, 0.55)
+      lane_blend = max(lane_blend, 0.80)
 
 
     if self.lanefull_mode and self.d_prob_count > int(1 / DT_MDL):
