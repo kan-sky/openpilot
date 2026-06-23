@@ -21,7 +21,7 @@ from openpilot.selfdrive.controls.lib.desire_helper import DesireHelper
 from openpilot.selfdrive.controls.lib.drive_helpers import get_accel_from_plan, smooth_value, get_curvature_from_plan
 from openpilot.selfdrive.modeld.parse_model_outputs import Parser
 from openpilot.selfdrive.modeld.compile_modeld import make_input_queues, WARP_INPUTS, POLICY_INPUTS
-from openpilot.selfdrive.modeld.fill_model_msg import fill_model_msg, fill_pose_msg, PublishState
+from openpilot.selfdrive.modeld.fill_model_msg import fill_model_msg, fill_driving_model_data, fill_pose_msg, PublishState
 from openpilot.common.file_chunker import read_file_chunked, get_manifest_path
 from openpilot.selfdrive.modeld.constants import ModelConstants, Plan
 from openpilot.selfdrive.modeld.helpers import usbgpu_present, modeld_pkl_path, get_tg_input_devices
@@ -63,13 +63,13 @@ def get_lat_smooth_seconds_dynamic(model_output: dict[str, np.ndarray],
 
 def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.ModelDataV2.Action,
                           lat_action_t: float, long_action_t: float, v_ego: float, lat_smooth_seconds: float, vEgoStopping: float) -> log.ModelDataV2.Action:
+  plan = model_output['plan'][0]
+  desired_accel, should_stop, _, desired_velocity_now = get_accel_from_plan(plan[:,Plan.VELOCITY][:,0],
+                                                   plan[:,Plan.ACCELERATION][:,0],
+                                                   ModelConstants.T_IDXS,
+                                                   action_t=long_action_t,
+                                                   vEgoStopping=vEgoStopping)
   if 'action' not in model_output:
-    plan = model_output['plan'][0]
-    desired_accel, should_stop, _, desired_velocity_now = get_accel_from_plan(plan[:,Plan.VELOCITY][:,0],
-                                                     plan[:,Plan.ACCELERATION][:,0],
-                                                     ModelConstants.T_IDXS,
-                                                     action_t=long_action_t,
-                                                     vEgoStopping=vEgoStopping)
     desired_curvature = get_curvature_from_plan(plan[:,Plan.T_FROM_CURRENT_EULER][:,2],
                                                 plan[:,Plan.ORIENTATION_RATE][:,2],
                                                 ModelConstants.T_IDXS,
@@ -90,7 +90,7 @@ def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.
   curv_drop = abs(raw_desired_curvature) < abs(prev_curvature) * 0.70  # 모델이 그 곡률값을 갑자기 70%이하로 확 떨어뜨리면,
 
   if same_curve and deep_curve and curv_drop:
-    desired_curvature = prev_curvature * 0.7 + raw_desired_curvature * 0.3  # 과하게 낮춘 값을 따라가지 않고 80%만 반영한다.
+    desired_curvature = prev_curvature * 0.8 + raw_desired_curvature * 0.2  # 과하게 낮춘 값을 따라가지 않고 80%만 반영한다.
 
   # Kans: 큰 곡률로 이어지는 커브 판단
   abs_curvature = abs(desired_curvature)
@@ -142,15 +142,14 @@ def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.
     neginf=0.0))
   desired_velocity_now = max(0.0, desired_velocity_now)
 
-  return(log.ModelDataV2.Action(
+  return (log.ModelDataV2.Action(
       desiredCurvature=float(desired_curvature),
       desiredAcceleration=float(desired_accel),
       shouldStop=bool(should_stop),
       desiredVelocity=desired_velocity_now
     ),
     curve_smooth_max,
-    applied_lat_smooth_seconds
-  ) 
+    applied_lat_smooth_seconds)
 
 class FrameMeta:
   frame_id: int = 0
@@ -248,7 +247,10 @@ def main(demo=False):
   params.put_bool("UsbGpuPresent", _present)
   params.put_bool("UsbGpuCompiled", _compiled)
 
-  config_realtime_process(7, 54)
+  if not USBGPU:
+    # USB GPU currently saturates a core so can't do this yet,
+    # also need to move the aux USB interrupts for good timings
+    config_realtime_process(7, 54)
 
   # visionipc clients
   while True:
@@ -424,9 +426,11 @@ def main(demo=False):
       modelv2_send = messaging.new_message('modelV2')
       drivingdata_send = messaging.new_message('drivingModelData')
       posenet_send = messaging.new_message('cameraOdometry')
-      # Kans:
+
+      # Kans: dynamic lateral smoothing
       lat_smooth_seconds_dynamic, y_std_1s, lat_smooth_extra = get_lat_smooth_seconds_dynamic(
           model_output, lat_smooth_seconds)
+
       if custom_lat_delay > 0.0:
         lat_delay_dynamic = custom_lat_delay + lat_smooth_seconds_dynamic
       else:
@@ -447,6 +451,8 @@ def main(demo=False):
             f"s:{applied_lat_smooth_seconds:.3f} c:{curve_smooth_max:.3f}")
 
       prev_action = action
+
+      # modelV2 생성
       fill_model_msg(modelv2_send, model_output, action,
                      publish_state, meta_main.frame_id, meta_extra.frame_id, frame_id,
                      frame_drop_ratio, meta_main.timestamp_eof, model_execution_time, live_calib_seen)
@@ -456,12 +462,14 @@ def main(demo=False):
       r_lane_change_prob = desire_state[log.Desire.laneChangeRight]
       lane_change_prob = l_lane_change_prob + r_lane_change_prob
       DH.update(sm['carState'], modelv2_send.modelV2, sm['carControl'].latActive, lane_change_prob, sm['carrotMan'], sm['radarState'])
+
+      # desire_helper 결과를 modelV2에 반영
       modelv2_send.modelV2.meta.laneChangeState = DH.lane_change_state
       modelv2_send.modelV2.meta.laneChangeDirection = DH.lane_change_direction
       modelv2_send.modelV2.meta.desireLog = DH.desireLog #carrot
       drivingdata_send.drivingModelData.meta.laneChangeState = DH.lane_change_state
       drivingdata_send.drivingModelData.meta.laneChangeDirection = DH.lane_change_direction
-      # carrot
+
       modelv2_send.modelV2.meta.laneWidthLeft = float(DH.left.lane_width)
       modelv2_send.modelV2.meta.laneWidthRight = float(DH.right.lane_width)
       modelv2_send.modelV2.meta.distanceToRoadEdgeLeft = float(DH.left.dist_to_edge)
@@ -473,7 +481,7 @@ def main(demo=False):
       modelv2_send.modelV2.meta.laneChangeAvailableRight = DH.lane_change_available_right
       mt3 = time.perf_counter()
       drivingdata_send.drivingModelData.modelExecutionTime = mt3 - mt1
-
+      # drivingModelData 생성 (반드시 DH 반영 후)
       fill_driving_model_data(drivingdata_send, modelv2_send)
       fill_pose_msg(posenet_send, model_output, meta_main.frame_id, vipc_dropped_frames, meta_main.timestamp_eof, live_calib_seen)
       pm.send('modelV2', modelv2_send)
