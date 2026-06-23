@@ -170,7 +170,7 @@ class LateralMpc:
   def get_speed_offset(self, v_ego, yaw_rate_pts):
     v = np.clip(v_ego, 10.0, 27.0)
     # 속도 기반 기본값: 고속일수록 약간 증가
-    speed_offset = float(np.interp(v, [10.0, 15.0, 27.0], [1.0, 2.0, 3.0]))
+    speed_offset = float(np.interp(v, [10.0, 15.0, 27.0], [3.0, 4.0, 5.0]))
     # 곡률 추정
     curvature = np.abs(yaw_rate_pts) / max(v_ego, 0.1)
     # 너무 먼 미래/노이즈보다 앞쪽 구간 위주
