@@ -20,44 +20,14 @@ namespace kittens {
  * @param[in] b The second input rt_base<bf16_2, row_layout> matrix in row-major mode.
  * @param[in] c The input rt_base<float2, row_layout> accumulator matrix.
  */
-template<typename AccumulatorShape, typename InputType, typename RegisterRangeA, typename RegisterRangeB, typename RegisterRangeC, typename RegisterRangeD>
+template<typename RegisterRangeA, typename RegisterRangeB, typename RegisterRangeC, typename RegisterRangeD>
 __device__ static inline void mma_ABt_base() {
-    if constexpr (std::is_same_v<AccumulatorShape, ducks::rt_shape::rt_16x16>)
-    {
-        if constexpr (std::is_same_v<InputType, fp8e4m3>)
-        {
-            macros::mfma_f32_16x16x32_fp8_fp8<RegisterRangeA::lo, RegisterRangeB::lo, RegisterRangeC::lo, RegisterRangeD::lo>();
-        }
-        else
-        {
-            macros::mfma_f32_16x16x32_bf16<RegisterRangeA::lo, RegisterRangeB::lo, RegisterRangeC::lo, RegisterRangeD::lo>();
-        }
-    }
-    else
-    {
-        macros::mfma_f32_16x16x32_bf16<RegisterRangeA::lo, RegisterRangeB::lo, RegisterRangeC::lo, RegisterRangeD::lo>();
-    }
+    macros::mfma_f32_16x16x32_bf16<RegisterRangeA::lo, RegisterRangeB::lo, RegisterRangeC::lo, RegisterRangeD::lo>();
 }
-
-template<typename AccumulatorShape, typename InputType, typename RegisterRangeA, typename RegisterRangeB, typename RegisterRangeD>
+template<typename RegisterRangeA, typename RegisterRangeB, typename RegisterRangeD>
 __device__ static inline void mma_ABt_base_zero_accum() {
-    if constexpr (std::is_same_v<AccumulatorShape, ducks::rt_shape::rt_16x16>)
-    {
-        if constexpr (std::is_same_v<InputType, fp8e4m3>)
-        {
-            macros::mfma_f32_16x16x32_fp8_fp8_zero_accum<RegisterRangeA::lo, RegisterRangeB::lo, RegisterRangeD::lo>();
-        }
-        else
-        {
-            macros::mfma_f32_16x16x32_bf16_zero_accum<RegisterRangeA::lo, RegisterRangeB::lo, RegisterRangeD::lo>();
-        }
-    }
-    else
-    {
-        macros::mfma_f32_16x16x32_bf16_zero_accum<RegisterRangeA::lo, RegisterRangeB::lo, RegisterRangeD::lo>();
-    }
+    macros::mfma_f32_16x16x32_bf16_zero_accum<RegisterRangeA::lo, RegisterRangeB::lo, RegisterRangeD::lo>();
 }
-
 /**
  * @brief Base matrix multiply-accumulate operation for row layout with transposed A.
  *
@@ -117,9 +87,7 @@ __device__ static inline void mma_ABt(D &d,
         (std::is_same_v<typename D::T, float> && std::is_same_v<typename A::T, bf16> &&
             std::is_same_v<typename B::T, bf16>) ||
         (std::is_same_v<typename D::T, half> && std::is_same_v<typename A::T, half> &&
-            std::is_same_v<typename B::T, half>) ||
-        (std::is_same_v<typename D::T, float> && std::is_same_v<typename A::T, fp8e4m3> &&
-            std::is_same_v<typename B::T, fp8e4m3>)
+            std::is_same_v<typename B::T, half>)
     );
 
     // Helper function template for compile-time MMA operations
@@ -127,7 +95,7 @@ __device__ static inline void mma_ABt(D &d,
     using range_type_B = ducks::art::get_nth_range_t<typename B::register_ranges, M * B::width + K>;
     using range_type_C = ducks::art::get_nth_range_t<typename C::register_ranges, N * C::width + M>;
     using range_type_D = ducks::art::get_nth_range_t<typename D::register_ranges, N * D::width + M>;
-    mma_ABt_base<typename D::shape, typename A::T, range_type_A, range_type_B, range_type_C, range_type_D>();
+    mma_ABt_base<range_type_A, range_type_B, range_type_C, range_type_D>();
 }
 
 template<ducks::art::all D, ducks::art::all A, ducks::art::all B, ducks::art::all C>
@@ -149,9 +117,7 @@ __device__ static inline void mma_ABt(D &d,
         (std::is_same_v<typename D::T, float> && std::is_same_v<typename A::T, bf16> &&
             std::is_same_v<typename B::T, bf16>) ||
         (std::is_same_v<typename D::T, half> && std::is_same_v<typename A::T, half> &&
-            std::is_same_v<typename B::T, half>) ||
-        (std::is_same_v<typename D::T, float> && std::is_same_v<typename A::T, fp8e4m3> &&
-            std::is_same_v<typename B::T, fp8e4m3>)
+            std::is_same_v<typename B::T, half>)
     );
 
     // Helper function template for compile-time MMA operations
@@ -161,7 +127,7 @@ __device__ static inline void mma_ABt(D &d,
         using range_type_B = ducks::art::get_nth_range_t<typename B::register_ranges, M * B::width>;
         using range_type_C = ducks::art::get_nth_range_t<typename C::register_ranges, N * C::width + M>;
         using range_type_D = ducks::art::get_nth_range_t<typename D::register_ranges, N * D::width + M>;
-        mma_ABt_base<typename D::shape, typename A::T, range_type_A, range_type_B, range_type_C, range_type_D>();
+        mma_ABt_base<range_type_A, range_type_B, range_type_C, range_type_D>();
 
         // Subsequent MMA operations for k=1 to A::width-1
         [&]<std::size_t... Ks>(std::index_sequence<Ks...>) {
@@ -172,7 +138,7 @@ __device__ static inline void mma_ABt(D &d,
                     using range_type_B = ducks::art::get_nth_range_t<typename B::register_ranges, k + M * B::width>;
                     using range_type_C = ducks::art::get_nth_range_t<typename C::register_ranges, N * C::width + M>;
                     using range_type_D = ducks::art::get_nth_range_t<typename D::register_ranges, N * D::width + M>;
-                    mma_ABt_base<typename D::shape, typename A::T, range_type_A, range_type_B, range_type_C, range_type_D>();
+                    mma_ABt_base<range_type_A, range_type_B, range_type_C, range_type_D>();
                 }
             }(), ...);
         }(std::make_index_sequence<A::width>{});
@@ -206,9 +172,7 @@ __device__ static inline void mma_ABt(D &d,
         (std::is_same_v<typename D::T, float> && std::is_same_v<typename A::T, bf16> &&
             std::is_same_v<typename B::T, bf16>) ||
         (std::is_same_v<typename D::T, half> && std::is_same_v<typename A::T, half> &&
-            std::is_same_v<typename B::T, half>) ||
-        (std::is_same_v<typename D::T, float> && std::is_same_v<typename A::T, fp8e4m3> &&
-            std::is_same_v<typename B::T, fp8e4m3>)
+            std::is_same_v<typename B::T, half>)
     );
 
     // Helper function template for compile-time MMA operations
@@ -216,7 +180,7 @@ __device__ static inline void mma_ABt(D &d,
     using range_type_A = ducks::art::get_nth_range_t<typename A::register_ranges, N * A::width + K>;
     using range_type_B = ducks::art::get_nth_range_t<typename B::register_ranges, M * B::width + K>;
     using range_type_D = ducks::art::get_nth_range_t<typename D::register_ranges, N * D::width + M>;
-    mma_ABt_base_zero_accum<typename D::shape, typename A::T, range_type_A, range_type_B, range_type_D>();
+    mma_ABt_base_zero_accum<range_type_A, range_type_B, range_type_D>();
 }
 
 template<ducks::art::all D, ducks::art::all A, ducks::art::all B>
@@ -235,9 +199,7 @@ __device__ static inline void mma_ABt(D &d,
         (std::is_same_v<typename D::T, float> && std::is_same_v<typename A::T, bf16> &&
             std::is_same_v<typename B::T, bf16>) ||
         (std::is_same_v<typename D::T, half> && std::is_same_v<typename A::T, half> &&
-            std::is_same_v<typename B::T, half>) ||
-        (std::is_same_v<typename D::T, float> && std::is_same_v<typename A::T, fp8e4m3> &&
-            std::is_same_v<typename B::T, fp8e4m3>)
+            std::is_same_v<typename B::T, half>)
     );
 
     // Helper function template for compile-time MMA operations
@@ -246,7 +208,7 @@ __device__ static inline void mma_ABt(D &d,
         using range_type_A = ducks::art::get_nth_range_t<typename A::register_ranges, N * A::width>;
         using range_type_B = ducks::art::get_nth_range_t<typename B::register_ranges, M * B::width>;
         using range_type_D = ducks::art::get_nth_range_t<typename D::register_ranges, N * D::width + M>;
-        mma_ABt_base_zero_accum<typename D::shape, typename A::T, range_type_A, range_type_B, range_type_D>();
+        mma_ABt_base_zero_accum<range_type_A, range_type_B, range_type_D>();
 
         // Subsequent MMA operations for k=1 to A::width-1
         [&]<std::size_t... Ks>(std::index_sequence<Ks...>) {
@@ -256,7 +218,7 @@ __device__ static inline void mma_ABt(D &d,
                     using range_type_A = ducks::art::get_nth_range_t<typename A::register_ranges, k + N * A::width>;
                     using range_type_B = ducks::art::get_nth_range_t<typename B::register_ranges, k + M * B::width>;
                     using range_type_D = ducks::art::get_nth_range_t<typename D::register_ranges, N * D::width + M>;
-                    mma_ABt_base<typename D::shape, typename A::T, range_type_A, range_type_B, range_type_D, range_type_D>();
+                    mma_ABt_base<range_type_A, range_type_B, range_type_D, range_type_D>();
                 }
             }(), ...);
         }(std::make_index_sequence<A::width>{});

@@ -164,10 +164,12 @@ class T5Attention:
     relative_buckets += Tensor.where(is_small, relative_position, relative_position_if_large)
     return relative_buckets
 
-  def compute_bias(self, query_length, key_length) -> Tensor:
+  def compute_bias(self, query_length, key_length, device=None) -> Tensor:
     """Compute binned relative position bias"""
-    context_position = Tensor.arange(query_length, dtype=dtypes.long)[:, None]
-    memory_position = Tensor.arange(key_length, dtype=dtypes.long)[None, :]
+    if device is None:
+      device = self.relative_attention_bias.weight.device
+    context_position = Tensor.arange(query_length, dtype=dtypes.long, device=device)[:, None]
+    memory_position = Tensor.arange(key_length, dtype=dtypes.long, device=device)[None, :]
     relative_position = memory_position - context_position  # shape (query_length, key_length)
     relative_position_bucket = self._relative_position_bucket(
         relative_position,  # shape (query_length, key_length)
@@ -210,7 +212,7 @@ class T5Attention:
     scores = Tensor.matmul(query_states, key_states.transpose(3, 2))
 
     if position_bias is None:
-      position_bias = self.compute_bias(key_length, key_length)
+      position_bias = self.compute_bias(key_length, key_length, device=scores.device)
 
     scores += position_bias
     attn_weights = Tensor.softmax(scores.float(), axis=-1).cast(scores.dtype)  # (batch_size, n_heads, seq_length, key_length)

@@ -21,7 +21,7 @@ from openpilot.selfdrive.controls.lib.desire_helper import DesireHelper
 from openpilot.selfdrive.controls.lib.drive_helpers import get_accel_from_plan, smooth_value, get_curvature_from_plan
 from openpilot.selfdrive.modeld.parse_model_outputs import Parser
 from openpilot.selfdrive.modeld.compile_modeld import make_input_queues, WARP_INPUTS, POLICY_INPUTS
-from openpilot.selfdrive.modeld.fill_model_msg import fill_model_msg, fill_driving_model_data, fill_pose_msg, PublishState
+from openpilot.selfdrive.modeld.fill_model_msg import fill_model_msg, fill_pose_msg, PublishState
 from openpilot.common.file_chunker import read_file_chunked, get_manifest_path
 from openpilot.selfdrive.modeld.constants import ModelConstants, Plan
 from openpilot.selfdrive.modeld.helpers import usbgpu_present, modeld_pkl_path, get_tg_input_devices
@@ -151,7 +151,6 @@ def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.
     curve_smooth_max,
     applied_lat_smooth_seconds
   ) 
- 
 
 class FrameMeta:
   frame_id: int = 0
@@ -170,15 +169,22 @@ class ModelState:
     input_devices = get_tg_input_devices(PROCESS_NAME, usbgpu)
     self.WARP_DEV, self.QUEUE_DEV = input_devices['WARP_DEV'], input_devices['QUEUE_DEV']
     jits = pickle.loads(read_file_chunked(modeld_pkl_path(usbgpu)))
-    metadata = jits['metadata']
-    self.input_shapes = metadata['input_shapes']
-    self.vision_input_names = [k for k in self.input_shapes if 'img' in k]
-    self.output_slices = metadata['output_slices']
+    vision_metadata = jits['metadata']['vision']
+    self.vision_input_shapes = vision_metadata['input_shapes']
+    self.vision_input_names = list(self.vision_input_shapes.keys())
+    self.vision_output_slices = vision_metadata['output_slices']
+
+    off_policy_metadata = jits['metadata']['off_policy']
+    self.off_policy_output_slices = off_policy_metadata['output_slices']
+
+    policy_metadata = jits['metadata']['on_policy']
+    self.policy_input_shapes = policy_metadata['input_shapes']
+    self.policy_output_slices = policy_metadata['output_slices']
 
     self.prev_desire = np.zeros(ModelConstants.DESIRE_LEN, dtype=np.float32)
 
     self.frame_skip = ModelConstants.MODEL_RUN_FREQ // ModelConstants.MODEL_CONTEXT_FREQ
-    self.input_queues, self.npy = make_input_queues(self.input_shapes, self.frame_skip, device=self.QUEUE_DEV)
+    self.input_queues, self.npy = make_input_queues(self.vision_input_shapes, self.policy_input_shapes, self.frame_skip, device=self.QUEUE_DEV)
     self.full_frames: dict[str, Tensor] = {}
     self._blob_cache: dict[int, Tensor] = {}
     self.parser = Parser()
@@ -215,16 +221,21 @@ class ModelState:
     if prepare_only:
       return None
 
-    outs, = self.run_policy(
+    vision_output, on_policy_output, off_policy_output = self.run_policy(
       **{k: self.input_queues[k] for k in POLICY_INPUTS if k in self.input_queues}, img=img, big_img=big_img
     )
-    model_output = outs.numpy()[0]
-    outputs_dict = self.parser.parse_outputs(self.slice_outputs(model_output, self.output_slices))
-    self.npy['prev_feat'][:] = model_output[self.output_slices['hidden_state']]
+
+    vision_output = vision_output.numpy().flatten()
+    off_policy_output = off_policy_output.numpy().flatten()
+    on_policy_output = on_policy_output.numpy().flatten()
+    vision_outputs_dict = self.parser.parse_vision_outputs(self.slice_outputs(vision_output, self.vision_output_slices))
+    off_policy_outputs_dict = self.parser.parse_off_policy_outputs(self.slice_outputs(off_policy_output, self.off_policy_output_slices))
+    policy_outputs_dict = self.parser.parse_policy_outputs(self.slice_outputs(on_policy_output, self.policy_output_slices))
+    combined_outputs_dict = {**vision_outputs_dict, **off_policy_outputs_dict, **policy_outputs_dict}
 
     if SEND_RAW_PRED:
-      outputs_dict['raw_pred'] = model_output.copy()
-    return outputs_dict
+      combined_outputs_dict['raw_pred'] = np.concatenate([vision_output.copy(), on_policy_output.copy(), off_policy_output.copy()])
+    return combined_outputs_dict
 
 
 def main(demo=False):
@@ -353,6 +364,14 @@ def main(demo=False):
 
     sm.update(0)
     desire = DH.desire
+
+    # Kans: RL 모델 차선변경 중 desire 유지 보강
+    if DH.lane_change_state != log.LaneChangeState.off:
+      if DH.lane_change_direction == log.LaneChangeDirection.left:
+        desire = log.Desire.laneChangeLeft
+      elif DH.lane_change_direction == log.LaneChangeDirection.right:
+        desire = log.Desire.laneChangeRight
+
     is_rhd = sm["driverMonitoringState"].isRHD
     frame_id = sm["roadCameraState"].frameId
     v_ego = max(sm["carState"].vEgo, 0.)
@@ -388,7 +407,7 @@ def main(demo=False):
     transforms = {name: model_transform_extra if 'big' in name else model_transform_main for name in model.vision_input_names}
     frame_delay = DT_MDL # compensate for time passed since the frame was captured: current_time - timestamp_eof is 50ms on average
     action_delay = DT_MDL / 2 # middle of the interval between model output (current state) and next frame (expected state)
-    lat_action_t = lat_delay + frame_delay + action_delay
+    lat_action_t = lat_delay_dynamic + frame_delay + action_delay
     long_action_t = long_delay + frame_delay + action_delay
     inputs: dict[str, np.ndarray] = {
       'desire_pulse': vec_desire,
@@ -405,15 +424,13 @@ def main(demo=False):
       modelv2_send = messaging.new_message('modelV2')
       drivingdata_send = messaging.new_message('drivingModelData')
       posenet_send = messaging.new_message('cameraOdometry')
-
-      # Kans: dynamic lateral smoothing
+      # Kans:
       lat_smooth_seconds_dynamic, y_std_1s, lat_smooth_extra = get_lat_smooth_seconds_dynamic(
           model_output, lat_smooth_seconds)
-
       if custom_lat_delay > 0.0:
-        lat_delay_dynamic = custom_lat_delay
+        lat_delay_dynamic = custom_lat_delay + lat_smooth_seconds_dynamic
       else:
-        lat_delay_dynamic = sm["liveDelay"].lateralDelay
+        lat_delay_dynamic = sm["liveDelay"].lateralDelay + lat_smooth_seconds_dynamic
 
       action, curve_smooth_max, applied_lat_smooth_seconds = get_action_from_model(model_output, prev_action, lat_delay_dynamic + frame_delay + action_delay,
         long_delay + frame_delay + action_delay, v_ego, lat_smooth_seconds_dynamic, vEgoStopping)
@@ -428,9 +445,8 @@ def main(demo=False):
         else:
           params.put_nonblocking("LatSmoothDebug",
             f"s:{applied_lat_smooth_seconds:.3f} c:{curve_smooth_max:.3f}")
-      prev_action = action
 
-      # modelV2 생성
+      prev_action = action
       fill_model_msg(modelv2_send, model_output, action,
                      publish_state, meta_main.frame_id, meta_extra.frame_id, frame_id,
                      frame_drop_ratio, meta_main.timestamp_eof, model_execution_time, live_calib_seen)
@@ -440,11 +456,11 @@ def main(demo=False):
       r_lane_change_prob = desire_state[log.Desire.laneChangeRight]
       lane_change_prob = l_lane_change_prob + r_lane_change_prob
       DH.update(sm['carState'], modelv2_send.modelV2, sm['carControl'].latActive, lane_change_prob, sm['carrotMan'], sm['radarState'])
-
-      # desire_helper 결과를 modelV2에 반영
       modelv2_send.modelV2.meta.laneChangeState = DH.lane_change_state
       modelv2_send.modelV2.meta.laneChangeDirection = DH.lane_change_direction
       modelv2_send.modelV2.meta.desireLog = DH.desireLog #carrot
+      drivingdata_send.drivingModelData.meta.laneChangeState = DH.lane_change_state
+      drivingdata_send.drivingModelData.meta.laneChangeDirection = DH.lane_change_direction
       # carrot
       modelv2_send.modelV2.meta.laneWidthLeft = float(DH.left.lane_width)
       modelv2_send.modelV2.meta.laneWidthRight = float(DH.right.lane_width)
@@ -455,15 +471,10 @@ def main(demo=False):
       modelv2_send.modelV2.meta.modelTurnSpeed = float(DH.model_turn_speed)
       modelv2_send.modelV2.meta.laneChangeAvailableLeft = DH.lane_change_available_left
       modelv2_send.modelV2.meta.laneChangeAvailableRight = DH.lane_change_available_right
-
-      # drivingModelData 생성 (반드시 DH 반영 후)
-      fill_driving_model_data(drivingdata_send, modelv2_send)
-
-      # Kans: carrot execution time override
       mt3 = time.perf_counter()
       drivingdata_send.drivingModelData.modelExecutionTime = mt3 - mt1
 
-
+      fill_driving_model_data(drivingdata_send, modelv2_send)
       fill_pose_msg(posenet_send, model_output, meta_main.frame_id, vipc_dropped_frames, meta_main.timestamp_eof, live_calib_seen)
       pm.send('modelV2', modelv2_send)
       pm.send('drivingModelData', drivingdata_send)

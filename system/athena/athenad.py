@@ -4,7 +4,6 @@ from __future__ import annotations
 import base64
 import hashlib
 import io
-import itertools
 import json
 import os
 import queue
@@ -58,9 +57,6 @@ WS_FRAME_SIZE = 4096
 DEVICE_STATE_UPDATE_INTERVAL = 1.0  # in seconds
 DEFAULT_UPLOAD_PRIORITY = 99  # higher number = lower priority
 
-SEND_PRIORITY_HIGH = 0
-SEND_PRIORITY_LOW = 1
-
 # https://bytesolutions.com/dscp-tos-cos-precedence-conversion-chart,
 # https://en.wikipedia.org/wiki/Differentiated_services
 UPLOAD_TOS = 0x20  # CS1, low priority background traffic
@@ -83,9 +79,6 @@ class UploadTOSAdapter(HTTPAdapter):
 UPLOAD_SESS = requests.Session()
 UPLOAD_SESS.mount("http://", UploadTOSAdapter())
 UPLOAD_SESS.mount("https://", UploadTOSAdapter())
-
-WEBRTCD_SESS = requests.Session()
-WEBRTCD_SESS.mount("http://", HTTPAdapter(max_retries=0))
 
 
 @dataclass
@@ -133,17 +126,13 @@ class UploadItem:
 
 dispatcher["echo"] = lambda s: s
 recv_queue: Queue[str] = queue.Queue()
-send_queue: Queue[tuple[int, int, str]] = queue.PriorityQueue()
+send_queue: Queue[str] = queue.Queue()
 upload_queue: Queue[UploadItem] = queue.PriorityQueue()
+low_priority_send_queue: Queue[str] = queue.Queue()
 log_recv_queue: Queue[str] = queue.Queue()
 cancelled_uploads: set[str] = set()
 
 cur_upload_items: dict[int, UploadItem | None] = {}
-
-send_seq = itertools.count()
-def send_queue_push(data: str, priority: int) -> None:
-  assert priority is not None, "send queue priority must be specified"
-  send_queue.put_nowait((priority, next(send_seq), data)) # tie-break with a monotonic counter
 
 
 def strip_zst_extension(fn: str) -> str:
@@ -219,7 +208,7 @@ def jsonrpc_handler(end_event: threading.Event) -> None:
       if "method" in data:
         cloudlog.event("athena.jsonrpc_handler.call_method", data=data)
         response = JSONRPCResponseManager.handle(data, dispatcher)
-        send_queue_push(response.json, SEND_PRIORITY_HIGH)
+        send_queue.put_nowait(response.json)
       elif "id" in data and ("result" in data or "error" in data):
         log_recv_queue.put_nowait(data)
       else:
@@ -228,7 +217,7 @@ def jsonrpc_handler(end_event: threading.Event) -> None:
       pass
     except Exception as e:
       cloudlog.exception("athena jsonrpc handler failed")
-      send_queue_push(json.dumps({"error": str(e)}), SEND_PRIORITY_HIGH)
+      send_queue.put_nowait(json.dumps({"error": str(e)}))
 
 
 def retry_upload(tid: int, end_event: threading.Event, increase_count: bool = True) -> None:
@@ -580,9 +569,8 @@ def getNetworks():
 
 
 @dispatcher.add_method
-def startStream(sdp: str, enabled: bool) -> dict:
-  from openpilot.system.webrtc.models import StreamRequestBody
-  init_camera = "wideRoad"
+def startStream(sdp: str) -> dict:
+  from openpilot.system.webrtc.webrtcd import StreamRequestBody
   bridge_services_in = []
 
   # get live car params to avoid stale notCar edge case
@@ -591,21 +579,23 @@ def startStream(sdp: str, enabled: bool) -> dict:
     with car.CarParams.from_bytes(cp_bytes) as CP:
       if CP.notCar:
         bridge_services_in.append("testJoystick")
-        if HARDWARE.get_device_type() == "tici":
-          init_camera = "driver"
 
-  t_start = time.monotonic()
-  body = StreamRequestBody(sdp=sdp, init_camera=init_camera, bridge_services_in=bridge_services_in, bridge_services_out=["carState"], enabled=enabled)
+  body = StreamRequestBody(sdp, "wideRoad", bridge_services_in, ["carState"])
   try:
-    resp = WEBRTCD_SESS.post(f"http://localhost:{WEBRTCD_PORT}/stream", json=asdict(body), timeout=10)
-    t_end = time.monotonic()
-    ret = resp.json()
-    ret["time"] = (t_end - t_start) * 1000
-    return ret
+    resp = requests.post(f"http://localhost:{WEBRTCD_PORT}/stream",
+                       json=asdict(body), timeout=10)
+    if not resp.ok:
+      try:
+        error_body = resp.json()
+        raise Exception(error_body.get("message", f"webrtcd returned {resp.status_code}"))
+      except ValueError:
+        resp.raise_for_status()
+    return resp.json()
   except requests.ConnectTimeout as e:
-    raise Exception("webrtc took too long to respond. is the comma body on?") from e
+    raise Exception("webrtc took too long to respond. is it on?") from e
   except requests.ConnectionError as e:
     raise Exception("webrtc is not running. turn on comma body ignition.") from e
+
 
 @dispatcher.add_method
 def takeSnapshot() -> str | dict[str, str] | None:
@@ -676,7 +666,7 @@ def log_handler(end_event: threading.Event) -> None:
               "jsonrpc": "2.0",
               "id": log_entry
             }
-            send_queue_push(json.dumps(jsonrpc), SEND_PRIORITY_LOW)
+            low_priority_send_queue.put_nowait(json.dumps(jsonrpc))
             curr_log = log_entry
         except OSError:
           pass  # file could be deleted by log rotation
@@ -727,7 +717,7 @@ def stat_handler(end_event: threading.Event) -> None:
               "jsonrpc": "2.0",
               "id": stat_filenames[0]
             }
-            send_queue_push(json.dumps(jsonrpc), SEND_PRIORITY_LOW)
+            low_priority_send_queue.put_nowait(json.dumps(jsonrpc))
           os.remove(stat_path)
         last_scan = curr_scan
     except Exception:
@@ -809,7 +799,10 @@ def ws_recv(ws: WebSocket, end_event: threading.Event) -> None:
 def ws_send(ws: WebSocket, end_event: threading.Event) -> None:
   while not end_event.is_set():
     try:
-      _, _, data = send_queue.get(timeout=1)
+      try:
+        data = send_queue.get_nowait()
+      except queue.Empty:
+        data = low_priority_send_queue.get(timeout=1)
       for i in range(0, len(data), WS_FRAME_SIZE):
         frame = data[i:i+WS_FRAME_SIZE]
         last = i + WS_FRAME_SIZE >= len(data)

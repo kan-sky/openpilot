@@ -187,7 +187,7 @@ class LanePlanner:
     laneline_active = False
     self.d_prob_count = self.d_prob_count + 1 if self.d_prob > 0.3 else 0
 
-    # Kans: 커브 안쪽마진 적용시에도 양쪽 차선이 모두 유효할 때만 d_prob 신뢰도(0.7->0.85로) 유지.
+    # Kans: 커브 안쪽마진 적용시에도 양쪽 차선이 모두 유효할 때만 d_prob 신뢰도(0.7로) 유지.
     # 한쪽 차선만 보이는 상태에서 lane_blend(=d_prob)를 강제로 살리면 한쪽 쏠림이 다시 발생할 수 있음.
     lane_blend = self.d_prob
 
@@ -202,15 +202,11 @@ class LanePlanner:
     if inside_margin_active and both_lane_available:
       lane_blend = max(lane_blend, 0.80)
 
-
     if self.lanefull_mode and self.d_prob_count > int(1 / DT_MDL):
       laneline_active = True
-
-      # Kans: 시간축 보간에서 위치축 보간으로 변경; supercombo로 통한된후 곡선 시간축을 반영하지 못하는 것으로 판단.
-      safe_idxs = np.isfinite(self.ll_x) & np.isfinite(lane_path_y)
+      safe_idxs = np.isfinite(self.ll_t)
       if safe_idxs[0]:
-        path_x = path_xyz[:, 0]
-        lane_path_y_interp = np.interp(path_x, self.ll_x[safe_idxs], lane_path_y[safe_idxs])
+        lane_path_y_interp = np.interp(path_t * (1.0 + adjustLaneTime), self.ll_t[safe_idxs], lane_path_y[safe_idxs])
         path_xyz[:, 1] = lane_blend * lane_path_y_interp + (1.0 - lane_blend) * path_xyz[:, 1]
 
     return path_xyz, laneline_active

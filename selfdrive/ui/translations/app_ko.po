@@ -369,20 +369,6 @@ msgstr "롱컨 기동 모드"
 #: openpilot/selfdrive/ui/onroad/hud_renderer.py
 msgid "MAX"
 msgstr "최대"
-msgid "eco"
-msgstr "연비"
-
-msgid "safe"
-msgstr "안전"
-
-msgid "high"
-msgstr "고속"
-
-msgid "norm"
-msgstr "일반"
-
-msgid "carrot"
-msgstr "당근"
 
 #: openpilot/selfdrive/ui/widgets/setup.py
 msgid "Maximize your training data uploads to improve openpilot's driving models."

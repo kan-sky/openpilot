@@ -19,7 +19,6 @@ SAMPLE_RATE = 48000
 SAMPLE_BUFFER = 4096 # (approx 100ms)
 MAX_VOLUME = 1.0
 MIN_VOLUME = 0.4
-ALERT_RAMP_TIME = 4 # seconds to ramp to max volume for warningImmediate
 SELFDRIVE_STATE_TIMEOUT = 5 # 5 seconds
 FILTER_DT = 1. / (micd.SAMPLE_RATE / micd.FFT_SAMPLES)
 
@@ -200,24 +199,9 @@ class Soundd:
       self.current_alert = new_alert
       self.current_sound_frame = 0
 
-  def update_carrot_alert(self, sm, new_alert):
-    if new_alert == AudibleAlert.none:
-      count_down = sm['carrotMan'].leftSec
-      if self.carrot_count_down != count_down:
-        self.carrot_count_down = count_down
-        if count_down == 0:
-          new_alert = AudibleAlert.longDisengaged
-        elif 0 < count_down <= 10:
-          new_alert = getattr(AudibleAlert, f'audio{count_down}')
-        elif count_down == 11:
-          new_alert = AudibleAlert.promptDistracted
-
-    return new_alert
-
   def get_audible_alert(self, sm):
     if sm.updated['selfdriveState']:
       new_alert = sm['selfdriveState'].alertSound.raw
-      new_alert = self.update_carrot_alert(sm, new_alert)
       self.update_alert(new_alert)
     elif check_selfdrive_timeout_alert(sm):
       self.update_alert(AudibleAlert.warningImmediate)
@@ -241,13 +225,12 @@ class Soundd:
     # sounddevice must be imported after forking processes
     import sounddevice as sd
 
-    sm = messaging.SubMaster(['selfdriveState', 'soundPressure', 'carrotMan'])
+    sm = messaging.SubMaster(['selfdriveState', 'soundPressure'])
 
     with self.get_stream(sd) as stream:
       rk = Ratekeeper(20)
 
       cloudlog.info(f"soundd stream started: {stream.samplerate=} {stream.channels=} {stream.dtype=} {stream.device=}, {stream.blocksize=}")
-      print(f"soundd stream started: {stream.samplerate=} {stream.channels=} {stream.dtype=} {stream.device=}, {stream.blocksize=}")
       while True:
         sm.update(0)
 
