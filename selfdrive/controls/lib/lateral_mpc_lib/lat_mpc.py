@@ -167,9 +167,19 @@ class LateralMpc:
     self.solver.cost_set(N, 'W', W[:COST_E_DIM,:COST_E_DIM])
 
   # Kans: spped offset
-  def get_speed_offset(self, v_ego):
+  def get_speed_offset(self, v_ego, yaw_rate_pts):
     v = np.clip(v_ego, 10.0, 27.0)
-    return float(np.interp(v, [10.0, 15.0, 27.0], [5.5, 5.0, 4.1]))
+    # 속도 기반 기본값: 고속일수록 약간 증가
+    speed_offset = float(np.interp(v, [10.0, 15.0, 27.0], [1.0, 2.0, 3.0]))
+    # 곡률 추정
+    curvature = np.abs(yaw_rate_pts) / max(v_ego, 0.1)
+    # 너무 먼 미래/노이즈보다 앞쪽 구간 위주
+    n = min(len(curvature), 20)
+    curv_ref = float(np.percentile(curvature[:n], 85)) if n > 0 else 0.0
+    # 곡률 기반 추가 보정
+    curve_offset = float(np.interp(curv_ref, [0.0005, 0.0015, 0.0030, 0.0050], [0.0, 0.5, 1.5, 2.5]))
+
+    return np.clip(speed_offset + curve_offset, 0.0, 5.0)
 
   def run(self, x0, p, y_pts, heading_pts, yaw_rate_pts):
     x0_cp = np.copy(x0)
@@ -179,7 +189,7 @@ class LateralMpc:
     self.yref[:,0] = y_pts
     v_ego = p_cp[0, 0]
     # Kans
-    speed_offset = self.get_speed_offset(v_ego)
+    speed_offset = self.get_speed_offset(v_ego, yaw_rate_pts)
     v_ego_offset = v_ego + speed_offset
 
     self.yref[:,1] = heading_pts * v_ego_offset
