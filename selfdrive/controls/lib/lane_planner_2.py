@@ -183,7 +183,7 @@ class LanePlanner:
     # laneless at lowspeed
     self.d_prob *= np.interp(v_ego * 3.6, [5., 10.], [0.0, 1.0])
 
-    adjustLane_xPos = self.params.get_float("LatMpcInputOffset") * 0.01
+    #adjustLane_xPos = self.params.get_float("LatMpcInputOffset") * 0.01
     laneline_active = False
     self.d_prob_count = self.d_prob_count + 1 if self.d_prob > 0.3 else 0
 
