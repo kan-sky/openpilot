@@ -193,11 +193,11 @@ class LanePlanner:
 
     # Kans: 직선에서는 lane line 보정을 약하게, 커브에서는 강하게
     curvature_abs = abs(curvature)
-    curve_blend_limit = float(np.interp(curvature_abs, [0.0003, 0.0012], [0.30, 0.65]))
+    curve_blend_limit = float(np.interp(curvature_abs, [0.0003, 0.0012], [0.55, 0.70]))
     lane_blend = min(lane_blend, curve_blend_limit)
     # Kans: 한쪽 차선쏠림 방지용
     if inside_margin_active and both_lane_available:
-      lane_blend = max(lane_blend, 0.65)
+      lane_blend = max(lane_blend, 0.70)
 
     if self.lanefull_mode and self.d_prob_count > int(1 / DT_MDL):
       laneline_active = True
@@ -209,17 +209,14 @@ class LanePlanner:
         lane_path_y_interp = np.interp(path_xyz[:, 0], ll_x_np[safe_idxs], lane_path_y_np[safe_idxs])
         # Kans: 커브에서 차선 경로가 순간적으로 직선화되는 현상 완화
         curvature_abs = abs(curvature)
-        if curvature_abs > 0.0008:
+        if curvature_abs > 0.0013:
           if hasattr(self, "prev_lane_path_y_interp"):
             if (self.prev_lane_path_y_interp is not None and
                 len(self.prev_lane_path_y_interp) == len(lane_path_y_interp)):
-              near_idxs = path_xyz[:, 0] < 30.0  # 30m
+              near_idxs = path_xyz[:, 0] < 15  # 15m내의 곡선안에서만 적용.
               delta = np.nanmax(np.abs(lane_path_y_interp[near_idxs] - self.prev_lane_path_y_interp[near_idxs]))
-              new_curve = np.nanmax(lane_path_y_interp[near_idxs]) - np.nanmin(lane_path_y_interp[near_idxs])
-              prev_curve = np.nanmax(self.prev_lane_path_y_interp[near_idxs]) - np.nanmin(self.prev_lane_path_y_interp[near_idxs])
-              curve_drop = prev_curve > 0.25 and new_curve < prev_curve * 0.70
 
-              if delta > 0.30 or curve_drop:
+              if delta > 0.30:
                 lane_path_y_interp = (0.25 * self.prev_lane_path_y_interp + 0.75 * lane_path_y_interp)
         self.prev_lane_path_y_interp = lane_path_y_interp.copy()
         path_xyz[:, 1] = lane_blend * lane_path_y_interp + (1.0 - lane_blend) * path_xyz[:, 1]
