@@ -726,10 +726,12 @@ class CarrotServ:
     # Kans: 차선변경 카테고리
     is_Uturn = x_turn_info == 7
     is_turn = x_turn_info in [1, 2]
-    is_lane_change = x_turn_info in [3, 4]
+    is_lane_change = x_turn_info in [3, 4]l
     is_rotary = x_turn_info == 5
     is_tg = x_turn_info == 6
     is_arrive = x_turn_info == 8
+    # Kans: 고속도로/고속국도/자동차전용도로 계열
+    is_highway_like = self.roadcate in [0, 1] or self.nRoadLimitSpeed >= 70
 
     # Kans: 현재속도 값 설정
     fork_speed = self.nRoadLimitSpeed
@@ -756,8 +758,6 @@ class CarrotServ:
     fork_dist_for_speed = self.autoTurnControlTurnEnd * fork_speed / 3.6 # fork_speed(=nRoadLimitSpeed) 목표속도까지 감속 완료할 거리.
     stop_dist_for_speed = 5
 
-    is_highway_like = self.roadcate in [0, 1] or self.nRoadLimitSpeed >= 70
-
     # Kans: 차선변경 기본값
     start_fork_dist = max(60.0, self.autoTurnControlTurnEnd * 10.0)
     start_turn_dist = min(28.0, self.autoTurnControlTurnEnd * 10.0)
@@ -781,8 +781,11 @@ class CarrotServ:
       elif is_highway_like:
         start_fork_dist = 100.0
         atc_debug = "Lc"
+      elif v_ego_kph < 70:
+        start_fork_dist = 30
+        atc_debug = "Lc"
       else:
-        start_fork_dist = 40
+        start_fork_dist = 60
         atc_debug = "Lc"
 
     elif is_tg:
