@@ -472,7 +472,7 @@ class AugmentedRoadView(CameraView):
 
     bottom_left = ui_state.params.get("GitBranch") or ""
 
-    bottom_right = ui_state.params_memory.get("NetworkAddress") or ""
+    #bottom_right = ui_state.params_memory.get("NetworkAddress") or ""
 
     # text positions
     top_text_y = y + line_margin
@@ -488,7 +488,7 @@ class AugmentedRoadView(CameraView):
                        align="center_top", y_offset=0.0)
     draw_text_ui_style(bottom_left, x + text_margin, bottom_text_y, font_size, rl.WHITE,
                        align="left_top", y_offset=0.0)
-    draw_text_ui_style(bottom_right, x + w - text_margin, bottom_text_y, font_size, rl.WHITE,
+    #draw_text_ui_style(bottom_right, x + w - text_margin, bottom_text_y, font_size, rl.WHITE,
                        align="right_top", y_offset=0.0)
 
 if __name__ == "__main__":
