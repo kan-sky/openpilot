@@ -783,6 +783,7 @@ class CarrotServ:
         atc_debug = "Lc"
       else:
         start_fork_dist = np.interp(v_ego_kph, [40, 55, 70], [20, 35, 65])
+        atc_debug = "Lc"
 
     elif is_tg:
       start_fork_dist = 15.0

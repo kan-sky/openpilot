@@ -444,12 +444,13 @@ def main(demo=False):
       if frame % 100 == 0:
         if 'action' in model_output:
           model_curv = float(model_output['action'][0, 0]) / (max(1.0, v_ego) ** 2)
+          abs_curvature = abs(model_curv)
           params.put_nonblocking("LatSmoothDebug",
             f"in:{model_curv:.4f} out:{action.desiredCurvature:.4f} "
-            f"s:{applied_lat_smooth_seconds:.3f} c:{curve_smooth_max:.3f}")
+            f"s:{applied_lat_smooth_seconds:.3f} c:{curve_smooth_max:.3f} curv:{abs_curvature:.4f}")
         else:
           params.put_nonblocking("LatSmoothDebug",
-            f"s:{applied_lat_smooth_seconds:.3f} c:{curve_smooth_max:.3f}")
+            f"s:{applied_lat_smooth_seconds:.3f} c:{curve_smooth_max:.3f} curv:{abs_curvature:.4f}")
 
       prev_action = action
 

@@ -209,15 +209,17 @@ class LanePlanner:
         lane_path_y_interp = np.interp(path_xyz[:, 0], ll_x_np[safe_idxs], lane_path_y_np[safe_idxs])
         # Kans: 커브에서 차선 경로가 순간적으로 직선화되는 현상 완화
         curvature_abs = abs(curvature)
-        if curvature_abs > 0.0013:
+        if curvature_abs > 0.0015:
           if hasattr(self, "prev_lane_path_y_interp"):
             if (self.prev_lane_path_y_interp is not None and
                 len(self.prev_lane_path_y_interp) == len(lane_path_y_interp)):
               near_idxs = path_xyz[:, 0] < 15  # 15m내의 곡선안에서만 적용.
               delta = np.nanmax(np.abs(lane_path_y_interp[near_idxs] - self.prev_lane_path_y_interp[near_idxs]))
 
-              if delta > 0.30:
-                lane_path_y_interp = (0.25 * self.prev_lane_path_y_interp + 0.75 * lane_path_y_interp)
+              if delta > 0.25:  # 차선폭 편차(합해서 .5m) 이상이면 d_prob가 낮을수록 이전경로를 최대25% 반영
+                d_prob_clip = float(np.clip(self.d_prob, 0.5, 1.0))
+                smooth_blend = float(np.interp(d_prob_clip, [0.5, 1.0], [0.25, 0.0]))
+                lane_path_y_interp = (smooth_blend * self.prev_lane_path_y_interp + (1.0 - smooth_blend) * lane_path_y_interp)
         self.prev_lane_path_y_interp = lane_path_y_interp.copy()
         path_xyz[:, 1] = lane_blend * lane_path_y_interp + (1.0 - lane_blend) * path_xyz[:, 1]
 
