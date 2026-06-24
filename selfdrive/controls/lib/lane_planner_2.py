@@ -215,10 +215,13 @@ class LanePlanner:
                 len(self.prev_lane_path_y_interp) == len(lane_path_y_interp)):
               near_idxs = path_xyz[:, 0] < 30.0  # 30m
               delta = np.nanmax(np.abs(lane_path_y_interp[near_idxs] - self.prev_lane_path_y_interp[near_idxs]))
-              if delta > 0.30:
-                lane_path_y_interp = 0.25 * self.prev_lane_path_y_interp + 0.75 * lane_path_y_interp  # 이전 경로 25% 반영
-        self.prev_lane_path_y_interp = lane_path_y_interp.copy()
+              new_curve = np.nanmax(lane_path_y_interp[near_idxs]) - np.nanmin(lane_path_y_interp[near_idxs])
+              prev_curve = np.nanmax(self.prev_lane_path_y_interp[near_idxs]) - np.nanmin(self.prev_lane_path_y_interp[near_idxs])
+              curve_drop = prev_curve > 0.25 and new_curve < prev_curve * 0.70
 
+              if delta > 0.30 or curve_drop:
+                lane_path_y_interp = (0.25 * self.prev_lane_path_y_interp + 0.75 * lane_path_y_interp)
+        self.prev_lane_path_y_interp = lane_path_y_interp.copy()
         path_xyz[:, 1] = lane_blend * lane_path_y_interp + (1.0 - lane_blend) * path_xyz[:, 1]
 
     return path_xyz, laneline_active
