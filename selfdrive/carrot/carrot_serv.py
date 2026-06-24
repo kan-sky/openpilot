@@ -726,7 +726,7 @@ class CarrotServ:
     # Kans: 차선변경 카테고리
     is_Uturn = x_turn_info == 7
     is_turn = x_turn_info in [1, 2]
-    is_lane_change = x_turn_info in [3, 4]l
+    is_lane_change = x_turn_info in [3, 4]
     is_rotary = x_turn_info == 5
     is_tg = x_turn_info == 6
     is_arrive = x_turn_info == 8
