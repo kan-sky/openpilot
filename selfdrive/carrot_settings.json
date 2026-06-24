@@ -210,22 +210,6 @@
       "cdescr": "(车道模式) 转向速率限制 — 值越低转向越激进"
     },
     {
-      "group": "레인모드",
-      "name": "LatMpcInputOffset",
-      "title": "*LATMPC.InputOffset(4)",
-      "descr": "(레인모드) Mpc입력보상 \n 값이 크면 일찍커브에 진입함",
-      "egroup": "LANE",
-      "etitle": "*LATMPC.InputOffset(4)",
-      "edescr": "(LaneMode) MPC Input Compensation — Higher values enter curves earlier",
-      "min": 0,
-      "max": 20,
-      "default": 4,
-      "unit": 1,
-      "cgroup": "转向",
-      "ctitle": "横向MPC输入偏移(4)",
-      "cdescr": "(车道模式) MPC 输入补偿 — 值越高进入弯道越早"
-    },
-    {
       "group": "조향토크",
       "name": "CustomSteerMax",
       "title": "_CustomSteerMax(0)",
