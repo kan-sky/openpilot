@@ -201,7 +201,10 @@ class LanePlanner:
 
     if self.lanefull_mode and self.d_prob_count > int(1 / DT_MDL):
       laneline_active = True
-      safe_idxs = (np.isfinite(self.ll_x) & np.isfinite(lane_path_y))
+      lane_path_y_np = np.asarray(lane_path_y)
+      ll_x_np = np.asarray(self.ll_x)
+
+      safe_idxs = np.isfinite(ll_x_np) & np.isfinite(lane_path_y_np)
       if np.any(safe_idxs):
         lane_path_y_interp = np.interp(path_xyz[:, 0], self.ll_x[safe_idxs], lane_path_y[safe_idxs])
         # Kans: 커브에서 차선 경로가 순간적으로 직선화되는 현상 완화
