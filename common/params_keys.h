@@ -289,7 +289,6 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"LatMpcAccelCost", {PERSISTENT, INT, "120"}},
     {"LatMpcJerkCost", {PERSISTENT, INT, "4"}},
     {"LatMpcSteeringRateCost", {PERSISTENT, INT, "7"}},
-    {"LatMpcInputOffset", {PERSISTENT, INT, "4"}},
 
     {"PathOffset", {PERSISTENT, INT, "0"}},
 
