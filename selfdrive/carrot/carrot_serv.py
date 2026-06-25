@@ -732,47 +732,50 @@ class CarrotServ:
     is_rotary = x_turn_info == 5
     is_tg = x_turn_info == 6
     is_arrive = x_turn_info == 8
-    # Kans: 고속도로/고속국도/자동차전용도로 계열
     is_highway_like = self.roadcate in [0, 1] or self.nRoadLimitSpeed >= 70
 
     # Kans: 현재속도 값 설정
     fork_speed = self.nRoadLimitSpeed
     turn_speed = v_ego_kph
-    # Kans: 현재속도의 감속비(당근맨=85%) 적용,
     if self.autoTurnControlSpeedTurn > 0:
-      turn_ratio = min(0.9, self.autoTurnControlSpeedTurn)  # 최소값=당근맨값(75%)
+      turn_ratio = min(0.90, self.autoTurnControlSpeedTurn)
       ratio_speed = v_ego_kph * turn_ratio
-      # 일반 좌/우회전은 과도한 고속 진입 방지로 17km/h
       if is_turn:
-        turn_speed = min(17.0, ratio_speed)
+        # Kans: 일반 좌/우회전은 저속 회전. 너무 느려지거나 빠르지 않게 제한
+        turn_speed = max(15.0, min(22.0, ratio_speed))
         fork_speed = turn_speed
-      # 로터리: 좌우회전보다 약간 빠르게 
       elif is_rotary:
-        turn_speed = max(30.0, min(40.0, ratio_speed))
+        # Kans: 로터리는 너무 느리면 후속차 방해됨
+        turn_speed = max(30.0, min(45.0, ratio_speed))
         fork_speed = turn_speed
-      # 고속/분기 차선변경: 현재속도 감속비 적용
       elif is_lane_change:
-        turn_speed = max(30.0, ratio_speed)
-        fork_speed = turn_speed
+        # Kans: 분기/차선변경은 현재속도 감속비 적용
+        fork_speed = max(30.0, ratio_speed)
+        turn_speed = fork_speed
 
     stop_speed = 1
-    turn_dist_for_speed = self.autoTurnControlTurnEnd * turn_speed / 3.6 # autoTurnControlSpeedTurn(70%) 목표속도까지 감속 완료할 거리.
-    fork_dist_for_speed = self.autoTurnControlTurnEnd * fork_speed / 3.6 # fork_speed(=nRoadLimitSpeed) 목표속도까지 감속 완료할 거리.
-    stop_dist_for_speed = 5
 
-    # Kans: 차선변경 기본값
-    start_fork_dist = min(25.0, self.autoTurnControlTurnEnd * 10.0)
-    start_turn_dist = min(28.0, self.autoTurnControlTurnEnd * 10.0)
+    turn_dist_for_speed = self.autoTurnControlTurnEnd * turn_speed / 3.6
+    fork_dist_for_speed = self.autoTurnControlTurnEnd * fork_speed / 3.6
+    stop_dist_for_speed = 5.0
+
+    # Kans: 기본 시작거리
+    start_fork_dist = max(25.0, self.autoTurnControlTurnEnd * 10.0)
+    start_turn_dist = 5.0
     atc_debug = "Df"
-
-    #일반 좌/우회전: start_fork_dist ~ start_turn_dist 구간에서 atc left/right 발생"
     if is_turn:
-      start_turn_dist = 28.0
+      # Kans: prepare 해제 후 atc left/right 구간 확보
+      # 예: FD 25~30m, ATCD 12~18m → 그 사이에서 atc left/right
+      start_fork_dist = max(25.0, min(32.0, turn_dist_for_speed + 10.0))
+      start_turn_dist = max(8.0, min(18.0, turn_dist_for_speed))
       atc_debug = "Trn"
     elif is_Uturn:
+      start_fork_dist = 18.0
       start_turn_dist = 5.0
+      turn_dist_for_speed = 5.0
       atc_debug = "Utn"
     elif is_rotary:
+      # Kans: 로터리는 조향 개입보다는 감속 짧게
       start_turn_dist = 5.0
       turn_dist_for_speed = 5.0
       atc_debug = "Rty"
@@ -784,18 +787,15 @@ class CarrotServ:
         start_fork_dist = 100.0
         atc_debug = "Lc"
       else:
-        start_fork_dist = np.interp(v_ego_kph, [40, 55, 70], [20, 35, 65])
+        # Kans: 일반 분기는 속도별 시작거리. 40m가 늦었던 구간 보완
+        start_fork_dist = float(np.interp(v_ego_kph, [40, 55, 70], [30, 50, 70]))
         atc_debug = "Lc"
-
     elif is_tg:
       start_fork_dist = 15.0
       atc_debug = "TG"
-
     elif is_arrive:
       start_turn_dist = 5.0
       atc_debug = "Arv"
-
-    # Kans: debug
     if check_steer:
       self.atcDebugText = (
         f"ATC:{atc_debug} "
@@ -807,18 +807,17 @@ class CarrotServ:
       )
 
     turn_info_mapping = {
-        1: {"type": "turn left", "speed": turn_speed, "dist": turn_dist_for_speed, "start": start_fork_dist},
-        2: {"type": "turn right", "speed": turn_speed, "dist": turn_dist_for_speed, "start": start_fork_dist},
-        5: {"type": "straight", "speed": turn_speed, "dist": turn_dist_for_speed, "start": start_turn_dist},
-        3: {"type": "fork left", "speed": fork_speed, "dist": fork_dist_for_speed, "start": start_fork_dist},
-        4: {"type": "fork right", "speed": fork_speed, "dist": fork_dist_for_speed, "start": start_fork_dist},
-        6: {"type": "straight", "speed": fork_speed, "dist": fork_dist_for_speed, "start": start_fork_dist},
-        7: {"type": "straight", "speed": stop_speed, "dist": stop_dist_for_speed, "start": 1000},
-        8: {"type": "straight", "speed": stop_speed, "dist": stop_dist_for_speed, "start": 1000},
+      1: {"type": "turn left",  "speed": turn_speed, "dist": turn_dist_for_speed, "start": start_fork_dist},
+      2: {"type": "turn right", "speed": turn_speed, "dist": turn_dist_for_speed, "start": start_fork_dist},
+      3: {"type": "fork left",  "speed": fork_speed, "dist": fork_dist_for_speed, "start": start_fork_dist},
+      4: {"type": "fork right", "speed": fork_speed, "dist": fork_dist_for_speed, "start": start_fork_dist},
+      5: {"type": "straight",   "speed": turn_speed, "dist": turn_dist_for_speed, "start": start_turn_dist},
+      6: {"type": "straight",   "speed": fork_speed, "dist": fork_dist_for_speed, "start": start_fork_dist},
+      7: {"type": "straight",   "speed": stop_speed, "dist": stop_dist_for_speed, "start": 1000},
+      8: {"type": "straight",   "speed": stop_speed, "dist": stop_dist_for_speed, "start": 1000},
     }
 
     default_mapping = {"type": "none", "speed": 0, "dist": 0, "start": 1000}
-
     mapping = turn_info_mapping.get(x_turn_info, default_mapping)
 
     atc_type = mapping["type"]
@@ -833,8 +832,12 @@ class CarrotServ:
     else:
       if check_steer:
         self.atc_activate_count = max(0, self.atc_activate_count + 1)
-      if atc_type in ["turn left", "turn right"] and x_dist_to_turn > start_turn_dist:
-        atc_type = "atc left" if atc_type == "turn left" else "atc right"
+      if atc_type in ["turn left", "turn right"]:
+        if x_dist_to_turn > start_turn_dist:
+          atc_type = "atc left" if atc_type == "turn left" else "atc right"
+        # start_turn_dist 이내에서는 turn left/right
+        else:
+          pass
 
     if self.autoTurnMapChange > 0 and check_steer:
       #print(f"x_dist_to_turn: {x_dist_to_turn}, atc_start_dist: {atc_start_dist}")
@@ -868,42 +871,6 @@ class CarrotServ:
       decel = self.autoNaviSpeedDecelRate
       safe_sec = 2.0
       atc_desired = min(atc_desired, self.calculate_current_speed(x_dist_to_turn - atc_dist, atc_speed, safe_sec, decel))
-    # Kans: ATC event log - 상태 변화 시점에만 출력
-    log_src = "CUR" if check_steer else "NXT"
-
-    atc_phase = (
-      "PREP" if atc_type.endswith(" prepare") else
-      "CANC" if atc_type.endswith(" canceled") else
-      "ACT"
-    )
-
-    atc_log_key = (
-      log_src,
-      atc_phase,
-      atc_type,
-      x_turn_info,
-    )
-
-    prev_key_name = "prev_atc_log_cur" if check_steer else "prev_atc_log_nxt"
-
-    if atc_log_key != getattr(self, prev_key_name, None):
-      setattr(self, prev_key_name, atc_log_key)
-
-      cloudlog.warning(
-        f"KANS_ATC_EVENT "
-        f"{log_src} "
-        f"phase={atc_phase} "
-        f"type={atc_type} "
-        f"TI={x_turn_info} "
-        f"TYP={self.navType} "
-        f"D={x_dist_to_turn:.1f} "
-        f"START={atc_start_dist:.1f} "
-        f"FD={start_fork_dist:.1f} "
-        f"TD={start_turn_dist:.1f} "
-        f"ATCD={atc_dist:.1f} "
-        f"v={v_ego_kph:.1f} "
-        f"limit={self.nRoadLimitSpeed:.1f}"
-      )
 
     return atc_desired, atc_type, atc_speed, atc_dist
 
