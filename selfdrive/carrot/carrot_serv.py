@@ -826,16 +826,6 @@ class CarrotServ:
     atc_dist = mapping["dist"]
     atc_start_dist = mapping["start"]
 
-    # Kans: debug x_dist -> start_dist:
-    cloudlog.warning(
-      f"ATC_CHECK "
-      f"type={atc_type} "
-      f"dist={x_dist_to_turn:.1f} "
-      f"start={atc_start_dist:.1f} "
-      f"turn={start_turn_dist:.1f} "
-      f"atcDist={atc_dist:.1f}"
-    )
-
     if x_dist_to_turn > atc_start_dist:
       atc_type += " prepare"
       if check_steer:
@@ -879,31 +869,41 @@ class CarrotServ:
       safe_sec = 2.0
       atc_desired = min(atc_desired, self.calculate_current_speed(x_dist_to_turn - atc_dist, atc_speed, safe_sec, decel))
     # Kans: ATC event log - 상태 변화 시점에만 출력
-    if check_steer:
-      atc_phase = (
-        "prepare" if atc_type.endswith(" prepare") else
-        "canceled" if atc_type.endswith(" canceled") else
-        "active"
-      )
-      atc_log_key = (atc_phase, atc_type, x_turn_info)
+    log_src = "CUR" if check_steer else "NXT"
 
-      if atc_log_key != self.prev_atc_log_key:
-        self.prev_atc_log_key = atc_log_key
-        cloudlog.warning(
-          f"KANS_ATC_EVENT "
-          f"type={atc_type} "
-          f"xTurnInfo={x_turn_info} "
-          f"navType={self.navType} "
-          f"dist={x_dist_to_turn:.1f} "
-          f"start={atc_start_dist:.1f} "
-          f"forkStart={start_fork_dist:.1f} "
-          f"turnStart={start_turn_dist:.1f} "
-          f"roadcate={self.roadcate} "
-          f"limit={self.nRoadLimitSpeed:.1f} "
-          f"vEgo={v_ego_kph:.1f} "
-          f"atcSpeed={atc_speed:.1f} "
-          f"atcDist={atc_dist:.1f}"
-        )
+    atc_phase = (
+      "PREP" if atc_type.endswith(" prepare") else
+      "CANC" if atc_type.endswith(" canceled") else
+      "ACT"
+    )
+
+    atc_log_key = (
+      log_src,
+      atc_phase,
+      atc_type,
+      x_turn_info,
+    )
+
+    prev_key_name = "prev_atc_log_cur" if check_steer else "prev_atc_log_nxt"
+
+    if atc_log_key != getattr(self, prev_key_name, None):
+      setattr(self, prev_key_name, atc_log_key)
+
+      cloudlog.warning(
+        f"KANS_ATC_EVENT "
+        f"{log_src} "
+        f"phase={atc_phase} "
+        f"type={atc_type} "
+        f"TI={x_turn_info} "
+        f"TYP={self.navType} "
+        f"D={x_dist_to_turn:.1f} "
+        f"START={atc_start_dist:.1f} "
+        f"FD={start_fork_dist:.1f} "
+        f"TD={start_turn_dist:.1f} "
+        f"ATCD={atc_dist:.1f} "
+        f"v={v_ego_kph:.1f} "
+        f"limit={self.nRoadLimitSpeed:.1f}"
+      )
 
     return atc_desired, atc_type, atc_speed, atc_dist
 
