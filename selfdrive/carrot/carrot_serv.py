@@ -874,6 +874,7 @@ class CarrotServ:
         "canceled" if atc_type.endswith(" canceled") else
         "active"
       )
+      atc_log_key = (atc_phase, atc_type, x_turn_info)
 
       if atc_log_key != self.prev_atc_log_key:
         self.prev_atc_log_key = atc_log_key
