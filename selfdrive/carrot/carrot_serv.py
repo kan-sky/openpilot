@@ -826,6 +826,16 @@ class CarrotServ:
     atc_dist = mapping["dist"]
     atc_start_dist = mapping["start"]
 
+    # Kans: debug x_dist -> start_dist:
+    cloudlog.warning(
+      f"ATC_CHECK "
+      f"type={atc_type} "
+      f"dist={x_dist_to_turn:.1f} "
+      f"start={atc_start_dist:.1f} "
+      f"turn={start_turn_dist:.1f} "
+      f"atcDist={atc_dist:.1f}"
+    )
+
     if x_dist_to_turn > atc_start_dist:
       atc_type += " prepare"
       if check_steer:
