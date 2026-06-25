@@ -191,6 +191,7 @@ class CarrotServ:
 
     self.debugText = ""
     self.atcDebugText = ""
+    self.prev_atc_log_key = None
 
     # 默认语言，稍后在 update_params 中从 Params 读取覆盖，
     # 规则：main_ko -> 韩语；main_zh-CHS -> 中文；其他 -> 英文
@@ -866,7 +867,31 @@ class CarrotServ:
       decel = self.autoNaviSpeedDecelRate
       safe_sec = 2.0
       atc_desired = min(atc_desired, self.calculate_current_speed(x_dist_to_turn - atc_dist, atc_speed, safe_sec, decel))
+    # Kans: ATC event log - 상태 변화 시점에만 출력
+    if check_steer:
+      atc_phase = (
+        "prepare" if atc_type.endswith(" prepare") else
+        "canceled" if atc_type.endswith(" canceled") else
+        "active"
+      )
 
+      if atc_log_key != self.prev_atc_log_key:
+        self.prev_atc_log_key = atc_log_key
+        cloudlog.warning(
+          f"KANS_ATC_EVENT "
+          f"type={atc_type} "
+          f"xTurnInfo={x_turn_info} "
+          f"navType={self.navType} "
+          f"dist={x_dist_to_turn:.1f} "
+          f"start={atc_start_dist:.1f} "
+          f"forkStart={start_fork_dist:.1f} "
+          f"turnStart={start_turn_dist:.1f} "
+          f"roadcate={self.roadcate} "
+          f"limit={self.nRoadLimitSpeed:.1f} "
+          f"vEgo={v_ego_kph:.1f} "
+          f"atcSpeed={atc_speed:.1f} "
+          f"atcDist={atc_dist:.1f}"
+        )
 
     return atc_desired, atc_type, atc_speed, atc_dist
 
