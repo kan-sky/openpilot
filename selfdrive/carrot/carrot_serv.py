@@ -775,7 +775,7 @@ class CarrotServ:
       # 25m ~ 8m    : atc left/right
       # 8m ~ 0m     : turn left/right
       start_fork_dist = 25.0
-      start_turn_dist = 8.0
+      start_turn_dist = 13.0
       atc_debug = "Trn"
 
     elif is_rotary:
@@ -792,7 +792,7 @@ class CarrotServ:
       elif is_highway_like:
         start_fork_dist = 100.0
       else:
-        start_fork_dist = float(np.interp(v_ego_kph, [40, 55, 70], [30, 50, 70]))
+        start_fork_dist = float(np.interp(v_ego_kph, [40, 55, 70], [20, 30, 40]))
       atc_debug = "Fork"
 
     elif is_tg:
