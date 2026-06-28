@@ -129,14 +129,12 @@ def fill_model_msg(msg: capnp._DynamicStructBuilder, net_output_data: dict[str, 
 
   # Kans: 시간값이 뒤로 갈수록 단순 감소하지 않도록 보정
   LINE_T_IDXS = [float(Tmax if math.isnan(float(v)) else float(v)) for v in LINE_T_IDXS]
-
-  # 비내림(monotonic non-decreasing) 보정 (순수 파이썬, numpy 불사용)
   running = LINE_T_IDXS[0]
   for i in range(1, len(LINE_T_IDXS)):
-      if LINE_T_IDXS[i] < running:
-          LINE_T_IDXS[i] = running
-      else:
-          running = LINE_T_IDXS[i]
+    if LINE_T_IDXS[i] < running:
+      LINE_T_IDXS[i] = running
+    else:
+      running = LINE_T_IDXS[i]
 
   # lane lines
   modelV2.init('laneLines', 4)

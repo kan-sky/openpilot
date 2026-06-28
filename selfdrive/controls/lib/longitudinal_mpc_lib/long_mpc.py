@@ -109,9 +109,7 @@ def gen_long_model():
   model.name = MODEL_NAME
 
   # set up states & controls
-  x_ego = SX.sym('x_ego')
-  v_ego = SX.sym('v_ego')
-  a_ego = SX.sym('a_ego')
+  x_ego, v_ego, a_ego = SX.sym('x_ego'), SX.sym('v_ego'), SX.sym('a_ego')
   model.x = vertcat(x_ego, v_ego, a_ego)
 
   # controls
@@ -258,18 +256,19 @@ class LongitudinalMpc:
 
   def reset(self):
     self.solver.reset()
-    # self.solver.options_set('print_level', 2)
+
+    self.x_sol = np.zeros((N+1, X_DIM))
+    self.u_sol = np.zeros((N, 1))
     self.v_solution = np.zeros(N+1)
     self.a_solution = np.zeros(N+1)
-    self.prev_a = np.array(self.a_solution)
     self.j_solution = np.zeros(N)
+    self.prev_a = np.array(self.a_solution)
     self.yref = np.zeros((N+1, COST_DIM))
 
     for i in range(N):
       self.solver.cost_set(i, "yref", self.yref[i])
     self.solver.cost_set(N, "yref", self.yref[N][:COST_E_DIM])
-    self.x_sol = np.zeros((N+1, X_DIM))
-    self.u_sol = np.zeros((N,1))
+
     self.params = np.zeros((N+1, PARAM_DIM))
     for i in range(N+1):
       self.solver.set(i, 'x', np.zeros(X_DIM))

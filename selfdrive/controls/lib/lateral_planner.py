@@ -114,8 +114,8 @@ class LateralPlanner:
       self.v_plan = np.clip(car_speed, MIN_SPEED, np.inf)
       self.v_ego = self.v_plan[0]
       self.plan_a = np.array(md.acceleration.x)
-      # Kans: 15번째 x값이 강한 감속(현재 속도의 0.7)이거나 레인모드 속도이하에는 레인리스로 전환
-      model_decel = md.velocity.x[-1] < md.velocity.x[0] * 0.6
+      # Kans: 마지막 x값이 강한 감속(현재 속도의 0.65)이거나 레인모드 속도이하에는 레인리스로 전환
+      model_decel = md.velocity.x[-1] < md.velocity.x[0] * 0.65
       low_speed_laneless = (self.useLaneLineSpeedApply > 0 and (v_ego_car * 3.6) < self.useLaneLineSpeedApply)
       if model_decel or low_speed_laneless:
         self.lanemode_possible_count = 0
