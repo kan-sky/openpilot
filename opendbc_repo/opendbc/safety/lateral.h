@@ -60,7 +60,7 @@ static bool rt_torque_rate_limit_check(int val, int val_last, const int MAX_RT_D
 bool steer_torque_cmd_checks(int desired_torque, int steer_req, const TorqueSteeringLimits limits) {
   bool violation = false;
   uint32_t ts = microsecond_timer_get();
-
+  bool aol_allowed = true;
   if (controls_allowed || aol_allowed) {
     acc_main_on = true;
     // Some safety models support variable torque limit based on vehicle speed
@@ -176,7 +176,7 @@ static bool rt_angle_rate_limit_check(AngleSteeringLimits limits) {
 // Safety checks for angle-based steering commands
 bool steer_angle_cmd_checks(int desired_angle, bool steer_control_enabled, const AngleSteeringLimits limits) {
   bool violation = false;
-
+  bool aol_allowed = true;
   if ((aol_allowed || controls_allowed) && steer_control_enabled) {
     acc_main_on = true;
     // convert floating point angle rate limits to integers in the scale of the desired angle on CAN,
