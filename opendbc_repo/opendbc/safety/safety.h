@@ -43,7 +43,6 @@ const int MAX_WRONG_COUNTERS = 5;
 // This can be set by the safety hooks
 bool controls_allowed = false;
 bool relay_malfunction = false;
-int gas_interceptor_prev = 0;
 bool gas_pressed = false;
 bool gas_pressed_prev = false;
 bool brake_pressed = false;
@@ -57,8 +56,9 @@ struct sample_t vehicle_speed;
 bool vehicle_moving = false;
 bool acc_main_on = false;  // referred to as "ACC off" in ISO 15622:2018
 int cruise_button_prev = 0;
-int cruise_main_prev = 0;
 bool safety_rx_checks_invalid = false;
+int gas_interceptor_prev = 0;
+int cruise_main_prev = 0;
 
 
 // for safety modes with torque steering control
@@ -425,7 +425,6 @@ int set_safety_hooks(uint16_t mode, uint16_t param) {
   // reset state set by safety mode
   safety_mode_cnt = 0U;
   relay_malfunction = false;
-  gas_interceptor_prev = 0;
   gas_pressed = false;
   gas_pressed_prev = false;
   brake_pressed = false;
@@ -458,6 +457,11 @@ int set_safety_hooks(uint16_t mode, uint16_t param) {
   relay_malfunction_reset();
   safety_rx_checks_invalid = false;
 
+  // GM variables
+  enable_gas_interceptor = false;
+  gas_interceptor_prev = 0;
+  cruise_main_prev = 0;
+
   current_safety_config.rx_checks = NULL;
   current_safety_config.rx_checks_len = 0;
   current_safety_config.tx_msgs = NULL;
@@ -486,9 +490,6 @@ int set_safety_hooks(uint16_t mode, uint16_t param) {
       current_safety_config.rx_checks[j].status = (RxStatus){0};
     }
   }
-
-
-  enable_gas_interceptor = false;
 
   return set_status;
 }

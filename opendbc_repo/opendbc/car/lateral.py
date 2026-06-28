@@ -167,4 +167,3 @@ def get_friction(lateral_accel_error: float, lateral_accel_deadzone: float, fric
   )
   friction = float(friction_interp) if friction_compensation else 0.0
   return friction
-  return float(friction_interp)

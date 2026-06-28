@@ -161,6 +161,9 @@ struct CarState {
   canTimeout @40 :Bool;     # CAN bus dropped out
   canErrorCounter @48 :UInt32;
 
+  # process meta
+  cumLagMs @50 :Float32;
+
   # car speed
   vEgo @1 :Float32;            # best estimate of speed
   aEgo @16 :Float32;           # best estimate of aCAN cceleration
@@ -235,9 +238,6 @@ struct CarState {
 
   fuelGauge @41 :Float32; # battery or fuel tank level from 0.0 to 1.0
   charging @43 :Bool;
-
-  # process meta
-  cumLagMs @50 :Float32;
 
   vCluRatio @58 :Float32;
   logCarrot @59 :Text;
@@ -721,8 +721,7 @@ struct CarParams {
   enum SteerControlType {
     torque @0;
     angle @1;
-
-    curvatureDEPRECATED @2;
+    curvature @2;
   }
 
   enum TransmissionType {

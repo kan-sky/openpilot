@@ -270,6 +270,7 @@ class DesireHelper:
         # 기존 조건: edge_available + (trigger or appeared) + not side_object_detected
         auto_lane_change_trigger = (
           self.auto_lane_change_enable and
+          (not atc_lane_change_manual_only) and
           side.edge_available and
           (side.lane_available_trigger or side.lane_appeared) and
           (not side.side_object_detected) and
