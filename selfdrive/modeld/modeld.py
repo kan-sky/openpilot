@@ -78,8 +78,7 @@ def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.
   else:
     desired_accel = model_output['action'][0,1]
     desired_curvature = model_output['action'][0,0] / (max(1.0, v_ego))**2
-    should_stop = (v_ego < 0.3 and desired_accel < 0.1)
-    desired_velocity_now = max(0.0, float(v_ego))
+    #should_stop = (v_ego < 0.3 and desired_accel < 0.1)
 
   # Kans: 깊은 커브에서 모델 곡률이 갑자기 줄어들 때 핸들 급풀림 방지
   raw_desired_curvature = float(desired_curvature)
@@ -131,9 +130,9 @@ def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.
 
   desired_accel = float(np.nan_to_num(
     desired_accel,
-    nan=prev_action.desiredAcceleration,
-    posinf=prev_action.desiredAcceleration,
-    neginf=prev_action.desiredAcceleration))
+    nan=prev_action.desiredAccel,
+    posinf=prev_action.desiredAccel,
+    neginf=prev_action.desiredAccel))
 
   desired_velocity_now = float(np.nan_to_num(
     desired_velocity_now,

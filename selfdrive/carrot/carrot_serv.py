@@ -725,78 +725,79 @@ class CarrotServ:
     return new_lat, new_lon
 
   def update_auto_turn(self, v_ego_kph, sm, x_turn_info, x_dist_to_turn, check_steer=False):
+    turn_speed = v_ego_kph  # self.utoTurnControlSpeedTurn
+    fork_speed = self.nRoadLimitSpeed
     # Kans: 네비 주행안내 카테고리
     is_turn = x_turn_info in [1, 2]  # 일반 좌/우회전
     is_lane_change = x_turn_info in [3, 4]  # 포크/분기/차선변경
     is_rotary = x_turn_info == 5
     is_tg = x_turn_info == 6
-
     is_highway_like = self.roadcate in [0, 1] or self.nRoadLimitSpeed >= 70
-
-    # Kans: 속도 설정
-    fork_speed = self.nRoadLimitSpeed
-    turn_speed = v_ego_kph
 
     if self.autoTurnControlSpeedTurn > 0:
       turn_ratio = min(0.90, self.autoTurnControlSpeedTurn)
-      ratio_speed = v_ego_kph * turn_ratio
+      apply_speed = v_ego_kph * turn_ratio
+      fork_speed = turn_speed
 
       if is_turn:
         # 일반 좌/우회전: 교차로/코너용 저속
-        turn_speed = max(15.0, min(22.0, ratio_speed))
-        fork_speed = turn_speed
+        turn_speed = max(15.0, min(22.0, apply_speed))
 
       elif is_rotary:
         # 로터리: 너무 느리면 후속차 방해
-        turn_speed = max(30.0, min(37.0, ratio_speed))
-        fork_speed = turn_speed
-
+        turn_speed = max(30.0, min(37.0, apply_speed))
+ 
       elif is_lane_change:
         # 포크/분기/램프: 현재속도 기반 감속
-        fork_speed = max(30.0, ratio_speed)
+        fork_speed = max(30.0, apply_speed)
         turn_speed = fork_speed
 
     stop_speed = 1
-    turn_dist_for_speed = self.autoTurnControlTurnEnd * turn_speed / 3.6
-    fork_dist_for_speed = self.autoTurnControlTurnEnd * fork_speed / 3.6
-    stop_dist_for_speed = 5.0
-
-    # Kans:
-    # fork_start = prepare 해제 / fork active 진입 거리
-    # turn_start = atc left/right -> turn left/right 전환 거리
-    # *_dist_for_speed = 감속 완료 목표 거리
-    start_fork_dist = max(25.0, self.autoTurnControlTurnEnd * 10.0)
-    start_turn_dist = 10.0
+    turn_dist_for_speed = self.autoTurnControlTurnEnd * turn_speed / 3.6 # 5
+    fork_dist_for_speed = self.autoTurnControlTurnEnd * fork_speed / 3.6 # 5
+    stop_dist_for_speed = 5
+    # Kans: 시작거리 기본값
+    # start_fork_dist: fork/차선변경 prepare 해제 거리
+    # start_turn_dist: 일반 좌/우회전에서 atc left/right 유지 경계
+    # 핸들이 늦게 꺾이면 start_fork_dist를 키우고, “턴합니다” 상태가 늦으면 start_turn_dist를 키운다.
+    start_fork_dist = 55.0
+    start_turn_dist = 35.0
     atc_debug = "Df"
 
     if is_turn:
-      # 일반 좌/우회전:
-      # 25m 밖      : turn prepare
-      # 25m ~ 8m    : atc left/right
-      # 8m ~ 0m     : turn left/right
-      start_fork_dist = 25.0
-      start_turn_dist = 13.0
+      # Kans: 일반 좌/우회전/교차로
+      # 조향변경이 늦으니 멀리서부터 미리 준비하게 한다.
+      start_fork_dist = 45.0
+      road_dist = np.interp(self.nTBTNextRoadWidth, [5, 10], [30, 45])
+      speed_dist = np.interp(v_ego_kph, [20, 30, 50], [25, 35, 50])
+      start_turn_dist = min(road_dist, speed_dist)
       atc_debug = "Trn"
 
     elif is_rotary:
-      # 로터리는 조향 개입보다는 감속 짧게
+      # Kans: 로터리는 조향 개입보다 속도만 짧게 제어
       start_turn_dist = 5.0
       turn_dist_for_speed = 5.0
       atc_debug = "Rty"
 
     elif is_lane_change:
-      # 포크/분기/램프:
-      # prepare 해제 후 바로 fork left/right 유지
+      # Kans: 포크/분기/차선변경
       if self.navType == "off ramp":
         start_fork_dist = 90.0
+        atc_debug = "Rmp"
+
       elif is_highway_like:
         start_fork_dist = 100.0
+        atc_debug = "Hwy"
+
       else:
-        start_fork_dist = float(np.interp(v_ego_kph, [40, 55, 70], [20, 30, 40]))
-      atc_debug = "Fork"
+        # Kans: 일반 분기
+        # 저속에서는 짧게, 60~70km/h에서는 더 일찍 차선변경
+        start_fork_dist = float(np.interp(v_ego_kph, [35, 55, 75], [27, 50, 70]))
+        atc_debug = "Fok"
 
     elif is_tg:
-      start_fork_dist = 25.0
+      # Kans: TG는 짧게
+      start_fork_dist = 15.0
       atc_debug = "TG"
 
     if check_steer:
@@ -810,14 +811,14 @@ class CarrotServ:
       )
 
     turn_info_mapping = {
-      1: {"type": "turn left",  "speed": turn_speed, "dist": turn_dist_for_speed, "start": start_fork_dist},
-      2: {"type": "turn right", "speed": turn_speed, "dist": turn_dist_for_speed, "start": start_fork_dist},
-
-      3: {"type": "fork left",  "speed": fork_speed, "dist": fork_dist_for_speed, "start": start_fork_dist},
-      4: {"type": "fork right", "speed": fork_speed, "dist": fork_dist_for_speed, "start": start_fork_dist},
-
-      5: {"type": "straight", "speed": turn_speed, "dist": turn_dist_for_speed, "start": start_turn_dist},
-      6: {"type": "straight", "speed": fork_speed, "dist": fork_dist_for_speed, "start": start_fork_dist},
+        1: {"type": "turn left", "speed": turn_speed, "dist": turn_dist_for_speed, "start": start_fork_dist},
+        2: {"type": "turn right", "speed": turn_speed, "dist": turn_dist_for_speed, "start": start_fork_dist},
+        5: {"type": "straight", "speed": turn_speed, "dist": turn_dist_for_speed, "start": start_turn_dist},
+        3: {"type": "fork left", "speed": fork_speed, "dist": fork_dist_for_speed, "start": start_fork_dist},
+        4: {"type": "fork right", "speed": fork_speed, "dist": fork_dist_for_speed, "start": start_fork_dist},
+        6: {"type": "straight", "speed": fork_speed, "dist": fork_dist_for_speed, "start": start_fork_dist},
+        7: {"type": "straight", "speed": stop_speed, "dist": stop_dist_for_speed, "start": 1000},
+        8: {"type": "straight", "speed": stop_speed, "dist": stop_dist_for_speed, "start": 1000},
     }
 
     default_mapping = {"type": "none", "speed": 0, "dist": 0, "start": 1000}

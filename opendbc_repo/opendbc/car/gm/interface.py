@@ -390,8 +390,8 @@ class CarInterface(CarInterfaceBase):
       self.CS.out.autoHoldActivated = True
       return
 
-  def apply(self, c, now_nanos, MD=None):
-    self.CS.MD = MD
+  def apply(self, c, now_nanos, model_v2=None):
+    self.CS.modelV2 = model_v2
     self.update_auto_hold()
     can_sends = self.CC.update(c, self.CS, now_nanos)
     return can_sends

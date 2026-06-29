@@ -243,6 +243,7 @@ def get_friction(lateral_accel_error: float, lateral_accel_deadzone: float, fric
     [-torque_params.friction, torque_params.friction]
   )
   friction = float(friction_interp) if friction_compensation else 0.0
+  return friction
 
 
 def make_tester_present_msg(addr, bus, subaddr=None, suppress_response=False):
