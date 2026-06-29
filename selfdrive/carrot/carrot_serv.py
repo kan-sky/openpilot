@@ -766,7 +766,7 @@ class CarrotServ:
     # turn_start = atc left/right -> turn left/right 전환 거리
     # *_dist_for_speed = 감속 완료 목표 거리
     start_fork_dist = max(25.0, self.autoTurnControlTurnEnd * 10.0)
-    start_turn_dist = 5.0
+    start_turn_dist = 10.0
     atc_debug = "Df"
 
     if is_turn:
