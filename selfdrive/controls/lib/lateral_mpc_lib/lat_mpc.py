@@ -183,8 +183,8 @@ class LateralMpc:
 
     curve_offset = float(np.interp(
         curv_ref,
-        [0.0003, 0.0008, 0.0015, 0.0030],
-        [0.2,    0.6,    1.2,    2.0]
+        [0.0025, 0.0006, 0.0012, 0.0030],
+        [0.3,    0.8,    1.4,    2.1]
     ))
 
     return float(np.clip(speed_offset + curve_offset, 0.0, 6.0))
