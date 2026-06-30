@@ -214,7 +214,7 @@ class LanePlanner:
             if (self.prev_lane_path_y_interp is not None and
                 len(self.prev_lane_path_y_interp) == len(lane_path_y_interp)):
 
-              near_idxs = path_xyz[:, 0] < 30.0
+              near_idxs = (path_xyz[:, 0] > 3.0) & (path_xyz[:, 0] < 25.0)
 
               if np.any(near_idxs):
                 delta = np.nanmax(np.abs(
@@ -224,9 +224,9 @@ class LanePlanner:
                 new_curve = np.nanmax(lane_path_y_interp[near_idxs]) - np.nanmin(lane_path_y_interp[near_idxs])
                 prev_curve = np.nanmax(self.prev_lane_path_y_interp[near_idxs]) - np.nanmin(self.prev_lane_path_y_interp[near_idxs])
 
-                curve_drop = prev_curve > 0.25 and new_curve < prev_curve * 0.70
+                curve_drop = prev_curve > 0.20 and new_curve < prev_curve * 0.70
 
-                if delta > 0.25 or curve_drop:
+                if delta > 0.20 or curve_drop:
                   d_prob_clip = float(np.clip(self.d_prob, 0.5, 1.0))
                   smooth_blend = float(np.interp(d_prob_clip, [0.5, 1.0], [0.35, 0.05]))
                   lane_path_y_interp = (
