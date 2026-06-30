@@ -168,18 +168,26 @@ class LateralMpc:
 
   # Kans: spped offset
   def get_speed_offset(self, v_ego, yaw_rate_pts):
-    v = np.clip(v_ego, 10.0, 27.0)
-    # 속도 기반 기본값: 고속일수록 약간 증가
-    speed_offset = float(np.interp(v, [10.0, 15.0, 27.0], [3.0, 4.0, 5.0]))
-    # 곡률 추정
+  def get_speed_offset(self, v_ego, yaw_rate_pts):
+    v = np.clip(v_ego, 10.0, 32.0)
+
+    speed_offset = float(np.interp(
+        v,
+        [10.0, 15.0, 27.0, 32.0],
+        [3.0,  4.0,  5.0,  5.5]
+    ))
+
     curvature = np.abs(yaw_rate_pts) / max(v_ego, 0.1)
-    # 너무 먼 미래/노이즈보다 앞쪽 구간 위주
     n = min(len(curvature), 20)
     curv_ref = float(np.percentile(curvature[:n], 85)) if n > 0 else 0.0
-    # 곡률 기반 추가 보정
-    curve_offset = float(np.interp(curv_ref, [0.0005, 0.0015, 0.0030, 0.0050], [0.0, 0.5, 1.5, 2.5]))
 
-    return np.clip(speed_offset + curve_offset, 0.0, 5.0)
+    curve_offset = float(np.interp(
+        curv_ref,
+        [0.0003, 0.0008, 0.0015, 0.0030],
+        [0.2,    0.6,    1.2,    2.0]
+    ))
+
+    return float(np.clip(speed_offset + curve_offset, 0.0, 6.0))
 
   def run(self, x0, p, y_pts, heading_pts, yaw_rate_pts):
     x0_cp = np.copy(x0)
