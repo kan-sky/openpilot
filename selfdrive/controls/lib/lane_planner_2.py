@@ -209,17 +209,30 @@ class LanePlanner:
         lane_path_y_interp = np.interp(path_xyz[:, 0], ll_x_np[safe_idxs], lane_path_y_np[safe_idxs])
         # Kans: 커브에서 차선 경로가 순간적으로 직선화되는 현상 완화
         curvature_abs = abs(curvature)
-        if curvature_abs > 0.0015:
+        if curvature_abs > 0.0010:
           if hasattr(self, "prev_lane_path_y_interp"):
             if (self.prev_lane_path_y_interp is not None and
                 len(self.prev_lane_path_y_interp) == len(lane_path_y_interp)):
-              near_idxs = path_xyz[:, 0] < 15  # 15m내의 곡선안에서만 적용.
-              delta = np.nanmax(np.abs(lane_path_y_interp[near_idxs] - self.prev_lane_path_y_interp[near_idxs]))
 
-              if delta > 0.25:  # 차선폭 편차(합해서 .5m) 이상이면 d_prob가 낮을수록 이전경로를 최대25% 반영
-                d_prob_clip = float(np.clip(self.d_prob, 0.5, 1.0))
-                smooth_blend = float(np.interp(d_prob_clip, [0.5, 1.0], [0.25, 0.0]))
-                lane_path_y_interp = (smooth_blend * self.prev_lane_path_y_interp + (1.0 - smooth_blend) * lane_path_y_interp)
+              near_idxs = path_xyz[:, 0] < 30.0
+
+              if np.any(near_idxs):
+                delta = np.nanmax(np.abs(
+                  lane_path_y_interp[near_idxs] - self.prev_lane_path_y_interp[near_idxs]
+                ))
+
+                new_curve = np.nanmax(lane_path_y_interp[near_idxs]) - np.nanmin(lane_path_y_interp[near_idxs])
+                prev_curve = np.nanmax(self.prev_lane_path_y_interp[near_idxs]) - np.nanmin(self.prev_lane_path_y_interp[near_idxs])
+
+                curve_drop = prev_curve > 0.25 and new_curve < prev_curve * 0.70
+
+                if delta > 0.25 or curve_drop:
+                  d_prob_clip = float(np.clip(self.d_prob, 0.5, 1.0))
+                  smooth_blend = float(np.interp(d_prob_clip, [0.5, 1.0], [0.35, 0.05]))
+                  lane_path_y_interp = (
+                    smooth_blend * self.prev_lane_path_y_interp +
+                    (1.0 - smooth_blend) * lane_path_y_interp
+                  )
         self.prev_lane_path_y_interp = lane_path_y_interp.copy()
         path_xyz[:, 1] = lane_blend * lane_path_y_interp + (1.0 - lane_blend) * path_xyz[:, 1]
 

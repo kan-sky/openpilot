@@ -81,15 +81,17 @@ def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.
     #should_stop = (v_ego < 0.3 and desired_accel < 0.1)
 
   # Kans: 깊은 커브에서 모델 곡률이 갑자기 줄어들 때 핸들 급풀림 방지
-  raw_desired_curvature = float(desired_curvature)
-  prev_curvature = float(prev_action.desiredCurvature)
+  raw_curv = float(desired_curvature)
+  prev_curv = float(prev_action.desiredCurvature)
 
-  same_curve = raw_desired_curvature * prev_curvature > 0.0
-  deep_curve = abs(prev_curvature) > 0.0025  # 같은 방향의 곡률이 .0025이상일때(램프)
-  curv_drop = abs(raw_desired_curvature) < abs(prev_curvature) * 0.70  # 모델이 그 곡률값을 갑자기 70%이하로 확 떨어뜨리면,
+  same_curve = raw_curv * prev_curv > 0.0
+  prev_abs = abs(prev_curv)
+  raw_abs = abs(raw_curv)
 
-  if same_curve and deep_curve and curv_drop:
-    desired_curvature = prev_curvature * 0.8 + raw_desired_curvature * 0.2  # 과하게 낮춘 값을 따라가지 않고 80%만 반영한다.
+  if same_curve and prev_abs > 0.0025 and raw_abs < prev_abs * 0.70:
+    desired_curvature = 0.8 * prev_curv + 0.2 * raw_curv  # 과하게 낮춘 값을 따라가지 않고 80%만 반영한다.
+  else:
+    desired_curvature = raw_curv
 
   # Kans: 큰 곡률로 이어지는 커브 판단
   abs_curvature = abs(desired_curvature)
@@ -98,7 +100,7 @@ def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.
   # 기존 [0.15, 0.10, 0.08]은 변화폭이 커서 조향이 감겼다 풀렸다 할 수 있음.
   curve_smooth_max = float(np.interp(abs_curvature,
     [0.0005, 0.0015, 0.0040],
-    [0.13, 0.11, 0.10]))
+    [0.13, 0.12, 0.11]))
 
   # 속도에 따른 smoothing 상한값
   speed_smooth_max = float(np.interp(v_ego,
@@ -145,7 +147,7 @@ def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.
       desiredCurvature=float(desired_curvature),
       desiredAcceleration=float(desired_accel),
       shouldStop=bool(should_stop),
-      desiredVelocity=desired_velocity_now
+      desiredVelocity=float(desired_velocity_now)
     ),
     curve_smooth_max,
     applied_lat_smooth_seconds)
