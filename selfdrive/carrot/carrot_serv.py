@@ -771,6 +771,7 @@ class CarrotServ:
       road_dist = np.interp(self.nTBTNextRoadWidth, [5, 10], [30, 45])
       speed_dist = np.interp(v_ego_kph, [20, 30, 50], [25, 35, 50])
       start_turn_dist = min(road_dist, speed_dist)
+      start_turn_dist = max(8.0, min(start_turn_dist, start_fork_dist - 5.0))
       atc_debug = "Trn"
 
     elif is_rotary:
