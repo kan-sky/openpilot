@@ -167,7 +167,7 @@ class LateralMpc:
     self.solver.cost_set(N, 'W', W[:COST_E_DIM,:COST_E_DIM])
 
   # Kans: spped offset
-  def get_speed_offset(self, v_ego, yaw_rate_pts):
+  #def get_speed_offset(self, v_ego, yaw_rate_pts):
   def get_speed_offset(self, v_ego, yaw_rate_pts):
     v = np.clip(v_ego, 10.0, 32.0)
 
