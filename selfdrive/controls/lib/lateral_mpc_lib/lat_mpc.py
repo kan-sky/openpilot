@@ -169,7 +169,7 @@ class LateralMpc:
   # Kans: spped offset
   def get_speed_offset(self, v_ego):
     v = np.clip(v_ego, 10.0, 32.0)
-    return float(np.interp(v, [10.0, 20.0, 32.0], [7.0, 8.0, 9.0]))
+    return float(np.interp(v, [10.0, 20.0, 32.0], [8.0, 9.0, 10.0]))
 
   def run(self, x0, p, y_pts, heading_pts, yaw_rate_pts):
     x0_cp = np.copy(x0)
