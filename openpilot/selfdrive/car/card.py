@@ -11,7 +11,7 @@ from openpilot.common.params import Params
 from openpilot.common.realtime import config_realtime_process, Priority, Ratekeeper
 from openpilot.common.swaglog import cloudlog, ForwardingHandler
 
-from opendbc.car import DT_CTRL, structs
+from opendbc.car import DT_CTRL, ButtonType, structs
 from opendbc.car.can_definitions import CanData, CanRecvCallable, CanSendCallable
 from opendbc.car.carlog import carlog
 from opendbc.car.fw_versions import ObdCallback
@@ -165,6 +165,8 @@ class Car:
     # card is driven by can recv, expected at 100Hz
     self.rk = Ratekeeper(100, print_delay_threshold=None)
 
+    # OPGM variables
+    self.resume_prev_button = False
   def state_update(self) -> tuple[car.CarState, structs.RadarDataT | None]:
     """carState update loop, driven by can"""
 
@@ -214,12 +216,19 @@ class Car:
     CS.vCruise = float(v_cruise_kph)
     CS.vCruiseCluster = float(v_cruise_cluster_kph)
     CS.softHoldActive = self.v_cruise_helper._soft_hold_active
-    CS.activateCruise = self.v_cruise_helper._activate_cruise
+    # Kans: use latch
+    CS.activateCruise = self.v_cruise_helper.get_activate_cruise()  # _activate_cruise
     CS.latEnabled = self.v_cruise_helper._lat_enabled
     CS.useLaneLineSpeed = self.v_cruise_helper.useLaneLineSpeedApply
     CS.carrotCruise = 1 if self.v_cruise_helper.carrot_cruise_active else 0
 
     self.CI.CS.softHoldActive = CS.softHoldActive
+
+    # OPGM variables
+    if any(be.type in (ButtonType.accelCruise, ButtonType.resumeCruise) for be in CS.buttonEvents):
+      self.resume_prev_button = True
+    elif any(be.type in (ButtonType.decelCruise, ButtonType.setCruise) for be in CS.buttonEvents):
+      self.resume_prev_button = False
     return CS, RD
 
   def state_publish(self, CS: car.CarState, RD: structs.RadarDataT | None):

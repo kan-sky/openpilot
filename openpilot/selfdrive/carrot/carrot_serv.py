@@ -19,6 +19,7 @@ from openpilot.common.filter_simple import MyMovingAverage
 from openpilot.system.hardware import PC, TICI
 from openpilot.selfdrive.navd.helpers import Coordinate
 from openpilot.common.constants import CV
+from openpilot.common.swaglog import cloudlog
 from openpilot.common.gps import get_gps_location_service
 
 nav_type_mapping = {
@@ -190,6 +191,7 @@ class CarrotServ:
     self.source_last = "none"
 
     self.debugText = ""
+    self.atcDebugText = ""
 
     # 默认语言，稍后在 update_params 中从 Params 读取覆盖，
     # 规则：main_ko -> 韩语；main_zh-CHS -> 中文；其他 -> 英文
@@ -208,7 +210,7 @@ class CarrotServ:
     self.turnSpeedControlMode= self.params.get_int("TurnSpeedControlMode")
     self.mapTurnSpeedFactor= self.params.get_float("MapTurnSpeedFactor") * 0.01
 
-    self.autoTurnControlSpeedTurn = self.params.get_int("AutoTurnControlSpeedTurn")
+    self.autoTurnControlSpeedTurn = self.params.get_int("AutoTurnControlSpeedTurn") * 0.01
     self.autoTurnMapChange = self.params.get_int("AutoTurnMapChange")
     self.autoTurnControl = self.params.get_int("AutoTurnControl")
     self.autoTurnControlTurnEnd = self.params.get_int("AutoTurnControlTurnEnd")
@@ -722,14 +724,92 @@ class CarrotServ:
     return new_lat, new_lon
 
   def update_auto_turn(self, v_ego_kph, sm, x_turn_info, x_dist_to_turn, check_steer=False):
-    turn_speed = self.autoTurnControlSpeedTurn
+    turn_speed = v_ego_kph  # self.utoTurnControlSpeedTurn
     fork_speed = self.nRoadLimitSpeed
+    # Kans: 네비 주행안내 카테고리
+    is_turn = x_turn_info in [1, 2]  # 일반 좌/우회전
+    is_lane_change = x_turn_info in [3, 4]  # 포크/분기/차선변경
+    is_rotary = x_turn_info == 5
+    is_tg = x_turn_info == 6
+    is_highway_like = self.roadcate in [0, 1] or self.nRoadLimitSpeed >= 70
+
+    if self.autoTurnControlSpeedTurn > 0:
+      turn_ratio = min(0.90, self.autoTurnControlSpeedTurn)
+      apply_speed = v_ego_kph * turn_ratio
+      fork_speed = turn_speed
+
+      if is_turn:
+        # 일반 좌/우회전: 교차로/코너용 저속
+        turn_speed = max(15.0, min(22.0, apply_speed))
+
+      elif is_rotary:
+        # 로터리: 너무 느리면 후속차 방해
+        turn_speed = max(30.0, min(37.0, apply_speed))
+ 
+      elif is_lane_change:
+        # 포크/분기/램프: 현재속도 기반 감속
+        fork_speed = max(30.0, apply_speed)
+        turn_speed = fork_speed
+
     stop_speed = 1
     turn_dist_for_speed = self.autoTurnControlTurnEnd * turn_speed / 3.6 # 5
     fork_dist_for_speed = self.autoTurnControlTurnEnd * fork_speed / 3.6 # 5
     stop_dist_for_speed = 5
-    start_fork_dist = np.interp(self.nRoadLimitSpeed, [30, 50, 100], [160, 200, 350])
-    start_turn_dist = np.interp(self.nTBTNextRoadWidth, [5, 10], [43, 60])
+    # Kans: 시작거리 기본값
+    # start_fork_dist: fork/차선변경 prepare 해제 거리
+    # start_turn_dist: 일반 좌/우회전에서 atc left/right 유지 경계
+    # 핸들이 늦게 꺾이면 start_fork_dist를 키우고, “턴” 시점이 늦으면 start_turn_dist를 키운다.
+    start_fork_dist = 45.0
+    start_turn_dist = 30.0
+    atc_debug = "Df"
+
+    if is_turn:
+      # Kans: 일반 좌/우회전/교차로
+      # 조향변경이 늦으니 멀리서부터 미리 준비하게 한다.
+      start_fork_dist = 45.0
+      road_dist = np.interp(self.nTBTNextRoadWidth, [5, 10], [30, 45])
+      speed_dist = np.interp(v_ego_kph, [20, 30, 50], [15, 25, 40])
+      start_turn_dist = min(road_dist, speed_dist)
+      atc_debug = "Trn"
+
+    elif is_rotary:
+      # Kans: 로터리는 조향 개입보다 속도만 짧게 제어
+      start_turn_dist = 5.0
+      turn_dist_for_speed = 5.0
+      atc_debug = "Rty"
+
+    elif is_lane_change:
+      # Kans: 포크/분기/차선변경
+      if self.navType == "off ramp":
+        start_fork_dist = 90.0
+        atc_debug = "Rmp"
+
+      elif is_highway_like:
+        start_fork_dist = 100.0
+        atc_debug = "Hwy"
+
+      else:
+        # Kans: 일반 분기
+        # 저속에서는 짧게, 60~70km/h에서는 더 일찍 차선변경
+        start_fork_dist = float(np.interp(v_ego_kph, [35, 55, 75], [27, 50, 70]))
+        atc_debug = "Fok"
+
+    elif is_tg:
+      # Kans: TG는 짧게
+      start_fork_dist = 15.0
+      atc_debug = "TG"
+
+
+    if check_steer:
+      self.atcDebugText = (
+        f"ATC:{atc_debug} "
+        f"TYP:{self.navType} "
+        f"TI:{x_turn_info} "
+        f"D:{x_dist_to_turn:.0f} "
+        f"FD:{start_fork_dist:.0f} "
+        f"TD:{start_turn_dist:.0f}"
+      )
+
     turn_info_mapping = {
         1: {"type": "turn left", "speed": turn_speed, "dist": turn_dist_for_speed, "start": start_fork_dist},
         2: {"type": "turn right", "speed": turn_speed, "dist": turn_dist_for_speed, "start": start_fork_dist},
@@ -750,11 +830,16 @@ class CarrotServ:
     atc_dist = mapping["dist"]
     atc_start_dist = mapping["start"]
 
+    # Kans: 상태 전환
+    # x_dist_to_turn: 네비가 주는 턴 지점. 대체로 교차로 중앙. 준비거리(start_dist)를 길게 주어야 함.
     if x_dist_to_turn > atc_start_dist:
+      # 아직 active 시작 전
       atc_type += " prepare"
       if check_steer:
         self.atc_activate_count = min(0, self.atc_activate_count - 1)
+
     else:
+      # active 진입
       if check_steer:
         self.atc_activate_count = max(0, self.atc_activate_count + 1)
       if atc_type in ["turn left", "turn right"] and x_dist_to_turn > start_turn_dist:
@@ -942,8 +1027,19 @@ class CarrotServ:
 
     #print(f"sdi_speed: {sdi_speed}, hda_active: {hda_active}, xSpdType: {self.xSpdType}, xSpdDist: {self.xSpdDist}, active_carrot: {self.active_carrot}, v_ego_kph: {v_ego_kph}, nRoadLimitSpeed: {self.nRoadLimitSpeed}")
     ### TBT 속도제어
-    atc_desired, self.atcType, self.atcSpeed, self.atcDist = self.update_auto_turn(v_ego*3.6, sm, self.xTurnInfo, self.xDistToTurn, True)
-    atc_desired_next, _, _, _ = self.update_auto_turn(v_ego*3.6, sm, self.xTurnInfoNext, self.xDistToTurnNext, False)
+    atc_desired, atc_type, self.atcSpeed, self.atcDist = self.update_auto_turn(v_ego * 3.6, sm, self.xTurnInfo, self.xDistToTurn, True)
+    # Kans: 분기후 이어지는 차선변경안내(atc_type_next) 추가
+    atc_desired_next, atc_type_next, _, _ = self.update_auto_turn(v_ego * 3.6, sm, self.xTurnInfoNext, self.xDistToTurnNext, False)
+
+    self.atcType = atc_type
+
+    # Kans: 현재 안내가 없거나/지났거나/아직 prepare 상태이면, 가까운 다음 안내를 조향 타입으로 사용
+    use_next_atc = (self.atcType == "none" or self.atcType.endswith(" prepare") or self.xDistToTurn < 0)
+    next_ready = (0 < self.xDistToTurnNext < 250 and atc_type_next != "none" and not atc_type_next.endswith(" prepare"))
+
+    if use_next_atc and next_ready:
+      if 0 < self.xDistToTurnNext < 250 and not atc_type_next.endswith(" prepare"):
+        self.atcType = atc_type_next
 
     if self.nSdiType  >= 0: # or self.active_carrot > 0:
       pass
@@ -981,7 +1077,7 @@ class CarrotServ:
     if self.turnSpeedControlMode == 2:
       if -500 < self.xDistToTurn < 500:
         speed_n_sources.append((route_speed, "route"))
-    elif self.turnSpeedControlMode in [3, 4]:
+    elif self.turnSpeedControlMode == 3:
       speed_n_sources.append((route_speed, "route"))
       #speed_n_sources.append((self.calculate_current_speed(dist, speed * self.mapTurnSpeedFactor, 0, 1.2), "route"))
 
@@ -1006,8 +1102,7 @@ class CarrotServ:
       if desired_speed < self.gas_override_speed:
         source = "gas"
         desired_speed = self.gas_override_speed
-
-      self.debugText += f"route={route_speed:.1f}"#f"desired={desired_speed:.1f},{source},g={self.gas_override_speed:.0f}"
+      self.debugText = f"{self.atcDebugText}"
 
     left_spd_sec = 100
     left_tbt_sec = 100

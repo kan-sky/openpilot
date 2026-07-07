@@ -1151,7 +1151,13 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
   EventName.torqueNNLoad: {
     ET.PERMANENT: torque_nn_load_alert,
   },
-
+  EventName.autoHold: {
+    ET.WARNING: Alert(
+      "오토홀드 작동.",
+      "",
+      AlertStatus.normal, AlertSize.small,
+      Priority.LOW, VisualAlert.none, AudibleAlert.autoHold, 2.),
+  },
 }
 if HARDWARE.get_device_type() == 'mici':
   EVENTS.update({

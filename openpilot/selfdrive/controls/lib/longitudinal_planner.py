@@ -49,21 +49,8 @@ def get_future_curvature(model_msg, fallback_curvature, lookahead=TURN_CURVATURE
 
   return yaw_rate_future / max(abs(velocity_future), TURN_CURVATURE_MIN_SPEED)
 
-def limit_accel_in_turns(v_ego, curvature, a_target, a_lat_max,
-                         safety_ratio=0.70,   # 0.60~0.85 (작을수록 더 얌전)
-                         min_v=0.1):
-  """
-  v_ego    : m/s
-  curvature: 1/m  (sign 포함)
-  a_target : [a_min, a_max] (m/s^2)
-  a_lat_max: 허용 최대 횡가속 (m/s^2)
-
-  safety_ratio:
-    a_lat_max에 소프트 마진을 주는 비율.
-    예) a_lat_max=4, safety_ratio=0.7 -> 실사용 한계 2.8로 계산.
-
-  return   : [a_min, 제한된 a_max]
-  """
+def limit_accel_in_turns(v_ego, curvature, a_target, a_lat_max, safety_ratio=0.70, min_v=0.1):
+  # 아주 저속이면 굳이 제한 안 걸어도 됨
   if v_ego < min_v or a_lat_max <= 0.0:
     return a_target
 
@@ -243,8 +230,8 @@ class LongitudinalPlanner:
 
     # Interpolate 0.05 seconds and save as starting point for next iteration
     a_prev = self.a_desired
-    self.a_desired = float(np.interp(self.dt, CONTROL_N_T_IDX, self.a_desired_trajectory))
-    self.v_desired_filter.x = self.v_desired_filter.x + self.dt * (self.a_desired + a_prev) / 2.0
+    self.a_desired = float(np.interp(self.CP.radarTimeStep, CONTROL_N_T_IDX, self.a_desired_trajectory))
+    self.v_desired_filter.x = self.v_desired_filter.x + self.CP.radarTimeStep * (self.a_desired + a_prev) / 2.0
 
     longitudinalActuatorDelay = self.params.get_float("LongActuatorDelay")*0.01
     vEgoStopping = self.params.get_float("VEgoStopping") * 0.01

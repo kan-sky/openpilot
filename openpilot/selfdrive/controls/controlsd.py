@@ -36,7 +36,7 @@ from openpilot.selfdrive.carrot.carrot_controls import CarrotControls
 State = log.SelfdriveState.OpenpilotState
 LaneChangeState = log.LaneChangeState
 LaneChangeDirection = log.LaneChangeDirection
-LAT_CURVATURE_SATURATION_ACCEL = 0.1  # infiniteCable2 LatControlCurvature: ê³¡ë¥  ê¸°ë°˜ steer_limited ì„ê³„ (m/s^2 í™˜ì‚°)
+LAT_CURVATURE_SATURATION_ACCEL = 0.1  # infiniteCable2 LatControlCurvature: °î·ü ±â¹İ steer_limited ÀÓ°è (m/s^2 È¯»ê)
 
 ACTUATOR_FIELDS = tuple(car.CarControl.Actuators.schema.fields.keys())
 
@@ -62,9 +62,9 @@ class Controls:
     self.curvature = 0.0
     self.desired_curvature = 0.0
 
-    # VW MEB(ID.4/ID.5)ì—ì„œë§Œ ì‚¬ìš©. infiniteCable2 LatControlCurvature ì •í™• ë³µì œ:
-    # EnableCurvatureController=1(ê¸°ë³¸ ON) ìƒíƒœì˜ ê³¡ë¥  íë£¨í”„ PID + useCarSteerCurvature ë³´ì •
-    # (id4-meb ë¸Œëœì¹˜ ì‹¤ì°¨ ê²€ì¦íŒ). ê²Œì¸ì€ opendbc values.pyì˜ MEB_CURVATURE_PID_*ê°€ ë‹¨ì¼ ì†ŒìŠ¤.
+    # VW MEB(ID.4/ID.5)¿¡¼­¸¸ »ç¿ë. infiniteCable2 LatControlCurvature Á¤È® º¹Á¦:
+    # EnableCurvatureController=1(±âº» ON) »óÅÂÀÇ °î·ü Æó·çÇÁ PID + useCarSteerCurvature º¸Á¤
+    # (id4-meb ºê·£Ä¡ ½ÇÂ÷ °ËÁõÆÇ). °ÔÀÎÀº opendbc values.pyÀÇ MEB_CURVATURE_PID_*°¡ ´ÜÀÏ ¼Ò½º.
     self.is_vw_meb = is_volkswagen_meb(self.CP)
     self.meb_curvature_pid = (MultiplicativeUnwindPID(MEB_CURVATURE_PID_KP, MEB_CURVATURE_PID_KI,
                                                       k_f=MEB_CURVATURE_PID_KF,
@@ -106,10 +106,10 @@ class Controls:
     lp = self.sm['liveParameters']
     x = max(lp.stiffnessFactor, 0.1)
     if self.is_vw_meb:
-      # VW MEB(ID.4/ID.5): infiniteCable2ì™€ ë™ì¼í•˜ê²Œ í•™ìŠµëœ steerRatioë¥¼ ê·¸ëŒ€ë¡œ ì‚¬ìš©.
-      # carrotì˜ SteerRatioRate ìë™í•™ìŠµ/CustomSR ë°°ìˆ˜ë¥¼ ê³±í•˜ë©´ VM steerRatioê°€ infiniteCable2ì™€
-      # ì–´ê¸‹ë‚˜ actual_curvature_vmì´ í‹€ì–´ì§€ê³  useCarSteerCurvature ë³´ì •í•­ì´ ê°ë„ë¹„ë¡€ ë°”ì´ì–´ìŠ¤ê°€ ë˜ì–´
-      # ê³¡ì„  ë°œì§„Â·ì°¨ì„ ì´íƒˆì„ ìœ ë°œí•¨. MEBë§Œ ì›ë³¸ ë°©ì‹(ë°°ìˆ˜ ë¯¸ì ìš©)ìœ¼ë¡œ ê³ ì •. íƒ€ ì°¨ì¢…ì€ carrot ê·¸ëŒ€ë¡œ.
+      # VW MEB(ID.4/ID.5): infiniteCable2¿Í µ¿ÀÏÇÏ°Ô ÇĞ½ÀµÈ steerRatio¸¦ ±×´ë·Î »ç¿ë.
+      # carrotÀÇ SteerRatioRate ÀÚµ¿ÇĞ½À/CustomSR ¹è¼ö¸¦ °öÇÏ¸é VM steerRatio°¡ infiniteCable2¿Í
+      # ¾î±ß³ª actual_curvature_vmÀÌ Æ²¾îÁö°í useCarSteerCurvature º¸Á¤Ç×ÀÌ °¢µµºñ·Ê ¹ÙÀÌ¾î½º°¡ µÇ¾î
+      # °î¼± ¹ßÁø¡¤Â÷¼±ÀÌÅ»À» À¯¹ßÇÔ. MEB¸¸ ¿øº» ¹æ½Ä(¹è¼ö ¹ÌÀû¿ë)À¸·Î °íÁ¤. Å¸ Â÷Á¾Àº carrot ±×´ë·Î.
       sr = max(lp.steerRatio, 0.1)
     else:
       sr = max(lp.steerRatio, 0.1) * self.params.get_float("SteerRatioRate") / 100.0
@@ -183,15 +183,15 @@ class Controls:
     if not CC.latActive:
       new_desired_curvature = self.curvature
     elif self.is_vw_meb:
-      # VW MEB(ID.4/ID.5): ê¸°ë³¸ì€ ë ˆì¸ë¦¬ìŠ¤(raw ëª¨ë¸ê³¡ë¥  = infiniteCable2 ë™ì¼).
-      # carrot íš¡í”Œë˜ë„ˆê°€ ë ˆì¸ëª¨ë“œ í™œì„±(lat_plan.useLaneLines, UseLaneLineSpeed>0 & ì°¨ì„ ê°ì§€)ì¼ ë•Œë§Œ
-      # ì°¨ì„ ê¸°ë°˜ lateralPlan ê²½ë¡œë¥¼ ì“´ë‹¤(opt-in). ëª¨ë¸ ê²½ë¡œ ì¶œë ì„(ì°¨ì„ ë„˜ë‚˜ë“¦)ì„ ì°¨ì„  ì§€ì˜¤ë©”íŠ¸ë¦¬ë¡œ ë³´ì™„.
+      # VW MEB(ID.4/ID.5): ±âº»Àº ·¹ÀÎ¸®½º(raw ¸ğµ¨°î·ü = infiniteCable2 µ¿ÀÏ).
+      # carrot È¾ÇÃ·¡³Ê°¡ ·¹ÀÎ¸ğµå È°¼º(lat_plan.useLaneLines, UseLaneLineSpeed>0 & Â÷¼±°¨Áö)ÀÏ ¶§¸¸
+      # Â÷¼±±â¹İ lateralPlan °æ·Î¸¦ ¾´´Ù(opt-in). ¸ğµ¨ °æ·Î Ãâ··ÀÓ(Â÷¼±³Ñ³ªµê)À» Â÷¼± Áö¿À¸ŞÆ®¸®·Î º¸¿Ï.
       if getattr(lat_plan, 'useLaneLines', False) and len(lat_plan.curvatures) > 0:
         curvature = get_lag_adjusted_curvature(self.CP, CS.vEgo, lat_plan.psis, lat_plan.curvatures,
                                                steer_actuator_delay + lat_smooth_seconds, lat_plan.distances)
         new_desired_curvature = smooth_value(curvature, self.desired_curvature, lat_smooth_seconds)
       else:
-        new_desired_curvature = float(model_v2.action.desiredCurvature)  # raw ëª¨ë¸ê³¡ë¥  (if2 ê¸°ë³¸ê³¼ ë™ì¼)
+        new_desired_curvature = float(model_v2.action.desiredCurvature)  # raw ¸ğµ¨°î·ü (if2 ±âº»°ú µ¿ÀÏ)
     elif self.lanefull_mode_enabled:
       if len(lat_plan.curvatures) == 0:
         new_desired_curvature = self.curvature
@@ -205,14 +205,14 @@ class Controls:
 
     actuators.curvature = float(self.desired_curvature)
 
-    # VW MEB íë£¨í”„ ê³¡ë¥  ë³´ì • = infiniteCable2 LatControlCurvature.update() ì •í™• ë³µì œ.
-    # carrotì—” ê³¡ë¥  ì „ìš© íš¡ì œì–´ê¸°ê°€ ì—†ì–´ ëª¨ë¸ ëª©í‘œê³¡ë¥ ì„ open-loopë¡œ ë³´ë‚´ë©´ EPSê°€ ëª…ë ¹ë§Œí¼ ì•ˆ êº¾ì—¬
-    # ì°¨ì„  ì ë¦¼ ë°œìƒ. infiniteCable2 ê¸°ë³¸ì„¤ì •(EnableCurvatureController=1 -> PID ON,
-    # EnableCurvatureD=0 -> curvatured/liveCurvatureParameters ë¯¸ì‚¬ìš©, useCarSteerCurvature=True)ì„ ê·¸ëŒ€ë¡œ:
-    #   output = pid(error, feedforward) + (ì°¨ëŸ‰ì‹¤ì¸¡ê³¡ë¥  - VMëª¨ë¸ê³¡ë¥ _ë¡¤ì œì™¸)
-    #   feedforward = ëª©í‘œê³¡ë¥  - ë¡¤ë³´ì •,  error = ëª©í‘œê³¡ë¥  - ì‹¤ì¸¡ê³¡ë¥ (VM+pose ë¸”ë Œë”©)
-    # PIDëŠ” MultiplicativeUnwindPID(ê²Œì¸ infiniteCable2 ë™ì¼). steeringPressed ì‹œ ì ë¶„ unwind.
-    # (brand==volkswagen & steerControlType==angle == MEB ê³ ìœ  ì¡°ê±´). ìµœì¢… rate/í¬ê¸° ì œí•œì€ carcontroller.
+    # VW MEB Æó·çÇÁ °î·ü º¸Á¤ = infiniteCable2 LatControlCurvature.update() Á¤È® º¹Á¦.
+    # carrot¿£ °î·ü Àü¿ë È¾Á¦¾î±â°¡ ¾ø¾î ¸ğµ¨ ¸ñÇ¥°î·üÀ» open-loop·Î º¸³»¸é EPS°¡ ¸í·É¸¸Å­ ¾È ²ª¿©
+    # Â÷¼± ½ò¸² ¹ß»ı. infiniteCable2 ±âº»¼³Á¤(EnableCurvatureController=1 -> PID ON,
+    # EnableCurvatureD=0 -> curvatured/liveCurvatureParameters ¹Ì»ç¿ë, useCarSteerCurvature=True)À» ±×´ë·Î:
+    #   output = pid(error, feedforward) + (Â÷·®½ÇÃø°î·ü - VM¸ğµ¨°î·ü_·ÑÁ¦¿Ü)
+    #   feedforward = ¸ñÇ¥°î·ü - ·Ñº¸Á¤,  error = ¸ñÇ¥°î·ü - ½ÇÃø°î·ü(VM+pose ºí·»µù)
+    # PID´Â MultiplicativeUnwindPID(°ÔÀÎ infiniteCable2 µ¿ÀÏ). steeringPressed ½Ã ÀûºĞ unwind.
+    # (brand==volkswagen & steerControlType==angle == MEB °íÀ¯ Á¶°Ç). ÃÖÁ¾ rate/Å©±â Á¦ÇÑÀº carcontroller.
     if self.is_vw_meb:
       if not CC.latActive:
         self.meb_curvature_pid.reset()
@@ -230,12 +230,12 @@ class Controls:
         pid_curvature = self.meb_curvature_pid.update(error, speed=CS.vEgo, feedforward=feedforward,
                                                       freeze_integrator=freeze_integrator, override=CS.steeringPressed)
         output_curvature = pid_curvature + (CS.steeringCurvature - actual_curvature_vm_no_roll)  # useCarSteerCurvature
-        # infiniteCable2ì™€ ë™ì¼: ì—¬ê¸°ì„  clip ì•ˆ í•¨. ì‹¤ì œ í•œê³„ëŠ” carcontroller apply_std_curvature_limits
-        # (rate+í‰ê· +0.195) ì™€ panda(0.195)ê°€ bound. ê³¡ë¥ ì€ ë¬¼ë¦¬ì ìœ¼ë¡œ bounded(~Â±0.2)ë¼ NaNê²€ì‚¬ë§Œìœ¼ë¡œ ì¶©ë¶„.
+        # infiniteCable2¿Í µ¿ÀÏ: ¿©±â¼± clip ¾È ÇÔ. ½ÇÁ¦ ÇÑ°è´Â carcontroller apply_std_curvature_limits
+        # (rate+Æò±Õ+0.195) ¿Í panda(0.195)°¡ bound. °î·üÀº ¹°¸®ÀûÀ¸·Î bounded(~¡¾0.2)¶ó NaN°Ë»ç¸¸À¸·Î ÃæºĞ.
         actuators.curvature = float(output_curvature)
 
-    # ì£¼ì˜: MEBëŠ” ìœ„ ê³¡ë¥  PIDê°€ ì‹¤ì œ ì¡°í–¥ì„ ë§Œë“¤ê³ , ì•„ë˜ LaC(LatControlAngle)ì™€ lac_logëŠ”
-    # íŒŒì´í”„ë¼ì¸ í˜•ì‹ ìœ ì§€ë¥¼ ìœ„í•œ ë”ë¯¸ì„ (ë¡œê·¸ì˜ angleStateëŠ” ì‹¤ì œ ì œì–´ ìƒíƒœê°€ ì•„ë‹˜).
+    # ÁÖÀÇ: MEB´Â À§ °î·ü PID°¡ ½ÇÁ¦ Á¶ÇâÀ» ¸¸µé°í, ¾Æ·¡ LaC(LatControlAngle)¿Í lac_log´Â
+    # ÆÄÀÌÇÁ¶óÀÎ Çü½Ä À¯Áö¸¦ À§ÇÑ ´õ¹ÌÀÓ (·Î±×ÀÇ angleState´Â ½ÇÁ¦ Á¦¾î »óÅÂ°¡ ¾Æ´Ô).
     steer, steeringAngleDeg, lac_log = self.LaC.update(CC.latActive, CS, self.VM, lp,
                                                        self.steer_limited_by_safety, self.desired_curvature,
                                                        CC, curvature_limited,
@@ -287,32 +287,32 @@ class Controls:
     hudControl.activeCarrot = self.sm['carrotMan'].activeCarrot
     hudControl.atcDistance = self.sm['carrotMan'].xDistToTurn
 
-    # VW MEB(ID.4/ID.5) ê³„ê¸°íŒ ë‚´ë¹„ í‘œì‹œìš© - ID.4 ì„ íƒ ì‹œ ìë™ (í† ê¸€ ì—†ìŒ).
-    # carrot_servì˜ SDI/ATC/ì»¤ë¸Œ ë°ì´í„°ë¥¼ hudControlë¡œ ì „ë‹¬í•˜ê³ , VW carcontrollerê°€
-    # MEB_ACC_01(ACC_19)ì˜ ACC_Tempolimit/ACC_Events/ACC_Event_Wunschgeschwë¡œ ë³€í™˜í•œë‹¤.
-    # (tjddyd0130/opendbc meb-cluster-tmap ê²€ì¦ í‘œì‹œ ì²´ê³„: ì¹´ë©”ë¼ > ì»¤ë¸Œ > êµì°¨ë¡œ)
+    # VW MEB(ID.4/ID.5) °è±âÆÇ ³»ºñ Ç¥½Ã¿ë - ID.4 ¼±ÅÃ ½Ã ÀÚµ¿ (Åä±Û ¾øÀ½).
+    # carrot_servÀÇ SDI/ATC/Ä¿ºê µ¥ÀÌÅÍ¸¦ hudControl·Î Àü´ŞÇÏ°í, VW carcontroller°¡
+    # MEB_ACC_01(ACC_19)ÀÇ ACC_Tempolimit/ACC_Events/ACC_Event_Wunschgeschw·Î º¯È¯ÇÑ´Ù.
+    # (tjddyd0130/opendbc meb-cluster-tmap °ËÁõ Ç¥½Ã Ã¼°è: Ä«¸Ş¶ó > Ä¿ºê > ±³Â÷·Î)
     if self.is_vw_meb:
       carrot_man = self.sm['carrotMan']
-      # ë‹¨ì†ì¹´ë©”ë¼/êµ¬ê°„ë‹¨ì† (ë°©ì§€í„± 22ëŠ” ê³„ê¸°íŒ ë¯¸í‘œì‹œ - ì œí•œì†ë„ í‘œì§€ë¡œ ì˜¤ì¸ë¨)
+      # ´Ü¼ÓÄ«¸Ş¶ó/±¸°£´Ü¼Ó (¹æÁöÅÎ 22´Â °è±âÆÇ ¹ÌÇ¥½Ã - Á¦ÇÑ¼Óµµ Ç¥Áö·Î ¿ÀÀÎµÊ)
       navi_speed_limit = 0
       if carrot_man.xSpdType >= 0 and carrot_man.xSpdType != 22 and carrot_man.xSpdLimit > 0:
         navi_speed_limit = int(carrot_man.xSpdLimit)
       hudControl.naviSpeedLimit = navi_speed_limit
-      # ì»¤ë¸Œ(ë¹„ì „ ì»¤ë¸Œì†ë„) / êµì°¨ë¡œ íšŒì „ / ë¶„ê¸°Â·ì¶œêµ¬ (ATC í™œì„± ìƒíƒœì—ì„œë§Œ)
+      # Ä¿ºê(ºñÀü Ä¿ºê¼Óµµ) / ±³Â÷·Î È¸Àü / ºĞ±â¡¤Ãâ±¸ (ATC È°¼º »óÅÂ¿¡¼­¸¸)
       navi_event_type = 0
       navi_event_speed = 0
       v_ego_kph = CS.vEgo * CV.MS_TO_KPH
       vturn_kph = abs(carrot_man.vTurnSpeed)
       atc_type = carrot_man.atcType
-      if 0 < vturn_kph < 120 and vturn_kph < v_ego_kph - 3:  # ì»¤ë¸Œ ê°ì†ì´ ì‹¤ì œë¡œ ì‘ë™ ì¤‘ì¼ ë•Œë§Œ
+      if 0 < vturn_kph < 120 and vturn_kph < v_ego_kph - 3:  # Ä¿ºê °¨¼ÓÀÌ ½ÇÁ¦·Î ÀÛµ¿ ÁßÀÏ ¶§¸¸
         navi_event_type = 1
         navi_event_speed = int(vturn_kph)
-      elif atc_type in ("turn left", "turn right", "atc left", "atc right"):  # êµì°¨ë¡œ ì¢Œ/ìš°íšŒì „ (prepare ì œì™¸)
+      elif atc_type in ("turn left", "turn right", "atc left", "atc right"):  # ±³Â÷·Î ÁÂ/¿ìÈ¸Àü (prepare Á¦¿Ü)
         navi_event_type = 2
-        if self.sm.frame % 100 == 0:  # 1Hzë¡œë§Œ íŒŒë¼ë¯¸í„° IO (100Hz ë£¨í”„ ë³´í˜¸)
+        if self.sm.frame % 100 == 0:  # 1Hz·Î¸¸ ÆÄ¶ó¹ÌÅÍ IO (100Hz ·çÇÁ º¸È£)
           self.atc_turn_speed = self.params.get_int("AutoTurnControlSpeedTurn")
         navi_event_speed = int(self.atc_turn_speed)
-      elif atc_type in ("fork left", "fork right") and carrot_man.nRoadLimitSpeed > 0:  # ë¶„ê¸°/ê³ ì†ë„ë¡œ ì¶œêµ¬
+      elif atc_type in ("fork left", "fork right") and carrot_man.nRoadLimitSpeed > 0:  # ºĞ±â/°í¼Óµµ·Î Ãâ±¸
         navi_event_type = 3
         navi_event_speed = int(carrot_man.nRoadLimitSpeed)
       hudControl.naviEventType = navi_event_type
@@ -374,9 +374,10 @@ class Controls:
 
     if self.sm['selfdriveState'].active:
       CO = self.sm['carOutput']
+      # Æø½º¹Ù°Õ¿ë(vw_meb)
       if self.is_vw_meb:
-        # VW MEB: ê³¡ë¥ ë¡œ ì•¡ì¶”ì—ì´ì…˜í•˜ë¯€ë¡œ ê³¡ë¥  ê¸°ë°˜ìœ¼ë¡œ steer_limited ê³„ì‚° (infiniteCable2 curvatureDEPRECATED ë¶„ê¸°ì™€ ë™ì¼).
-        # carrot ê¸°ë³¸ angle ë¶„ê¸°ëŠ” steeringAngleDeg(ë¯¸ì‚¬ìš© ì¶œë ¥) ê¸°ì¤€ì´ë¼ ìš°ë¦¬ ê³¡ë¥  ì œí•œì„ ë°˜ì˜ ëª» í•¨.
+        # VW MEB: °î·ü·Î ¾×Ãß¿¡ÀÌ¼ÇÇÏ¹Ç·Î °î·ü ±â¹İÀ¸·Î steer_limited °è»ê (infiniteCable2 curvatureDEPRECATED ºĞ±â¿Í µ¿ÀÏ).
+        # carrot ±âº» angle ºĞ±â´Â steeringAngleDeg(¹Ì»ç¿ë Ãâ·Â) ±âÁØÀÌ¶ó ¿ì¸® °î·ü Á¦ÇÑÀ» ¹İ¿µ ¸ø ÇÔ.
         self.steer_limited_by_safety = abs(CC.actuators.curvature - CO.actuatorsOutput.curvature) * CS.vEgo ** 2 > \
                                               LAT_CURVATURE_SATURATION_ACCEL
       elif self.CP.steerControlType == car.CarParams.SteerControlType.angle:

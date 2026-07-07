@@ -5,35 +5,37 @@ from opendbc.car.common.conversions import Conversions as CV
 
 # GM: AutoResume: brake signal to CAN
 def create_brake_command(packer, bus, apply_brake, idx):
+  rc = int(idx) & 0x3  # 2비트 롤링카운터
   mode = 0xA if apply_brake > 0 else 0x1
+  apply_brake = max(0, min(0xFFF, int(apply_brake)))
   brake = (0x1000 - apply_brake) & 0xFFF
-  checksum = (0x10000 - (mode << 12) - brake - idx) & 0xFFFF
+  checksum = (0x10000 - (mode << 12) - brake - rc) & 0xFFFF
 
   values = {
-    "RollingCounter": idx,
+    "RollingCounter": rc,
     "FrictionBrakeMode": mode,
     "FrictionBrakeChecksum": checksum,
-    "FrictionBrakeCmd": -apply_brake
+    "FrictionBrakeCmd": brake,   # unsigned/raw DBC
   }
 
   return packer.make_can_msg("EBCMFrictionBrakeCmd", bus, values)
 
 def create_buttons(packer, bus, idx, button):
+  rc = int(idx) & 0x3
   values = {
     "ACCButtons": button,
-    "RollingCounter": idx,
+    "RollingCounter": rc,
     "ACCAlwaysOne": 1,
     "DistanceButton": 0,
   }
 
   checksum = 240 + int(values["ACCAlwaysOne"] * 0xf)
   checksum += values["RollingCounter"] * (0x4ef if values["ACCAlwaysOne"] != 0 else 0x3f0)
-  checksum -= int(values["ACCButtons"] - 1) << 4  # not correct if value is 0
+  checksum -= int(values["ACCButtons"] - 1) << 4  # 값이 0일 경우 문제 발생 가능성 있음
   checksum -= 2 * values["DistanceButton"]
 
   values["SteeringButtonChecksum"] = checksum
   return packer.make_can_msg("ASCMSteeringButton", bus, values)
-
 
 def create_pscm_status(packer, bus, pscm_status):
   values = {s: pscm_status[s] for s in [
@@ -69,6 +71,7 @@ def create_adas_keepalive(bus):
 
 
 def create_gas_regen_command(packer, bus, throttle, idx, enabled, at_full_stop):
+  idx = int(idx) & 0x3  # 2-bit rolling counter
   values = {
     "GasRegenCmdActive": enabled,
     "RollingCounter": idx,
@@ -85,7 +88,6 @@ def create_gas_regen_command(packer, bus, throttle, idx, enabled, at_full_stop):
 
   return packer.make_can_msg("ASCMGasRegenCmd", bus, values)
 
-
 def create_friction_brake_command(packer, bus, apply_brake, idx, enabled, near_stop, at_full_stop, CP):
   mode = 0x1
 
@@ -94,24 +96,26 @@ def create_friction_brake_command(packer, bus, apply_brake, idx, enabled, near_s
     mode = 0x9
 
   if apply_brake > 0:
-    mode = 0xa
+    mode = 0xA
     if at_full_stop:
-      mode = 0xd
+      mode = 0xD
 
     # TODO: this is to have GM bringing the car to complete stop,
     # but currently it conflicts with OP controls, so turned off. Not set by all cars
     #elif near_stop:
-    #  mode = 0xb
+    #  mode = 0xB
 
-  apply_brake = max(0, min(0xFFF, apply_brake))
-  brake = (0x1000 - apply_brake) & 0xfff
-  checksum = (0x10000 - (mode << 12) - brake - idx) & 0xffff
+
+  apply_brake = max(0, min(0xFFF, int(apply_brake)))
+  brake = (0x1000 - apply_brake) & 0xFFF
+  rc = int(idx) & 0x3  # 2비트 롤링카운터
+  checksum = (0x10000 - (mode << 12) - brake - rc) & 0xFFFF
 
   values = {
-    "RollingCounter": idx,
+    "RollingCounter": rc,
     "FrictionBrakeMode": mode,
     "FrictionBrakeChecksum": checksum,
-    "FrictionBrakeCmd": (0x1000 - apply_brake) & 0xfff,
+    "FrictionBrakeCmd": brake,   # unsigned/raw DBC
   }
 
   return packer.make_can_msg("EBCMFrictionBrakeCmd", bus, values)
@@ -187,9 +191,16 @@ def create_lka_icon_command(bus, active, critical, steer):
     dat = b"\x00\x00\x00"
   return CanData(0x104c006c, dat, bus)
 
-def create_regen_paddle_command(packer, bus):
+def create_regen_paddle_command(packer, bus, press_regen_paddle):
+  regen_paddle_value = 2 if press_regen_paddle else 0
   values = {
-    "RegenPaddle": 0x20, #이 값은 패들의 강도일 가능성이 있음.
+    "RegenPaddle": regen_paddle_value,
+    "Byte1": 0,
+    "Byte2": 0,
+    "Byte3": 0,
+    "Byte4": 0,
+    "Byte5": 0,
+    "Byte6": 0
   }
   return packer.make_can_msg("EBCMRegenPaddle", bus, values)
 

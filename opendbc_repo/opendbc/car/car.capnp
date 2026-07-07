@@ -260,9 +260,15 @@ struct CarState {
   leftRearLatDist @79 :Float32; # rear-left corner radar lateral distance
   rightRearLatDist @80 :Float32; # rear-right corner radar lateral distance
   trailerConnected @81 :Bool; # trailer connection state after disconnect debounce
-  ureaGauge @82 :Float32; # diesel exhaust fluid/urea tank level from 0.0 to 1.0
-  cruiseSpeedBigStep @83 :Bool; # VW: cruise +/- button is a stage-2 (swipe/long) press -> use big increment
-  steeringCurvature @84 :Float32; # VW MEB: measured road curvature from EPS (QFK_01), rad/m. Used for closed-loop curvature correction.
+  ureaGauge @87 :Float32; # diesel exhaust fluid/urea tank level from 0.0 to 1.0
+  steeringDisengage @82 :Bool;     # more force than steeringPressed, disengages for applicable brands
+  stockLkas @83 :Bool;
+  blockPcmEnable @84 :Bool;  # whether to allow PCM to enable this frame
+  accStatus @85 :UInt16;
+  autoHoldActivated @86 :Bool;
+  cruiseSpeedBigStep @88 :Bool; # VW: cruise +/- button is a stage-2 (swipe/long) press -> use big increment
+  steeringCurvature @89 :Float32; # VW MEB: measured road curvature from EPS (QFK_01), rad/m. Used for closed-loop curvature correction.
+
 
   struct Tpms {
     fl @0 :Float32;
@@ -517,7 +523,6 @@ struct CarControl {
       audio8 @31;
       audio9 @32;
       audio10 @33;
-
       nnff @34;
     }
   }
@@ -640,6 +645,7 @@ struct CarParams {
     useSteeringAngle @0 :Bool;
     kp @1 :Float32;
     ki @2 :Float32;
+    kd @8 : Float32;
     friction @3 :Float32;
     kf @4 :Float32;
     steeringAngleDeadzoneDeg @5 :Float32;

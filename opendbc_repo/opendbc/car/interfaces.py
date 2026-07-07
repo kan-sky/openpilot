@@ -1,12 +1,8 @@
-from collections import deque
-import json
 import os
 import numpy as np
 import time
 import tomllib
-import math
 from abc import abstractmethod, ABC
-from difflib import SequenceMatcher
 from enum import StrEnum
 from typing import Any, NamedTuple
 from collections.abc import Callable
@@ -20,7 +16,11 @@ from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.common.simple_kalman import KF1D, get_kalman_gain
 from opendbc.car.values import PLATFORMS
 from opendbc.can import CANParser
-
+# NNFF
+from collections import deque
+import json
+import math
+from difflib import SequenceMatcher
 from openpilot.common.params import Params
 from openpilot.common.filter_simple import FirstOrderFilter
 
@@ -31,6 +31,7 @@ V_CRUISE_MAX = 145
 MAX_CTRL_SPEED = (V_CRUISE_MAX + 4) * CV.KPH_TO_MS
 ACCEL_MAX = 2.5
 ACCEL_MIN = -4.0 #3.5
+# NNFF
 FRICTION_THRESHOLD = 0.3
 
 NEURAL_PARAMS_PATH = os.path.join(BASEDIR, 'torque_data/neural_ff_weights.json')
@@ -52,6 +53,7 @@ GEAR_SHIFTER_MAP: dict[str, structs.CarState.GearShifter] = {
   'B': GearShifter.brake, 'BRAKE': GearShifter.brake,
 }
 
+#NNFF
 def similarity(s1: str, s2: str) -> float:
   return SequenceMatcher(None, s1, s2).ratio()
 
@@ -94,7 +96,7 @@ def get_torque_params():
 
   return torque_params
 
-# Twilsonco's Lateral Neural Network Feedforward
+# NNFF: Twilsonco's Lateral Neural Network Feedforward
 class FluxModel:
   # dict used to rename activation functions whose names aren't valid python identifiers
   activation_function_names = {'σ': 'sigmoid'}
@@ -296,6 +298,7 @@ class RadarInterfaceBase(ABC):
     self.init_samples = []
     self.init_done = False
 
+  # NNFF
   def estimate_dt(self, rcv_time):
     if self.CP.radarTimeStep > 0.0:
       self.dt = self.CP.radarTimeStep
@@ -380,6 +383,7 @@ class CarInterfaceBase(ABC):
     dbc_names = {bus: cp.dbc_name for bus, cp in self.can_parsers.items()}
     self.CC: CarControllerBase = self.CarController(dbc_names, CP)
 
+    # NNFF
     Params().put_int('LongitudinalPersonalityMax', 3)
     eps_firmware = str(next((fw.fwVersion for fw in CP.carFw if fw.ecu == "eps"), ""))
 
@@ -436,7 +440,7 @@ class CarInterfaceBase(ABC):
 
     ret = cls._get_params(ret, candidate, fingerprint, car_fw, alpha_long, is_release, docs)
    
-    # Enable torque controller for all cars that do not use angle based steering
+    # NNFF: Enable torque controller for all cars that do not use angle based steering
     if ret.steerControlType != structs.CarParams.SteerControlType.angle and Params().get_bool("NNFF"):
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
       eps_firmware = str(next((fw.fwVersion for fw in car_fw if fw.ecu == "eps"), ""))
@@ -481,6 +485,7 @@ class CarInterfaceBase(ABC):
   def get_steer_feedforward_function(self):
     return self.get_steer_feedforward_default
 
+  # NNFF(only GM)
   def torque_from_lateral_accel_linear(self, latcontrol_inputs: LatControlInputs, torque_params: structs.CarParams.LateralTorqueTuning,
                                        lateral_accel_error: float, lateral_accel_deadzone: float, friction_compensation: bool, gravity_adjusted: bool) -> float:
     # The default is a linear relationship between torque and lateral acceleration (accounting for road roll and steering friction)
@@ -514,7 +519,7 @@ class CarInterfaceBase(ABC):
     ret.stoppingDecelRate = 0.8 # brake_travel/s while trying to stop
     ret.vEgoStopping = 0.5
     ret.vEgoStarting = 0.5
-    ret.longitudinalTuning.kf = 1.
+    ret.longitudinalTuning.kf = 1. # Carrot
     ret.longitudinalTuning.kpBP = [0.]
     ret.longitudinalTuning.kpV = [0.]
     ret.longitudinalTuning.kiBP = [0.]
@@ -525,14 +530,17 @@ class CarInterfaceBase(ABC):
     return ret
 
   @staticmethod
+  # Carrot
   def configure_torque_tune(candidate: str, tune: structs.CarParams.LateralTuning, steering_angle_deadzone_deg: float = 0.0, use_steering_angle: bool = True):
     params = get_torque_params()[candidate]
 
     tune.init('torque')
+    # Carrot
     tune.torque.useSteeringAngle = use_steering_angle
     tune.torque.kp = 1.0
     tune.torque.kf = 1.0
     tune.torque.ki = 0.1
+    tune.torque.kd = 0.0
     tune.torque.friction = params['FRICTION']
     tune.torque.latAccelFactor = params['LAT_ACCEL_FACTOR']
     tune.torque.latAccelOffset = 0.0
@@ -606,6 +614,10 @@ class CarStateBase(ABC):
   def update(self, can_parsers) -> structs.CarState:
     pass
 
+  def parse_wheel_speeds(self, cs, fl, fr, rl, rr, unit=CV.KPH_TO_MS):
+    cs.vEgoRaw = sum((fl, fr, rl, rr)) / 4 * unit * self.CP.wheelSpeedFactor
+    cs.vEgo, cs.aEgo = self.update_speed_kf(cs.vEgoRaw)
+
   def update_speed_kf(self, v_ego_raw):
     if abs(v_ego_raw - self.v_ego_kf.x[0][0]) > 2.0:  # Prevent large accelerations when car starts at non zero speed
       self.v_ego_kf.set_x([[v_ego_raw], [0.0]])
@@ -640,8 +652,8 @@ class CarStateBase(ABC):
 
   def update_steering_pressed(self, steering_pressed, steering_pressed_min_count):
     """Applies filtering on steering pressed for noisy driver torque signals."""
-    self.steering_pressed_cnt = self.steering_pressed_cnt + 1 if steering_pressed else 0
-    self.steering_pressed_cnt = min(self.steering_pressed_cnt, steering_pressed_min_count + 1)
+    self.steering_pressed_cnt += 1 if steering_pressed else -1
+    self.steering_pressed_cnt = int(np.clip(self.steering_pressed_cnt, 0, steering_pressed_min_count * 2 + 1))
     return self.steering_pressed_cnt > steering_pressed_min_count
 
   def update_blinker_from_stalk(self, blinker_time: int, left_blinker_stalk: bool, right_blinker_stalk: bool):
@@ -729,7 +741,7 @@ def get_interface_attr(attr: str, combine_brands: bool = False, ignore_none: boo
 
   return result
 
-
+# NNFF
 class NanoFFModel:
   def __init__(self, weights_loc: str, platform: str):
     self.weights_loc = weights_loc

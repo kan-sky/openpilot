@@ -2,6 +2,7 @@ from collections import deque
 from openpilot.cereal import car, log
 import openpilot.cereal.messaging as messaging
 from opendbc.car import DT_CTRL, structs
+from opendbc.car.car_helpers import interfaces
 from opendbc.car.interfaces import MAX_CTRL_SPEED
 from opendbc.car.volkswagen.values import CarControllerParams as VWCarControllerParams
 from opendbc.car.hyundai.interface import ENABLE_BUTTONS as HYUNDAI_ENABLE_BUTTONS
@@ -32,6 +33,16 @@ class MockCarState:
     return CS
 
 
+BRAND_EXTRA_GEARS = {
+  'ford': [GearShifter.low, GearShifter.manumatic],
+  'nissan': [GearShifter.brake],
+  'chrysler': [GearShifter.low],
+  'honda': [GearShifter.sport],
+  'toyota': [GearShifter.sport],
+  'gm': [GearShifter.sport, GearShifter.low, GearShifter.eco, GearShifter.manumatic],
+  'volkswagen': [GearShifter.eco, GearShifter.sport, GearShifter.manumatic],
+  'hyundai': [GearShifter.sport, GearShifter.manumatic]
+}
 class CarSpecificEvents:
   def __init__(self, CP: structs.CarParams):
     self.CP = CP
@@ -39,7 +50,7 @@ class CarSpecificEvents:
     self.steering_unpressed = 0
     self.low_speed_alert = False
     self.no_steer_warning = False
-    self.silent_steer_warning = 1
+    self.silent_steer_warning = True
 
     self.cruise_buttons: deque = deque([], maxlen=HYUNDAI_PREV_BUTTON_SAMPLES)
 
@@ -58,19 +69,21 @@ class CarSpecificEvents:
       self.mute_door = self.params.get_bool("MuteDoor")
 
   def update(self, CS: car.CarState, CS_prev: car.CarState, CC: car.CarControl):
+    extra_gears = BRAND_EXTRA_GEARS.get(self.CP.brand, None)
+
     self.frame += 1
     self.update_params()
     if self.CP.brand in ('body', 'mock'):
       events = Events()
 
     elif self.CP.brand == 'ford':
-      events = self.create_common_events(CS, CS_prev, extra_gears=[GearShifter.manumatic])
+      events = self.create_common_events(CS, CS_prev, extra_gears=extra_gears)
 
     elif self.CP.brand == 'nissan':
-      events = self.create_common_events(CS, CS_prev, extra_gears=[GearShifter.brake])
+      events = self.create_common_events(CS, CS_prev, extra_gears=extra_gears)
 
     elif self.CP.brand == 'chrysler':
-      events = self.create_common_events(CS, CS_prev, extra_gears=[GearShifter.low])
+      events = self.create_common_events(CS, CS_prev, extra_gears=extra_gears)
 
       # Low speed steer alert hysteresis logic
       if self.CP.minSteerSpeed > 0. and CS.vEgo < (self.CP.minSteerSpeed + 0.5):
@@ -81,7 +94,7 @@ class CarSpecificEvents:
         events.add(EventName.belowSteerSpeed)
 
     elif self.CP.brand == 'honda':
-      events = self.create_common_events(CS, CS_prev, pcm_enable=False)
+      events = self.create_common_events(CS, CS_prev, extra_gears=extra_gears, pcm_enable=False)
 
       if self.CP.pcmCruise and CS.vEgo < self.CP.minEnableSpeed:
         events.add(EventName.belowEngageSpeed)
@@ -102,7 +115,7 @@ class CarSpecificEvents:
         events.add(EventName.manualRestart)
 
     elif self.CP.brand == 'toyota':
-      events = self.create_common_events(CS, CS_prev)
+      events = self.create_common_events(CS, CS_prev, extra_gears=extra_gears)
 
       if self.CP.openpilotLongitudinalControl:
         if CS.cruiseState.standstill and not CS.brakePressed:
@@ -117,9 +130,7 @@ class CarSpecificEvents:
             events.add(EventName.manualRestart)
 
     elif self.CP.brand == 'gm':
-      events = self.create_common_events(CS, CS_prev, extra_gears=[GearShifter.sport, GearShifter.low,
-                                                                   GearShifter.eco, GearShifter.manumatic],
-                                         pcm_enable=self.CP.pcmCruise)
+      events = self.create_common_events(CS, CS_prev, extra_gears=extra_gears, pcm_enable=self.CP.pcmCruise)
 
       # Enabling at a standstill with brake is allowed
       # TODO: verify 17 Volt can enable for the first time at a stop and allow for all GMs
@@ -128,8 +139,6 @@ class CarSpecificEvents:
         events.add(EventName.belowEngageSpeed)
       if CS.cruiseState.standstill:
         events.add(EventName.resumeRequired)
-      if CS.vEgo < self.CP.minSteerSpeed:
-        events.add(EventName.belowSteerSpeed)
 
     elif self.CP.brand == 'volkswagen':
       events = self.create_common_events(CS, CS_prev, extra_gears=[GearShifter.eco, GearShifter.sport, GearShifter.manumatic],
@@ -171,7 +180,7 @@ class CarSpecificEvents:
         events.add(EventName.belowSteerSpeed)
 
     else:
-      events = self.create_common_events(CS, CS_prev)
+      events = self.create_common_events(CS, CS_prev, extra_gears=extra_gears)
 
     # Tesla 3-finger infotainment press: toggle ExperimentalMode
     if self.CP.brand == 'tesla':
@@ -194,17 +203,18 @@ class CarSpecificEvents:
 
     return events
 
-  def create_common_events(self, CS: structs.CarState, CS_prev: car.CarState, extra_gears=None, pcm_enable=True,
+  def create_common_events(self, CS: structs.CarState, CS_prev: car.CarState, extra_gears: list | None = None, pcm_enable=True,
                            allow_enable=True, allow_button_cancel=True):
     events = Events()
 
-    if CS.doorOpen and not self.mute_door:
+    CI = interfaces[self.CP.carFingerprint]
+
+    if CS.doorOpen:
       events.add(EventName.doorOpen)
-    if CS.seatbeltUnlatched and not self.mute_seatbelt:
+    if CS.seatbeltUnlatched:
       events.add(EventName.seatbeltNotLatched)
-    if CS.gearShifter == GearShifter.park:
-      events.add(EventName.wrongGear)
-    if CS.gearShifter == GearShifter.neutral:
+    if CS.gearShifter != GearShifter.drive and (extra_gears is None or
+       CS.gearShifter not in extra_gears):
       events.add(EventName.wrongGear)
     if CS.gearShifter == GearShifter.reverse:
       events.add(EventName.reverseGear)
@@ -218,6 +228,8 @@ class CarSpecificEvents:
       events.add(EventName.stockFcw)
     if CS.stockAeb:
       events.add(EventName.stockAeb)
+    if CS.stockLkas:
+      events.add(EventName.stockLkas)
     if CS.vEgo > MAX_CTRL_SPEED:
       events.add(EventName.speedTooHigh)
     if CS.cruiseState.nonAdaptive:
@@ -226,10 +238,12 @@ class CarSpecificEvents:
       events.add(EventName.brakeHold)
     if CS.parkingBrake:
       events.add(EventName.parkBrake)
-    if CS.accFaulted:
+    if CS.accFaulted and not CS.brakePressed:
       events.add(EventName.accFaulted)
     if CS.steeringPressed:
       events.add(EventName.steerOverride)
+    if CS.steeringDisengage and not CS_prev.steeringDisengage:
+      events.add(EventName.steerDisengage)
     if CS.brakePressed and CS.standstill:
       events.add(EventName.preEnableStandstill)
     if CS.gasPressed:
@@ -249,9 +263,6 @@ class CarSpecificEvents:
       # TODO: only check the cancel button with openpilot longitudinal on all brands to match panda safety
       if b.type == ButtonType.cancel and (allow_button_cancel or not self.CP.pcmCruise):
         events.add(EventName.buttonCancel)
-        if CS.gearShifter == GearShifter.park and not self.do_shutdown:
-          self.do_shutdown = True
-          self.params.put_bool("DoShutdown", True)
 
     # Handle permanent and temporary steering faults
     self.steering_unpressed = 0 if CS.steeringPressed else self.steering_unpressed + 1
@@ -262,15 +273,16 @@ class CarSpecificEvents:
         self.no_steer_warning = False
 
         # if the user overrode recently, show a less harsh alert
-        if self.silent_steer_warning > 0 or CS.standstill or self.steering_unpressed < int(1.5 / DT_CTRL):
-          self.silent_steer_warning += 1
-          if self.silent_steer_warning > 20:
+        if self.silent_steer_warning or CS.standstill or self.steering_unpressed < int(1.5 / DT_CTRL):
+          self.silent_steer_warning = True
+          if CS.vEgo < self.CP.minSteerSpeed:
             events.add(EventName.steerTempUnavailableSilent)
         else:
-          events.add(EventName.steerTempUnavailable)
+          if CS.vEgo < self.CP.minSteerSpeed:
+            events.add(EventName.steerTempUnavailable)
     else:
       self.no_steer_warning = False
-      self.silent_steer_warning = 0
+      self.silent_steer_warning = False
     if CS.steerFaultPermanent:
       events.add(EventName.steerUnavailable)
 

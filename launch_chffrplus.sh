@@ -1,5 +1,22 @@
 #!/usr/bin/env bash
 
+if [ ! -f "./boot_finish" ]; then
+  mount -o rw,remount /system
+  chmod 755 ./restart.sh
+  chmod 755 ./selfdrive/apilot.py
+  chmod 755 ./selfdrive/debug/clear_dtc.py
+  chmod 755 ./selfdrive/debug/debug_console_carrot.py
+  chmod 755 ./selfdrive/debug/debug_console.py
+
+  if [ ! -f "/data/params/d/DongleId" ]; then
+    echo -n "UnregisteredDevice" > /data/params/d/DongleId
+  fi
+  rm -f /data/params/d/Offroad_UnregisteredHardware
+  touch ./boot_finish
+else
+  chmod 644 ./boot_finish
+fi
+
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null && pwd )"
 
 source "$DIR/launch_env.sh"
@@ -213,7 +230,7 @@ function launch {
   LANG=$(cat /data/params/d/LanguageSetting)
   GITSTAT=$(git status)
 
-  # events.py ?쒓?濡?蹂寃?諛??뚯씪??援먯껜???곹깭?몄? ?뺤씤
+  # events.py 한글로 변경 및 파일이 교체된 상태인지 확인
   if [ "${LANG}" = "ko" ] && [[ ! "${GITSTAT}" == *"modified:   openpilot/selfdrive/selfdrived/events.py"* ]]; then
     cp -f $DIR/openpilot/selfdrive/selfdrived/events.py $DIR/scripts/add/events_en.py
     cp -f $DIR/scripts/add/events_ko.py $DIR/openpilot/selfdrive/selfdrived/events.py

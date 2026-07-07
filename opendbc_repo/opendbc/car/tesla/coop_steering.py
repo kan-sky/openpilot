@@ -3,7 +3,8 @@ import numpy as np
 from collections import namedtuple
 from dataclasses import replace
 
-from opendbc.car import structs, rate_limit, DT_CTRL, apply_steer_angle_limits_vm
+from opendbc.car import structs, rate_limit, DT_CTRL
+from opendbc.car.lateral import apply_steer_angle_limits_vm
 from opendbc.car.vehicle_model import VehicleModel
 from opendbc.car.tesla.values import CarControllerParams
 
