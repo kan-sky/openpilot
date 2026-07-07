@@ -33,7 +33,10 @@ def classify_maneuver_type(blinker_state: int,
 
   if atc_type in ("turn left", "turn right"):
     score_turn += 2
-  elif atc_type in ("fork left", "fork right", "atc left", "atc right"):
+  elif atc_type in ("atc left", "atc right"):
+    # Kans: 일반 좌/우회전 진입 전 조향 유도 구간일 수 있으므로 turn 감점하지 않음
+    score_turn += 1
+  elif atc_type in ("fork left", "fork right"):
     score_turn -= 2
 
   edge_far = side.dist_to_edge_far > 4.0

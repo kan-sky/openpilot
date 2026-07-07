@@ -766,10 +766,10 @@ class CarrotServ:
     if is_turn:
       # Kans: 일반 좌/우회전/교차로
       # 조향변경이 늦으니 멀리서부터 미리 준비하게 한다.
-      start_fork_dist = 45.0
+      start_fork_dist = float(np.interp(v_ego_kph, [20, 40, 60], [45, 60, 80]))
       road_dist = np.interp(self.nTBTNextRoadWidth, [5, 10], [30, 45])
       speed_dist = np.interp(v_ego_kph, [20, 30, 50], [15, 25, 40])
-      start_turn_dist = min(road_dist, speed_dist)
+      start_turn_dist = max(road_dist, speed_dist)
       atc_debug = "Trn"
 
     elif is_rotary:

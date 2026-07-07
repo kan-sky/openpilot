@@ -315,7 +315,13 @@ class DesireHelper:
 
     else:
       # classify maneuver type using selected side
-      if desire_enabled and side is not None:
+      turn_desire_early = (
+      self.enable_turn_desires and
+      self.atc_type in ("turn left", "turn right", "atc left", "atc right") and
+      blinker_state in (BLINKER_LEFT, BLINKER_RIGHT) and
+      self.turn_desire_state is not None
+      )
+      if (desire_enabled or turn_desire_early) and side is not None:
         new_type = classify_maneuver_type(
           blinker_state=blinker_state,
           carstate=carstate,
@@ -340,7 +346,8 @@ class DesireHelper:
         self.maneuver_type = new_type
 
       # ─ TURN mode ─
-      if desire_enabled and self.maneuver_type == "turn" and self.enable_turn_desires:
+      # Kans: 일반 좌/우회전은 차선변경보다 늦으면 안 되므로 조기 활성화
+      if (desire_enabled or turn_desire_early) and self.maneuver_type == "turn" and self.enable_turn_desires:
         self.lane_change_state = LaneChangeState.off
         if self.turn_disable_count > 0:
           self.turn_direction = TurnDirection.none
@@ -359,9 +366,10 @@ class DesireHelper:
             self.lane_change_ll_prob = 1.0
             self.lane_change_delay = self.laneChangeDelay
 
-            # 맨 끝 차선이 아니면, ATC 자동 차선변경 비활성
+            # 맨 끝 차선이 아니면, ATC 자동 차선변경 비활성 -> Kans: 허용하기
             # (원본 유지: 차선 존재하거나 geom 가능하면 auto off, 아니면 on)
-            self.auto_lane_change_enable = self._is_last_lane(side)
+            # Kans: ATC 차선변경 요청 구간에서는 맨끝차선 판단이 늦어도 자동 변경을 미리 arm
+            self.auto_lane_change_enable = (atc_lane_change_only and (self._is_last_lane(side) or auto_lane_change_trigger))
             self.next_lane_change = False
 
         elif self.lane_change_state == LaneChangeState.preLaneChange:
@@ -387,7 +395,9 @@ class DesireHelper:
 
             # Arm automatic ATC only after this side has actually become the last lane.
             # Keep it latched so a newly appearing lane can start the maneuver later.
-            if atc_lane_change_only and self._is_last_lane(side):
+            # Kans: 맨끝차선 판단이 되면 arm.
+            # 단, 분기/회전 차선변경 거리 안에 들어오면 판단 지연 보완용으로도 arm
+            if atc_lane_change_only and (self._is_last_lane(side) or auto_lane_change_trigger):
               self.auto_lane_change_enable = True
 
             if not desire_enabled or below_lane_change_speed:
@@ -403,6 +413,7 @@ class DesireHelper:
               block_released = side.lane_change_available_released
               # A BSD/radar release must not start pure ATC unless ATC was armed at a last lane.
               # Driver blinkers retain the existing retry behavior.
+              # Kans: ATC 자동 차선변경은 맨끝 차선 여부와 무관하게 block release 허용
               block_released_auto = block_released and (driver_enabled or self.auto_lane_change_enable) and \
                                     not atc_lane_change_retry_line_blocked
               start_gate = (side.lane_change_available_geom and self.lane_change_delay == 0) or \
