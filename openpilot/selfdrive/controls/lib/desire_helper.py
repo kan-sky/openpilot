@@ -416,8 +416,15 @@ class DesireHelper:
               # Kans: ATC 자동 차선변경은 맨끝 차선 여부와 무관하게 block release 허용
               block_released_auto = block_released and (driver_enabled or self.auto_lane_change_enable) and \
                                     not atc_lane_change_retry_line_blocked
+              atc_distance_release = (
+                atc_lane_change_only and
+                auto_lane_change_trigger and
+                self.auto_lane_change_enable and
+                side_clear_without_line
+              )
               start_gate = (side.lane_change_available_geom and self.lane_change_delay == 0) or \
-                           side.lane_line_info_edge_detect or solid_line_blocked or block_released_auto or atc_line_release
+                side.lane_line_info_edge_detect or solid_line_blocked or \
+                block_released_auto or atc_line_release or atc_distance_release
                 
               if start_gate:
                 if solid_line_blocked:
@@ -432,14 +439,14 @@ class DesireHelper:
                 elif driver_enabled:
                   # driver blinker면 바로 시작(원본 유지)
                   # 단, object/bzd 막힘은 side.lane_change_available에서 걸림
-                  if side.lane_change_available or atc_line_release:
+                  if side.lane_change_available or atc_line_release or or atc_distance_release:
                     self.lane_change_state = LaneChangeState.laneChangeStarting
                 else:
                   if torque_applied or ((not atc_lane_change_manual_only) and (
-                    auto_lane_change_trigger or side.lane_line_info_edge_detect or block_released_auto
+                    auto_lane_change_trigger or side.lane_line_info_edge_detect or block_released_auto or atc_distance_release
                   )):
                     # 여기서는 시작 직전 안전성 체크
-                    if side.lane_change_available or atc_line_release:
+                    if side.lane_change_available or atc_line_release or atc_distance_release:
                       self.lane_change_state = LaneChangeState.laneChangeStarting
 
         elif self.lane_change_state == LaneChangeState.laneChangeStarting:
