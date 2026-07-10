@@ -22,7 +22,7 @@ ROUTE_CACHE_TTL = 3.0
 DASHCAM_ROUTE_LIMIT_DEFAULT = 40
 DASHCAM_ROUTE_LIMIT_MAX = 200
 DASHCAM_SEGMENT_LIMIT_DEFAULT = 10
-DASHCAM_SEGMENT_LIMIT_MAX = 80
+DASHCAM_SEGMENT_LIMIT_MAX = 2000
 DASHCAM_OFFSET_MAX = 1000000
 _route_cache_lock = threading.Lock()
 _route_cache = {"time": 0.0, "routes": []}
@@ -64,14 +64,28 @@ def bounded_query_int(request: web.Request, name: str, default: int, maximum: in
   return max(0 if name == "offset" else 1, min(maximum, value))
 
 
-def route_with_segment_page(entry: dict, segment_offset: int = 0, segment_limit: int = DASHCAM_SEGMENT_LIMIT_DEFAULT) -> dict:
+def normalized_sort(request: web.Request) -> str:
+  value = (request.query.get("sort") or "asc").strip().lower()
+  return "desc" if value == "desc" else "asc"
+
+
+def route_with_segment_page(entry: dict, segment_offset: int = 0, segment_limit: int = DASHCAM_SEGMENT_LIMIT_DEFAULT, sort: str = "asc") -> dict:
   segments = list(entry.get("segmentFolders") or [])
+  if sort == "desc":
+    segments = list(reversed(segments))
   total = len(segments)
   offset = max(0, min(segment_offset, total))
   limit = max(1, min(DASHCAM_SEGMENT_LIMIT_MAX, segment_limit))
   end = min(offset + limit, total)
+  page_segments = segments[offset:end]
   result = dict(entry)
-  result["segmentFolders"] = segments[offset:end]
+  result["segmentFolders"] = page_segments
+  all_segment_times = entry.get("segmentTimes") or {}
+  result["segmentTimes"] = {
+    segment: all_segment_times[segment]
+    for segment in page_segments
+    if segment in all_segment_times
+  }
   result["segmentCount"] = int(entry.get("segmentCount") or total)
   result["segmentOffset"] = offset
   result["segmentLimit"] = limit
@@ -99,13 +113,14 @@ async def api_dashcam_routes(request: web.Request) -> web.Response:
       DASHCAM_SEGMENT_LIMIT_DEFAULT,
       DASHCAM_SEGMENT_LIMIT_MAX,
     )
+    sort = normalized_sort(request)
     routes = await asyncio.to_thread(cached_dashcam_routes)
     total = len(routes)
     end = min(offset + limit, total)
     return web.json_response({
       "ok": True,
       "routes": [
-        route_with_segment_page(entry, 0, segment_limit)
+        route_with_segment_page(entry, 0, segment_limit, sort)
         for entry in routes[offset:end]
       ],
       "root": DASHCAM_ROOT,
@@ -125,15 +140,17 @@ async def api_dashcam_segments(request: web.Request) -> web.Response:
     route = request.match_info.get("route", "")
     offset = bounded_query_int(request, "offset", 0, DASHCAM_OFFSET_MAX)
     limit = bounded_query_int(request, "limit", DASHCAM_SEGMENT_LIMIT_DEFAULT, DASHCAM_SEGMENT_LIMIT_MAX)
+    sort = normalized_sort(request)
     routes = await asyncio.to_thread(cached_dashcam_routes)
     entry = find_dashcam_route(routes, route)
     if not entry:
       return web.json_response({"ok": False, "error": "route not found"}, status=404)
-    page = route_with_segment_page(entry, offset, limit)
+    page = route_with_segment_page(entry, offset, limit, sort)
     return web.json_response({
       "ok": True,
       "route": route,
       "segments": page["segmentFolders"],
+      "segmentTimes": page["segmentTimes"],
       "offset": page["segmentOffset"],
       "limit": page["segmentLimit"],
       "total": page["segmentCount"],

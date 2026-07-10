@@ -53,31 +53,41 @@ function renderDeviceActionRow(title, descr, buttonText, buttonId, buttonClass =
     </div>`;
 }
 
-function renderSshKeysRow(username, hasKeys) {
-  const displayName = String(username || "").trim();
+function renderSshKeysRow(statusOrUsername, fallbackHasKeys) {
+  const status = (statusOrUsername && typeof statusOrUsername === "object")
+    ? statusOrUsername
+    : { username: statusOrUsername || "", has_keys: Boolean(fallbackHasKeys) };
+  const displayName = String(status.username || "").trim();
+  const hasKeys = Boolean(status.has_keys || status.hasKeys);
+  const fingerprints = Array.isArray(status.fingerprints) ? status.fingerprints : [];
   const accountText = hasKeys ? (displayName || "-") : getUIText("not_configured", "Not configured");
-  const buttonText = hasKeys ? getUIText("remove_upper", "REMOVE") : getUIText("add_upper", "ADD");
-  const buttonClass = hasKeys ? "smallBtn device-ssh-action device-ssh-action--remove" : "smallBtn device-ssh-action";
+  const control = renderSettingFormControl({
+    label: getUIText("ssh_github_username", "GitHub username"),
+    value: accountText,
+    placeholder: getUIText("ssh_github_username_prompt", "Enter your GitHub username"),
+    configured: hasKeys,
+    editAction: "edit",
+    actionAttribute: "data-ssh-action",
+    actions: [
+      { action: "remove", label: getUIText("remove_upper", "REMOVE"), disabled: !hasKeys },
+      ...(fingerprints.length ? [{ action: "view", label: getUIText("ssh_keys_view", "View keys") }] : []),
+    ],
+  });
   return `
     <div class="setting device-setting">
       <div class="settingTop">
         <div>
           <div class="title">${escapeHtml(getUIText("ssh_keys", "SSH Keys"))}</div>
-          <div class="descr">${escapeHtml(getUIText("ssh_keys_desc", "Warning: This grants SSH access to all public keys in your GitHub settings. Never enter a GitHub username other than your own."))}</div>
         </div>
         <div class="ctrl device-ssh-control">
-          <div class="device-ssh-account ${hasKeys ? "is-configured" : ""}" title="${escapeHtml(accountText)}">
-            <span class="device-ssh-account__label">GitHub</span>
-            <span class="device-ssh-account__value">${escapeHtml(accountText)}</span>
-          </div>
-          <button type="button" class="${buttonClass}" id="btnDeviceSshKeys" data-has-keys="${hasKeys ? "1" : "0"}">${escapeHtml(buttonText)}</button>
+          <div class="device-ssh-form">${control}</div>
         </div>
       </div>
     </div>`;
 }
 
 function renderDeviceLanguageRow(info) {
-  const currentLang = info.language || "main_en";
+  const currentLang = info.language || "en";
   return `
     <div class="setting device-setting">
       <div class="settingTop">

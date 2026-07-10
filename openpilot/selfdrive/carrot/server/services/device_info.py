@@ -21,7 +21,8 @@ def get_calibration_status() -> Dict[str, Any]:
     if not calib_bytes:
       return {"calibrated": False, "pitch": None, "yaw": None}
 
-    from cereal import messaging, log
+    import openpilot.cereal.messaging as messaging
+    from openpilot.cereal import log
     calib = messaging.log_from_bytes(calib_bytes, log.Event).liveCalibration
 
     uncal = 0  # cereal::LiveCalibrationData::Status::UNCALIBRATED

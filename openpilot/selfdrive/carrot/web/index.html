@@ -1,7 +1,14 @@
 ﻿<!doctype html>
-<html>
+<html class="notranslate" translate="no">
 <head>
   <meta charset="utf-8" />
+  <meta name="google" content="notranslate" />
+  <!-- Keep the default interactive-widget=resizes-visual: the on-screen keyboard
+       must shrink only the *visual* viewport, not the layout viewport. Dialogs
+       anchor to --app-vv-* (visualViewport) so they stay keyboard-safe, while the
+       layout-viewport aspect-ratio (which drives rail/split via 13/10) stays
+       stable — otherwise opening the keyboard on a near-square device would push
+       aspect-ratio past 13/10 and flip the whole app to the rail layout mid-typing. -->
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
   <title>CarrotPilot</title>
   <link rel="icon" type="image/png" href="/assets/img_chffr_wheel.png?v=2604-01" />
@@ -10,9 +17,12 @@
       var primaryPages = { carrot: 1, setting: 1, tools: 1, logs: 1, terminal: 1 };
       var startPage = "carrot";
       try {
+        var miniHudRequested = /(?:^|[?&])mini_hud=(?:auto|force|1)(?:&|$)/.test(window.location.search || "");
         var webSettings = window.__CARROT_BOOTSTRAP__ && window.__CARROT_BOOTSTRAP__.webSettings;
         var setting = (webSettings && webSettings.start_page) || "last";
-        if (setting === "last") {
+        if (miniHudRequested) {
+          startPage = "carrot";
+        } else if (setting === "last") {
           var lastPage = localStorage.getItem("carrot_web_last_page");
           startPage = primaryPages[lastPage] ? lastPage : "carrot";
         } else {
@@ -20,6 +30,42 @@
         }
       } catch (e) {}
       document.documentElement.dataset.carrotStartPage = startPage;
+    })();
+  </script>
+  <script>
+    // Set the visual-viewport CSS vars BEFORE first paint. Geometry that depends
+    // on --app-vv-height (e.g. the settings page height → the page-anchored
+    // floating button's bottom) would otherwise first lay out at the 100dvh
+    // fallback, then shift when viewport.js corrects it on script load — that is
+    // the "세로모드 로딩 중 플로팅버튼이 위→아래로 복귀" jump. viewport.js keeps these updated.
+    (function () {
+      try {
+        var vv = window.visualViewport;
+        var h = Math.max(320, Math.round((vv && vv.height) || window.innerHeight || 0));
+        var w = Math.max(320, Math.round((vv && vv.width) || window.innerWidth || 0));
+        var t = Math.max(0, Math.round((vv && vv.offsetTop) || 0));
+        var s = document.documentElement.style;
+        s.setProperty("--app-vv-height", h + "px");
+        s.setProperty("--app-vv-width", w + "px");
+        s.setProperty("--app-vv-top", t + "px");
+        // Mirror the coarse layout mode before first paint so CSS attribute /
+        // container hooks (and JS read on early pages) match viewport.js.
+        var lw = window.innerWidth || w;
+        var lh = window.innerHeight || h;
+        var ratio = lh > 0 ? lw / lh : 1;
+        var segmented = false;
+        try {
+          segmented =
+            (window.viewport && Array.isArray(window.viewport.segments) && window.viewport.segments.length > 1) ||
+            (window.matchMedia && (
+              window.matchMedia("(horizontal-viewport-segments: 2)").matches ||
+              window.matchMedia("(vertical-viewport-segments: 2)").matches
+            ));
+        } catch (e) {}
+        var wide = ratio >= 1.3 || segmented || (lw >= 640 && lh >= 650);
+        document.documentElement.dataset.layout =
+          wide ? "wide" : (ratio >= 0.92 ? "square" : "tall");
+      } catch (e) {}
     })();
   </script>
   <style>
@@ -47,7 +93,7 @@
       display: block !important;
     }
 
-    @media (orientation: landscape) {
+    @media (min-aspect-ratio: 13/10), (horizontal-viewport-segments: 2), (vertical-viewport-segments: 2), (min-width: 640px) and (min-height: 650px) {
       html[data-carrot-start-page="tools"]:not([data-carrot-bootstrapped]) #pageTools {
         display: grid !important;
       }
@@ -69,26 +115,31 @@
       background: color-mix(in srgb, var(--md-primary) 14%, transparent) !important;
     }
   </style>
-  <link rel="stylesheet" href="/css/tokens.css?v=2605-09" />
-  <link rel="stylesheet" href="/css/layout_tokens.css?v=2605-07" />
+  <link rel="stylesheet" href="/css/tokens.css?v=2607-45" />
+  <link rel="stylesheet" href="/css/layout_tokens.css?v=2607-42" />
   <link rel="stylesheet" href="/css/hud_card.css?v=2605-03" />
-  <link rel="stylesheet" href="/css/base.css?v=2605-10" />
+  <link rel="stylesheet" href="/css/base.css?v=2607-40" />
   <link rel="stylesheet" href="/css/layout.css?v=2605-08" />
-  <link rel="stylesheet" href="/css/components.css?v=2605-09" />
-  <link rel="stylesheet" href="/css/pages/logs.css?v=2605-21" />
-  <link rel="stylesheet" href="/css/pages/terminal.css?v=2605-07" />
-  <link rel="stylesheet" href="/css/pages/settings/base.css?v=2605-37" />
-  <link rel="stylesheet" href="/css/pages/settings/panels.css?v=2605-37" />
-  <link rel="stylesheet" href="/css/pages/settings/device.css?v=2605-37" />
-  <link rel="stylesheet" href="/css/pages/tools/base.css?v=2605-40" />
+  <link rel="stylesheet" href="/css/components.css?v=2607-45" />
+  <link rel="stylesheet" href="/css/components/nav_status_badges.css?v=2607-04" />
+  <link rel="stylesheet" href="/css/pages/logs.css?v=2607-43" />
+  <link rel="stylesheet" href="/css/pages/terminal.css?v=2607-42" />
+  <link rel="stylesheet" href="/css/pages/settings/base.css?v=2606-21" />
+  <link rel="stylesheet" href="/css/pages/settings/panels.css?v=2607-44" />
+  <link rel="stylesheet" href="/css/pages/settings/device.css?v=2607-50" />
+  <link rel="stylesheet" href="/css/pages/settings/youtube_live.css?v=2607-23" />
+  <link rel="stylesheet" href="/css/pages/settings/token_card.css?v=2607-08" />
+  <link rel="stylesheet" href="/css/pages/tools/base.css?v=2605-43" />
   <link rel="stylesheet" href="/css/pages/tools/qr.css?v=2605-40" />
-  <link rel="stylesheet" href="/css/pages/tools/main.css?v=2605-40" />
-  <link rel="stylesheet" href="/css/pages/drive.css?v=2605-11" />
-  <link rel="stylesheet" href="/css/responsive.css?v=2605-10" />
+  <link rel="stylesheet" href="/css/pages/tools/main.css?v=2607-42" />
+  <link rel="stylesheet" href="/css/pages/drive.css?v=2607-49" />
+  <link rel="stylesheet" href="/css/components/nav_hud.css?v=2607-42" />
+  <link rel="stylesheet" href="/css/components/mini_hud.css?v=2607-88" />
+  <link rel="stylesheet" href="/css/responsive.css?v=2607-44" />
   <link rel="stylesheet" href="/css/vendor/plyr.css?v=3.7.8" />
 </head>
 
-<body>
+<body class="notranslate" translate="no">
 
   <div class="wrap swipe-container" id="swipeContainer">
     <!-- ════════════ CAR SELECT ════════════ -->
@@ -146,8 +197,8 @@
             </button>
           </div>
           <button id="btnSettingSearch" class="fab fab--round fab--icon fab--setting-search fab--setting-menu" type="button" aria-label="설정 작업" aria-expanded="false" aria-haspopup="menu" aria-controls="settingFabActions">
-            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-              <path fill="currentColor" d="M19 11h-6V5h-2v6H5v2h6v6h2v-6h6z"/>
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" class="setting-fab-menu-icon">
+              <path d="M5 7h14M5 12h14M5 17h14"></path>
             </svg>
           </button>
         </div>
@@ -191,10 +242,6 @@
 
         <!-- Items Screen -->
         <div id="settingScreenItems" class="screen hidden" style="display:none;">
-          <div id="settingSubnavWrap" class="setting-subnav-wrap">
-            <div id="settingSubnav" class="setting-subnav" aria-label="Setting groups"></div>
-            <div id="deviceSubnav" class="setting-subnav" hidden aria-label="Device groups"></div>
-          </div>
           <div class="row-between mb-sm">
             <h3 id="itemsTitle" class="section-title" style="cursor:pointer; margin:0;">Items</h3>
             <span class="muted" id="groupMeta">-</span>
@@ -240,18 +287,20 @@
             <span id="gitCommandsTitle" class="section-title tools-group__title">Git Commands</span>
             <span class="tools-group__chevron" aria-hidden="true"></span>
           </button>
-          <div id="toolsGroupBodyGit" class="tools-group__body ui-action-grid">
-            <button id="btnGitPull" class="btn git-pull-btn" type="button">
-              <span>git pull</span>
-              <span id="gitPullBadge" class="git-pull-btn__badge" hidden aria-label="pending commits">0</span>
-            </button>
-            <button id="btnGitSync" class="btn">git sync</button>
-            <button id="btnGitReset" class="btn">git reset</button>
-            <button id="btnGitLog" class="btn">git log</button>
-            <button id="btnGitRemote" class="btn">change repository</button>
-            <button id="btnGitBranch" class="btn">change branch</button>
-            <button id="btnGitAddRemote" class="btn">add remote</button>
-            <button id="btnGitResetRepo" class="btn btn--danger">reset repo</button>
+          <div id="toolsGroupBodyGit" class="tools-group__body">
+            <div class="tools-group__bodyInner ui-action-grid">
+              <button id="btnGitPull" class="btn git-pull-btn" type="button">
+                <span>git pull</span>
+                <span id="gitPullBadge" class="git-pull-btn__badge" hidden aria-label="pending commits">0</span>
+              </button>
+              <button id="btnGitSync" class="btn">git sync</button>
+              <button id="btnGitReset" class="btn">git reset</button>
+              <button id="btnGitLog" class="btn">git log</button>
+              <button id="btnGitRemote" class="btn">change repository</button>
+              <button id="btnGitBranch" class="btn">change branch</button>
+              <button id="btnGitAddRemote" class="btn">add remote</button>
+              <button id="btnGitResetRepo" class="btn btn--danger">reset repo</button>
+            </div>
           </div>
         </div>
 
@@ -262,16 +311,18 @@
             <span id="userSystemTitle" class="section-title tools-group__title">User / System</span>
             <span class="tools-group__chevron" aria-hidden="true"></span>
           </button>
-          <div id="toolsGroupBodySystem" class="tools-group__body ui-action-grid hidden" hidden>
-            <button id="btnDeviceLang" class="btn">Device Lang</button>
-            <button id="btnResetCalib" class="btn btn--danger">Reset Calib</button>
-            <button id="btnSendTmuxLog" class="btn">capture tmux</button>
-            <button id="btnSendTmuxServerLog" class="btn">send tmux</button>
-            <button id="btnInstallRequired" class="btn">install flask</button>
-            <button id="btnDeleteVideos" class="btn btn--danger">delete all videos</button>
-            <button id="btnDeleteLogs" class="btn btn--danger">delete all logs</button>
-            <button id="btnRebuildAll" class="smallBtn btn--danger">Rebuild All</button>
-            <button id="btnReboot" class="btn">reboot</button>
+          <div id="toolsGroupBodySystem" class="tools-group__body">
+            <div class="tools-group__bodyInner ui-action-grid">
+              <button id="btnDeviceLang" class="btn" hidden style="display:none;">Device Lang</button>
+              <button id="btnResetCalib" class="btn btn--danger">Reset Calib</button>
+              <button id="btnSendTmuxLog" class="btn">capture tmux</button>
+              <button id="btnSendTmuxServerLog" class="btn">send tmux</button>
+              <button id="btnInstallRequired" class="btn">install flask</button>
+              <button id="btnDeleteVideos" class="btn btn--danger">delete all videos</button>
+              <button id="btnDeleteLogs" class="btn btn--danger">delete all logs</button>
+              <button id="btnRebuildAll" class="smallBtn btn--danger">Rebuild All</button>
+              <button id="btnReboot" class="btn">reboot</button>
+            </div>
           </div>
         </div>
 
@@ -282,13 +333,15 @@
             <span id="userSettingsTitle" class="section-title tools-group__title">Settings</span>
             <span class="tools-group__chevron" aria-hidden="true"></span>
           </button>
-          <div id="toolsGroupBodySettings" class="tools-group__body ui-action-grid hidden" hidden>
-            <button id="btnBackupSettings" class="btn">Backup</button>
-            <button id="btnRestoreSettings" class="btn">Restore</button>
-            <button id="btnQrBackupSettings" class="btn">QR Backup</button>
-            <button id="btnQrRestoreSettings" class="btn">QR Restore</button>
-            <button id="btnCopySettings" class="btn">Copy</button>
-            <button id="btnViewSettings" class="btn">View</button>
+          <div id="toolsGroupBodySettings" class="tools-group__body">
+            <div class="tools-group__bodyInner ui-action-grid">
+              <button id="btnBackupSettings" class="btn">Backup</button>
+              <button id="btnRestoreSettings" class="btn">Restore</button>
+              <button id="btnQrBackupSettings" class="btn">QR Backup</button>
+              <button id="btnQrRestoreSettings" class="btn">QR Restore</button>
+              <button id="btnCopySettings" class="btn">Copy</button>
+              <button id="btnViewSettings" class="btn">View</button>
+            </div>
           </div>
         </div>
 
@@ -406,6 +459,45 @@
         <canvas id="carrotLastFrameCanvas" class="carrot-stage__videoHold" aria-hidden="true"></canvas>
         <canvas id="carrotOverlayCanvas" class="carrot-stage__canvas"></canvas>
         <canvas id="carrotHudCanvas" class="carrot-stage__hud"></canvas>
+        <div id="carrotMapDock" class="carrot-map-dock" hidden>
+          <iframe id="carrotMapFrame" class="carrot-map-frame" title="Carrot map" loading="eager" referrerpolicy="no-referrer"></iframe>
+          <div class="carrot-map-zoom" data-carrot-map-zoom-bar>
+            <button type="button" class="carrot-map-zoom__btn" data-carrot-map-zoom="out" aria-label="지도 축소">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>
+            </button>
+            <div class="carrot-map-zoom-level" data-carrot-map-zoom-level hidden>기본</div>
+            <button type="button" class="carrot-map-zoom__btn" data-carrot-map-zoom="in" aria-label="지도 확대">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>
+            </button>
+          </div>
+        </div>
+        <div id="carrotNavHud" class="carrot-nav-hud" hidden aria-live="polite">
+          <div class="carrot-nav-hud__side" data-nav-hud-side hidden>
+            <div class="carrot-nav-hud__side-sign" data-nav-hud-side-sign></div>
+            <div class="carrot-nav-hud__side-body">
+              <div class="carrot-nav-hud__side-dist" data-nav-hud-side-dist></div>
+              <div class="carrot-nav-hud__side-label" data-nav-hud-side-label></div>
+            </div>
+            <div class="carrot-nav-hud__side-countdown" data-nav-hud-side-countdown hidden></div>
+          </div>
+          <div class="carrot-nav-hud__main" data-nav-hud-main>
+            <div class="carrot-nav-hud__atc" data-nav-hud-atc hidden></div>
+            <div class="carrot-nav-hud__icon" data-nav-hud-icon>↑</div>
+            <div class="carrot-nav-hud__body">
+              <div class="carrot-nav-hud__dist-row">
+                <span class="carrot-nav-hud__dist" data-nav-hud-dist></span>
+                <span class="carrot-nav-hud__advice" data-nav-hud-advice hidden></span>
+                <span class="carrot-nav-hud__countdown" data-nav-hud-countdown hidden></span>
+              </div>
+              <div class="carrot-nav-hud__road-row">
+                <span class="carrot-nav-hud__road" data-nav-hud-road></span>
+                <span class="carrot-nav-hud__limit" data-nav-hud-limit hidden></span>
+              </div>
+              <div class="carrot-nav-hud__meta" data-nav-hud-meta hidden></div>
+            </div>
+            <div class="carrot-nav-hud__hint" data-nav-hud-hint hidden></div>
+          </div>
+        </div>
         <div id="carrotOnroadAlert" class="carrot-stage__alert" hidden aria-live="polite" aria-atomic="true">
           <div id="carrotOnroadAlertBox" class="carrot-stage__alert-box">
             <div id="carrotOnroadAlertText1" class="carrot-stage__alert-text carrot-stage__alert-text--primary"></div>
@@ -425,6 +517,9 @@
             <div class="carrot-stage__spinner" aria-hidden="true"></div>
             <div id="carrotStageLoadingText" class="carrot-stage__loadingText"></div>
             <div id="carrotStageLoadingDetail" class="carrot-stage__loadingDetail"></div>
+            <div class="carrot-stage__loadingActions" role="group" aria-label="Vision connection actions">
+              <button id="btnVisionStop" class="smallBtn carrot-stage__loadingAction" type="button">중지</button>
+            </div>
           </div>
         </div>
 
@@ -432,7 +527,8 @@
           <div id="carrotStageStatus" class="carrot-stage__status">waiting stream...</div>
         </div>
         <div id="carrotStageDebug" class="carrot-stage__debug">LD:- LT:- SR:-</div>
-        <div class="carrot-stage__controls" role="group" aria-label="Display and recording controls">
+        <div class="carrot-stage__controls" role="group" aria-label="Sound, display and recording controls">
+          <button id="btnWebSound" class="carrot-stage__controlBtn carrot-stage__controlBtn--sound" type="button" aria-label="Web sound">Sound</button>
           <button id="btnDisplayModeCycle" class="carrot-stage__controlBtn carrot-stage__controlBtn--display" type="button" aria-label="Display mode">Normal</button>
           <button id="btnRecordToggle" class="carrot-stage__controlBtn carrot-stage__controlBtn--record" type="button" aria-label="Record">Record</button>
         </div>
@@ -443,7 +539,101 @@
     </div>
   </div>
 
+  <section id="carrotMiniHud" class="carrot-mini-hud" hidden aria-label="Carrot compact driving HUD">
+    <div class="carrot-mini-hud__top">
+      <div class="carrot-mini-hud__top-cell">
+        <button class="carrot-mini-hud__cpu" type="button" data-mini-hud-cpu aria-label="CPU temperature">CPU:--°C</button>
+      </div>
+      <div class="carrot-mini-hud__top-cell">
+        <span data-mini-hud-source>STOCK</span>
+      </div>
+    </div>
+
+    <div class="carrot-mini-hud__main">
+      <div class="carrot-mini-hud__limit" data-mini-hud-limit-zone>
+        <div class="carrot-mini-hud__limit-visual">
+          <div class="carrot-mini-hud__limit-sign">
+            <div class="carrot-mini-hud__limit-us-caption" aria-hidden="true">
+              <span>SPEED</span><span>LIMIT</span>
+            </div>
+            <span data-mini-hud-limit>--</span>
+            <small data-mini-hud-limit-label hidden></small>
+          </div>
+          <img class="carrot-mini-hud__alert-badge" data-mini-hud-alert-badge alt="" hidden>
+        </div>
+        <div class="carrot-mini-hud__limit-badge" data-mini-hud-limit-badge hidden></div>
+      </div>
+
+      <div class="carrot-mini-hud__stock-mode" data-mini-hud-stock-mode hidden>
+        <div class="carrot-mini-hud__drive-mode" data-mini-hud-drive-kind="normal">
+          <span data-mini-hud-drive-mode>NORMAL</span>
+        </div>
+      </div>
+
+      <div class="carrot-mini-hud__alert" data-mini-hud-alert-zone>
+        <span class="carrot-mini-hud__chip" data-mini-hud-countdown-zone>
+          <small class="carrot-mini-hud__chip-label">TIM</small>
+          <b data-mini-hud-countdown></b>
+        </span>
+        <span class="carrot-mini-hud__chip" data-mini-hud-distance-zone>
+          <small class="carrot-mini-hud__chip-label">DST</small>
+          <b data-mini-hud-distance></b>
+        </span>
+        <span class="carrot-mini-hud__chip" data-mini-hud-gap-zone>
+          <small class="carrot-mini-hud__chip-label">GAP</small>
+          <b class="carrot-mini-hud__gap-value">
+            <span data-mini-hud-gap></span>
+            <span class="carrot-mini-hud__gap-signal" data-mini-hud-gap-signal aria-hidden="true">
+              <i></i><i></i><i></i><i></i>
+            </span>
+          </b>
+        </span>
+        <strong class="carrot-mini-hud__chip carrot-mini-hud__temp" data-mini-hud-temp-zone data-mini-hud-temp-decel="0">
+          <small class="carrot-mini-hud__chip-label" data-mini-hud-temp-label></small>
+          <b data-mini-hud-temp-speed></b>
+        </strong>
+      </div>
+
+    </div>
+
+    <div class="carrot-mini-hud__speed-row">
+      <div class="carrot-mini-hud__speed"><span data-mini-hud-speed>--</span></div>
+      <div class="carrot-mini-hud__set-speed">
+        <small class="carrot-mini-hud__gear-badge" data-mini-hud-gear-badge data-mini-hud-gear-known="0">
+          <span data-mini-hud-gear-label hidden></span><strong data-mini-hud-gear>--</strong>
+        </small>
+        <span data-mini-hud-set-speed>--</span>
+      </div>
+    </div>
+  </section>
+
   <div id="driveHudCard">
+    <div id="carrotRtcPerfHud" class="carrot-rtc-perf" hidden>
+      <section id="carrotRtcPerfSummary" class="carrot-rtc-perf-summary" data-tone="offline" hidden aria-label="Carrot Vision live diagnostic summary">
+        <div class="carrot-rtc-perf-summary__head">
+          <span class="carrot-rtc-perf__dot" aria-hidden="true"></span>
+          <strong id="carrotRtcPerfTitle" class="carrot-rtc-perf-summary__title">VISION OFFLINE</strong>
+          <button id="carrotRtcPerfLogBtn" class="carrot-rtc-perf-summary__action" type="button">LOG</button>
+          <button id="carrotRtcPerfCloseBtn" class="carrot-rtc-perf-summary__close" type="button" aria-label="Close Carrot Vision diagnostic summary">x</button>
+        </div>
+        <div class="carrot-rtc-perf-summary__sub">RTC ROAD CAMERA / LIVE DIAGNOSTIC</div>
+        <div class="carrot-rtc-perf-summary__grid">
+          <span>Video</span><strong id="carrotRtcPerfVideo">-</strong>
+          <span>Codec</span><strong id="carrotRtcPerfCodec">-</strong>
+          <span>Bitrate</span><strong id="carrotRtcPerfBitrate">-</strong>
+          <span>RTT</span><strong id="carrotRtcPerfRtt">-</strong>
+          <span>Jitter</span><strong id="carrotRtcPerfJitter">-</strong>
+          <span>Loss</span><strong id="carrotRtcPerfLoss">-</strong>
+          <span>Freeze</span><strong id="carrotRtcPerfFreeze">-</strong>
+          <span class="carrot-rtc-perf-summary__path-label">Path</span><strong id="carrotRtcPerfPath" class="carrot-rtc-perf-summary__path-value">-</strong>
+        </div>
+      </section>
+      <div id="carrotRtcPerfGlance" class="carrot-rtc-perf-glance" data-tone="offline" aria-live="polite">
+        <span class="carrot-rtc-perf__dot" aria-hidden="true"></span>
+        <span id="carrotRtcPerfGlanceText" class="carrot-rtc-perf-glance__text">VISION OFFLINE</span>
+      </div>
+    </div>
+    <button id="carrotRtcPerfHoldTarget" class="carrot-rtc-perf-hold-target" type="button" aria-label="Hold HUD to toggle Carrot Vision diagnostic summary"></button>
     <div class="hudWrap" id="hudRoot">
       <div class="hudMetricBar" role="presentation">
         <div class="hudMetricCell">
@@ -499,11 +689,12 @@
               </div>
               <div id="hudGapNum" class="hudGapText">(--)</div>
             </div>
-            <div class="hudGearStatus">
-              <div id="hudGearStep" class="hudGearStep" hidden>1</div>
-              <div id="hudGearLabel" class="hudGearLabel">GEAR</div>
-              <div id="hudGear" class="hudGearValue">P</div>
-            </div>
+          </div>
+          <!-- 기어: 설정속도 칼럼 우측 빈 공간(중앙)에 절대배치 -->
+          <div class="hudGearStatus hudGearStatus--floating">
+            <div id="hudGearStep" class="hudGearStep" hidden>1</div>
+            <div id="hudGearLabel" class="hudGearLabel">GEAR</div>
+            <div id="hudGear" class="hudGearValue">P</div>
           </div>
         </div>
       </div>
@@ -527,6 +718,10 @@
   <!-- Bottom Navigation (Material 3 style) -->
   <nav class="topbar">
     <button id="btnHome" class="nav-btn active">
+      <span id="navHomeStatusBadges" class="nav-status-badges" aria-hidden="true">
+        <span id="navRecordStatusBadge" class="nav-status-badge nav-status-badge--record" hidden>REC</span>
+        <span id="navYouTubeStatusBadge" class="nav-status-badge nav-status-badge--live" hidden>LIVE</span>
+      </span>
       <span class="nav-icon">
         <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
       </span>
@@ -570,6 +765,7 @@
       <div id="appDialogChoices" class="app-dialog__choices" hidden></div>
       <div id="appDialogInputWrap" class="app-dialog__inputWrap" hidden>
         <input id="appDialogInput" type="text" class="input-text app-dialog__input" />
+        <div id="appDialogInputError" class="app-dialog__inputError" role="alert" hidden></div>
       </div>
       <div class="app-dialog__actions">
         <button id="appDialogCopy" class="smallBtn" type="button" hidden>복사</button>
@@ -612,45 +808,57 @@
   <script src="/js/vendor/qrcode-generator.js?v=1.4.4"></script>
   <script src="/js/vendor/jsQR.js?v=1.4.0"></script>
   <script src="/js/translations/registry.js?v=2605-09"></script>
-  <script src="/js/translations/ko.js?v=2605-12"></script>
-  <script src="/js/translations/en.js?v=2605-12"></script>
-  <script src="/js/translations/zh.js?v=2605-12"></script>
-  <script src="/js/realtime/hud_card.js?v=2604-05"></script>
+  <script src="/js/translations/ko.js?v=2607-33"></script>
+  <script src="/js/translations/en.js?v=2607-33"></script>
+  <script src="/js/translations/zh.js?v=2607-33"></script>
+  <script src="/js/realtime/hud_card.js?v=2607-42"></script>
   <script src="/js/shared/constants.js?v=2604-72"></script>
-  <script src="/js/shared/dom.js?v=2604-71"></script>
+  <script src="/js/shared/dom.js?v=2607-01"></script>
   <script src="/js/shared/utils.js?v=2604-71"></script>
-  <script src="/js/shared/i18n.js?v=2605-06"></script>
+  <script src="/js/shared/i18n.js?v=2606-03"></script>
   <script src="/js/shared/api.js?v=2604-73"></script>
   <script src="/js/shared/setting_diff.js?v=2605-01"></script>
   <script src="/js/shared/activity.js?v=2604-04"></script>
   <script src="/js/shared/ui/focus_trap.js?v=2605-15"></script>
-  <script src="/js/shared/ui/dialog.js?v=2604-73"></script>
-  <script src="/js/shared/ui/viewport.js?v=2604-71"></script>
+  <script src="/js/shared/ui/dialog.js?v=2607-44"></script>
+  <script src="/js/shared/ui/setting_form.js?v=2607-03"></script>
+  <script src="/js/shared/ui/viewport.js?v=2607-47"></script>
   <script src="/js/shared/ui/effects.js?v=2604-72"></script>
-  <script src="/js/shared/ui/navigation.js?v=2605-14"></script>
-  <script src="/js/pages/car.js?v=2604-75"></script>
-  <script src="/js/pages/setting.js?v=2605-17"></script>
-  <script src="/js/pages/setting_device_config.js?v=2605-04"></script>
-  <script src="/js/pages/setting_device_render.js?v=2605-02"></script>
+  <script src="/js/shared/ui/navigation.js?v=2607-42"></script>
+  <script src="/js/pages/car.js?v=2607-01"></script>
+  <script src="/js/pages/setting_youtube_live.js?v=2607-31"></script>
+  <script src="/js/pages/setting_mapbox_tokens.js?v=2607-06"></script>
+  <script src="/js/shared/ui/nav_status_badges.js?v=2607-01"></script>
+  <script src="/js/pages/setting.js?v=2607-49"></script>
+  <script src="/js/pages/setting_device_config.js?v=2605-06"></script>
+  <script src="/js/pages/setting_device_render.js?v=2607-02"></script>
   <script src="/js/pages/setting_device_network.js?v=2605-01"></script>
-  <script src="/js/pages/setting_device_actions.js?v=2605-02"></script>
-  <script src="/js/pages/setting_device.js?v=2605-09"></script>
-  <script src="/js/pages/tools_web_settings.js?v=2605-04"></script>
-  <script src="/js/pages/tools_notifications.js?v=2605-25"></script>
-  <script src="/js/pages/tools.js?v=2605-14"></script>
+  <script src="/js/pages/setting_device_actions.js?v=2607-02"></script>
+  <script src="/js/pages/setting_device.js?v=2607-02"></script>
+  <script src="/js/pages/tools_web_settings.js?v=2605-10"></script>
+  <script src="/js/realtime/web_sound.js?v=2607-10"></script>
+  <script src="/js/pages/tools_notifications.js?v=2607-42"></script>
+  <script src="/js/pages/tools.js?v=2607-42"></script>
   <script src="/js/pages/tools_settings_qr.js?v=2605-11"></script>
   <script src="/js/pages/branch.js?v=2604-82"></script>
-  <script src="/js/pages/logs/shared.js?v=2605-15"></script>
-  <script src="/js/pages/logs/dashcam.js?v=2605-15"></script>
+  <script src="/js/pages/logs/shared.js?v=2607-01"></script>
+  <script src="/js/pages/logs/dashcam.js?v=2607-02"></script>
   <script src="/js/pages/logs/screenrecord.js?v=2605-15"></script>
-  <script src="/js/pages/terminal.js?v=2604-72"></script>
+  <script src="/js/pages/terminal.js?v=2607-44"></script>
   <script src="/js/realtime/raw_capnp.js?v=2604-05"></script>
+  <script src="/js/realtime/mini_hud_model.js?v=2607-85"></script>
+  <script src="/js/realtime/mini_hud_mode.js?v=2607-15"></script>
+  <script src="/js/realtime/mini_hud.js?v=2607-89"></script>
+  <script src="/js/realtime/mini_hud_demo.js?v=2607-87"></script>
   <script src="/js/realtime/vision_state.js?v=2605-01"></script>
-  <script src="/js/realtime/vision_rtc.js?v=2605-01"></script>
-  <script src="/js/realtime/vision_raw.js?v=2605-01"></script>
-  <script src="/js/realtime/app_realtime.js?v=2604-29"></script>
+  <script src="/js/realtime/vision_rtc.js?v=2606-06"></script>
+  <script src="/js/realtime/vision_raw.js?v=2607-04"></script>
+  <script src="/js/realtime/app_realtime.js?v=2607-44"></script>
+  <script src="/js/realtime/vision_diag.js?v=2606-07"></script>
+  <script src="/js/realtime/carrot_map.js?v=2607-42"></script>
+  <script src="/js/realtime/nav_hud.js?v=2607-42"></script>
   <script src="/js/pages/vision_background.js?v=2605-01"></script>
-  <script src="/js/realtime/home_drive.js?v=2605-05"></script>
-  <script src="/js/app.js?v=2604-76"></script>
+  <script src="/js/realtime/home_drive.js?v=2607-42"></script>
+  <script src="/js/app.js?v=2606-11"></script>
 </body>
 </html>

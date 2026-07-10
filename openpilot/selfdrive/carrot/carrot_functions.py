@@ -1,7 +1,7 @@
 import time
 from enum import Enum
 
-from cereal import log
+from openpilot.cereal import log
 from openpilot.common.params import Params
 import numpy as np
 from openpilot.common.realtime import DT_MDL
@@ -74,7 +74,7 @@ class CarrotPlanner:
     self.traffic_starting_count = 0
     self.user_stop_distance = -1
 
-    #self.t_follow_last = 1.5
+    self.t_follow_last = 1.5
 
     self.startSignCount = 0
     self.stopSignCount = 0
@@ -103,7 +103,8 @@ class CarrotPlanner:
     self.dynamicTFollow = 0.0
     self.dynamicTFollowLC = 0.0
     self.enableSpeedTF = 0
-    #self.tFollowDecelBoost = 0.0
+    self.tFollowDecelBoost = 0.0
+    self._tf_decel_extra = 0.0
     self.personality = 1
 
     self.cruiseMaxVals0 = 1.6
@@ -166,7 +167,7 @@ class CarrotPlanner:
       self.dynamicTFollow = self.params.get_float("DynamicTFollow") / 100.
       self.dynamicTFollowLC = self.params.get_float("DynamicTFollowLC") / 100.
       self.enableSpeedTF = self.params.get_int("EnableSpeedTF")
-      #self.tFollowDecelBoost = self.params.get_float("TFollowDecelBoost") / 100.
+      self.tFollowDecelBoost = self.params.get_float("TFollowDecelBoost") / 100.
     elif self.params_count == 30:
       self.cruiseMaxVals0 = self.params.get_float("CruiseMaxVals0") / 100.
       self.cruiseMaxVals1 = self.params.get_float("CruiseMaxVals1") / 100.
@@ -191,8 +192,7 @@ class CarrotPlanner:
     factor = self.myHighModeFactor if self.myDrivingMode == DrivingMode.High else self.mySafeFactor
     return np.interp(v_ego, A_CRUISE_MAX_BP_CARROT, cruiseMaxVals) * factor
 
-  def get_T_FOLLOW(self, personality=log.LongitudinalPersonality.standard, v_ego=0.0, a_ego=0.0):
-    # Compute tf_target
+  def _get_base_t_follow(self, personality, v_ego):
     if self.enableSpeedTF < 0:
       TF_SPEED_BPS = {
         -1: [0, 30, 60, 90],
@@ -203,90 +203,141 @@ class CarrotPlanner:
       v_kph = v_ego * CV.MS_TO_KPH
       bp = TF_SPEED_BPS.get(self.enableSpeedTF, [0, 30, 60, 90])
 
-      tf_target = float(np.interp(v_kph, bp,
-                                  [self.tFollowGap1, self.tFollowGap2, self.tFollowGap3, self.tFollowGap4]))
+      tf_base = float(np.interp(
+        v_kph,
+        bp,
+        [self.tFollowGap1, self.tFollowGap2, self.tFollowGap3, self.tFollowGap4]
+      ))
 
       self.jerk_factor = float(np.interp(v_kph, bp, [1.0, 0.7, 0.5, 0.5]))
 
       if personality == log.LongitudinalPersonality.moreRelaxed:
-        tf_target *= 2.0
+        tf_base *= 2.0
       elif personality == log.LongitudinalPersonality.relaxed:
-        tf_target *= 1.6
+        tf_base *= 1.6
       elif personality == log.LongitudinalPersonality.standard:
-        tf_target *= 1.3
+        tf_base *= 1.3
       elif personality == log.LongitudinalPersonality.aggressive:
-        tf_target *= 1.0
-
-    else:
-      tf_target = 1.0
-      if personality == log.LongitudinalPersonality.moreRelaxed:
-        self.jerk_factor = 1.0
-        tf_target = self.tFollowGap4
-      elif personality == log.LongitudinalPersonality.relaxed:
-        self.jerk_factor = 1.0
-        tf_target = self.tFollowGap3
-      elif personality == log.LongitudinalPersonality.standard:
-        self.jerk_factor = 1.0 if self.myDrivingMode == DrivingMode.Safe else 0.7
-        tf_target = self.tFollowGap2
-      elif personality == log.LongitudinalPersonality.aggressive:
-        self.jerk_factor = 1.0 if self.myDrivingMode == DrivingMode.Safe else 0.5
-        tf_target = self.tFollowGap1
+        tf_base *= 1.0
       else:
         raise NotImplementedError("Longitudinal personality not supported")
 
-      if self.enableSpeedTF > 0:
-        reduce = self.enableSpeedTF * 0.01
-        s = float(np.clip(v_ego * CV.MS_TO_KPH / 100.0, 0.0, 1.0))
-        scale = (1.0 - reduce) + reduce * s
-        tf_target *= scale
+    else:
+      if personality == log.LongitudinalPersonality.moreRelaxed:
+        self.jerk_factor = 1.0
+        tf_base = self.tFollowGap4
+      elif personality == log.LongitudinalPersonality.relaxed:
+        self.jerk_factor = 1.0
+        tf_base = self.tFollowGap3
+      elif personality == log.LongitudinalPersonality.standard:
+        self.jerk_factor = 1.0 if self.myDrivingMode == DrivingMode.Safe else 0.7
+        tf_base = self.tFollowGap2
+      elif personality == log.LongitudinalPersonality.aggressive:
+        self.jerk_factor = 1.0 if self.myDrivingMode == DrivingMode.Safe else 0.5
+        tf_base = self.tFollowGap1
       else:
-        return tf_target
+        raise NotImplementedError("Longitudinal personality not supported")
 
-    # Decel-hold only
+    return float(tf_base)
+
+
+  def _apply_speed_t_follow_scale(self, tf_base, v_ego):
+    tf_target = float(tf_base)
+
+    # enableSpeedTF > 0:
+    # 저속에서는 차간거리 축소, 고속으로 갈수록 원래값으로 복귀
+    if self.enableSpeedTF > 0:
+      reduce = self.enableSpeedTF * 0.01
+      s = float(np.clip(v_ego * CV.MS_TO_KPH / 100.0, 0.0, 1.0))
+      scale = (1.0 - reduce) + reduce * s
+      tf_target *= scale
+
+    return float(tf_target)
+
+
+  def _apply_decel_hold_and_boost_t_follow(self, tf_target, a_ego):
     if not hasattr(self, "_tf_applied") or self._tf_applied <= 0.0:
       self._tf_applied = float(tf_target)
 
     DECEL_HOLD_A = -0.2  # m/s^2
+    self._tf_decel_extra = 0.0
 
     # 감속 중에는 t_follow 축소를 막음
     if a_ego <= DECEL_HOLD_A and tf_target < self._tf_applied:
-      tf_applied = self._tf_applied
+      tf_held = float(self._tf_applied)
     else:
-      tf_applied = tf_target
+      tf_held = float(tf_target)
 
-    # configured gaps 범위로 clamp
+    # 감속 중에는 속도 감소로 실제 거리 여유가 줄 수 있으므로 약간 추가 확보
+    # a_ego = -0.2 부근에서는 거의 0, 더 강한 감속일수록 boost 증가
+    decel_boost = float(np.interp(a_ego, [-2.5, -1.0, -0.3, 0.0],
+                                  [0.50, 0.25, 0.06, 0.0]))
+    self._tf_decel_extra = decel_boost * self.tFollowDecelBoost
+
+    return float(tf_held + self._tf_decel_extra)
+
+
+  def _clip_t_follow(self, t_follow):
     tf_min = float(min(self.tFollowGap1, self.tFollowGap2, self.tFollowGap3, self.tFollowGap4))
     tf_max = float(max(self.tFollowGap1, self.tFollowGap2, self.tFollowGap3, self.tFollowGap4))
-    tf_applied = float(np.clip(tf_applied, tf_min, tf_max))
+    tf_max = min(2.0, tf_max + max(0.0, self._tf_decel_extra))
+    return float(np.clip(t_follow, max(0.3, tf_min), tf_max))
 
-    self._tf_applied = tf_applied
-    return tf_applied
+  def get_T_FOLLOW(self, personality=log.LongitudinalPersonality.standard, v_ego=0.0, a_ego=0.0):
+    tf_base = self._get_base_t_follow(personality, v_ego)
+    tf_target = self._apply_speed_t_follow_scale(tf_base, v_ego)
+    tf_adjusted = self._apply_decel_hold_and_boost_t_follow(tf_target, a_ego)
+    tf_safe = float(tf_adjusted * self.mySafeFactor)
+    tf_final = self._clip_t_follow(tf_safe)
+    self._tf_applied = float(tf_final)
+    return self.apply_t_follow(tf_final)
+
 
   def _update_model_desire(self, sm):
     meta = sm['modelV2'].meta
     carState = sm['carState']
-    if meta.laneChangeState == LaneChangeState.laneChangeStarting: # laneChangig
+
+    if meta.laneChangeState == LaneChangeState.laneChangeStarting:
       self.desireState = meta.desireState[3] if carState.leftBlinker else meta.desireState[4]
       self.desireStateCount += 1
     else:
       self.desireState = 0.0
       self.desireStateCount = 0
 
+
   def dynamic_t_follow(self, t_follow, lead, desired_follow_distance, prev_a):
     self.jerk_factor_apply = self.jerk_factor
-    if self.desireState > 0.9 and self.desireStateCount < int(1.5 / DT_MDL):  # lane change state, 1.5초동안만.
-      t_follow *= self.dynamicTFollowLC  # 차선변경시에는 t_follow를 설정 비율만큼 줄여 목표 차간거리를 축소.
-      self.jerk_factor_apply = self.jerk_factor * self.dynamicTFollowLC  # 차선변경시 jerk factor를 줄여 aggressive하게
-    elif lead.status:
-      t_follow += np.interp(prev_a[0], [-2.0, -0.5], [0.1, 0.0])
-      if self.dynamicTFollow > 0.0:
-        gap_dist_adjust = np.clip((desired_follow_distance - lead.dRel) * self.dynamicTFollow, 0.0, 1.0) * 0.1
 
-        # Kans: 앞차가 갑자기 감속 중이면 추가로 t_follow 증가
-        lead_decel_adjust = np.interp(lead.jLead, [-3.0, -1.0, -0.3, 0.0], [0.15, 0.08, 0.02, 0.0]) * self.dynamicTFollow
-        t_follow += gap_dist_adjust + lead_decel_adjust
+    # 차선변경 시작 후 1.5초 동안은 공격적으로
+    if self.desireState > 0.9 and self.desireStateCount < int(1.5 / DT_MDL):
+      dynamicTFollowLC = max(0.2, self.dynamicTFollowLC)
+      t_follow *= dynamicTFollowLC
+      self.jerk_factor_apply = self.jerk_factor * dynamicTFollowLC
 
-    return t_follow
+    # 일반 lead follow: lead.jLead 기반 동적 조절
+    elif lead.status and self.dynamicTFollow > 0.0:
+      # lead.jLead < 0 : 앞차가 감속 방향으로 변함 -> 차간거리 증가
+      # lead.jLead > 0 : 앞차가 가속 방향으로 변함 -> 차간거리 감소
+      t_follow += np.interp(lead.jLead, [-3.0, -0.5, 0.5, 2.0], [1.0, 0.0, 0.0, -1.0]) * self.dynamicTFollow
+
+      # 앞차가 풀어주는 상황에서는 jerk factor 약간 낮춰서 더 민첩하게
+      if lead.jLead > 0.2:
+        self.jerk_factor_apply = self.jerk_factor * 0.5
+
+      t_follow = np.clip(t_follow, 0.3, 2.0)
+
+    return self.apply_t_follow(t_follow, 0.0)
+
+
+  def apply_t_follow(self, t_follow, adjust_t_follow=0.0):
+    # t_follow가 급격히 증가하면 목표거리도 급격히 증가하여 강한 감속을 유도할 수 있으므로
+    # 증가 방향만 천천히 반영
+    if t_follow > self.t_follow_last:
+      rise_rate = 0.45 if self._tf_decel_extra > 0.02 else 0.1
+      t_follow = min(t_follow, self.t_follow_last + rise_rate * DT_MDL)
+
+    self.t_follow_last = float(t_follow)
+    return float(t_follow + adjust_t_follow)
 
   def update_stop_dist(self, stop_x):
     stop_x = self.xStopFilter.process(stop_x, median = True)
@@ -309,13 +360,28 @@ class CarrotPlanner:
                   model_x < np.interp(v[0] * 3.6, [30, 60, 80], [90, 120.0, 140]) and
                   ((model_v < 2.2) or (model_v < v[0] * 0.6)) and
                   abs(y[-1]) < 5.0)
-      # 정상 주행 중 카메라 감속으로 인한 오감지 방지
-      # (크루즈 세트 살아 있고, e2eCruise + 제법 강한 감속인 경우는 제외)
+      # 정상 주행 중 감속하는 경우(카메라 감속 등)에는 오감지가 많음.
+      # 회생 감속으로 v_cruise가 0인 경우에는 신호를 감지하도록 함.
       if v_cruise != 0 and (self.xState == XState.e2eCruise and a_ego < -1.0):
         stopSign = False
     else:
       stopSign = False
 
+    # self.stopSignCount = (
+    #   self.stopSignCount + 1
+    #   if (
+    #     stopSign
+    #     and (
+    #       model_x > get_safe_obstacle_distance(
+    #         v_ego,
+    #         t_follow=0,
+    #         comfort_brake=COMFORT_BRAKE,
+    #         stop_distance=-1.0,
+    #       )
+    #     )
+    #   )
+    #   else 0
+    # )
     self.stopSignCount = self.stopSignCount + 1 if stopSign else 0
     self.startSignCount = self.startSignCount + 1 if startSign and not stopSign else 0
 
@@ -496,6 +562,7 @@ class CarrotPlanner:
           self.comfort_brake = self.comfortBrake
           #self.comfort_brake = COMFORT_BRAKE
           self.trafficStopAdjustRatio = np.interp(v_ego_kph, [0, 100], [1.0, 0.7])
+          # 속도가 높을수록 먼 정지거리 추정값을 줄여 보정함.
           stop_dist = stop_model_x_rl * np.interp(stop_model_x_rl, [0, 50], [1.0, self.trafficStopAdjustRatio])
           # Kans: 신호정지선을 기준으로 정지 위치를 앞/뒤로 보정
           stop_dist = max(0.0, stop_dist - self.trafficStopDistanceAdjust)
@@ -518,7 +585,7 @@ class CarrotPlanner:
         self.actual_stop_distance = max(0.0, 5.0 - self.trafficStopDistanceAdjust) # 5.0
       elif v_ego_kph > 5.0:
         self.xState = XState.e2eCruise
-    else:
+    else: #XState.lead, XState.cruise, XState.e2eCruise
       self.traffic_starting_count = max(0, self.traffic_starting_count - 1)
       if lead_detected:
         self.xState = XState.lead
@@ -544,16 +611,21 @@ class CarrotPlanner:
     self.comfort_brake *= self.mySafeFactor
     self.actual_stop_distance = max(0, self.actual_stop_distance - (v_ego * DT_MDL))
 
-    if stop_model_x == 1000.0:
+    if stop_model_x == 1000.0:  # e2eCruise 또는 lead 상태
       self.actual_stop_distance = 0.0
-    elif self.actual_stop_distance > 0:
+    elif self.actual_stop_distance > 0:  # e2eStop 또는 e2eStopped 상태
       stop_model_x = 0.0
 
     stopping_active = self.xState not in [XState.e2eStop, XState.e2eStopped]
     if not stopping_active:
       self._stop_x_rl = stop_model_x_raw
 
-
+    # self.debugLongText = (
+    #   f"XState({str(self.xState)})," +
+    #   f"stop_x={stop_x:.1f}," +
+    #   f"stopDist={self.actual_stop_distance:.1f}," +
+    #   f"Traffic={str(self.trafficState)}"
+    # )
     stop_dist =  stop_model_x + self.actual_stop_distance
     stop_dist = max(stop_dist, 0.0)
 

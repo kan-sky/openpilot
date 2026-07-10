@@ -15,15 +15,19 @@ import traceback
 
 from aiohttp import ClientSession, web
 
-from cereal import messaging
+from openpilot.cereal import messaging
 
 from ..realtime.transports import CameraWsHub, RawWsHub
 from . import features
 from .config import WEB_DIR
 from .live_runtime.broker import RealtimeBroker
+from .services.auto_update import auto_update_loop
 from .services.git_status import git_status_loop
 from .services.heartbeat import heartbeat_loop
 from .services.params import HAS_PARAMS
+from .services.popular_values import start_popular_value_upload
+
+VISION_DIAG_UPLOAD_MAX_BYTES = 16 * 1024 * 1024
 
 
 # ===== request log middleware =====
@@ -42,7 +46,7 @@ async def log_mw(request, handler):
 
 
 def _do_gc_and_trim() -> None:
-  """gc.collect + malloc_trim — runs in thread pool (GIL acquired there)."""
+  """gc.collect + malloc_trim ??runs in thread pool (GIL acquired there)."""
   import gc as _gc
   _gc.collect()
   try:
@@ -64,7 +68,7 @@ async def _malloc_trim_loop():
 async def on_startup(app: web.Application) -> None:
   app["http"] = ClientSession()
   app["hb_last"] = {"ok": None, "msg": "not yet", "ts": 0}
-  # Eager broker creation — single SubMaster via RealtimeBroker
+  # Eager broker creation ??single SubMaster via RealtimeBroker
   try:
     broker = RealtimeBroker(repo_flavor="c3")
     app["realtime_broker"] = broker
@@ -72,11 +76,17 @@ async def on_startup(app: web.Application) -> None:
   except Exception as exc:
     app["realtime_broker"] = None
     app["realtime_broker_error"] = str(exc)
+  # Serializes broker.poll() across concurrent /api/live_runtime requests.
+  # SubMaster (msgq) is not thread-safe, so two parallel polls can crash it
+  # and take the whole server down.
+  app["realtime_broker_poll_lock"] = asyncio.Lock()
   app["realtime_camera_hub"] = CameraWsHub(messaging)
   app["realtime_raw_hub"] = RawWsHub(messaging)
   if HAS_PARAMS:
     app["hb_task"] = asyncio.create_task(heartbeat_loop(app))
   app["git_status_task"] = asyncio.create_task(git_status_loop())
+  app["auto_update_task"] = asyncio.create_task(auto_update_loop())
+  app["popular_value_upload_task"] = start_popular_value_upload(app)
   asyncio.create_task(_malloc_trim_loop())
 
 
@@ -115,19 +125,39 @@ async def on_cleanup(app: web.Application) -> None:
     except Exception:
       pass
 
+  auto_update_task = app.get("auto_update_task")
+  if auto_update_task:
+    auto_update_task.cancel()
+    try:
+      await auto_update_task
+    except asyncio.CancelledError:
+      pass
+    except Exception:
+      pass
+
+  popular_value_upload_task = app.get("popular_value_upload_task")
+  if popular_value_upload_task:
+    popular_value_upload_task.cancel()
+    try:
+      await popular_value_upload_task
+    except asyncio.CancelledError:
+      pass
+    except Exception:
+      pass
+
   sess = app.get("http")
   if sess:
     await sess.close()
 
 
 def make_app() -> web.Application:
-  app = web.Application(middlewares=[log_mw])
+  app = web.Application(middlewares=[log_mw], client_max_size=VISION_DIAG_UPLOAD_MAX_BYTES)
   app.on_startup.append(on_startup)
   app.on_cleanup.append(on_cleanup)
 
   features.register_all(app)
 
-  # foldered static assets — must come after explicit routes so /api/...,
+  # foldered static assets ??must come after explicit routes so /api/...,
   # /ws/..., /download/... win the match.
   app.router.add_static("/", str(WEB_DIR), show_index=True)
   return app

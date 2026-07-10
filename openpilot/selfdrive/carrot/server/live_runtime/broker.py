@@ -7,7 +7,7 @@ from typing import Iterable
 
 _MESSAGING_IMPORT_ERROR: Exception | None = None
 try:
-  from cereal import messaging
+  import openpilot.cereal.messaging as messaging
 except ModuleNotFoundError as exc:
   messaging = None  # type: ignore[assignment]
   _MESSAGING_IMPORT_ERROR = exc

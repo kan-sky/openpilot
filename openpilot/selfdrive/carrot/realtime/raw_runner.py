@@ -20,7 +20,7 @@ def main() -> int:
     return 2
 
   try:
-    from cereal import messaging
+    import openpilot.cereal.messaging as messaging
   except Exception as exc:
     print(f"messaging import failed: {exc}", file=sys.stderr)
     return 1

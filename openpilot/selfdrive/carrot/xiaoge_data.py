@@ -13,7 +13,7 @@ import traceback
 from typing import Dict, Any, List, Tuple
 
 import numpy as np
-import cereal.messaging as messaging
+import openpilot.cereal.messaging as messaging
 from openpilot.common.realtime import Ratekeeper
 from openpilot.system.hardware import PC
 

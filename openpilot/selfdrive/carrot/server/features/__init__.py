@@ -3,10 +3,12 @@ from aiohttp import web
 from . import (
   cars,
   dashcam,
+  mapbox_tokens,
   params,
   screenrecord,
   settings,
   setting_favorites,
+  setting_popular_values,
   setting_profiles,
   ssh_keys,
   static,
@@ -14,8 +16,12 @@ from . import (
   system,
   terminal,
   tools,
+  vision_diag,
+  vision_test,
+  web_sound,
   web_settings,
   ws,
+  youtube_live,
 )
 
 
@@ -26,6 +32,7 @@ def register_all(app: web.Application) -> None:
   settings.register(app)
   params.register(app)
   setting_favorites.register(app)
+  setting_popular_values.register(app)
   setting_profiles.register(app)
   web_settings.register(app)
   ssh_keys.register(app)
@@ -35,3 +42,8 @@ def register_all(app: web.Application) -> None:
   dashcam.register(app)
   screenrecord.register(app)
   tools.register(app)
+  mapbox_tokens.register(app)
+  youtube_live.register(app)
+  vision_test.register(app)
+  vision_diag.register(app)
+  web_sound.register(app)

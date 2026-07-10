@@ -285,6 +285,7 @@ function renderUIText() {
   setText("logsDashcamTitle", s.logs_dashcam || "Dashcam");
   setText("logsScreenTitle", s.logs_screenrecord || "Screen Record");
   setText("btnStartVision", `▶ ${s.start_vision || "Start Drive Vision"}`);
+  setText("btnVisionStop", s.vision_stop || "Stop");
   if (typeof applyRecordFabState === "function") applyRecordFabState();
   if (window.HomeDrive && typeof window.HomeDrive.renderText === "function") {
     window.HomeDrive.renderText();
@@ -358,12 +359,16 @@ function setWebLanguage(lang, options = {}) {
   if (SETTINGS && !(typeof getCurrentSettingTab === "function" && getCurrentSettingTab() === "device")) {
     if (typeof rebuildSettingSearchEntries === "function") rebuildSettingSearchEntries();
     if (typeof renderGroups === "function") renderGroups({ animateGroups: false });
-    if (typeof renderSettingSubnav === "function") renderSettingSubnav();
     if (CURRENT_GROUP && typeof renderItems === "function") {
       const currentTop = typeof getSettingItemsScrollTop === "function"
         ? getSettingItemsScrollTop()
         : 0;
-      renderItems(CURRENT_GROUP, { scrollMode: "restore", scrollTop: currentTop, animateItems: false });
+      renderItems(CURRENT_GROUP, {
+        detailName: (typeof CURRENT_SETTING_DETAIL !== "undefined" && CURRENT_SETTING_DETAIL) ? CURRENT_SETTING_DETAIL : "",
+        scrollMode: "restore",
+        scrollTop: currentTop,
+        animateItems: false,
+      });
     }
   }
   if (dispatch) {

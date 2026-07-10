@@ -1,6 +1,7 @@
 "use strict";
 
 const DEVICE_NETWORK_REFRESH_MS = 3000;
+const DEVICE_SSH_REFRESH_MS = 3000;
 
 const DEVICE_GROUPS = [
   { id: "Device", labelKey: "device_group_info", defaultLabel: "Device Info" },
@@ -32,10 +33,10 @@ const DEVICE_SOFTWARE_PARAMS = [
 ];
 
 const DEVICE_LANGUAGES = window.CarrotDeviceLanguageOptions || [
-  { code: "main_en", name: "English" },
-  { code: "main_ko", name: "한국어" },
-  { code: "main_zh-CHS", name: "简体中文" },
-  { code: "main_zh-CHT", name: "繁體中文" },
+  { code: "en", name: "English" },
+  { code: "ko", name: "한국어" },
+  { code: "zh-CHS", name: "简体中文" },
+  { code: "zh-CHT", name: "繁體中文" },
 ];
 
 const DEVICE_TOGGLES = [

@@ -42,6 +42,66 @@ const WEB_SETTINGS_GROUPS = [
       },
     ],
   },
+  {
+    id: "vision",
+    labelKey: "web_settings_carrot_vision",
+    defaultLabel: "Carrot Vision",
+    items: [
+      {
+        id: "vision_fullscreen_default",
+        type: "toggle",
+        titleKey: "web_vision_fullscreen_default",
+        defaultTitle: "Vision fullscreen",
+        descKey: "web_vision_fullscreen_default_desc",
+        defaultDesc: "Automatically enter fullscreen when Carrot Vision starts.",
+      },
+      {
+        id: "kmap_enabled",
+        type: "toggle",
+        titleKey: "web_kmap_enabled",
+        defaultTitle: "Carrot map",
+        descKey: "web_kmap_enabled_desc",
+        defaultDesc: "Show the kmap iframe on the drive vision screen.",
+      },
+      {
+        id: "kmap_overlay_heading_up",
+        type: "toggle",
+        titleKey: "web_kmap_heading_up",
+        defaultTitle: "Heading-up path",
+        descKey: "web_kmap_heading_up_desc",
+        defaultDesc: "Draw the local path relative to the vehicle heading.",
+      },
+      {
+        id: "kmap_overlay_curvature_color",
+        type: "toggle",
+        titleKey: "web_kmap_curvature_color",
+        defaultTitle: "Curve color",
+        descKey: "web_kmap_curvature_color_desc",
+        defaultDesc: "Tint local path segments more strongly on sharper bends.",
+      },
+      {
+        id: "kmap_map_type",
+        type: "select",
+        titleKey: "web_kmap_map_type",
+        defaultTitle: "Map type",
+        descKey: "web_kmap_map_type_desc",
+        defaultDesc: "Kakao base layer for the Carrot map (reloads the map on change).",
+        options: [
+          { value: "roadmap", labelKey: "web_kmap_map_type_roadmap", defaultLabel: "Roadmap" },
+          { value: "satellite", labelKey: "web_kmap_map_type_satellite", defaultLabel: "Satellite" },
+          { value: "hybrid", labelKey: "web_kmap_map_type_hybrid", defaultLabel: "Hybrid" },
+        ],
+      },
+      {
+        id: "nav_hud_enabled",
+        type: "toggle",
+        titleKey: "web_nav_hud_enabled",
+        defaultTitle: "Nav HUD",
+        descKey: "web_nav_hud_enabled_desc",
+        defaultDesc: "Show the small turn-by-turn card at the top of Carrot Vision.",
+      },
+    ],
+  },
 ];
 
 const WEB_LAST_PAGE_KEY = "carrot_web_last_page";
@@ -51,6 +111,13 @@ const WEB_SETTING_DEFAULTS = {
   auto_update_git_pull: false,
   start_page: "last",
   web_language: "",
+  vision_fullscreen_default: true,
+  kmap_enabled: false,
+  kmap_url: "https://jominki354.github.io/kmap/",
+  kmap_overlay_heading_up: true,
+  kmap_overlay_curvature_color: false,
+  kmap_map_type: "roadmap",
+  nav_hud_enabled: true,
 };
 
 const webSettingsState = { ...WEB_SETTING_DEFAULTS };
@@ -75,6 +142,22 @@ function normalizeWebSettingValue(key, value) {
     if (typeof normalizeLangCode === "function") return normalizeLangCode(value);
     const lang = String(value || "").trim().toLowerCase();
     return ["en", "ko", "zh"].includes(lang) ? lang : "";
+  }
+  if (key === "kmap_enabled" ||
+      key === "vision_fullscreen_default" ||
+      key === "kmap_overlay_heading_up" ||
+      key === "kmap_overlay_curvature_color" ||
+      key === "nav_hud_enabled") {
+    if (typeof value === "string") return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
+    return Boolean(value);
+  }
+  if (key === "kmap_url") {
+    const url = String(value || "").trim();
+    return url || WEB_SETTING_DEFAULTS.kmap_url;
+  }
+  if (key === "kmap_map_type") {
+    const mt = String(value || "").trim().toLowerCase();
+    return ["roadmap", "satellite", "hybrid"].includes(mt) ? mt : WEB_SETTING_DEFAULTS.kmap_map_type;
   }
   return value;
 }
@@ -367,7 +450,10 @@ async function runWebAutoUpdateGitPull(status = {}) {
 }
 
 function handleWebAutoUpdateStatus(status = {}) {
-  runWebAutoUpdateGitPull(status).catch((err) => console.error("[WebSettings]", err));
+  // Auto update now runs device-side in carrot_server (services/auto_update.py),
+  // so it works without the web open and won't double-pull. Intentionally a
+  // no-op here; runWebAutoUpdateGitPull is kept for backward compatibility.
+  void status;
 }
 
 window.loadWebSettings = loadWebSettings;

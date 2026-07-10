@@ -1,4 +1,4 @@
-.app-dialog--settings-diff .app-dialog__sheet {
+﻿.app-dialog--settings-diff .app-dialog__sheet {
   width: min(calc(100vw - 24px), 520px);
   max-height: min(calc(100dvh - 24px), 680px);
   overflow: hidden;
@@ -27,41 +27,16 @@
   white-space: nowrap;
 }
 
-.setting-profile-info {
-  display: grid;
-  gap: 7px;
-  min-width: 0;
-  white-space: normal;
-}
-
-.setting-profile-info--empty {
-  color: var(--md-on-surface-var);
-  font-weight: 800;
-}
-
-.page--setting #carrotTabContent,
-.page--setting #deviceTabContent,
-.page--setting #items,
-.page--setting #deviceItems {
-  animation: setting-content-enter 0.16s ease both;
-}
-
-@keyframes setting-content-enter {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
+/* setting-content-enter(opacity 0?? + translateY 4px??) ?쒓굅 ??
+   ?④퀎 ?꾪솚???앸굹硫??꾪솚 以?`animation:none` ?듭젣媛 ?由??? ???좊땲硫붿씠?섏씠 ?ъ깮??
+   肄섑뀗痢좉? ??踰??섏씠??源쒕컯)+4px ?몃줈 ?먰봽(?섎떒 ?꾩븘???붾뱾)?섎뜕 吏곸젒 ?먯씤?댁뿀??
+   醫뚯슦 ?щ씪?대뱶媛 ?대? ?붾㈃ 吏꾩엯???쒗쁽?섎?濡?蹂꾨룄 肄섑뀗痢?吏꾩엯 ?좊땲硫붿씠?섏? 遺덊븘?뷀븯?? */
 
 .setting-search-result {
   width: 100%;
-  padding: 15px 0;
+  padding: 12px 14px;
   border: 0;
-  border-bottom: 1px solid color-mix(in srgb, var(--md-stroke-soft) 62%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--md-stroke-soft) 32%, transparent);
   border-radius: 0;
   background: transparent;
   color: inherit;
@@ -69,13 +44,26 @@
   cursor: pointer;
 }
 
+.setting-search-section__body > .setting-search-result:last-child {
+  border-bottom: 0;
+}
+
+.setting-search-result:hover,
+.setting-search-result:focus-visible {
+  background: color-mix(in srgb, var(--md-surface-cont) 88%, var(--md-primary));
+  outline: none;
+}
+
 .setting-search-result:active {
-  background: color-mix(in srgb, var(--md-primary) 6%, transparent);
+  transform: translateY(1px);
 }
 
 .setting-search-result--empty {
   cursor: default;
   color: var(--md-on-surface-var);
+  border: 1px solid var(--popup-item-border);
+  border-radius: var(--popup-item-radius);
+  background: var(--popup-item-bg);
 }
 
 .setting-search-result__group {
@@ -102,10 +90,8 @@
   margin-top: 6px;
   color: var(--md-on-surface-var);
   font-size: var(--fs-body-sm);
-  display: -webkit-box;
-  overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  display: block;
+  overflow: visible;
 }
 
 .setting-search-result__mark {
@@ -126,83 +112,18 @@
   pointer-events: none;
 }
 
-.page--setting .setting-subnav__tab--favorites {
-  color: color-mix(in srgb, #bae6fd 82%, var(--md-on-surface-var));
-}
-
-@media (min-width: 769px) {
+@media (min-width: 769px) and (min-aspect-ratio: 13/10), (min-width: 769px) and (horizontal-viewport-segments: 2), (min-width: 769px) and (vertical-viewport-segments: 2), (min-width: 769px) and (min-height: 650px) {
   .setting-search-panel {
     --setting-search-form-width: clamp(360px, 34vw, 540px);
     --setting-search-results-width: min(64vw, 820px);
-    --setting-search-results-max-height: min(60dvh, 560px);
+    --setting-search-results-max-height: 680px;
     gap: 14px;
     padding-top: calc(22px + env(safe-area-inset-top, 0px));
-    padding-bottom: calc(var(--nav-bar-height-desktop) + 18px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(var(--app-nav-bottom-gap, var(--nav-bar-height-desktop)) + 18px + env(safe-area-inset-bottom, 0px));
   }
 }
 
-@media (max-width: 640px) {
-  .page--setting .setting-subnav-wrap {
-    margin-bottom: 0;
-    top: 0;
-    padding-top: calc(8px + env(safe-area-inset-top, 0px));
-    padding-bottom: 18px;
-    background: var(--md-surface);
-    border-bottom: 1px solid color-mix(in srgb, var(--md-stroke-soft) 72%, transparent);
-    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.14);
-  }
-
-  .page--setting .setting-subnav-wrap::after {
-    display: none;
-  }
-
-  .page--setting .setting-subnav {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 8px;
-    justify-content: stretch;
-    overflow: visible;
-    padding: 0;
-    border-bottom: 0;
-    scroll-snap-type: none;
-  }
-
-  .page--setting .setting-subnav::before,
-  .page--setting .setting-subnav::after {
-    display: none;
-  }
-
-  .page--setting .setting-subnav__tab {
-    flex: none;
-    min-height: 38px;
-    padding: 7px 6px;
-    border: 1px solid color-mix(in srgb, var(--md-outline-var) 44%, transparent);
-    border-radius: 8px;
-    background: var(--md-surface-cont);
-    color: var(--md-on-surface-var);
-    font-size: 12.5px;
-    font-weight: 800;
-    line-height: 1.15;
-    white-space: normal;
-    text-wrap: balance;
-    scroll-snap-align: none;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
-  }
-
-  .page--setting .setting-subnav__tab.is-active {
-    color: var(--md-primary);
-    border-color: color-mix(in srgb, var(--md-primary) 48%, var(--md-outline-var));
-    background: var(--md-primary-state);
-  }
-
-  .page--setting .setting-subnav__tab:active {
-    background: color-mix(in srgb, var(--md-surface-cont-hh) 88%, var(--md-primary));
-  }
-
-  .page--setting #settingSubnavWrap {
-    box-sizing: border-box;
-  }
-
+@media (aspect-ratio < 13/10) and (max-width: 639px), (aspect-ratio < 13/10) and (max-height: 649px) {
   .page--setting .settingTop {
     flex-direction: column;
     align-items: stretch;
@@ -219,9 +140,9 @@
   .setting-search-panel {
     --setting-search-form-width: calc(100vw - 28px);
     --setting-search-results-width: calc(100vw - 28px);
-    --setting-search-results-max-height: min(56dvh, 420px);
+    --setting-search-results-max-height: 560px;
     gap: 12px;
-    padding: calc(14px + env(safe-area-inset-top, 0px)) 12px calc(var(--nav-bar-height) + 14px + env(safe-area-inset-bottom, 0px));
+    padding: calc(14px + env(safe-area-inset-top, 0px)) 12px calc(var(--app-nav-bottom-gap, var(--nav-bar-height)) + 14px + env(safe-area-inset-bottom, 0px));
   }
 
   .setting-search-form {
@@ -230,93 +151,113 @@
 
 }
 
-@media (max-width: 640px) and (orientation: portrait) {
+/* Portrait at ANY width (phone / foldable / tablet / wide window): the
+   group?봧tems slide in runSettingScreenSlide() assumes both screens are
+   stacked as position:absolute; inset:0 inside the host so the transition is
+   pure transform. That overlap must exist for every portrait width ??not just
+   ??40px ??otherwise the screens fall back to normal flow and the submenu
+   appears to slide in vertically / only after the slide finishes. Landscape
+   has its own absolute-overlap block below, so the two together leave no gap.
+   Narrow layout (aspect-ratio < 13/10) covers portrait phones AND near-square
+   foldables ??the complement of the wide (>= 13/10) split block below, so the
+   two stay mutually exclusive and exhaustive (no square-aspect gap). */
+@media (aspect-ratio < 13/10) and (max-width: 639px), (aspect-ratio < 13/10) and (max-height: 649px) {
   .page--setting #settingScreenItems {
-    padding-top: calc(var(--setting-fixed-subnav-height, 174px) + 10px);
+    padding-top: 0;
   }
 
   .page--setting #settingScreenItems.setting-screen-items--profile {
     padding-top: 0;
     --setting-profile-panel-sticky-top: 0px;
-    --setting-profile-section-sticky-top: var(--setting-profile-toolbar-height);
+    --setting-profile-section-sticky-top: 72px;
   }
 
   .page--setting #settingScreenItems.setting-screen-items--profile #items {
     padding-top: 0;
   }
 
-  .page--setting #settingScreenItems.setting-screen-items--profile .setting-profile-panel + .setting-profile-section {
-    margin-top: 0;
+  .page--setting #settingScreenItems.setting-screen-items--profile .setting-profile-row {
+    min-height: 46px;
+    gap: var(--sp-sm);
   }
 
-  .page--setting #settingScreenItems.setting-screen-items--profile .setting-profile-panel {
-    margin-left: calc(-1 * var(--sp-lg));
-    margin-right: calc(-1 * var(--sp-lg));
-    padding-left: calc(var(--sp-lg) + 14px);
-    padding-right: var(--sp-lg);
-  }
-
-  .page--setting #settingScreenItems.setting-screen-items--profile .setting-profile-panel::before {
-    left: var(--sp-lg);
-  }
-
-  .page--setting #settingScreenItems.setting-screen-items--profile .setting-profile-panel__titleRow {
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 7px;
-  }
-
-  .page--setting #settingScreenItems.setting-screen-items--profile .setting-toolbar-action {
-    min-width: 50px;
-    padding-inline: 10px;
-    font-size: 12.5px;
+  .page--setting #settingScreenItems.setting-screen-items--profile .setting-profile-action__icon {
+    width: 20px;
+    height: 20px;
   }
 
   .page--setting #settingScreenItems.setting-screen-items--profile .setting-profile-section__header {
-    margin-left: calc(-1 * var(--sp-lg));
-    margin-right: calc(-1 * var(--sp-lg));
-    padding-left: var(--sp-lg);
-    padding-right: var(--sp-lg);
+    margin-left: 0;
+    margin-right: 0;
+    padding-left: 2px;
+    padding-right: 2px;
   }
 
-  .page--setting #settingScreenHost,
-  .page--setting #settingScreenItems:not(.hidden) {
-    overflow: visible;
-    transform: none !important;
-    will-change: auto !important;
+  .page--setting #settingScreenItems.setting-screen-items--profile > .row-between.mb-sm {
+    display: grid;
   }
 
-  .page--setting #settingSubnavWrap {
-    position: fixed !important;
-    top: 0 !important;
-    right: 0 !important;
-    left: 0 !important;
-    z-index: 90;
-    width: 100dvw;
-    margin: 0 !important;
-    padding: calc(8px + env(safe-area-inset-top, 0px)) var(--sp-lg) 12px;
-    background: color-mix(in srgb, var(--md-surface) 98%, #000);
-    border-bottom: 1px solid color-mix(in srgb, var(--md-primary) 42%, var(--md-outline-var));
-    box-shadow:
-      0 10px 22px rgba(0, 0, 0, 0.34),
-      inset 0 -1px 0 rgba(255, 255, 255, 0.04);
-    transform: none !important;
-    will-change: auto !important;
+  /* ?? ?몃줈(phone): ?ㅼ젙??酉고룷??怨좎젙 ?믪씠濡? ???붾㈃??absolute inset:0 濡?'??긽' 寃뱀퀜
+     媛곸옄 ?대? ?ㅽ겕濡ㅼ떆?⑤떎 ???④퀎 ?꾪솚???쒖닔 transform(?덉씠?꾩썐 蹂??0)?대씪 ?앹뿉
+     ?붾뱾由?源쒕컯?꾩씠 援ъ“?곸쑝濡??앷린吏 ?딅뒗?? (媛濡?split 紐⑤뱶? ?숈씪 ?먮━) ?? */
+  .page.page--setting {
+    display: flex;
+    flex-direction: column;
+    height: calc(var(--app-vv-height, 100dvh) - var(--nav-bar-height) - env(safe-area-inset-bottom, 0px));
+    min-block-size: 0;
+    padding-bottom: 0;
+    overflow: hidden;
   }
 
-  .page--setting #settingSubnavWrap::after {
-    display: none;
+  .page.page--setting > #settingsMeta {
+    flex: 0 0 auto;
   }
+
+  .page.page--setting > #settingScreenHost {
+    flex: 1 1 auto;
+    position: relative;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .page.page--setting > #settingScreenHost > #settingScreenGroups,
+  .page.page--setting > #settingScreenHost > #settingScreenItems {
+    position: absolute;
+    inset: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-gutter: stable;
+    padding-bottom: calc(var(--nav-bar-height) + 24px + env(safe-area-inset-bottom, 0px));
+    will-change: transform;
+  }
+
+  /* 理쒖긽??洹몃９ ?붾㈃? ??낵 泥?踰꾪듉???좊챸?섍쾶 ?좎??쒕떎.
+     ?ㅽ겕濡?媛?μ옄由??섏씠?쒕뒗 ?섏쐞 ?ㅼ젙 ?붾㈃?먮쭔 ?곸슜?쒕떎. */
+  .page.page--setting > #settingScreenHost > #settingScreenGroups {
+    -webkit-mask-image: none;
+            mask-image: none;
+  }
+
+  .page.page--setting > #settingScreenHost > #settingScreenItems {
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 12px, #000 calc(100% - 6px), transparent 100%);
+            mask-image: linear-gradient(to bottom, transparent 0, #000 12px, #000 calc(100% - 6px), transparent 100%);
+  }
+
 }
 
 @media (max-height: 760px) {
   .setting-search-panel {
-    --setting-search-results-max-height: min(48dvh, 300px);
+    --setting-search-results-max-height: 620px;
     gap: 10px;
     padding-top: calc(12px + env(safe-area-inset-top, 0px));
   }
 }
 
-@media (orientation: landscape) {
+/* Wide layout ??two-column split (group list | detail). Complement of the
+   narrow single-column block above; only engages at aspect-ratio >= 13/10 so
+   near-square foldables don't get the cramped split. */
+@media (min-aspect-ratio: 13/10), (horizontal-viewport-segments: 2), (vertical-viewport-segments: 2), (min-width: 640px) and (min-height: 650px) {
   .page.page--setting {
     --setting-landscape-left-width: clamp(208px, 28vw, 260px);
     --setting-landscape-gap: 12px;
@@ -367,6 +308,17 @@
   }
 
   .page.page--setting > #settingScreenHost > #settingScreenGroups {
+    -webkit-mask-image: none;
+            mask-image: none;
+  }
+
+  /* 媛濡쒕え?쒕룄 ?섏쐞 ?ㅼ젙 ?붾㈃?먮쭔 ?ㅽ겕濡?媛?μ옄由??섏씠?쒕? ?좎??쒕떎. */
+  .page.page--setting > #settingScreenHost > #settingScreenItems {
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 12px, #000 calc(100% - 6px), transparent 100%);
+            mask-image: linear-gradient(to bottom, transparent 0, #000 12px, #000 calc(100% - 6px), transparent 100%);
+  }
+
+  .page.page--setting > #settingScreenHost > #settingScreenGroups {
     position: relative;
     align-self: stretch;
     margin-left: 0;
@@ -389,7 +341,7 @@
   .page.page--setting > #settingScreenHost > #settingScreenItems.setting-screen-items--profile {
     padding-top: 0;
     --setting-profile-panel-sticky-top: 0px;
-    --setting-profile-section-sticky-top: var(--setting-profile-toolbar-height);
+    --setting-profile-section-sticky-top: 68px;
   }
 
   .page--setting #settingCarRow {
@@ -413,10 +365,6 @@
   .page--setting .setting-car-entry__text {
     min-width: 0;
     overflow: hidden;
-  }
-
-  .page--setting.setting-layout-split #settingSubnavWrap {
-    display: none !important;
   }
 
   .page--setting.setting-layout-split #groupList {
@@ -481,9 +429,29 @@
     display: inline-flex;
     opacity: 1 !important;
     visibility: visible !important;
-    transform: none !important;
     margin-right: 0;
     pointer-events: auto;
+  }
+
+  /* Reset the flow-positioning transform, but exempt the click bounce: CSS
+     animations are overridden by !important author rules, so the blanket
+     `transform: none !important` previously killed the FAB bounce in landscape
+     only (portrait has no such reset). Lifting it while .is-bouncing lets the
+     setting-fab-bounce keyframes play; it returns on animationend. */
+  .page.page--setting > .page-fab-layer--setting .fab:not(.is-bouncing) {
+    transform: none !important;
+  }
+
+  /* Flow the menu inside the page-anchored absolute layer instead of leaving it
+     viewport-fixed. A position:fixed element re-anchors to the page's transform
+     during page transitions (the page briefly gets will-change/transform), so
+     when the transition ends the FAB snaps by the nav-rail width ??that is the
+     "jumps to another spot then returns" jitter. Page-relative flow stays put. */
+  .page.page--setting > .page-fab-layer--setting .setting-fab-menu {
+    position: relative;
+    right: auto;
+    left: auto;
+    bottom: auto;
   }
 
   .page--setting.setting-layout-split #settingScreenItems .title {
@@ -535,13 +503,13 @@
   .setting-search-panel {
     --setting-search-form-width: min(76vw, 540px);
     --setting-search-results-width: min(82vw, 760px);
-    --setting-search-results-max-height: min(48dvh, 260px);
+    --setting-search-results-max-height: 680px;
     gap: 10px;
-    padding: calc(12px + env(safe-area-inset-top, 0px)) 12px calc(var(--nav-bar-height) + 12px + env(safe-area-inset-bottom, 0px));
+    padding: calc(12px + env(safe-area-inset-top, 0px)) 12px calc(var(--app-nav-bottom-gap, 0px) + 12px + env(safe-area-inset-bottom, 0px));
   }
 }
 
-@media (orientation: landscape) and (max-width: 760px) {
+@media (max-width: 760px) and (min-aspect-ratio: 13/10), (max-width: 760px) and (horizontal-viewport-segments: 2), (max-width: 760px) and (vertical-viewport-segments: 2), (min-width: 640px) and (max-width: 760px) and (min-height: 650px) {
   .page.page--setting {
     --setting-landscape-left-width: clamp(184px, 27vw, 220px);
   }
@@ -554,6 +522,45 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
+}
+
+/* Robust two-column layout for every width / orientation / language: the text
+   column shrinks (min-width:0) while the control column keeps its intrinsic
+   width, so right-side controls can never be pushed off-screen by long titles
+   (e.g. ko/zh). The media queries below still refine the gap and the
+   single-column wrap; this base rule fills the gaps they don't cover
+   (notably portrait wider than 640px). */
+.page--setting #settingScreenItems .settingTop {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--sp-md);
+  align-items: start;
+}
+
+.page--setting #settingScreenItems .settingTop > :first-child {
+  min-width: 0;
+}
+
+/* Long descriptions / range legends with no break opportunities (e.g. English
+   "0:stock,1,2:REC,..." ??unlike CJK, Latin runs without spaces don't break)
+   must wrap instead of forcing the row wider than the viewport, which would
+   push the right-side control off-screen. CJK wraps per-character on its own,
+   which is why this only surfaced in English. The landscape split layout
+   already applies this; promote it to every layout. */
+.page--setting #settingScreenItems .title,
+.page--setting #settingScreenItems .name,
+.page--setting #settingScreenItems .muted,
+.page--setting #settingScreenItems .descr {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* Safety net: never let a single item bleed past its box and drag the control
+   column with it (matches the known-good split layout). The title/name marquees
+   keep their own inner overflow-x scroller, so this does not clip them. */
+.page--setting #settingScreenItems .setting {
+  overflow: hidden;
 }
 
 .page--setting #settingScreenItems .ctrl {
@@ -603,6 +610,553 @@
   max-width: var(--setting-control-value);
 }
 
+.page--setting #settingScreenItems .ctrl--toggle,
+.page--setting #settingScreenItems .ctrl--value,
+.page--setting #settingScreenItems .ctrl--segmented,
+.page--setting #settingScreenItems .ctrl--select {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  width: auto;
+}
+
+.page--setting #settingScreenItems .ctrl--value {
+  display: inline-grid;
+  grid-template-columns: 38px minmax(66px, auto) 38px;
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--md-outline-var) 54%, transparent);
+  border-radius: var(--r-md);
+  background: var(--md-surface-cont-h);
+}
+
+.page--setting #settingScreenItems .ctrl--value > :nth-child(1),
+.page--setting #settingScreenItems .ctrl--value > :nth-child(2),
+.page--setting #settingScreenItems .ctrl--value > :nth-child(3) {
+  grid-row: 1;
+}
+
+.page--setting #settingScreenItems .ctrl--value .val {
+  position: relative;
+  width: auto;
+  min-width: 66px;
+  max-width: min(120px, 34vw);
+  min-height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-left: 1px solid color-mix(in srgb, var(--md-outline-var) 34%, transparent);
+  border-right: 1px solid color-mix(in srgb, var(--md-outline-var) 34%, transparent);
+  border-radius: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
+}
+
+.page--setting #settingScreenItems .setting-value-compact {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--md-surface-cont-hh) 72%, var(--md-surface-cont-h));
+  color: var(--md-on-surface);
+  box-shadow: none;
+  font-weight: 900;
+}
+
+.page--setting #settingScreenItems .setting-value-arrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  min-width: 38px;
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--md-on-surface);
+  font-size: var(--fs-label-sm);
+  font-weight: 900;
+  line-height: 1;
+  touch-action: manipulation;
+}
+
+.page--setting #settingScreenItems .setting-value-arrow:active,
+.page--setting #settingScreenItems .setting-value-arrow.is-holding,
+.page--setting #settingScreenItems .setting-step:active,
+.page--setting #settingScreenItems .setting-step.is-holding {
+  background: color-mix(in srgb, var(--md-surface-cont-hh) 88%, var(--md-on-surface));
+}
+
+.page--setting #settingScreenItems .setting-icon {
+  display: block;
+  width: 18px;
+  height: 18px;
+}
+
+.page--setting #settingScreenItems .setting-icon path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.page--setting #settingScreenItems .ctrl--toggle .val,
+.page--setting #settingScreenItems .ctrl--segmented .val,
+.page--setting #settingScreenItems .ctrl--select .val {
+  display: none;
+}
+
+.page--setting #settingScreenItems .setting-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: 54px;
+  height: 32px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.page--setting #settingScreenItems .setting-switch__input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.page--setting #settingScreenItems .setting-switch__track {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 1px solid color-mix(in srgb, var(--md-outline-var) 50%, transparent);
+  border-radius: 999px;
+  background: var(--md-surface-cont-h);
+  transition: background 0.16s ease, border-color 0.16s ease;
+}
+
+.page--setting #settingScreenItems .setting-switch__track::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--md-on-surface-var);
+  box-shadow: var(--shadow-1);
+  transition: transform 0.18s cubic-bezier(.2, 0, 0, 1), background 0.16s ease;
+}
+
+.page--setting #settingScreenItems .setting-switch__input:checked + .setting-switch__track {
+  border-color: color-mix(in srgb, var(--md-primary) 72%, var(--md-outline-var));
+  background: color-mix(in srgb, var(--md-primary) 70%, var(--md-surface-cont-h));
+}
+
+.page--setting #settingScreenItems .setting-switch__input:checked + .setting-switch__track::after {
+  transform: translateX(22px);
+  background: var(--md-on-primary);
+}
+
+.page--setting #settingScreenItems .setting-switch:focus-within .setting-switch__track,
+.page--setting #settingScreenItems .setting-segment:focus-visible,
+.page--setting #settingScreenItems .setting-select:focus-visible,
+.page--setting #settingScreenItems .setting-slider__input:focus-visible {
+  outline: var(--focus-ring-width, 2px) solid var(--focus-ring-color, var(--md-primary));
+  outline-offset: 2px;
+}
+
+.page--setting #settingScreenItems .setting-segments {
+  display: inline-flex;
+  max-width: min(216px, 100%);
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--md-outline-var) 54%, transparent);
+  border-radius: var(--r-md);
+  background: var(--md-surface-cont-h);
+}
+
+.page--setting #settingScreenItems .setting-segment {
+  min-width: 38px;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-right: 1px solid color-mix(in srgb, var(--md-outline-var) 34%, transparent);
+  background: transparent;
+  color: var(--md-on-surface-var);
+  font-size: var(--fs-label-sm);
+  font-weight: 800;
+}
+
+.page--setting #settingScreenItems .setting-segment:last-child {
+  border-right: 0;
+}
+
+.page--setting #settingScreenItems .setting-segment.is-active {
+  background: var(--md-primary-state);
+  color: var(--md-primary);
+}
+
+.page--setting #settingScreenItems .setting-select {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 92px;
+  min-height: 32px;
+  padding: 0 14px;
+  border: 1px solid color-mix(in srgb, var(--md-outline-var) 54%, transparent);
+  border-radius: var(--r-md);
+  background: var(--md-surface-cont-h);
+  color: var(--md-on-surface);
+  font-family: inherit;
+  font-size: var(--fs-label-sm);
+  font-weight: 850;
+  line-height: 1;
+  text-align: center;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  appearance: none;
+}
+
+.page--setting #settingScreenItems .ctrl--slider {
+  grid-template-columns: var(--setting-control-side) var(--setting-control-value) var(--setting-control-side);
+}
+
+.page--setting #settingScreenItems .ctrl--slider .setting-slider {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  width: 100%;
+}
+
+.page--setting #settingScreenItems .ctrl--slider .setting-step--minus {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.page--setting #settingScreenItems .ctrl--slider .val {
+  grid-column: 2;
+  grid-row: 2;
+}
+
+.page--setting #settingScreenItems .ctrl--slider .setting-step--plus {
+  grid-column: 3;
+  grid-row: 2;
+}
+
+.page--setting #settingScreenItems .setting-slider__input {
+  width: 100%;
+  accent-color: var(--md-primary);
+}
+
+.page--setting #settingScreenItems .setting {
+  position: relative;
+}
+
+.page--setting #settingScreenItems .setting--has-unit-cycle {
+  padding-bottom: var(--sp-md);
+}
+
+.page--setting #settingScreenItems .setting-unit-cycle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 8px 0 0 auto;
+  min-width: 54px;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid color-mix(in srgb, var(--md-outline-var) 54%, transparent);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--md-surface-cont-hh) 72%, var(--md-surface-cont-h));
+  color: var(--md-on-surface);
+  font-size: var(--fs-label-sm);
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: 0;
+  box-shadow: none;
+}
+
+.page--setting #settingScreenItems .setting-unit-cycle:active {
+  border-color: color-mix(in srgb, var(--md-outline-var) 68%, transparent);
+  background: color-mix(in srgb, var(--md-surface-cont-hh) 88%, var(--md-on-surface));
+  color: var(--md-on-surface);
+}
+
+/* Footer actions row ??holds the optional unit-cycle (諛곗쑉) and the
+   reset-to-default (湲곕낯媛? button, right-aligned under the item. */
+.page--setting #settingScreenItems .setting--has-actions {
+  padding-bottom: var(--sp-md);
+}
+
+.page--setting #settingScreenItems .setting-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.page--setting #settingScreenItems .setting-popular-value-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  flex-wrap: nowrap;
+  gap: 3px;
+  min-width: 0;
+  max-width: min(360px, 52vw);
+  min-height: 18px;
+  margin-right: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: color-mix(in srgb, var(--md-on-surface-var) 42%, transparent);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.18;
+  letter-spacing: 0;
+  text-align: left;
+  white-space: nowrap;
+  box-shadow: none;
+  opacity: 0.74;
+}
+
+.page--setting #settingScreenItems .setting-popular-value-chip__car {
+  min-width: 0;
+  max-width: 170px;
+  overflow: hidden;
+  color: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.page--setting #settingScreenItems .setting-popular-value-chip__accent {
+  color: color-mix(in srgb, var(--md-primary) 56%, var(--md-on-surface-var));
+  font-weight: 800;
+}
+
+.page--setting #settingScreenItems .setting-popular-value-chip__label {
+  color: inherit;
+}
+
+.page--setting #settingScreenItems .setting-actions .setting-unit-cycle {
+  margin: 0;
+}
+
+.page--setting #settingScreenItems .setting-default-reset {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 54px;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid color-mix(in srgb, var(--md-outline-var) 54%, transparent);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--md-surface-cont-hh) 72%, var(--md-surface-cont-h));
+  color: var(--md-on-surface);
+  font-size: var(--fs-label-sm);
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: 0;
+  box-shadow: none;
+}
+
+.page--setting #settingScreenItems .setting-default-reset:active {
+  border-color: color-mix(in srgb, var(--md-outline-var) 68%, transparent);
+  background: color-mix(in srgb, var(--md-surface-cont-hh) 88%, var(--md-on-surface));
+  color: var(--md-on-surface);
+}
+
+.setting-popular-detail {
+  display: grid;
+  gap: 12px;
+  min-width: min(360px, calc(100vw - 56px));
+}
+
+.page--setting #settingScreenItems .setting-popular-detail-block {
+  width: min(520px, 100%);
+  margin-top: 12px;
+}
+
+.page--setting #settingScreenItems .setting-popular-detail-block .setting-popular-detail {
+  gap: 9px;
+  min-width: 0;
+  width: 100%;
+}
+
+.setting-popular-detail__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.setting-popular-detail__name {
+  color: var(--md-on-surface-var);
+  font-size: var(--fs-body-sm);
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.page--setting #settingScreenItems .setting-popular-detail-block .setting-popular-detail__name {
+  color: color-mix(in srgb, var(--md-on-surface-var) 66%, transparent);
+  font-size: 12px;
+  font-weight: 780;
+}
+
+.setting-popular-detail__range {
+  flex: 0 0 auto;
+  min-height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--md-on-surface-var) 8%, transparent);
+  color: color-mix(in srgb, var(--md-on-surface-var) 58%, transparent);
+  font-size: 10px;
+  font-weight: 820;
+  line-height: 20px;
+}
+
+.setting-popular-detail__rows {
+  display: grid;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--md-outline-var) 32%, transparent);
+  border-radius: var(--r-md);
+  background: var(--md-surface-cont);
+}
+
+.setting-popular-detail__row {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr) 58px;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 38px;
+  padding: 0 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--md-stroke-soft) 40%, transparent);
+  border-left: 0;
+  border-right: 0;
+  border-top: 0;
+  background: transparent;
+  color: var(--md-on-surface);
+  font-family: inherit;
+  font-size: var(--fs-body-sm);
+  font-weight: 850;
+  letter-spacing: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.page--setting #settingScreenItems .setting-popular-detail-block .setting-popular-detail__rows {
+  gap: 6px;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.page--setting #settingScreenItems .setting-popular-detail-block .setting-popular-detail__row {
+  grid-template-columns: 18px minmax(0, 1fr) 48px;
+  min-height: 48px;
+  padding: 8px 11px;
+  gap: 10px;
+  border: 1px solid color-mix(in srgb, var(--md-outline-var) 16%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--md-surface-cont) 54%, transparent);
+  color: color-mix(in srgb, var(--md-on-surface) 82%, transparent);
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.page--setting #settingScreenItems .setting-popular-detail-block .setting-popular-detail__row:active {
+  border-color: color-mix(in srgb, var(--md-primary) 24%, var(--md-outline-var));
+  background: color-mix(in srgb, var(--md-primary) 9%, var(--md-surface-cont));
+}
+
+.page--setting #settingScreenItems .setting-popular-detail-block .setting-popular-detail--single .setting-popular-detail__row {
+  min-height: 44px;
+}
+
+.setting-popular-detail__row:last-child {
+  border-bottom: 1px solid color-mix(in srgb, var(--md-outline-var) 16%, transparent);
+}
+
+.setting-popular-detail__count {
+  color: var(--md-on-surface-var);
+  font-size: var(--fs-label-sm);
+  font-weight: 850;
+}
+
+.setting-popular-detail__marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+}
+
+.setting-popular-detail__marker::before {
+  content: "";
+  display: block;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--md-primary) 46%, var(--md-on-surface-var));
+  opacity: 0.72;
+}
+
+.setting-popular-detail__main {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.setting-popular-detail__value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.page--setting #settingScreenItems .setting-popular-detail-block .setting-popular-detail__value {
+  color: color-mix(in srgb, var(--md-primary) 68%, var(--md-on-surface));
+  font-size: 13px;
+  font-weight: 860;
+}
+
+.setting-popular-detail__count {
+  text-align: right;
+}
+
+.page--setting #settingScreenItems .setting-popular-detail-block .setting-popular-detail__count {
+  color: color-mix(in srgb, var(--md-on-surface-var) 66%, transparent);
+  font-size: 11px;
+  font-weight: 820;
+}
+
+.setting-popular-detail__bar {
+  display: block;
+  width: 100%;
+  max-width: 260px;
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--md-on-surface-var) 10%, transparent);
+}
+
+.setting-popular-detail__bar::after {
+  content: "";
+  display: block;
+  width: var(--setting-popular-width, 0%);
+  height: 100%;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--md-primary) 52%, var(--md-on-surface-var));
+  opacity: 0.78;
+}
+
+.setting-popular-detail__empty {
+  color: var(--md-on-surface-var);
+  font-size: var(--fs-body-sm);
+  font-weight: 750;
+}
+
 .page--setting #settingScreenItems .setting-copy {
   min-width: 0;
   max-width: 100%;
@@ -643,8 +1197,82 @@
   fill: currentColor;
 }
 
+.page--setting #settingScreenItems > .row-between.mb-sm {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: end;
+  min-height: 56px;
+  margin: 0 0 14px;
+  padding: 2px 2px 10px;
+}
+
+.page--setting #settingScreenItems #itemsTitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--md-on-surface);
+  font-size: 34px;
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+.page--setting #settingScreenItems .setting-title-backIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  margin-left: -10px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--md-on-surface);
+  transition: background 0.14s ease, color 0.14s ease, transform 0.14s ease;
+}
+
+.page--setting #settingScreenItems #itemsTitle:active .setting-title-backIcon {
+  background: color-mix(in srgb, var(--md-on-surface) 10%, transparent);
+  color: var(--md-on-surface);
+  transform: translateX(-1px);
+}
+
+.page--setting #settingScreenItems .setting-title-backIcon .setting-icon {
+  width: 24px;
+  height: 24px;
+}
+
+.page--setting #settingScreenItems .setting-title-backIcon .setting-icon path {
+  stroke-width: 3.05;
+}
+
+.page--setting #settingScreenItems .setting-title-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.page--setting.setting-layout-split #settingScreenItems .setting-title-backIcon {
+  display: none;
+}
+
+.page--setting #settingScreenItems #groupMeta {
+  padding-bottom: 3px;
+  color: var(--md-on-surface-var);
+  font-size: var(--fs-label-sm);
+  font-weight: 800;
+}
+
 .page--setting #settingScreenItems .setting.is-longpressing {
   background: color-mix(in srgb, #7dd3fc 7%, transparent);
+}
+
+.page--setting #settingScreenItems.setting-screen-items--detail #items::after {
+  display: none;
 }
 
 .page--setting #settingScreenItems .setting-favorites-empty {
@@ -700,13 +1328,13 @@
 }
 
 .page--setting #settingScreenItems .setting-marquee.is-overflowing .setting-marquee__content {
-  animation: setting-marquee-pan 7s ease-in-out 0.8s infinite alternate;
+  animation: setting-marquee-pan 6s linear 0.5s infinite alternate;
 }
 
-.page--setting #settingScreenItems .setting-marquee:hover .setting-marquee__content,
-.page--setting #settingScreenItems .setting-marquee:focus .setting-marquee__content,
-.page--setting #settingScreenItems .setting-marquee:active .setting-marquee__content {
-  animation-play-state: paused;
+.page--setting #settingScreenItems .setting-marquee.is-manual .setting-marquee__content {
+  animation: none;
+  transform: none;
+  will-change: auto;
 }
 
 .page--setting #settingScreenItems .title.setting-marquee,
@@ -714,35 +1342,47 @@
   text-align: left;
 }
 
-@media (max-width: 640px) {
+@media (aspect-ratio < 13/10) and (max-width: 639px), (aspect-ratio < 13/10) and (max-height: 649px) {
   .page--setting #settingScreenItems .ctrl {
     justify-content: center;
   }
 }
 
-@media (orientation: landscape) and (max-width: 760px) {
+@media (max-width: 760px) and (min-aspect-ratio: 13/10), (max-width: 760px) and (horizontal-viewport-segments: 2), (max-width: 760px) and (vertical-viewport-segments: 2), (min-width: 640px) and (max-width: 760px) and (min-height: 650px) {
   .page--setting #settingScreenItems .ctrl {
     justify-content: start;
   }
 }
 
-@media (max-width: 640px) and (orientation: portrait) {
+@media (aspect-ratio < 13/10) and (max-width: 639px), (aspect-ratio < 13/10) and (max-height: 649px) {
   .page--setting #settingScreenItems > .row-between.mb-sm {
-    min-height: 30px;
-    margin-bottom: 8px;
+    /* min-height was 48px while the row content (42px back-icon + title) is
+       shorter, and align-items:end pushed the ~6px slack ABOVE the title ??
+       the thin band the user saw. Collapse to content height so the title
+       starts at the top edge, like the groups screen. */
+    min-height: 0;
+    margin-bottom: 10px;
+    padding-top: 0;
     padding-bottom: 8px;
-    border-bottom: 1px solid color-mix(in srgb, var(--md-outline-var) 30%, transparent);
+  }
+
+  .page--setting #settingScreenItems #itemsTitle {
+    font-size: 28px;
   }
 
   .page--setting #settingScreenItems .setting {
     padding: 18px 0 20px;
   }
 
-  .page--setting #settingScreenItems #items::after {
-    content: "";
-    display: block;
-    height: calc(var(--fab-size, 62px) + 12px);
+  .page--setting #settingScreenItems .setting-group-card__body > .setting {
+    padding-left: var(--sp-lg);
+    padding-right: var(--sp-lg);
   }
+
+  /* No extra FAB spacer here: the scroll container's padding-bottom
+     (nav-bar-height + 24px) already clears the floating button, so the old
+     `#items::after` (fab-size + 12px) doubled the bottom gap on the submenu
+     only. Removing it matches the groups screen's spacing. */
 
   .page--setting #settingScreenItems .settingTop {
     display: grid;
@@ -761,10 +1401,28 @@
     max-width: 100%;
   }
 
+  .page--setting #settingScreenItems .ctrl--toggle,
+  .page--setting #settingScreenItems .ctrl--value,
+  .page--setting #settingScreenItems .ctrl--segmented,
+  .page--setting #settingScreenItems .ctrl--select {
+    width: auto;
+  }
+
   .page--setting #settingScreenItems .smallBtn,
   .page--setting #settingScreenItems .val {
     min-height: 34px;
     font-size: 12px;
+  }
+
+  .page--setting #settingScreenItems .ctrl--value .val,
+  .page--setting #settingScreenItems .setting-value-arrow {
+    min-height: 36px;
+    font-size: var(--fs-label-sm);
+  }
+
+  .page--setting #settingScreenItems .setting-unit-cycle {
+    min-height: 32px;
+    font-size: var(--fs-label-sm);
   }
 
   .page--setting #settingScreenItems .title,
@@ -792,11 +1450,11 @@
 }
 
 @keyframes setting-marquee-pan {
-  from {
+  0%, 6% {
     transform: translateX(0);
   }
 
-  to {
+  94%, 100% {
     transform: translateX(calc(var(--setting-marquee-distance, 0px) * -1));
   }
 }
@@ -839,8 +1497,6 @@
   transform: translateY(1px);
 }
 
-.page--setting #settingSubnav[hidden],
-.page--setting #deviceSubnav[hidden],
 .page--setting #carrotTabContent[hidden],
 .page--setting #deviceTabContent[hidden],
 .page--setting #items[hidden],
@@ -895,69 +1551,69 @@
 }
 
 .page--setting #deviceItems .device-ssh-control {
-  flex-direction: row;
-  align-items: flex-end;
-  justify-content: center;
-  gap: 8px;
+  width: min(68vw, 720px);
   min-width: 0;
 }
 
-.device-ssh-account {
+.device-ssh-form {
+  width: 100%;
   min-width: 0;
-  max-width: min(42vw, 240px);
-  min-height: 38px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 7px;
-  padding: 7px 10px;
-  border: 1px solid var(--setting-control-border, color-mix(in srgb, var(--md-outline-var) 46%, transparent));
-  border-radius: 9px;
-  background: var(--setting-control-bg, var(--md-surface-cont-h));
+}
+
+.app-dialog--device-ssh .app-dialog__sheet {
+  width: min(520px, calc(100vw - 28px));
+  max-height: min(560px, calc(100dvh - 28px));
+}
+
+.app-dialog--device-ssh .app-dialog__body {
+  flex: 1 1 auto;
+  overflow: auto;
+}
+
+.device-ssh-dialog {
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+}
+
+.device-ssh-dialog__empty {
+  padding: 18px;
+  border: 1px solid color-mix(in srgb, var(--md-outline-var) 34%, transparent);
+  border-radius: var(--r-sm);
   color: var(--md-on-surface-var);
-  box-shadow:
-    0 1px 0 rgba(0, 0, 0, 0.22),
-    inset 0 1px 0 rgba(255, 255, 255, 0.05);
-  box-sizing: border-box;
-  overflow: hidden;
+  font-weight: 800;
+  text-align: center;
 }
 
-.device-ssh-account.is-configured {
-  border-color: color-mix(in srgb, var(--md-primary) 34%, var(--setting-control-border, var(--md-outline-var)));
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--md-primary) 12%, var(--md-surface-cont-h)),
-    color-mix(in srgb, var(--md-primary) 6%, var(--md-surface-cont))
-  );
-  color: var(--md-on-surface);
+.device-ssh-key-list {
+  display: grid;
+  gap: 8px;
 }
 
-.device-ssh-account__label {
-  flex: 0 0 auto;
-  color: color-mix(in srgb, var(--md-primary) 82%, var(--md-on-surface));
-  font-size: 11px;
-  font-weight: 900;
-  line-height: 1;
-}
-
-.device-ssh-account__value {
+.device-ssh-key-list__item {
+  display: grid;
+  gap: 5px;
   min-width: 0;
-  overflow: hidden;
-  color: var(--md-on-surface);
-  font-family: var(--font-mono);
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--md-outline-var) 34%, transparent);
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--md-surface-cont-h) 72%, transparent);
+}
+
+.device-ssh-key-list__item span {
+  color: color-mix(in srgb, var(--md-primary) 78%, var(--md-on-surface));
   font-size: 12px;
   font-weight: 900;
-  line-height: 1;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.device-ssh-action {
-  flex: 0 0 auto;
-}
-
-.device-ssh-action--remove {
-  color: var(--md-error);
+.device-ssh-key-list__item code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--md-on-surface);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 850;
+  line-height: 1.25;
 }
 
 .page--setting #deviceItems .settingTop > :first-child {
@@ -987,17 +1643,11 @@
   overflow: hidden;
 }
 
-@media (max-width: 640px) {
+@media (aspect-ratio < 13/10) and (max-width: 639px), (aspect-ratio < 13/10) and (max-height: 649px) {
   .page--setting #deviceItems .device-ssh-control {
+    grid-column: 1 / -1;
     width: 100%;
     min-width: 0;
-    flex-direction: row;
-    justify-content: space-between;
-    align-items: center;
-  }
-
-  .device-ssh-account {
-    max-width: min(52vw, 220px);
   }
 }
 
@@ -1161,7 +1811,7 @@
   align-items: center;
   justify-content: center;
   padding: var(--sp-md);
-  background: rgba(0, 0, 0, 0.86);
+  background: var(--popup-backdrop);
 }
 
 .training-guide-modal__surface {
@@ -1171,9 +1821,10 @@
   width: min(100%, 960px);
   height: min(100%, 540px);
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--md-outline-var) 48%, transparent);
-  border-radius: var(--r-md);
+  border: 1px solid var(--popup-border-color);
+  border-radius: var(--popup-radius);
   background: #000;
+  box-shadow: var(--popup-shadow);
 }
 
 .training-guide-modal__image {
@@ -1192,7 +1843,7 @@
   width: 42px;
   height: 42px;
   border: 1px solid color-mix(in srgb, var(--md-outline-var) 56%, transparent);
-  border-radius: 999px;
+  border-radius: var(--dialog-control-radius);
   background: color-mix(in srgb, var(--md-surface-cont) 82%, #000);
   color: var(--md-on-surface);
   font-size: 28px;
@@ -1221,7 +1872,7 @@
   grid-template-rows: auto minmax(0, 1fr);
   width: min(100%, 760px);
   height: min(100%, 620px);
-  background: var(--md-surface);
+  background: var(--popup-bg);
 }
 
 .device-info-modal__header {
@@ -1250,4 +1901,35 @@
 
 .device-info-modal__body p {
   margin: 0 0 var(--sp-sm);
+}
+
+/* Portrait (phone): anchor the settings FAB as page-relative ABSOLUTE flow,
+   the same approach landscape already uses. As position:fixed the FAB was
+   captured by .page-active's transform (an ancestor transform is the
+   containing block for fixed children), so it followed the page geometry ??
+   --app-vv-height settling on load, page transitions ??and drifted up/down.
+   As a normal absolute child of the page it simply sits at the page's
+   bottom-right and stays put. The page already excludes the nav bar + safe
+   area from its height, so the offset here is just the small visual gap. */
+@media (aspect-ratio < 13/10) and (max-width: 639px), (aspect-ratio < 13/10) and (max-height: 649px) {
+  .page.page--setting > .page-fab-layer--setting {
+    position: absolute;
+    top: auto;
+    left: auto;
+    right: max(var(--sp-lg), env(safe-area-inset-right, 0px));
+    bottom: calc(10px + var(--sp-lg));
+    width: auto;
+    height: auto;
+    display: flex;
+    justify-content: flex-end;
+    z-index: 130;
+    pointer-events: none;
+  }
+
+  .page.page--setting > .page-fab-layer--setting .setting-fab-menu {
+    position: relative;
+    right: auto;
+    left: auto;
+    bottom: auto;
+  }
 }

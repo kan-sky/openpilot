@@ -7,6 +7,15 @@ let appToastRemoveTimer = null;
 let activeAppDialog = null;
 let appDialogSerial = 0;
 
+const APP_DIALOG_VARIANT_CLASSES = [
+  "app-dialog--choice",
+  "app-dialog--choice-list",
+  "app-dialog--choice-grid",
+  "app-dialog--choice-value-grid",
+  "app-dialog--form",
+  "app-dialog--input",
+];
+
 
 function syncModalBodyLock() {
   const hasOpenDialog =
@@ -16,6 +25,26 @@ function syncModalBodyLock() {
     Boolean(settingSearchPanel && !settingSearchPanel.hidden);
   document.body.classList.toggle("dialog-open", hasOpenDialog);
 }
+
+// Tone → icon glyph + style class. Centralized here so every toast across the
+// app (showAppToast is the single entry point) renders the same toast surface.
+const APP_TOAST_TONE_GLYPH = {
+  success: "✓", // ✓
+  error: "✕",   // ✕
+  warn: "!",
+  offline: "!",
+  info: "i",
+  hint: "i",
+  default: "i",
+};
+const APP_TOAST_TONE_CLASS = {
+  success: "is-success",
+  error: "is-error",
+  warn: "is-warn",
+  offline: "is-warn",
+  info: "is-info",
+  hint: "is-hint",
+};
 
 function showAppToast(message, opts = {}) {
   if (!appToastHost || !message) return;
@@ -30,9 +59,19 @@ function showAppToast(message, opts = {}) {
     activeAppToast = toast;
   }
 
-  toast.className = "app-toast";
-  if (tone && tone !== "default") toast.classList.add(`is-${tone}`);
-  toast.textContent = String(message);
+  const toneClass = APP_TOAST_TONE_CLASS[tone] || "";
+  toast.className = toneClass ? `app-toast ${toneClass}` : "app-toast";
+
+  const icon = document.createElement("span");
+  icon.className = "app-toast__icon";
+  icon.setAttribute("aria-hidden", "true");
+  icon.textContent = APP_TOAST_TONE_GLYPH[tone] || APP_TOAST_TONE_GLYPH.default;
+
+  const msg = document.createElement("div");
+  msg.className = "app-toast__msg";
+  msg.textContent = String(message);
+
+  toast.replaceChildren(icon, msg);
 
   if (appToastHideTimer) {
     clearTimeout(appToastHideTimer);
@@ -59,12 +98,45 @@ function showAppToast(message, opts = {}) {
       activeAppToast.remove();
       activeAppToast = null;
       appToastRemoveTimer = null;
-    }, 180);
+    }, 220);
   }, duration);
 }
 
 
 /* ── Dialog (alert / confirm / prompt / choice) ─────────── */
+function resetAppDialogPresentation() {
+  if (appDialog) appDialog.classList.remove(...APP_DIALOG_VARIANT_CLASSES);
+  if (appDialogChoices) {
+    appDialogChoices.className = "app-dialog__choices";
+    appDialogChoices.style.removeProperty("--app-dialog-choice-columns");
+  }
+}
+
+function appDialogChoiceText(choice) {
+  if (!choice || choice.labelHtml) return "";
+  return String(choice.label ?? "").trim();
+}
+
+function inferAppDialogChoiceLayout(choices, options = {}) {
+  const explicit = String(options.choiceLayout || options.choiceKind || "").trim();
+  if (explicit === "grid" || explicit === "value-grid" || explicit === "values") return "value-grid";
+  if (explicit === "list" || explicit === "action-list" || explicit === "actions") return "list";
+
+  const shortValueChoices = choices.length > 4 && choices.every((choice) => {
+    const text = appDialogChoiceText(choice);
+    return text && text.length <= 5 && !choice.danger && /^[+-]?(?:\d+|\d+\.\d+|[A-Za-z]{1,4})$/.test(text);
+  });
+  return shortValueChoices ? "value-grid" : "list";
+}
+
+function appDialogChoiceColumns(count, options = {}) {
+  const explicit = Number(options.choiceColumns || options.columns);
+  if (Number.isInteger(explicit) && explicit >= 2 && explicit <= 6) return explicit;
+  if (count <= 4) return Math.max(2, count);
+  if (count <= 25) return 5;
+  return 4;
+}
+
 function resolveAppDialog(result) {
   if (!activeAppDialog || !appDialog) return;
 
@@ -80,6 +152,7 @@ function resolveAppDialog(result) {
     }
     appDialog.hidden = true;
     syncModalBodyLock();
+    resetAppDialogPresentation();
     if (appDialogChoices) {
       appDialogChoices.hidden = true;
       appDialogChoices.innerHTML = "";
@@ -89,10 +162,24 @@ function resolveAppDialog(result) {
       appDialogDefault.onclick = null;
     }
     if (appDialogInputWrap) appDialogInputWrap.hidden = true;
+    if (appDialogInputError) {
+      appDialogInputError.hidden = true;
+      appDialogInputError.textContent = "";
+    }
     if (appDialogInput) {
+      appDialogInput.disabled = false;
       appDialogInput.value = "";
       appDialogInput.placeholder = "";
+      appDialogInput.type = "text";
+      appDialogInput.removeAttribute("autocomplete");
+      appDialogInput.removeAttribute("autocapitalize");
+      appDialogInput.removeAttribute("inputmode");
+      appDialogInput.removeAttribute("aria-labelledby");
+      appDialogInput.spellcheck = true;
     }
+    if (appDialogBody) appDialogBody.hidden = false;
+    if (appDialogConfirm) appDialogConfirm.disabled = false;
+    if (appDialogCancel) appDialogCancel.disabled = false;
     if (state.lastFocus && typeof state.lastFocus.focus === "function") {
       state.lastFocus.focus();
     }
@@ -101,35 +188,72 @@ function resolveAppDialog(result) {
 }
 
 function cancelAppDialog() {
-  if (!activeAppDialog) return;
-  const result = activeAppDialog.mode === "prompt" || activeAppDialog.mode === "choice"
+  if (!activeAppDialog || activeAppDialog.submitting) return;
+  const result = activeAppDialog.mode === "prompt" || activeAppDialog.mode === "form" || activeAppDialog.mode === "choice"
     ? null
     : false;
   resolveAppDialog(result);
 }
 
-function confirmAppDialog() {
-  if (!activeAppDialog) return;
-  const result = activeAppDialog.mode === "prompt"
-    ? (appDialogInput ? appDialogInput.value : "")
-    : true;
-  resolveAppDialog(result);
+async function confirmAppDialog() {
+  if (!activeAppDialog || activeAppDialog.submitting) return;
+  const state = activeAppDialog;
+  const isInputMode = state.mode === "prompt" || state.mode === "form";
+  const result = isInputMode ? (appDialogInput ? appDialogInput.value : "") : true;
+  if (state.mode !== "form" || typeof state.onSubmit !== "function") {
+    resolveAppDialog(result);
+    return;
+  }
+
+  state.submitting = true;
+  if (appDialogInputError) {
+    appDialogInputError.hidden = true;
+    appDialogInputError.textContent = "";
+  }
+  if (appDialogInput) appDialogInput.disabled = true;
+  if (appDialogConfirm) {
+    appDialogConfirm.disabled = true;
+    appDialogConfirm.textContent = state.submittingLabel;
+  }
+  if (appDialogCancel) appDialogCancel.disabled = true;
+
+  try {
+    await state.onSubmit(result);
+    resolveAppDialog(result);
+  } catch (err) {
+    if (activeAppDialog !== state) return;
+    state.submitting = false;
+    if (appDialogInput) {
+      appDialogInput.disabled = false;
+      appDialogInput.focus();
+    }
+    if (appDialogConfirm) {
+      appDialogConfirm.disabled = false;
+      appDialogConfirm.textContent = state.confirmLabel;
+    }
+    if (appDialogCancel) appDialogCancel.disabled = false;
+    if (appDialogInputError) {
+      appDialogInputError.textContent = err?.message || String(err);
+      appDialogInputError.hidden = false;
+    }
+  }
 }
 
 function openAppDialog(options = {}) {
   if (!appDialog || !appDialogTitle || !appDialogBody || !appDialogConfirm || !appDialogCancel) {
-    if (options.mode === "prompt") return Promise.resolve(null);
+    if (options.mode === "prompt" || options.mode === "form") return Promise.resolve(null);
     return Promise.resolve(options.mode === "alert");
   }
 
   if (activeAppDialog) cancelAppDialog();
 
   const mode = options.mode || "alert";
+  const isForm = mode === "form";
   const title =
     options.title ||
     (mode === "confirm"
       ? getUIText("confirm_title", "Confirm")
-      : mode === "prompt"
+      : mode === "prompt" || mode === "form"
         ? getUIText("input_title", "Input")
         : getUIText("notice", "Notice"));
   const message = options.message || "";
@@ -140,15 +264,28 @@ function openAppDialog(options = {}) {
   const defaultActionLabel = options.defaultActionLabel || "";
   const hasDefaultAction = mode === "prompt" && Boolean(defaultActionLabel);
   const choices = Array.isArray(options.choices)
-    ? options.choices.filter((choice) => choice && (choice.label || choice.labelHtml))
+    ? options.choices.filter((choice) => choice && (choice.label != null || choice.labelHtml))
     : [];
   const hasChoices = choices.length > 0;
   const isChoice = mode === "choice" || hasChoices;
+  const choiceLayout = hasChoices ? inferAppDialogChoiceLayout(choices, options) : "";
   const showCancel = mode !== "alert" && options.showCancel !== false;
+
+  resetAppDialogPresentation();
+  if (appDialog && isForm) appDialog.classList.add("app-dialog--form");
+  // Any dialog that shows the text input (prompt OR form) gets the keyboard-aware
+  // positioning so it floats just above the on-screen keyboard, consistently.
+  if (appDialog && (mode === "prompt" || isForm)) appDialog.classList.add("app-dialog--input");
+  if (appDialog && hasChoices) {
+    appDialog.classList.add("app-dialog--choice");
+    appDialog.classList.add(choiceLayout === "value-grid" ? "app-dialog--choice-grid" : "app-dialog--choice-list");
+    if (choiceLayout === "value-grid") appDialog.classList.add("app-dialog--choice-value-grid");
+  }
 
   appDialogTitle.textContent = title;
   if (useHtml) appDialogBody.innerHTML = String(messageHtml || message);
   else appDialogBody.textContent = String(message);
+  appDialogBody.hidden = isForm && !String(messageHtml || message).trim();
   appDialogBody.style.flex = hasChoices ? "0 0 auto" : "1 1 auto";
   appDialogConfirm.textContent = confirmLabel;
   appDialogCancel.textContent = cancelLabel;
@@ -180,12 +317,22 @@ function openAppDialog(options = {}) {
   if (appDialogChoices) {
     appDialogChoices.innerHTML = "";
     appDialogChoices.hidden = !hasChoices;
+    appDialogChoices.className = `app-dialog__choices app-dialog__choices--${choiceLayout || "list"}`;
+    if (choiceLayout === "value-grid") {
+      appDialogChoices.style.setProperty("--app-dialog-choice-columns", String(appDialogChoiceColumns(choices.length, options)));
+    } else {
+      appDialogChoices.style.removeProperty("--app-dialog-choice-columns");
+    }
     for (const choice of choices) {
       const button = document.createElement("button");
       button.type = "button";
       let btnClass = choice.danger
         ? "btn btn--danger app-dialog__choiceBtn"
         : "btn app-dialog__choiceBtn";
+      btnClass += choiceLayout === "value-grid"
+        ? " app-dialog__choiceBtn--value"
+        : " app-dialog__choiceBtn--action";
+      if (choice.current || choice.selected) btnClass += " is-current";
       if (choice.className) btnClass += " " + choice.className;
       button.className = btnClass;
       if (choice.labelHtml) {
@@ -193,17 +340,32 @@ function openAppDialog(options = {}) {
       } else {
         button.textContent = String(choice.label);
       }
-      button.style.cssText = "text-align:left; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;";
       button.addEventListener("click", () => resolveAppDialog(choice.value));
       appDialogChoices.appendChild(button);
     }
   }
 
   if (appDialogInputWrap && appDialogInput) {
-    const isPrompt = mode === "prompt";
+    const isPrompt = mode === "prompt" || isForm;
     appDialogInputWrap.hidden = !isPrompt;
     appDialogInput.value = options.defaultValue ?? "";
     appDialogInput.placeholder = options.placeholder || "";
+    appDialogInput.type = options.inputType === "password" ? "password" : "text";
+    const autocomplete = options.autocomplete ?? (isForm ? "off" : "");
+    const autocapitalize = options.autocapitalize ?? (isForm ? "none" : "");
+    if (autocomplete) appDialogInput.autocomplete = autocomplete;
+    else appDialogInput.removeAttribute("autocomplete");
+    if (autocapitalize) appDialogInput.autocapitalize = autocapitalize;
+    else appDialogInput.removeAttribute("autocapitalize");
+    appDialogInput.spellcheck = options.spellcheck == null ? !isForm : options.spellcheck === true;
+    if (isForm) appDialogInput.setAttribute("aria-labelledby", "appDialogTitle");
+    else appDialogInput.removeAttribute("aria-labelledby");
+    if (options.inputMode) appDialogInput.inputMode = options.inputMode;
+    else appDialogInput.removeAttribute("inputmode");
+    if (appDialogInputError) {
+      appDialogInputError.hidden = true;
+      appDialogInputError.textContent = "";
+    }
   }
 
   return new Promise((resolve) => {
@@ -212,6 +374,10 @@ function openAppDialog(options = {}) {
       resolve,
       mode,
       serial: dialogSerial,
+      onSubmit: options.onSubmit,
+      submitting: false,
+      confirmLabel,
+      submittingLabel: options.submittingLabel || getUIText("saving", "Saving..."),
       lastFocus: document.activeElement instanceof HTMLElement ? document.activeElement : null,
     };
 
@@ -220,12 +386,18 @@ function openAppDialog(options = {}) {
 
     requestAnimationFrame(() => {
       appDialog.classList.add("is-open");
-      if (mode === "prompt" && appDialogInput) {
+      if ((mode === "prompt" || isForm) && appDialogInput) {
         appDialogInput.focus();
         appDialogInput.select();
       } else if (hasChoices && appDialogChoices) {
-        const firstChoice = appDialogChoices.querySelector("button");
-        if (firstChoice && typeof firstChoice.focus === "function") firstChoice.focus();
+        const currentChoice = appDialogChoices.querySelector(".is-current");
+        const firstChoice = currentChoice || appDialogChoices.querySelector("button");
+        if (firstChoice && typeof firstChoice.focus === "function") {
+          firstChoice.focus({ preventScroll: Boolean(currentChoice) });
+          if (currentChoice && typeof currentChoice.scrollIntoView === "function") {
+            currentChoice.scrollIntoView({ block: "center", inline: "nearest" });
+          }
+        }
       } else if (mode === "choice" && appDialogCancel) {
         appDialogCancel.focus();
       } else {
@@ -272,6 +444,25 @@ function appPrompt(message, opts = {}) {
   });
 }
 
+function appForm(message, opts = {}) {
+  return openAppDialog({
+    mode: "form",
+    title: opts.title,
+    message,
+    defaultValue: opts.defaultValue,
+    placeholder: opts.placeholder,
+    inputType: opts.inputType,
+    autocomplete: opts.autocomplete,
+    autocapitalize: opts.autocapitalize,
+    inputMode: opts.inputMode,
+    spellcheck: opts.spellcheck,
+    confirmLabel: opts.confirmLabel,
+    cancelLabel: opts.cancelLabel,
+    submittingLabel: opts.submittingLabel,
+    onSubmit: opts.onSubmit,
+  });
+}
+
 if (appDialogBackdrop) appDialogBackdrop.onclick = cancelAppDialog;
 if (appDialogCancel) appDialogCancel.onclick = cancelAppDialog;
 if (appDialogConfirm) appDialogConfirm.onclick = confirmAppDialog;
@@ -287,6 +478,7 @@ document.addEventListener("keydown", (ev) => {
   }
 
   if (ev.key === "Enter" && !ev.shiftKey) {
+    if (ev.isComposing) return;
     const targetTag = ev.target?.tagName;
     if (targetTag === "TEXTAREA") return;
     ev.preventDefault();

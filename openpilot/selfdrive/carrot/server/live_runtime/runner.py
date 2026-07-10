@@ -53,7 +53,7 @@ def main() -> int:
     print("Suggested commands:", file=sys.stderr)
     print("  cd /data/openpilot", file=sys.stderr)
     print("  rm -f prebuilt", file=sys.stderr)
-    print("  python system/manager/build.py", file=sys.stderr)
+    print("  python openpilot/system/manager/build.py", file=sys.stderr)
     return 1
 
   count = 0

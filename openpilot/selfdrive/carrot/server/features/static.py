@@ -3,7 +3,7 @@ import os
 
 from aiohttp import web
 
-from ..config import TRAINING_ASSETS_DIR, WEB_DIR
+from ..config import SOUND_ASSETS_DIR, TRAINING_ASSETS_DIR, WEB_DIR
 from ..services.params import get_param_values
 from ..services.web_settings import read_web_settings
 
@@ -27,13 +27,19 @@ def _load_device_languages() -> list:
 
 def _build_bootstrap_payload() -> dict:
   try:
-    device_values = get_param_values(["LanguageSetting"], {"LanguageSetting": ""})
+    device_values = get_param_values(
+      ["LanguageSetting", "SoundLanguageSetting"],
+      {"LanguageSetting": "", "SoundLanguageSetting": "auto"},
+    )
     device_language = device_values.get("LanguageSetting", "")
+    sound_language = device_values.get("SoundLanguageSetting", "auto")
   except Exception:
     device_language = ""
+    sound_language = "auto"
   return {
     "webSettings": read_web_settings(),
     "deviceLanguage": device_language,
+    "soundLanguage": sound_language,
     "deviceLanguages": _load_device_languages(),
   }
 
@@ -62,3 +68,5 @@ def register(app: web.Application) -> None:
   app.router.add_get("/", handle_index)
   if os.path.isdir(TRAINING_ASSETS_DIR):
     app.router.add_static("/training/", TRAINING_ASSETS_DIR, show_index=False)
+  if os.path.isdir(SOUND_ASSETS_DIR):
+    app.router.add_static("/sound-assets/", SOUND_ASSETS_DIR, show_index=False)

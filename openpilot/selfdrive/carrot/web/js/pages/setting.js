@@ -1,6 +1,6 @@
 "use strict";
 
-// Setting page — groups, items, value cache, search, subnav, screen layout.
+// Setting page — groups, items, value cache, search, screen layout.
 
 let settingsLoadPromise = null;
 let settingValueWarmupTimer = null;
@@ -10,14 +10,18 @@ const SETTING_VALUES_TTL_MS = 60000;
 const settingValueCache = new Map();
 const settingGroupValueCache = new Map();
 const settingGroupValuePromises = new Map();
-
-let settingSubnavSettleTimer = null;
-let settingSubnavProgrammaticScroll = false;
-let settingSubnavFocusTimer = null;
+const settingPopularValuesState = {
+  loaded: false,
+  loadPromise: null,
+  carKey: "",
+  values: {},
+  fetchedAt: 0,
+};
 
 const SETTING_FAVORITES_GROUP = "__setting_favorites__";
 const SETTING_PROFILES_DIVIDER = "__setting_profiles_divider__";
 const SETTING_PROFILE_GROUP_PREFIX = "__setting_profile__:";
+const SETTING_CATEGORY_DIVIDER_PREFIX = "__setting_category__:";
 const SETTING_FAVORITES_LONG_PRESS_MS = 620;
 const SETTING_FAVORITES_MOVE_TOLERANCE = 10;
 const settingFavoritesState = {
@@ -31,6 +35,7 @@ const settingProfilesState = {
   loadPromise: null,
 };
 const settingProfileSectionExpandedState = new Map();
+let settingSoundSampleAudio = null;
 
 function isSettingFavoritesGroup(group) {
   return group === SETTING_FAVORITES_GROUP;
@@ -38,6 +43,52 @@ function isSettingFavoritesGroup(group) {
 
 function isSettingProfilesDivider(entry) {
   return entry?.group === SETTING_PROFILES_DIVIDER || entry === SETTING_PROFILES_DIVIDER;
+}
+
+function isSettingCategoryDivider(entry) {
+  return String(entry?.group || "").startsWith(SETTING_CATEGORY_DIVIDER_PREFIX);
+}
+
+function isSettingAnyDivider(entry) {
+  return isSettingProfilesDivider(entry) || isSettingCategoryDivider(entry);
+}
+
+// 대>중>소 노드(카테고리/그룹/섹션)의 현재 언어 라벨. ko/en/zh 직접 보유 노드용.
+function settingNodeLabel(node) {
+  if (!node) return "";
+  if (LANG === "zh") return node.zh || node.en || node.ko || "";
+  if (LANG === "ko") return node.ko || node.en || node.zh || "";
+  return node.en || node.ko || node.zh || "";
+}
+
+// /api/settings 의 categories(대>중>소)가 있으면 groups/items_by_group 를
+// 중-group id 키 기준으로 정규화한다. 각 항목엔 소-섹션 라벨을 __section 으로 부착.
+// categories 가 없으면(구버전) 아무것도 바꾸지 않아 기존 평면 UI 로 폴백.
+function normalizeSettingCategories(j) {
+  if (!j || !Array.isArray(j.categories) || !j.categories.length) return;
+  const idx = {};
+  Object.values(j.items_by_group || {}).forEach((list) => {
+    (list || []).forEach((it) => { if (it && it.name) idx[it.name] = it; });
+  });
+  const flatGroups = [];
+  const newItemsByGroup = {};
+  j.categories.forEach((cat) => {
+    (cat.groups || []).forEach((g) => {
+      flatGroups.push({ group: g.id, ko: g.ko, en: g.en, zh: g.zh, count: g.count, category: cat.id });
+      const items = [];
+      (g.sections || []).forEach((sec) => {
+        // 라벨이 없어도(단일 직속 섹션) 카드는 만들도록 항상 객체로 둔다.
+        const secLabel = { id: sec.id, ko: sec.ko, en: sec.en, zh: sec.zh };
+        (sec.items || []).forEach((name) => {
+          const def = idx[name];
+          if (def) items.push(Object.assign({}, def, { __section: secLabel }));
+        });
+      });
+      newItemsByGroup[g.id] = items;
+    });
+  });
+  j.groups = flatGroups;
+  j.items_by_group = newItemsByGroup;
 }
 
 function settingProfileGroup(profileId) {
@@ -133,15 +184,29 @@ function getSettingProfilesLabel() {
 }
 
 function getSettingGroupsForDisplay() {
-  const groups = SETTINGS?.groups || [];
   const out = [
     {
       group: SETTING_FAVORITES_GROUP,
       count: getFavoriteSettingEntries().length,
       virtual: true,
     },
-    ...groups,
   ];
+  const cats = SETTINGS?.categories;
+  if (Array.isArray(cats) && cats.length) {
+    cats.forEach((cat) => {
+      out.push({
+        group: SETTING_CATEGORY_DIVIDER_PREFIX + (cat.id || ""),
+        label: settingNodeLabel(cat),
+        divider: true,
+        virtual: true,
+      });
+      (cat.groups || []).forEach((g) => {
+        out.push({ group: g.id, ko: g.ko, en: g.en, zh: g.zh, count: g.count, category: cat.id });
+      });
+    });
+  } else {
+    out.push(...(SETTINGS?.groups || []));
+  }
   const profiles = settingProfilesState.profiles || [];
   if (profiles.length) {
     out.push({
@@ -168,6 +233,42 @@ function getSettingItemEntriesForGroup(group) {
   const profile = getSettingProfileByGroup(group);
   if (profile) return getProfileSettingEntries(profile);
   return (SETTINGS?.items_by_group?.[group] || []).map((item) => ({ group, item }));
+}
+
+function normalizeSettingPopularValues(payload) {
+  const values = payload?.popular_values;
+  return values && typeof values === "object" && !Array.isArray(values) ? values : {};
+}
+
+async function loadSettingPopularValues(force = false) {
+  if (!force && settingPopularValuesState.loaded) return settingPopularValuesState.values;
+  if (!force && settingPopularValuesState.loadPromise) return settingPopularValuesState.loadPromise;
+
+  settingPopularValuesState.loadPromise = getJson("/api/setting_popular_values")
+    .then((payload) => {
+      settingPopularValuesState.loaded = true;
+      settingPopularValuesState.carKey = String(payload?.car_key || "");
+      settingPopularValuesState.fetchedAt = Number(payload?.fetched_at || 0);
+      settingPopularValuesState.values = normalizeSettingPopularValues(payload);
+      return settingPopularValuesState.values;
+    })
+    .catch(() => {
+      settingPopularValuesState.loaded = true;
+      settingPopularValuesState.carKey = "";
+      settingPopularValuesState.fetchedAt = 0;
+      settingPopularValuesState.values = {};
+      return settingPopularValuesState.values;
+    })
+    .finally(() => {
+      settingPopularValuesState.loadPromise = null;
+    });
+
+  return settingPopularValuesState.loadPromise;
+}
+
+function getSettingPopularValue(name) {
+  const entry = settingPopularValuesState.values?.[String(name || "")];
+  return entry && typeof entry === "object" ? entry : null;
 }
 
 async function loadSettingFavorites(force = false) {
@@ -225,7 +326,6 @@ function updateSettingFavoriteRowMarks(root = document.getElementById("items")) 
 function refreshSettingFavoriteChrome(options = {}) {
   const animateGroups = options.animateGroups === true;
   renderGroups({ animateGroups });
-  renderSettingSubnav();
   syncSettingGroupChrome(CURRENT_GROUP);
   updateSettingFavoriteRowMarks();
 }
@@ -317,7 +417,7 @@ function applyRestoredSettingValuesToRenderedItems(values) {
     if (!name || !(name in values)) return;
     const valueButton = row.querySelector(".val");
     if (!valueButton) return;
-    valueButton.textContent = String(values[name]);
+    syncSettingControlState(row, values[name]);
     row.classList.add("is-restored-live");
     window.setTimeout(() => row.classList.remove("is-restored-live"), 900);
     updated = true;
@@ -481,8 +581,8 @@ async function loadSettings(options = {}) {
   if (SETTINGS && !force) {
     await loadSettingFavorites();
     await loadSettingProfiles();
+    await loadSettingPopularValues(true);
     renderGroups({ animateGroups: false });
-    renderSettingSubnav();
     syncSettingSearchFabState();
     if (!background && CURRENT_PAGE === "setting" && typeof syncSettingViewportLayout === "function") {
       await syncSettingViewportLayout({ animateChrome: false, animateItems: false });
@@ -496,6 +596,7 @@ async function loadSettings(options = {}) {
   settingsLoadPromise = (async () => {
     const j = await getJson("/api/settings");
 
+    normalizeSettingCategories(j);
     SETTINGS = j;
     UNIT_CYCLE = j.unit_cycle || UNIT_CYCLE;
     settingValueCache.clear();
@@ -503,6 +604,7 @@ async function loadSettings(options = {}) {
     settingGroupValuePromises.clear();
     await loadSettingFavorites(force);
     await loadSettingProfiles(force);
+    await loadSettingPopularValues(force);
     rebuildSettingSearchEntries();
 
     if (meta) {
@@ -520,7 +622,6 @@ async function loadSettings(options = {}) {
     }
 
     renderGroups();
-    renderSettingSubnav();
     syncSettingSearchFabState();
     scheduleSettingGroupValueWarmup(260);
 
@@ -626,7 +727,7 @@ function renderGroups(options = {}) {
   const box = document.getElementById("groupList");
   const animateGroups = options.animateGroups !== false;
   const groups = getSettingGroupsForDisplay();
-  const signature = groups.map((g) => isSettingProfilesDivider(g) ? SETTING_PROFILES_DIVIDER : `${g.group}:${g.count ?? ""}:${g.label || ""}`).join("|");
+  const signature = groups.map((g) => isSettingAnyDivider(g) ? `div:${g.label || ""}` : `${g.group}:${g.count ?? ""}:${g.label || ""}`).join("|");
 
   function setGroupButtonLabel(button, label, count) {
     const text = Number.isFinite(Number(count)) ? `${label} (${count})` : label;
@@ -638,8 +739,8 @@ function renderGroups(options = {}) {
   if (!animateGroups && box.dataset.groupsSignature === signature && box.children.length === groups.length) {
     Array.from(box.children).forEach((button, index) => {
       const g = groups[index];
-      if (isSettingProfilesDivider(g)) {
-        button.className = "setting-profile-divider";
+      if (isSettingAnyDivider(g)) {
+        button.className = isSettingCategoryDivider(g) ? "setting-profile-divider setting-category-divider" : "setting-profile-divider";
         button.innerHTML = `<span></span><strong>${escapeHtml(g.label || getSettingProfilesLabel())}</strong><span></span>`;
         button.removeAttribute("data-group");
         button.onclick = null;
@@ -662,9 +763,10 @@ function renderGroups(options = {}) {
   box.dataset.groupsSignature = signature;
 
   groups.forEach(g => {
-    if (isSettingProfilesDivider(g)) {
+    if (isSettingAnyDivider(g)) {
       const divider = document.createElement("div");
-      divider.className = animateGroups ? "setting-profile-divider ui-stagger-item" : "setting-profile-divider";
+      const base = animateGroups ? "setting-profile-divider ui-stagger-item" : "setting-profile-divider";
+      divider.className = isSettingCategoryDivider(g) ? base + " setting-category-divider" : base;
       if (animateGroups) divider.style.setProperty("--i", String(box.children.length));
       divider.innerHTML = `<span></span><strong>${escapeHtml(g.label || getSettingProfilesLabel())}</strong><span></span>`;
       box.appendChild(divider);
@@ -716,12 +818,506 @@ function getSettingGroupLabel(group) {
   if (profile) return profile.name;
   const meta = getSettingGroupMeta(group);
   if (!meta) return group;
+  if (meta.ko || meta.en || meta.zh) return settingNodeLabel(meta);
   if (LANG === "zh") return meta.cgroup || meta.egroup || meta.group;
   if (LANG === "ko") return meta.group || meta.egroup || group;
   return meta.egroup || meta.group || group;
 }
 
-const SETTING_SUBNAV_PAGE_STEP = 1;
+function getSettingItemContextLabel(group, item) {
+  const groupLabel = getSettingGroupLabel(group);
+  const sectionLabel = item?.__section ? settingNodeLabel(item.__section) : "";
+  if (!sectionLabel || sectionLabel === groupLabel) return groupLabel;
+  return `${groupLabel} > ${sectionLabel}`;
+}
+
+const SETTING_CONTROL_OVERRIDES = {
+  ShowPathMode: { kind: "select" },
+  ShowPathColor: { kind: "select" },
+  ShowPathColorCruiseOff: { kind: "select" },
+  ShowPathModeLane: { kind: "select" },
+  ShowPathColorLane: { kind: "select" },
+  ShowPlotMode: { kind: "select" },
+  ClusterHudScreenMode: { kind: "select" },
+  ClusterHudRadarInfo: { kind: "select" },
+  SoundLanguageSetting: { kind: "select" },
+};
+
+function getSettingControlConfig(p) {
+  const override = SETTING_CONTROL_OVERRIDES[p?.name] || {};
+  const min = Number(p?.min);
+  const max = Number(p?.max);
+  const unit = Math.max(1, Number(p?.unit) || 1);
+  const optionCount = Number.isFinite(min) && Number.isFinite(max) ? Math.floor(max - min + 1) : 0;
+  let kind = override.kind || "slider";
+
+  if (!override.kind) {
+    if (min === 0 && max === 1) {
+      kind = "toggle";
+    } else if (Number.isInteger(min) && Number.isInteger(max) && optionCount >= 2 && optionCount <= 4) {
+      kind = "segmented";
+    } else if (Number.isInteger(min) && Number.isInteger(max) && optionCount > 4 && optionCount <= 8) {
+      kind = "select";
+    } else {
+      kind = "slider";
+    }
+  }
+
+  return { kind, min, max, unit, optionCount };
+}
+
+const SETTING_DISPLAY_UNIT_TYPES = Object.freeze({
+  raw: "",
+  speedKph: "km/h",
+  distanceCm: "cm",
+  timeSec: "s",
+  timeMin: "min",
+  percent: "%",
+  degree: "deg",
+});
+
+const SETTING_PARAM_DISPLAY_TYPES = Object.freeze({
+  PathOffset: "distanceCm",
+  CruiseOnDist: "distanceCm",
+  CruiseEcoControl: "speedKph",
+  StopDistanceCarrot: "distanceCm",
+  TrafficStopDistanceAdjust: "distanceCm",
+  AutoTurnControlSpeedTurn: "speedKph",
+  CruiseSpeedUnit: "speedKph",
+  CruiseSpeedUnitBasic: "speedKph",
+  CruiseSpeed1: "speedKph",
+  CruiseSpeed2: "speedKph",
+  CruiseSpeed3: "speedKph",
+  CruiseSpeed4: "speedKph",
+  CruiseSpeed5: "speedKph",
+  AutoGasTokSpeed: "speedKph",
+  AutoGasCancelSpeed: "speedKph",
+  MaxTimeOffroadMin: "timeMin",
+  AutoSpeedUptoRoadSpeedLimit: "percent",
+  AutoRoadSpeedAdjust: "percent",
+  ApplyModelSpeed: "percent",
+  UseLaneLineSpeed: "speedKph",
+  UseLaneLineCurveSpeed: "speedKph",
+  AdjustLaneOffset: "distanceCm",
+  SoundVolumeAdjust: "percent",
+  SoundVolumeAdjustEngage: "percent",
+  AutoCurveSpeedLowerLimit: "speedKph",
+  AutoNaviSpeedCtrlEnd: "timeSec",
+  AutoNaviSpeedBumpTime: "timeSec",
+  AutoNaviSpeedBumpSpeed: "speedKph",
+  AutoRoadSpeedLimitOffset: "speedKph",
+  AutoCurveSpeedFactor: "percent",
+  MapTurnSpeedFactor: "percent",
+  AutoNaviSpeedSafetyFactor: "percent",
+  RadarReactionFactor: "percent",
+  SteerRatioRate: "percent",
+  DynamicTFollowLC: "percent",
+  TFollowDecelBoost: "percent",
+  ShowCustomBrightness: "percent",
+  ClusterHudBrightness: "percent",
+});
+
+function getSettingDisplayType(name) {
+  const key = String(name || "").trim();
+  return SETTING_PARAM_DISPLAY_TYPES[key] || "raw";
+}
+
+function getSettingDisplayUnit(name) {
+  return SETTING_DISPLAY_UNIT_TYPES[getSettingDisplayType(name)] || "";
+}
+
+function formatSettingDisplayValue(p, value) {
+  if (String(p?.name || "") === "SoundLanguageSetting") {
+    return getSoundLanguageSettingOptionLabel(value);
+  }
+  const text = String(value);
+  const unit = getSettingDisplayUnit(p?.name);
+  return unit ? `${text}${unit}` : text;
+}
+
+function formatSettingRangeMeta(p) {
+  if (String(p?.name || "") === "SoundLanguageSetting") {
+    return "";
+  }
+  return [
+    `min=${formatSettingDisplayValue(p, p?.min)}`,
+    `max=${formatSettingDisplayValue(p, p?.max)}`,
+    `default=${formatSettingDisplayValue(p, p?.default)}`,
+  ].join(", ");
+}
+
+function formatSettingPopularValue(p, raw) {
+  if (raw === null || raw === undefined) return "";
+  const min = Number(p?.min);
+  const max = Number(p?.max);
+  if (min === 0 && max === 1) {
+    const text = String(raw).trim().toLowerCase();
+    if (text === "1" || text === "true" || text === "on") return "ON";
+    if (text === "0" || text === "false" || text === "off") return "OFF";
+  }
+  return formatSettingDisplayValue(p, raw);
+}
+
+function normalizeSettingPopularNumericValue(p, raw) {
+  if (raw === null || raw === undefined || raw === "") return null;
+  const min = Number(p?.min);
+  const max = Number(p?.max);
+  const text = String(raw).trim().toLowerCase();
+  if (min === 0 && max === 1) {
+    if (text === "1" || text === "true" || text === "on") return 1;
+    if (text === "0" || text === "false" || text === "off") return 0;
+  }
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : null;
+}
+
+function isSettingPopularValueInRange(p, raw) {
+  const min = Number(p?.min);
+  const max = Number(p?.max);
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return true;
+  const value = normalizeSettingPopularNumericValue(p, raw);
+  if (value === null) return false;
+  return value >= min && value <= max;
+}
+
+function compareSettingPopularValueItems(p, a, b, aIndex = 0, bIndex = 0) {
+  const aCount = Number(a?.count ?? 0);
+  const bCount = Number(b?.count ?? 0);
+  const safeACount = Number.isFinite(aCount) ? aCount : 0;
+  const safeBCount = Number.isFinite(bCount) ? bCount : 0;
+  if (safeACount !== safeBCount) return safeBCount - safeACount;
+
+  const aValue = normalizeSettingPopularNumericValue(p, a?.value);
+  const bValue = normalizeSettingPopularNumericValue(p, b?.value);
+  if (aValue !== null && bValue !== null && aValue !== bValue) return aValue - bValue;
+  if (aValue !== null && bValue === null) return -1;
+  if (aValue === null && bValue !== null) return 1;
+
+  const aText = formatSettingPopularValue(p, a?.value);
+  const bText = formatSettingPopularValue(p, b?.value);
+  const textOrder = aText.localeCompare(bText, LANG === "ko" ? "ko-KR" : undefined, { numeric: true, sensitivity: "base" });
+  if (textOrder !== 0) return textOrder;
+
+  return aIndex - bIndex;
+}
+
+function getSettingPopularDisplayEntry(p, entry) {
+  if (!entry || typeof entry !== "object") return null;
+  const sample = Number(entry?.sample ?? entry?.sample_count ?? 0);
+  if (!Number.isFinite(sample) || sample < 1) return null;
+  if (!isSettingPopularValueInRange(p, entry?.value)) return null;
+  const topValues = Array.isArray(entry?.top_values)
+    ? entry.top_values.map((item, index) => ({ item, index })).filter(({ item }) => {
+      const count = Number(item?.count ?? 0);
+      return Number.isFinite(count) && count > 0 && isSettingPopularValueInRange(p, item?.value);
+    }).sort((a, b) => compareSettingPopularValueItems(p, a.item, b.item, a.index, b.index))
+      .slice(0, 10)
+      .map(({ item }) => item)
+    : [];
+  return { ...entry, top_values: topValues };
+}
+
+function getSettingPopularCarKeyLabel() {
+  return String(settingPopularValuesState.carKey || "").trim() || getUIText("setting_popular_value_my_model", "내 차종");
+}
+
+function getSettingPopularPrimaryCount(entry) {
+  const values = Array.isArray(entry?.top_values) ? entry.top_values : [];
+  const count = Number(values[0]?.count ?? entry?.top_count ?? entry?.count ?? 0);
+  return Number.isFinite(count) ? count : 0;
+}
+
+function getSettingPopularSummaryValues(entry) {
+  const values = Array.isArray(entry?.top_values) ? entry.top_values : [];
+  if (!values.length) return [];
+
+  const topCount = getSettingPopularPrimaryCount(entry);
+  if (topCount < 2) return [];
+
+  const tiedValues = values.filter((item) => {
+    const count = Number(item?.count ?? 0);
+    return Number.isFinite(count) && count === topCount;
+  });
+
+  return tiedValues.length <= 2 ? tiedValues : [];
+}
+
+function hasSettingPopularClearTop(entry) {
+  return getSettingPopularSummaryValues(entry).length > 0;
+}
+
+function renderSettingPopularChipText(p, entry) {
+  const summaryValues = getSettingPopularSummaryValues(entry);
+  if (!summaryValues.length) return "";
+  const sample = getSettingPopularPrimaryCount(entry);
+  const values = summaryValues.map((item) => formatSettingPopularValue(p, item?.value)).filter(Boolean);
+  if (!sample || !values.length) return "";
+  const label = getUIText("setting_popular_value_chip_label", "내 차종 인기값");
+  if (values.length === 1) {
+    return getUIText("setting_popular_value_chip", "{label} ({sample}대) {value}", {
+      label,
+      sample,
+      value: values[0],
+    });
+  }
+  return getUIText("setting_popular_value_chip_tied", "{label} (각 {sample}대) {values}", {
+    label,
+    sample,
+    values: values.join(" · "),
+  });
+}
+
+function renderSettingPopularChipHtml(p, entry) {
+  const summaryValues = getSettingPopularSummaryValues(entry);
+  if (!summaryValues.length) return "";
+  const sample = getSettingPopularPrimaryCount(entry);
+  const values = summaryValues.map((item) => formatSettingPopularValue(p, item?.value)).filter(Boolean);
+  if (!sample || !values.length) return "";
+  const sampleText = values.length === 1
+    ? getUIText("setting_popular_value_chip_sample", "{sample}대", { sample })
+    : getUIText("setting_popular_value_chip_each_sample", "각 {sample}대", { sample });
+  return `
+    <span class="setting-popular-value-chip__car">${escapeHtml(getUIText("setting_popular_value_chip_label", "내 차종 인기값"))}</span>
+    <span class="setting-popular-value-chip__label">(</span><span class="setting-popular-value-chip__accent">${escapeHtml(sampleText)}</span><span class="setting-popular-value-chip__label">)</span>
+    <span class="setting-popular-value-chip__accent">${escapeHtml(values.join(" · "))}</span>
+  `;
+}
+
+function getSettingPopularDetailTitle() {
+  const carKey = String(settingPopularValuesState.carKey || "").trim();
+  if (carKey) return getUIText("setting_popular_value_car_title", "{car} 인기값", { car: carKey });
+  return getUIText("setting_popular_value_title", "내 차종 인기값");
+}
+
+function formatSettingPopularUpdated(epochSec) {
+  const sec = Number(epochSec || 0);
+  if (!Number.isFinite(sec) || sec <= 0) return "";
+  try {
+    return new Date(sec * 1000).toLocaleString(LANG === "ko" ? "ko-KR" : undefined, {
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit",
+    });
+  } catch {
+    return "";
+  }
+}
+
+function renderSettingPopularDetailHtml(p, entry) {
+  const values = Array.isArray(entry?.top_values) ? entry.top_values : [];
+  if (!values.length) {
+    return `<div class="setting-popular-detail"><div class="setting-popular-detail__empty">${escapeHtml(getUIText("setting_popular_value_empty", "표시할 설정값이 없습니다."))}</div></div>`;
+  }
+
+  const counts = values.map((item) => Number(item?.count ?? 0)).filter((count) => Number.isFinite(count) && count > 0);
+  const maxCount = Math.max(1, ...counts);
+
+  const rows = values.map((item) => {
+    const value = formatSettingPopularValue(p, item?.value);
+    const count = Number(item?.count ?? 0);
+    const width = Math.max(4, Math.min(100, Math.round((Math.max(0, count) / maxCount) * 100)));
+    return `
+      <button type="button" class="setting-popular-detail__row" style="--setting-popular-width:${width}%" data-setting-popular-value="${escapeHtml(item?.value ?? "")}">
+        <span class="setting-popular-detail__marker" aria-hidden="true"></span>
+        <span class="setting-popular-detail__main">
+          <span class="setting-popular-detail__value">${escapeHtml(value)}</span>
+          ${values.length > 1 ? `<span class="setting-popular-detail__bar" aria-hidden="true"></span>` : ""}
+        </span>
+        <span class="setting-popular-detail__count">${escapeHtml(`${count}대`)}</span>
+      </button>
+    `;
+  }).join("");
+
+  const updated = formatSettingPopularUpdated(settingPopularValuesState.fetchedAt);
+  const updatedHtml = updated
+    ? `<div class="setting-popular-detail__updated" style="margin-top:8px;font-size:11px;color:var(--md-on-surface-var,#8a8f98)">${escapeHtml(getUIText("setting_popular_value_updated", "최근 업데이트: {time}", { time: updated }))}</div>`
+    : "";
+
+  return `
+    <div class="setting-popular-detail${values.length <= 1 ? " setting-popular-detail--single" : ""}">
+      <div class="setting-popular-detail__head">
+        <span class="setting-popular-detail__name">${escapeHtml(getSettingPopularDetailTitle())}</span>
+        <span class="setting-popular-detail__range">${escapeHtml(getUIText("setting_popular_value_common_values", "많이 쓰는 값"))}</span>
+      </div>
+      <div class="setting-popular-detail__rows">${rows}</div>
+      ${updatedHtml}
+    </div>
+  `;
+}
+
+const SETTING_UNIT_STORAGE_KEY = "carrot.settingUnitIndex.v1";
+let settingUnitIndexStore = null;
+
+function getSettingUnitIndexStore() {
+  if (settingUnitIndexStore) return settingUnitIndexStore;
+  try {
+    settingUnitIndexStore = JSON.parse(localStorage.getItem(SETTING_UNIT_STORAGE_KEY) || "{}") || {};
+  } catch (_) {
+    settingUnitIndexStore = {};
+  }
+  return settingUnitIndexStore;
+}
+
+function saveSettingUnitIndex(name, index) {
+  const key = String(name || "").trim();
+  if (!key) return;
+  try {
+    const store = getSettingUnitIndexStore();
+    store[key] = index;
+    localStorage.setItem(SETTING_UNIT_STORAGE_KEY, JSON.stringify(store));
+  } catch (_) {}
+}
+
+function getSettingUnitIndex(name) {
+  const key = String(name || "").trim();
+  if (!key) return 0;
+  if (!(key in UNIT_INDEX)) {
+    const saved = Number(getSettingUnitIndexStore()[key]);
+    UNIT_INDEX[key] = Number.isInteger(saved) && saved >= 0 && saved < UNIT_CYCLE.length ? saved : 0;
+  }
+  if (!Number.isInteger(UNIT_INDEX[key]) || UNIT_INDEX[key] < 0 || UNIT_INDEX[key] >= UNIT_CYCLE.length) {
+    UNIT_INDEX[key] = 0;
+  }
+  return UNIT_INDEX[key];
+}
+
+function getSettingUnitValue(name) {
+  return UNIT_CYCLE[getSettingUnitIndex(name)] || UNIT_CYCLE[0] || 1;
+}
+
+function setSettingUnitButtonLabel(button, name) {
+  if (button) button.textContent = "x" + getSettingUnitValue(name);
+}
+
+function cycleSettingUnitValue(name) {
+  const key = String(name || "").trim();
+  if (!key) return;
+  UNIT_INDEX[key] = (getSettingUnitIndex(key) + 1) % UNIT_CYCLE.length;
+  saveSettingUnitIndex(key, UNIT_INDEX[key]);
+}
+
+function settingChevronSvg(direction = "left") {
+  const path = direction === "right" ? "M8.75 4.75 16 12l-7.25 7.25" : "M15.25 4.75 8 12l7.25 7.25";
+  return `
+    <svg class="setting-icon setting-icon--chevron" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="${path}"></path>
+    </svg>
+  `;
+}
+
+function setSettingItemsTitle(label) {
+  if (!itemsTitle) return;
+  const safeLabel = escapeHtml(label || "");
+  itemsTitle.innerHTML = `
+    <span class="setting-title-backIcon" aria-hidden="true">${settingChevronSvg("left")}</span>
+    <span class="setting-title-text">${safeLabel}</span>
+  `;
+}
+
+function getLanguageSettingOptions() {
+  const options = Array.isArray(window.CarrotDeviceLanguageOptions) ? window.CarrotDeviceLanguageOptions : [];
+  return options.length
+    ? options
+    : [
+        { code: "en", name: "English" },
+        { code: "ko", name: "한국어" },
+        { code: "zh-CHS", name: "中文（简体）" },
+      ];
+}
+
+function getSoundLanguageSettingOptions() {
+  return [
+    { code: "auto", name: getUIText("automatic", "Automatic") },
+    { code: "en", name: "English" },
+    { code: "ko", name: "한국어" },
+    { code: "zh-CHS", name: "中文" },
+  ];
+}
+
+function getSoundLanguageSettingOptionLabel(value) {
+  const text = String(value ?? "").trim();
+  const normalized = text.toLowerCase();
+  const match = getSoundLanguageSettingOptions().find((option) => String(option.code || "").trim().toLowerCase() === normalized);
+  return match?.name || text || getUIText("automatic", "Automatic");
+}
+
+function getResolvedSoundLanguageCode(value) {
+  const text = String(value ?? "").trim();
+  if (text && text.toLowerCase() !== "auto") return text;
+  const deviceLang = String(window.__CARROT_BOOTSTRAP__?.deviceLanguage || "").trim();
+  return deviceLang || LANG || "en";
+}
+
+function getSoundAssetDirForLanguage(value) {
+  let normalized = getResolvedSoundLanguageCode(value).replaceAll("_", "-").toLowerCase();
+  if (normalized.startsWith("main-")) normalized = normalized.slice(5);
+  if (normalized === "ko" || normalized.startsWith("ko-")) return "sounds";
+  if (normalized === "zh-chs" || normalized === "zh-hans" || normalized.startsWith("zh")) return "sounds_chs";
+  return "sounds_eng";
+}
+
+async function playSoundLanguageSample(value) {
+  const dir = getSoundAssetDirForLanguage(value);
+  const url = `/sound-assets/${encodeURIComponent(dir)}/audio_speed_down.wav`;
+  if (settingSoundSampleAudio) {
+    settingSoundSampleAudio.pause();
+    settingSoundSampleAudio = null;
+  }
+  const audio = new Audio(url);
+  settingSoundSampleAudio = audio;
+  audio.addEventListener("ended", () => {
+    if (settingSoundSampleAudio === audio) settingSoundSampleAudio = null;
+  }, { once: true });
+  await audio.play();
+}
+
+function getSettingOptionValues(name, config) {
+  if (String(name || "") === "SoundLanguageSetting") {
+    return getSoundLanguageSettingOptions().map((option) => String(option.code || "").trim()).filter(Boolean);
+  }
+  if (!config || !Number.isInteger(config.min) || !Number.isInteger(config.max)) return [];
+  const out = [];
+  for (let value = config.min; value <= config.max; value += 1) out.push(value);
+  return out;
+}
+
+function getSettingOptionLabel(name, value) {
+  if (String(name || "") === "SoundLanguageSetting") {
+    return getSoundLanguageSettingOptionLabel(value);
+  }
+  return formatSettingDisplayValue({ name }, value);
+}
+
+function syncSettingControlState(row, value) {
+  if (!row) return;
+  const text = String(value);
+  const valueButton = row.querySelector(".val");
+  if (valueButton) {
+    const displayText = formatSettingDisplayValue({ name: row.dataset.settingName || "" }, value);
+    valueButton.textContent = displayText;
+    valueButton.dataset.rawValue = text;
+  }
+
+  const toggle = row.querySelector(".setting-switch__input");
+  if (toggle) toggle.checked = Number(value) === 1;
+
+  const slider = row.querySelector(".setting-slider__input");
+  if (slider) slider.value = text;
+
+  row.querySelectorAll(".setting-segment").forEach((button) => {
+    button.classList.toggle("is-active", String(button.dataset.value) === text);
+    button.setAttribute("aria-pressed", String(button.dataset.value) === text ? "true" : "false");
+  });
+
+  const select = row.querySelector(".setting-select");
+  if (select) {
+    select.value = text;
+    if (select.tagName === "BUTTON") {
+      select.dataset.value = text;
+      select.textContent = getSettingOptionLabel(row.dataset.settingName || "", value);
+    }
+  }
+}
+
 let settingGroupTransitionLock = false;
 let settingRenderToken = 0;
 let pendingSettingFocus = null;
@@ -731,34 +1327,14 @@ let settingSearchEntries = [];
 let settingSearchScope = { type: "all", profileId: "" };
 const settingPageRoot = document.getElementById("pageSetting");
 let settingFabMenuOpen = false;
+let CURRENT_SETTING_DETAIL = null;
 
 function isCompactLandscapeMode() {
-  return window.matchMedia("(orientation: landscape)").matches;
-}
-
-function isFixedPortraitSettingSubnavMode() {
-  return window.matchMedia("(max-width: 640px) and (orientation: portrait)").matches;
-}
-
-function syncSettingSubnavFixedOffset() {
-  if (!settingSubnavWrap || !screenItems) return;
-
-  const shouldFix =
-    CURRENT_PAGE === "setting" &&
-    isFixedPortraitSettingSubnavMode() &&
-    screenItems.style.display !== "none" &&
-    settingSubnavWrap.style.display !== "none" &&
-    !settingPageRoot?.classList.contains("setting-profile-active");
-
-  if (!shouldFix) {
-    document.documentElement.style.removeProperty("--setting-fixed-subnav-height");
-    return;
-  }
-
-  const height = Math.ceil(settingSubnavWrap.getBoundingClientRect().height || settingSubnavWrap.offsetHeight || 0);
-  if (height > 0) {
-    document.documentElement.style.setProperty("--setting-fixed-subnav-height", `${height}px`);
-  }
+  // Wide layout = nav rail + two-column split. Shared with the whole app via
+  // CarrotLayout so fold/large-panel detection matches CSS.
+  return window.CarrotLayout
+    ? window.CarrotLayout.isWide()
+    : window.matchMedia("(min-aspect-ratio: 13/10), (horizontal-viewport-segments: 2), (vertical-viewport-segments: 2), (min-width: 640px) and (min-height: 650px)").matches;
 }
 
 function getLandscapeDefaultSettingGroup() {
@@ -841,42 +1417,6 @@ function formatSettingProfileDate(value) {
   }
 }
 
-function settingProfileMetaRows(profile) {
-  const meta = profile?.meta || {};
-  const rows = [];
-  if (profile?.created_at) {
-    rows.push([getUIText("setting_profile_created", "Created"), settingsDiffEscape(formatSettingProfileDate(profile.created_at))]);
-  }
-  if (meta.branch) rows.push([getUIText("branch", "Branch"), settingsDiffEscape(meta.branch)]);
-  if (meta.commit) {
-    const commitText = meta.commit_short || String(meta.commit).slice(0, 7);
-    const commitValue = meta.commit_url
-      ? `<a href="${settingsDiffEscape(meta.commit_url)}" target="_blank" rel="noopener">${settingsDiffEscape(commitText)}</a>`
-      : settingsDiffEscape(commitText);
-    rows.push([getUIText("commit", "Commit"), commitValue]);
-  }
-  return rows;
-}
-
-async function openSettingProfileInfo(profile) {
-  const rows = settingProfileMetaRows(profile);
-  const messageHtml = rows.length
-    ? `<div class="setting-profile-info">${rows.map(([label, value]) => `
-        <div class="setting-profile-panel__metaRow">
-          <span>${settingsDiffEscape(label)}</span>
-          <strong>${value}</strong>
-        </div>
-      `).join("")}</div>`
-    : `<div class="setting-profile-info setting-profile-info--empty">${settingsDiffEscape(getUIText("setting_profile_info_empty", "No profile metadata"))}</div>`;
-  await openAppDialog({
-    mode: "alert",
-    title: getUIText("setting_profile_info", "Profile Info"),
-    html: true,
-    messageHtml,
-    confirmLabel: getUIText("ok", "OK"),
-  });
-}
-
 async function saveSettingProfile(profileId, updates) {
   const payload = await postJson("/api/setting_profiles/update", { id: profileId, ...(updates || {}) });
   updateSettingProfilesFromPayload(payload);
@@ -896,7 +1436,6 @@ async function createSettingProfileFromCurrent() {
     updateSettingProfilesFromPayload(payload);
     const profile = payload.profile;
     renderGroups({ animateGroups: false });
-    renderSettingSubnav();
     if (profile?.id) {
       await selectGroup(settingProfileGroup(profile.id));
       showAppToast(getUIText("setting_profile_saved", "Profile saved"));
@@ -981,7 +1520,6 @@ async function deleteSettingProfile(profile) {
     updateSettingProfilesFromPayload(payload);
     CURRENT_GROUP = null;
     renderGroups({ animateGroups: false });
-    renderSettingSubnav();
     showSettingScreen("groups", false);
     showAppToast(getUIText("setting_profile_deleted", "Profile deleted"));
   } catch (e) {
@@ -990,11 +1528,11 @@ async function deleteSettingProfile(profile) {
 }
 
 function closeSettingProfileActionMenus(exceptPanel = null) {
-  document.querySelectorAll(".setting-profile-action-menu.is-open").forEach((menu) => {
+  document.querySelectorAll(".setting-profile-menu.is-open").forEach((menu) => {
     if (exceptPanel && menu === exceptPanel) return;
     menu.classList.remove("is-open");
-    const button = menu.querySelector(".setting-profile-action-menu__button");
-    const panel = menu.querySelector(".setting-profile-action-menu__panel");
+    const button = menu.querySelector(".setting-profile-menu__button");
+    const panel = menu.querySelector(".setting-profile-menu__panel");
     if (button) button.setAttribute("aria-expanded", "false");
     if (panel) {
       panel.hidden = true;
@@ -1003,38 +1541,84 @@ function closeSettingProfileActionMenus(exceptPanel = null) {
   });
 }
 
-function makeSettingProfileMenuItem(label, onClick, className = "") {
+function settingProfileActionIcon(kind) {
+  const paths = {
+    edit: "M4 20h4l10.5-10.5a2.12 2.12 0 0 0-3-3L5 17v3m11-12 3 3",
+    search: "M10.5 18a7.5 7.5 0 1 1 5.3-12.8 7.5 7.5 0 0 1 0 10.6L20 20",
+    info: "M12 17v-6m0-4h.01M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20",
+    apply: "m5 12 4 4L19 6",
+    delete: "M6 7h12m-10 0 .7 13h6.6L16 7M10 7V4h4v3",
+  };
+  const path = paths[kind] || paths.info;
+  return `
+    <svg class="setting-profile-action__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="${path}"></path>
+    </svg>
+  `;
+}
+
+function makeSettingProfileMenuItem({ label, icon = "info", onClick, className = "" }) {
   const button = document.createElement("button");
   button.type = "button";
-  button.className = `setting-profile-action-menu__item ui-dropdown-menu__item${className ? ` ${className}` : ""}`;
+  button.className = `setting-profile-menu__item ui-dropdown-menu__item${className ? ` ${className}` : ""}`;
   button.setAttribute("role", "menuitem");
-  button.textContent = label;
+  button.innerHTML = `
+    ${settingProfileActionIcon(icon)}
+    <span>${settingsDiffEscape(label)}</span>
+  `;
   button.onclick = (event) => {
     event.stopPropagation();
     closeSettingProfileActionMenus();
-    onClick();
+    if (typeof onClick === "function") onClick();
   };
   return button;
 }
 
-function appendSettingProfileHeader(profile, container) {
-  const panel = document.createElement("div");
-  panel.className = "setting-profile-panel";
+function renderSettingProfileMetaRows(profile) {
+  const meta = profile?.meta || {};
+  const created = profile?.created_at ? settingsDiffEscape(formatSettingProfileDate(profile.created_at)) : "-";
+  const branch = meta.branch ? settingsDiffEscape(meta.branch) : "-";
+  let commit = "-";
+  if (meta.commit) {
+    const commitText = meta.commit_short || String(meta.commit).slice(0, 7);
+    commit = meta.commit_url
+      ? `<a href="${settingsDiffEscape(meta.commit_url)}" target="_blank" rel="noopener">${settingsDiffEscape(commitText)}</a>`
+      : settingsDiffEscape(commitText);
+  }
+  return [
+    [getUIText("setting_profile_created", "Created"), created],
+    [getUIText("branch", "Branch"), branch],
+    [getUIText("commit", "Commit"), commit],
+  ];
+}
 
-  const titleRow = document.createElement("div");
-  titleRow.className = "setting-profile-panel__titleRow";
-  const input = document.createElement("input");
-  input.className = "setting-profile-panel__name";
-  input.type = "text";
-  input.maxLength = 40;
-  input.value = profile.name || "";
-  input.setAttribute("aria-label", getUIText("setting_profile_name", "Profile name"));
+function appendSettingProfileHeader(profile, container) {
+  if (!container || !profile) return;
+  const panel = document.createElement("div");
+  panel.className = "setting-profile-panel setting-section-block ui-stagger-item";
+
+  const card = document.createElement("div");
+  card.className = "setting-profile-manage-card setting-group-card";
+  const valueCount = Object.keys(profile.values || {}).length;
+
+  const nameRow = document.createElement("div");
+  nameRow.className = "setting-profile-row setting-profile-row--name";
+  const nameLabel = document.createElement("div");
+  nameLabel.className = "setting-profile-row__label";
+  nameLabel.textContent = getUIText("setting_profile_card_title", "Profile ({count})", { count: valueCount });
+  const nameInput = document.createElement("input");
+  nameInput.className = "setting-profile-name-input";
+  nameInput.type = "text";
+  nameInput.maxLength = 40;
+  nameInput.value = profile.name || "";
+  nameInput.setAttribute("aria-label", getUIText("setting_profile_name", "Profile name"));
+
   let nameSaveTimer = 0;
   let nameSaveInFlight = null;
   async function persistProfileName() {
-    const nextName = input.value.trim();
+    const nextName = nameInput.value.trim();
     if (!nextName) {
-      input.value = profile.name || "";
+      nameInput.value = profile.name || "";
       return;
     }
     if (nextName === profile.name) return;
@@ -1043,49 +1627,50 @@ function appendSettingProfileHeader(profile, container) {
       if (nextName === profile.name) return;
     }
     try {
-      input.classList.add("is-saving");
+      nameInput.classList.add("is-saving");
       nameSaveInFlight = saveSettingProfile(profile.id, { name: nextName });
       const nextProfile = await nameSaveInFlight;
       if (nextProfile) profile.name = nextProfile.name;
-      if (itemsTitle) itemsTitle.textContent = profile.name;
       renderGroups({ animateGroups: false });
-      renderSettingSubnav();
+      setSettingItemsTitle(profile.name);
+      showAppToast(getUIText("setting_profile_saved", "Profile saved"));
     } catch (e) {
       showAppToast(e?.message || getUIText("setting_profile_save_failed", "Failed to save profile"), { tone: "error" });
     } finally {
       nameSaveInFlight = null;
-      input.classList.remove("is-saving");
+      nameInput.classList.remove("is-saving");
     }
   }
-  function scheduleProfileNameSave(delay = 500) {
+  function scheduleProfileNameSave(delay = 650) {
     if (nameSaveTimer) clearTimeout(nameSaveTimer);
     nameSaveTimer = window.setTimeout(() => {
       nameSaveTimer = 0;
       persistProfileName().catch(() => {});
     }, delay);
   }
-  input.addEventListener("input", () => scheduleProfileNameSave());
-  input.addEventListener("blur", () => {
+  nameInput.addEventListener("input", () => scheduleProfileNameSave());
+  nameInput.addEventListener("blur", () => {
     if (nameSaveTimer) {
       clearTimeout(nameSaveTimer);
       nameSaveTimer = 0;
     }
     persistProfileName().catch(() => {});
   });
-  input.addEventListener("keydown", (event) => {
+  nameInput.addEventListener("keydown", (event) => {
     if (event.key !== "Enter") return;
     event.preventDefault();
     if (nameSaveTimer) {
       clearTimeout(nameSaveTimer);
       nameSaveTimer = 0;
     }
-    persistProfileName().then(() => input.blur()).catch(() => {});
+    persistProfileName().then(() => nameInput.blur()).catch(() => {});
   });
+
   const menu = document.createElement("div");
-  menu.className = "setting-profile-action-menu ui-dropdown-menu";
+  menu.className = "setting-profile-menu ui-dropdown-menu";
   const menuBtn = document.createElement("button");
   menuBtn.type = "button";
-  menuBtn.className = "setting-profile-action-menu__button ui-dropdown-menu__button";
+  menuBtn.className = "setting-profile-menu__button ui-dropdown-menu__button";
   menuBtn.setAttribute("aria-haspopup", "menu");
   menuBtn.setAttribute("aria-expanded", "false");
   menuBtn.setAttribute("aria-label", getUIText("setting_profile_menu", "Profile menu"));
@@ -1095,28 +1680,27 @@ function appendSettingProfileHeader(profile, container) {
     </svg>
   `;
   const menuPanel = document.createElement("div");
-  menuPanel.className = "setting-profile-action-menu__panel ui-dropdown-menu__panel";
+  menuPanel.className = "setting-profile-menu__panel ui-dropdown-menu__panel";
   menuPanel.setAttribute("role", "menu");
   menuPanel.setAttribute("aria-hidden", "true");
   menuPanel.hidden = true;
-  menuPanel.appendChild(makeSettingProfileMenuItem(
-    getUIText("setting_profile_search", "Search Profile"),
-    () => openSettingSearchPanel({ scope: { type: "profile", profileId: profile.id } }).catch(() => {}),
-  ));
-  menuPanel.appendChild(makeSettingProfileMenuItem(
-    getUIText("setting_profile_info", "Info"),
-    () => openSettingProfileInfo(profile),
-  ));
-  menuPanel.appendChild(makeSettingProfileMenuItem(
-    getUIText("apply", "Apply"),
-    () => applySettingProfile(profile),
-    "setting-profile-action-menu__item--primary",
-  ));
-  menuPanel.appendChild(makeSettingProfileMenuItem(
-    getUIText("delete", "Delete"),
-    () => deleteSettingProfile(profile),
-    "setting-profile-action-menu__item--danger",
-  ));
+  menuPanel.appendChild(makeSettingProfileMenuItem({
+    label: getUIText("apply", "Apply"),
+    icon: "apply",
+    onClick: () => applySettingProfile(profile),
+    className: "setting-profile-menu__item--primary",
+  }));
+  menuPanel.appendChild(makeSettingProfileMenuItem({
+    label: getUIText("setting_profile_search", "Search Profile"),
+    icon: "search",
+    onClick: () => openSettingSearchPanel({ scope: { type: "profile", profileId: profile.id } }).catch(() => {}),
+  }));
+  menuPanel.appendChild(makeSettingProfileMenuItem({
+    label: getUIText("delete", "Delete"),
+    icon: "delete",
+    onClick: () => deleteSettingProfile(profile),
+    className: "setting-profile-menu__item--danger",
+  }));
   menuBtn.onclick = (event) => {
     event.stopPropagation();
     const nextOpen = !menu.classList.contains("is-open");
@@ -1128,10 +1712,31 @@ function appendSettingProfileHeader(profile, container) {
   };
   menu.appendChild(menuBtn);
   menu.appendChild(menuPanel);
-  titleRow.appendChild(input);
-  titleRow.appendChild(menu);
 
-  panel.appendChild(titleRow);
+  const rows = document.createElement("div");
+  rows.className = "setting-profile-card__rows";
+
+  nameRow.appendChild(nameLabel);
+  nameRow.appendChild(nameInput);
+  nameRow.appendChild(menu);
+  rows.appendChild(nameRow);
+
+  renderSettingProfileMetaRows(profile).forEach(([label, value]) => {
+    const row = document.createElement("div");
+    row.className = "setting-profile-row";
+    const rowLabel = document.createElement("div");
+    rowLabel.className = "setting-profile-row__label";
+    rowLabel.textContent = label;
+    const rowValue = document.createElement("div");
+    rowValue.className = "setting-profile-row__value";
+    rowValue.innerHTML = value;
+    row.appendChild(rowLabel);
+    row.appendChild(rowValue);
+    rows.appendChild(row);
+  });
+
+  card.appendChild(rows);
+  panel.appendChild(card);
   container.appendChild(panel);
 }
 
@@ -1191,6 +1796,7 @@ function mountSettingSearchOverlay() {
 
 function makeSettingSearchEntry({ source, profile = null, group, item }) {
   const groupLabel = getSettingGroupLabel(group);
+  const contextGroupLabel = getSettingItemContextLabel(group, item);
   const title = formatItemText(item, "title", "etitle", "");
   const descr = formatItemText(item, "descr", "edescr", "");
   const isProfile = source === "profile" && profile?.id;
@@ -1199,8 +1805,8 @@ function makeSettingSearchEntry({ source, profile = null, group, item }) {
     ? getUIText("setting_search_source_profile", "Profile")
     : getUIText("setting_search_source_carrot", "CarrotPilot");
   const contextLabel = isProfile
-    ? `${profileName} / ${groupLabel}`
-    : groupLabel;
+    ? `${profileName} / ${contextGroupLabel}`
+    : contextGroupLabel;
 
   return {
     source: isProfile ? "profile" : "carrot",
@@ -1210,11 +1816,12 @@ function makeSettingSearchEntry({ source, profile = null, group, item }) {
     group: isProfile ? settingProfileGroup(profile.id) : group,
     originalGroup: group,
     groupLabel,
+    contextGroupLabel,
     contextLabel,
     name: item.name,
     title,
     descr,
-    haystack: [sourceLabel, profileName, groupLabel, item.name, title, descr].join("\n").toLowerCase(),
+    haystack: [sourceLabel, profileName, groupLabel, contextGroupLabel, item.name, title, descr].join("\n").toLowerCase(),
   };
 }
 
@@ -1303,8 +1910,18 @@ function hasSettingViewportLayoutChanged() {
   );
 }
 
+function isPortraitInternalScrollMode() {
+  if (window.CarrotLayout?.isWide?.()) return false;
+  return Boolean(window.matchMedia && window.matchMedia("(max-width: 640px), (aspect-ratio < 13/10) and (max-width: 639px), (aspect-ratio < 13/10) and (max-height: 649px)").matches);
+}
+
 function getSettingItemsScrollContainer() {
   if (isCompactLandscapeMode() && screenItems) return screenItems;
+  // 세로 구조(뷰포트 고정 높이 + 화면 내부 스크롤)에서는 활성 화면이 스크롤러다.
+  if (isPortraitInternalScrollMode()) {
+    if (screenItems && screenItems.style.display !== "none" && !screenItems.classList.contains("hidden")) return screenItems;
+    if (screenGroups && screenGroups.style.display !== "none" && !screenGroups.classList.contains("hidden")) return screenGroups;
+  }
   return document.scrollingElement || document.documentElement || document.body;
 }
 
@@ -1363,7 +1980,7 @@ function resetSettingItemsViewport() {
 function hasRenderedSettingItems(group = CURRENT_GROUP) {
   const itemsBox = document.getElementById("items");
   if (!itemsBox || !group) return false;
-  return itemsBox.dataset.renderedGroup === group && itemsBox.childElementCount > 0;
+  return itemsBox.dataset.renderedGroup === group && !itemsBox.dataset.renderedDetail && itemsBox.childElementCount > 0;
 }
 
 function isCarrotSettingTabActive() {
@@ -1373,12 +1990,82 @@ function isCarrotSettingTabActive() {
 function syncSettingGroupChrome(group = CURRENT_GROUP) {
   const meta = document.getElementById("groupMeta");
   const list = getSettingItemEntriesForGroup(group);
-  if (meta && group) meta.textContent = `${group} / ${list.length}`;
+  const profile = getSettingProfileByGroup(group);
   const groupLabel = group ? getSettingGroupLabel(group) : "";
+  if (CURRENT_SETTING_DETAIL) {
+    const detailEntry = getSettingDetailEntry(group, CURRENT_SETTING_DETAIL);
+    const detailTitle = detailEntry?.item ? getSettingDetailTitle(detailEntry.item) : CURRENT_SETTING_DETAIL;
+    if (meta && group) meta.textContent = `${group} / 1`;
+    if (group) {
+      settingTitle.textContent = (UI_STRINGS[LANG].setting || "Setting") + " - " + detailTitle;
+      setSettingItemsTitle(detailTitle);
+    }
+    return;
+  }
+  if (meta && group) {
+    meta.classList.remove("setting-profile-meta");
+    meta.textContent = profile ? "" : `${group} / ${list.length}`;
+  }
   if (group) {
     settingTitle.textContent = (UI_STRINGS[LANG].setting || "Setting") + " - " + groupLabel;
-    if (itemsTitle) itemsTitle.textContent = groupLabel;
+    setSettingItemsTitle(groupLabel);
   }
+}
+
+function getSettingDetailEntry(group, name) {
+  const target = String(name || "").trim();
+  if (!target) return null;
+  const entries = getSettingItemEntriesForGroup(group);
+  return entries.find((entry) => entry?.item?.name === target) || null;
+}
+
+function getSettingDetailTitle(item) {
+  return formatItemText(item, "title", "etitle", item?.name || "");
+}
+
+function isSettingInlineControlTarget(target) {
+  return Boolean(target?.closest?.(".ctrl, button, input, select, textarea, a"));
+}
+
+const SETTING_VALUE_CONTROL_HIT_OUTSET = 8;
+
+function isSettingValueControlHit(event, row = null) {
+  if (!event || typeof event.clientX !== "number" || typeof event.clientY !== "number") return false;
+  const root = row || event.target?.closest?.(".setting[data-setting-name]");
+  const ctrl = root?.querySelector?.(".ctrl--value");
+  if (!ctrl) return false;
+  const rect = ctrl.getBoundingClientRect();
+  const outset = SETTING_VALUE_CONTROL_HIT_OUTSET;
+  return (
+    event.clientX >= rect.left - outset &&
+    event.clientX <= rect.right + outset &&
+    event.clientY >= rect.top - outset &&
+    event.clientY <= rect.bottom + outset
+  );
+}
+
+async function selectSettingDetail(group, name, pushHistory = true) {
+  const targetGroup = group || CURRENT_GROUP;
+  const targetName = String(name || "").trim();
+  if (!targetGroup || !targetName) return;
+
+  saveCurrentSettingScrollPosition(targetGroup);
+  CURRENT_GROUP = targetGroup;
+  CURRENT_SETTING_DETAIL = targetName;
+  if (pushHistory) {
+    history.pushState({
+      page: "setting",
+      screen: "detail",
+      group: targetGroup,
+      settingName: targetName,
+    }, "");
+  }
+  await transitionSettingItemsContent(() => renderItems(targetGroup, {
+    detailName: targetName,
+    scrollMode: "top",
+    animateItems: false,
+    forceValues: true,
+  }), "forward");
 }
 
 function settingMarqueeHtml(text, className) {
@@ -1393,10 +2080,20 @@ function syncSettingMarqueeOverflow(root = document) {
     const elWidth = el.clientWidth || 0;
     if (elWidth <= 0) return;
     const overflow = content.scrollWidth > el.clientWidth + 2;
-    const distance = Math.max(0, content.scrollWidth - el.clientWidth + 18);
+    const distance = Math.max(0, content.scrollWidth - el.clientWidth);
     const nextDistance = `${distance}px`;
     const prevDistance = el.style.getPropertyValue("--setting-marquee-distance");
     const wasOverflowing = el.classList.contains("is-overflowing");
+    if (el._settingMarqueeResetTimer) {
+      clearTimeout(el._settingMarqueeResetTimer);
+      el._settingMarqueeResetTimer = null;
+    }
+    if (el._settingMarqueeRestoreTimer) {
+      clearTimeout(el._settingMarqueeRestoreTimer);
+      el._settingMarqueeRestoreTimer = null;
+    }
+    el._settingMarqueeResetting = false;
+    el.classList.remove("is-manual");
     el.style.setProperty("--setting-marquee-distance", nextDistance);
     el.scrollLeft = 0;
     if (!overflow) {
@@ -1537,16 +2234,18 @@ function renderSettingSearchResults(query = "") {
         <span>${escapeHtml(section.title)}</span>
         <strong>${section.entries.length}</strong>
       </div>
+      <div class="setting-search-section__body"></div>
     `;
     settingSearchResults.appendChild(sectionEl);
+    const sectionBody = sectionEl.querySelector(".setting-search-section__body");
 
     section.entries.forEach((entry) => {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "setting-search-result";
       const metaLabel = entry.source === "profile"
-        ? `${entry.profileName} / ${entry.groupLabel}`
-        : entry.groupLabel;
+        ? `${entry.profileName} / ${entry.contextGroupLabel || entry.groupLabel}`
+        : entry.contextGroupLabel || entry.groupLabel;
       button.innerHTML = `
         <div class="setting-search-result__group">${highlightSettingSearchText(metaLabel, trimmed)}</div>
         <div class="setting-search-result__title">${highlightSettingSearchText(entry.title || entry.name, trimmed)}</div>
@@ -1560,7 +2259,7 @@ function renderSettingSearchResults(query = "") {
             settingProfileSectionExpandedState.set(`${entry.profileId}:${entry.originalGroup}`, true);
           }
           closeSettingSearchPanel({ syncHistory: false });
-          if (CURRENT_GROUP === entry.group && screenItems && screenItems.style.display !== "none") {
+          if (CURRENT_GROUP === entry.group && !CURRENT_SETTING_DETAIL && screenItems && screenItems.style.display !== "none") {
             focusSettingItem(entry.name);
             return;
           }
@@ -1569,7 +2268,7 @@ function renderSettingSearchResults(query = "") {
           showAppToast(e.message || "Search jump failed", { tone: "error" });
         }
       };
-      sectionEl.appendChild(button);
+      sectionBody.appendChild(button);
     });
   });
 }
@@ -1579,7 +2278,6 @@ async function openSettingSearchPanel(options = {}) {
   const scope = options.scope || { type: "all", profileId: "" };
   if (CURRENT_PAGE !== "setting") return;
   closeSettingFabMenu();
-  closeSettingProfileActionMenus();
   if (!SETTINGS) {
     try {
       await loadSettings();
@@ -1603,8 +2301,9 @@ async function openSettingSearchPanel(options = {}) {
   if (pushHistory && !(state.page === "setting" && state.search)) {
     history.pushState({
       page: "setting",
-      screen: (screenItems && screenItems.style.display !== "none") ? "items" : "groups",
+      screen: CURRENT_SETTING_DETAIL ? "detail" : ((screenItems && screenItems.style.display !== "none") ? "items" : "groups"),
       group: CURRENT_GROUP || null,
+      settingName: CURRENT_SETTING_DETAIL || null,
       search: true,
       searchScope: settingSearchScope.type,
       profileId: settingSearchScope.profileId || null,
@@ -1624,16 +2323,19 @@ async function openSettingSearchPanel(options = {}) {
   });
 }
 
-function toggleSettingSearchPanel() {
-  if (!settingSearchPanel) return;
-  if (settingSearchPanel.hidden) {
-    openSettingSearchPanel().catch(() => {});
-  }
-  else closeSettingSearchPanel({ syncHistory: true });
-}
-
 if (btnSettingSearch) {
-  btnSettingSearch.onclick = () => toggleSettingFabMenu();
+  btnSettingSearch.addEventListener("animationend", (event) => {
+    if (event.animationName === "setting-fab-bounce") {
+      btnSettingSearch.classList.remove("is-bouncing");
+    }
+  });
+  btnSettingSearch.onclick = () => {
+    // 빠른 연타에도 바운스가 다시 재생되도록 클래스 제거 후 reflow 강제
+    btnSettingSearch.classList.remove("is-bouncing");
+    void btnSettingSearch.offsetWidth;
+    btnSettingSearch.classList.add("is-bouncing");
+    toggleSettingFabMenu();
+  };
 }
 
 if (btnSettingFabSearch) {
@@ -1716,8 +2418,9 @@ window.addEventListener("keydown", (e) => {
     closeSettingSearchPanel({ syncHistory: true });
     return;
   }
-  if (e.key === "Escape") {
+  if (e.key === "Escape" && document.querySelector(".setting-profile-menu.is-open")) {
     closeSettingProfileActionMenus();
+    return;
   }
   if (e.key === "Escape" && settingFabMenuOpen) {
     closeSettingFabMenu();
@@ -1725,72 +2428,112 @@ window.addEventListener("keydown", (e) => {
 });
 
 document.addEventListener("pointerdown", (e) => {
-  if (!(e.target instanceof Element && e.target.closest(".setting-profile-action-menu"))) {
+  if (!(e.target instanceof Element) || !e.target.closest(".setting-profile-menu")) {
     closeSettingProfileActionMenus();
   }
-  if (!settingFabMenuOpen || !settingFabMenu) return;
-  if (settingFabMenu.contains(e.target)) return;
-  closeSettingFabMenu();
+  if (settingFabMenuOpen && settingFabMenu && !settingFabMenu.contains(e.target)) {
+    closeSettingFabMenu();
+  }
 });
 
 window.addEventListener("carrot:pagechange", (event) => {
   if (event?.detail?.page !== "setting") {
-    closeSettingFabMenu();
     closeSettingProfileActionMenus();
+    closeSettingFabMenu();
   }
 });
 
-function updateSettingSubnavLayoutState() {
-  if (!settingSubnav || !settingSubnavWrap) {
-    syncSettingSubnavFixedOffset();
-    return;
+async function transitionSettingItemsContent(renderContent, direction = "forward") {
+  if (typeof renderContent !== "function") return false;
+
+  const reduceMotion = Boolean(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  const canAnimate =
+    !window.__CARROT_WEB_BOOTSTRAPPING &&
+    !reduceMotion &&
+    !isCompactLandscapeMode() &&
+    !settingGroupTransitionLock &&
+    settingScreenHost &&
+    screenItems &&
+    screenItems.style.display !== "none" &&
+    !screenItems.classList.contains("hidden");
+
+  if (!canAnimate) {
+    if (screenItems && (screenItems.style.display === "none" || screenItems.classList.contains("hidden"))) {
+      showSettingScreen("items", false);
+    }
+    await renderContent();
+    return false;
   }
 
-  const maxScrollLeft = Math.max(settingSubnav.scrollWidth - settingSubnav.clientWidth, 0);
-  const isScrollable = maxScrollLeft > 4;
-  settingSubnavWrap.classList.toggle("is-scrollable", isScrollable);
-  syncSettingSubnavFixedOffset();
-}
+  settingGroupTransitionLock = true;
+  const snapshot = screenItems.cloneNode(true);
+  snapshot.classList.add("setting-screen-snapshot");
+  snapshot.querySelectorAll(".is-longpressing, .is-bouncing").forEach((el) => {
+    el.classList.remove("is-longpressing", "is-bouncing");
+  });
+  snapshot.setAttribute("aria-hidden", "true");
+  snapshot.style.pointerEvents = "none";
 
-function getSettingSubnavGroups() {
-  return getSettingGroupsForDisplay().filter((entry) =>
-    !isSettingProfilesDivider(entry) &&
-    !isSettingFavoritesGroup(entry.group) &&
-    !isSettingProfileGroup(entry.group)
-  );
-}
+  try {
+    settingScreenHost.classList.add("setting-screen-transitioning");
+    document.getElementById("pageSetting")?.classList.add("setting-screen-transitioning");
+    settingScreenHost.appendChild(snapshot);
+    prepareSwipeFrame(settingScreenHost, snapshot);
+    snapshot.style.zIndex = "1";
+    screenItems.style.visibility = "hidden";
+    screenItems.style.pointerEvents = "none";
 
-function getSettingSubnavGroupIndex(group = CURRENT_GROUP) {
-  const groups = getSettingSubnavGroups();
-  return groups.findIndex((entry) => entry.group === group);
-}
+    await renderContent();
 
-function getSettingSubnavShiftTarget(direction) {
-  const groups = getSettingSubnavGroups();
-  if (!groups.length) return null;
+    screenItems.querySelectorAll(".ui-stagger-item").forEach((el) => el.classList.remove("ui-stagger-item"));
+    screenItems.style.visibility = "";
+    const frame = prepareSwipeFrame(settingScreenHost, snapshot, screenItems);
+    if (!frame) {
+      resetPageRuntimeStyles(screenItems);
+      snapshot.remove();
+      settingScreenHost.classList.remove("setting-screen-transitioning");
+      document.getElementById("pageSetting")?.classList.remove("setting-screen-transitioning");
+      settingGroupTransitionLock = false;
+      return false;
+    }
 
-  const currentIndex = Math.max(0, getSettingSubnavGroupIndex());
-  const delta = direction === "forward" ? SETTING_SUBNAV_PAGE_STEP : -SETTING_SUBNAV_PAGE_STEP;
-  const nextIndex = Math.max(0, Math.min(currentIndex + delta, groups.length - 1));
+    applySwipeDrag(frame, 0, direction, false, { fade: false });
+    await new Promise((resolve) => {
+      settleSwipe(frame, direction, true, resolve, {
+        durationMs: SETTING_SCREEN_SLIDE_MS,
+        easing: SETTING_SCREEN_SLIDE_EASE,
+        fade: false,
+      });
+    });
 
-  return {
-    currentIndex,
-    nextIndex,
-    group: groups[nextIndex]?.group || null,
-    reachedEdge: nextIndex === currentIndex,
-  };
-}
-
-function stripIdsFromClone(root) {
-  if (!root) return;
-  if (root.id) root.removeAttribute("id");
-  root.querySelectorAll("[id]").forEach((node) => node.removeAttribute("id"));
+    clearPageTransitionClasses(screenItems);
+    resetPageRuntimeStyles(screenItems);
+    snapshot.remove();
+    settingScreenHost.style.minHeight = "";
+    settingScreenHost.classList.remove("setting-screen-transitioning");
+    document.getElementById("pageSetting")?.classList.remove("setting-screen-transitioning");
+    settingGroupTransitionLock = false;
+    scheduleSettingOverflowSync(screenItems);
+    return true;
+  } catch (e) {
+    clearPageTransitionClasses(screenItems);
+    resetPageRuntimeStyles(screenItems);
+    if (snapshot.parentElement) snapshot.remove();
+    if (settingScreenHost) {
+      settingScreenHost.style.minHeight = "";
+      settingScreenHost.classList.remove("setting-screen-transitioning");
+    }
+    document.getElementById("pageSetting")?.classList.remove("setting-screen-transitioning");
+    settingGroupTransitionLock = false;
+    throw e;
+  }
 }
 
 async function activateSettingGroup(group, pushHistory = true, options = {}) {
   if (!isCarrotSettingTabActive()) return;
   const nextGroup = group || CURRENT_GROUP;
   const previousGroup = CURRENT_GROUP;
+  CURRENT_SETTING_DETAIL = null;
   const scrollMode = options.scrollMode || "top";
   const animateItems = options.animateItems !== false;
   const animateGroups = options.animateGroups !== false;
@@ -1804,12 +2547,13 @@ async function activateSettingGroup(group, pushHistory = true, options = {}) {
   }
 
   CURRENT_GROUP = group;
-  renderGroups({ animateGroups });
+  // 드릴인 시 그룹 목록을 재생성/재-stagger 하지 않는다 — 그 변화가 '슬라이드로 나가는 중인'
+  // 최상위 메뉴에 보여서 어색했다. 활성 표시만 제자리 갱신(reuse 경로)한다.
+  renderGroups({ animateGroups: false });
   if (isCompactLandscapeMode() && CURRENT_PAGE === "setting") {
     showSettingScreen("items", false);
     history.replaceState({ page: "setting", screen: "items", group: CURRENT_GROUP || null }, "");
     syncSettingGroupChrome(group);
-    if (typeof centerActiveSettingSubnavTab === "function") centerActiveSettingSubnavTab("auto");
     if (canReuseRenderedGroup) {
       requestAnimationFrame(() => {
         if (scrollMode === "restore") {
@@ -1830,13 +2574,12 @@ async function activateSettingGroup(group, pushHistory = true, options = {}) {
     return;
   }
 
-  showSettingScreen("items", pushHistory);
-  if (!pushHistory) {
-    history.replaceState({ page: "setting", screen: "items", group: CURRENT_GROUP || null }, "");
-  }
-  syncSettingGroupChrome(group);
-  if (typeof centerActiveSettingSubnavTab === "function") centerActiveSettingSubnavTab("auto");
   if (canReuseRenderedGroup) {
+    showSettingScreen("items", pushHistory);
+    if (!pushHistory) {
+      history.replaceState({ page: "setting", screen: "items", group: CURRENT_GROUP || null }, "");
+    }
+    syncSettingGroupChrome(group);
     requestAnimationFrame(() => {
       if (scrollMode === "restore") {
         setSettingItemsScrollTop(
@@ -1848,310 +2591,19 @@ async function activateSettingGroup(group, pushHistory = true, options = {}) {
     });
     return;
   }
+  // 단계 진입(items)은 좌우 슬라이드로만 보여준다 — 행별 세로 stagger 없이
+  // 한 덩어리로 슬라이드 인 (One UI). 세로 stagger 는 설정 첫 진입에서만.
   await renderItems(group, {
     scrollMode,
     scrollTop: options.scrollTop,
-    animateItems,
+    animateItems: false,
+    allowHidden: true,
   });
-}
-
-async function animateSettingGroupSwitch(group, direction = "forward") {
-  if (!group || group === CURRENT_GROUP) {
-    centerActiveSettingSubnavTab("smooth");
-    return;
+  showSettingScreen("items", pushHistory);
+  if (!pushHistory) {
+    history.replaceState({ page: "setting", screen: "items", group: CURRENT_GROUP || null }, "");
   }
-
-  if (settingGroupTransitionLock || !settingScreenHost || !screenItems || screenItems.style.display === "none") {
-    await activateSettingGroup(group, false);
-    return;
-  }
-
-  settingGroupTransitionLock = true;
-  if (typeof stopSettingSubnavMotion === "function") stopSettingSubnavMotion();
-
-  const snapshot = screenItems.cloneNode(true);
-  stripIdsFromClone(snapshot);
-  snapshot.setAttribute("aria-hidden", "true");
-  snapshot.style.pointerEvents = "none";
-
-  try {
-    settingScreenHost.appendChild(snapshot);
-    prepareSwipeFrame(settingScreenHost, snapshot);
-    screenItems.style.visibility = "hidden";
-    await activateSettingGroup(group, false);
-    screenItems.style.visibility = "";
-    const frame = prepareSwipeFrame(settingScreenHost, snapshot, screenItems);
-    if (!frame) {
-      snapshot.remove();
-      settingGroupTransitionLock = false;
-      return;
-    }
-
-    applySwipeDrag(frame, 0, direction);
-    settleSwipe(frame, direction, true, () => {
-      clearPageTransitionClasses(screenItems);
-      resetPageRuntimeStyles(screenItems);
-      if (snapshot.parentElement) snapshot.remove();
-      settingScreenHost.style.minHeight = "";
-      settingGroupTransitionLock = false;
-    });
-  } catch (e) {
-    screenItems.style.visibility = "";
-    if (snapshot.parentElement) snapshot.remove();
-    settingScreenHost.style.minHeight = "";
-    settingGroupTransitionLock = false;
-    throw e;
-  }
-}
-
-function getCenteredSettingSubnavGroup() {
-  if (!settingSubnav) return null;
-  const tabs = Array.from(settingSubnav.querySelectorAll(".setting-subnav__tab"));
-  if (!tabs.length) return null;
-
-  const viewport = settingSubnav.getBoundingClientRect();
-  const centerX = viewport.left + (viewport.width / 2);
-  let bestGroup = null;
-  let bestDistance = Number.POSITIVE_INFINITY;
-
-  tabs.forEach((tab) => {
-    const rect = tab.getBoundingClientRect();
-    const tabCenter = rect.left + (rect.width / 2);
-    const distance = Math.abs(tabCenter - centerX);
-    if (distance < bestDistance) {
-      bestDistance = distance;
-      bestGroup = tab.dataset.group || null;
-    }
-  });
-
-  return bestGroup;
-}
-
-function centerActiveSettingSubnavTab(behavior = "smooth") {
-  if (!settingSubnav) return;
-  const activeTab = settingSubnav.querySelector(".setting-subnav__tab.is-active");
-  if (activeTab) {
-    const maxScrollLeft = Math.max(settingSubnav.scrollWidth - settingSubnav.clientWidth, 0);
-    const targetLeft = activeTab.offsetLeft - ((settingSubnav.clientWidth - activeTab.offsetWidth) / 2);
-    const nextLeft = Math.max(0, Math.min(targetLeft, maxScrollLeft));
-    settingSubnavProgrammaticScroll = true;
-    settingSubnav.scrollTo({ left: nextLeft, behavior });
-    window.setTimeout(() => {
-      settingSubnavProgrammaticScroll = false;
-      updateSettingSubnavLayoutState();
-    }, behavior === "smooth" ? 260 : 80);
-  }
-  updateSettingSubnavLayoutState();
-}
-
-function scheduleSettingSubnavFocus() {
-  if (settingSubnavFocusTimer) clearTimeout(settingSubnavFocusTimer);
-
-  requestAnimationFrame(() => centerActiveSettingSubnavTab("auto"));
-  settingSubnavFocusTimer = window.setTimeout(() => {
-    centerActiveSettingSubnavTab("auto");
-    settingSubnavFocusTimer = window.setTimeout(() => {
-      centerActiveSettingSubnavTab("auto");
-      settingSubnavFocusTimer = null;
-    }, 180);
-  }, 60);
-}
-
-function stopSettingSubnavMotion() {
-  if (settingSubnavSettleTimer) {
-    clearTimeout(settingSubnavSettleTimer);
-    settingSubnavSettleTimer = null;
-  }
-  if (settingSubnavFocusTimer) {
-    clearTimeout(settingSubnavFocusTimer);
-    settingSubnavFocusTimer = null;
-  }
-  if (!settingSubnav) return;
-
-  settingSubnavProgrammaticScroll = false;
-  settingSubnav.scrollTo({ left: settingSubnav.scrollLeft, behavior: "auto" });
-  updateSettingSubnavLayoutState();
-}
-
-function renderSettingSubnav() {
-  if (!settingSubnav) return;
-
-  const groups = getSettingSubnavGroups();
-  const signature = groups.map((entry) => `${entry.group}:${entry.count ?? ""}`).join("|");
-
-  if (settingSubnav.dataset.groupsSignature === signature && settingSubnav.children.length === groups.length) {
-    Array.from(settingSubnav.children).forEach((button, index) => {
-      const entry = groups[index];
-      button.className = "setting-subnav__tab";
-      if (isSettingFavoritesGroup(entry.group)) button.classList.add("setting-subnav__tab--favorites");
-      if (isSettingProfileGroup(entry.group)) button.classList.add("setting-subnav__tab--profile");
-      if (entry.group === CURRENT_GROUP) button.classList.add("is-active");
-      button.dataset.group = entry.group;
-      button.textContent = getSettingGroupLabel(entry.group);
-      button.onclick = () => selectGroup(entry.group, screenItems?.style.display === "none");
-    });
-    scheduleSettingSubnavFocus();
-    requestAnimationFrame(syncSettingSubnavFixedOffset);
-    return;
-  }
-
-  settingSubnav.innerHTML = "";
-  settingSubnav.dataset.groupsSignature = signature;
-
-  groups.forEach((entry) => {
-    const button = document.createElement("button");
-    button.className = "setting-subnav__tab";
-    if (isSettingFavoritesGroup(entry.group)) button.classList.add("setting-subnav__tab--favorites");
-    if (isSettingProfileGroup(entry.group)) button.classList.add("setting-subnav__tab--profile");
-    if (entry.group === CURRENT_GROUP) button.classList.add("is-active");
-    button.dataset.group = entry.group;
-    button.textContent = getSettingGroupLabel(entry.group);
-    button.type = "button";
-    button.onclick = () => selectGroup(entry.group, screenItems?.style.display === "none");
-    settingSubnav.appendChild(button);
-  });
-
-  scheduleSettingSubnavFocus();
-  requestAnimationFrame(syncSettingSubnavFixedOffset);
-}
-
-if (settingSubnav) {
-  settingSubnav.addEventListener("scroll", () => {
-    updateSettingSubnavLayoutState();
-    if (settingSubnavProgrammaticScroll) return;
-
-    if (settingSubnavSettleTimer) clearTimeout(settingSubnavSettleTimer);
-    settingSubnavSettleTimer = window.setTimeout(() => {
-      settingSubnavSettleTimer = null;
-      const centeredGroup = getCenteredSettingSubnavGroup();
-      if (!centeredGroup) return;
-      if (centeredGroup !== CURRENT_GROUP) {
-        selectGroup(centeredGroup, false);
-        return;
-      }
-      centerActiveSettingSubnavTab("smooth");
-    }, 120);
-  }, { passive: true });
-  window.addEventListener("resize", () => requestAnimationFrame(updateSettingSubnavLayoutState));
-  window.addEventListener("orientationchange", () => {
-    window.setTimeout(syncSettingSubnavFixedOffset, 80);
-  }, { passive: true });
-}
-
-if (settingSubnavWrap) {
-  if (window.ResizeObserver) {
-    const settingSubnavResizeObserver = new ResizeObserver(() => syncSettingSubnavFixedOffset());
-    settingSubnavResizeObserver.observe(settingSubnavWrap);
-  }
-
-  let gesture = null;
-
-  settingSubnavWrap.addEventListener("touchstart", (e) => {
-    if (CURRENT_PAGE === "setting") {
-      gesture = null;
-      return;
-    }
-    if (
-      e.touches.length !== 1 ||
-      CURRENT_PAGE !== "setting" ||
-      !screenItems ||
-      screenItems.style.display === "none"
-    ) {
-      gesture = null;
-      return;
-    }
-
-    const touch = e.touches[0];
-    gesture = {
-      dragging: false,
-      startX: touch.clientX,
-      startY: touch.clientY,
-      dx: 0,
-      velocity: 0,
-      lastX: touch.clientX,
-      lastTime: performance.now(),
-    };
-  }, { passive: true });
-
-  settingSubnavWrap.addEventListener("touchmove", (e) => {
-    if (CURRENT_PAGE === "setting") {
-      gesture = null;
-      return;
-    }
-    if (!gesture || e.touches.length !== 1) return;
-
-    const touch = e.touches[0];
-    const dx = touch.clientX - gesture.startX;
-    const dy = touch.clientY - gesture.startY;
-
-    if (!gesture.dragging) {
-      if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
-      if (Math.abs(dy) > Math.abs(dx) * 0.9) {
-        gesture = null;
-        return;
-      }
-      gesture.dragging = true;
-    }
-
-    e.preventDefault();
-
-    const now = performance.now();
-    const dt = Math.max(now - gesture.lastTime, 1);
-    gesture.velocity = (touch.clientX - gesture.lastX) / dt;
-    gesture.lastX = touch.clientX;
-    gesture.lastTime = now;
-    gesture.dx = dx;
-  }, { passive: false });
-
-  settingSubnavWrap.addEventListener("touchend", () => {
-    if (CURRENT_PAGE === "setting") {
-      gesture = null;
-      return;
-    }
-    if (!gesture) return;
-    if (!gesture.dragging) {
-      gesture = null;
-      return;
-    }
-
-    const dx = gesture.dx;
-    const direction = dx < 0 ? "forward" : "backward";
-    const velocityOk =
-      (direction === "forward" && gesture.velocity < -SWIPE_VELOCITY_THRESHOLD) ||
-      (direction === "backward" && gesture.velocity > SWIPE_VELOCITY_THRESHOLD);
-    const shouldShift = Math.abs(dx) > 48 || velocityOk;
-    const shiftTarget = shouldShift ? getSettingSubnavShiftTarget(direction) : null;
-
-    gesture = null;
-
-    if (!shouldShift || !shiftTarget) {
-      centerActiveSettingSubnavTab("smooth");
-      return;
-    }
-
-    if (typeof stopSettingSubnavMotion === "function") stopSettingSubnavMotion();
-
-    if (direction === "backward" && shiftTarget.reachedEdge) {
-      history.back();
-      return;
-    }
-
-    if (direction === "forward" && shiftTarget.reachedEdge) {
-      showPage("tools", true, getSwipeTransition(CURRENT_PAGE, "tools"));
-      return;
-    }
-
-    if (shiftTarget.group && shiftTarget.group !== CURRENT_GROUP) {
-      animateSettingGroupSwitch(shiftTarget.group, direction).catch((e) => console.log("[SettingSubnav] switch failed:", e));
-      return;
-    }
-
-    centerActiveSettingSubnavTab("smooth");
-  }, { passive: true });
-
-  settingSubnavWrap.addEventListener("touchcancel", () => {
-    gesture = null;
-  }, { passive: true });
+  syncSettingGroupChrome(group);
 }
 
 function selectGroup(group, pushHistory = true) {
@@ -2167,21 +2619,32 @@ async function renderItems(group, options = {}) {
   const meta = document.getElementById("groupMeta");
   const itemsBox = document.getElementById("items");
   const renderToken = ++settingRenderToken;
+  const detailName = String(options.detailName || "").trim();
+  const detailMode = Boolean(detailName);
   const scrollMode = options.scrollMode || "top";
   const animateItems = options.animateItems !== false;
+  const allowHidden = options.allowHidden === true;
   const requestedScrollTop = Number.isFinite(options.scrollTop) ? options.scrollTop : null;
   itemsBox.innerHTML = "";
   delete itemsBox.dataset.renderedGroup;
-  renderSettingSubnav();
+  delete itemsBox.dataset.renderedDetail;
 
-  const entries = getSettingItemEntriesForGroup(group);
+  const allEntries = getSettingItemEntriesForGroup(group);
+  const detailEntry = detailMode ? getSettingDetailEntry(group, detailName) : null;
+  const entries = detailMode ? (detailEntry ? [detailEntry] : []) : allEntries;
   const list = entries.map((entry) => entry.item);
   const profile = getSettingProfileByGroup(group);
   if (screenItems) screenItems.classList.toggle("setting-screen-items--profile", Boolean(profile));
-  if (meta) meta.textContent = `${group} / ${list.length}`;
+  if (screenItems) screenItems.classList.toggle("setting-screen-items--detail", detailMode);
+  CURRENT_SETTING_DETAIL = detailMode ? detailName : null;
   const groupLabel = getSettingGroupLabel(group);
-  settingTitle.textContent = (UI_STRINGS[LANG].setting || "Setting") + " - " + groupLabel;
-  if (itemsTitle) itemsTitle.textContent = groupLabel;
+  const detailTitle = detailMode && list[0] ? getSettingDetailTitle(list[0]) : "";
+  settingTitle.textContent = (UI_STRINGS[LANG].setting || "Setting") + " - " + (detailTitle || groupLabel);
+  setSettingItemsTitle(detailTitle || groupLabel);
+  if (meta) {
+    meta.classList.remove("setting-profile-meta");
+    meta.textContent = profile && !detailMode ? "" : `${group} / ${detailMode ? "1" : list.length}`;
+  }
 
   let values = {};
   try {
@@ -2193,7 +2656,30 @@ async function renderItems(group, options = {}) {
     values = {};
   }
 
-  if (renderToken !== settingRenderToken || CURRENT_GROUP !== group || !isCarrotSettingTabActive() || screenItems?.style.display === "none") {
+  if (
+    renderToken !== settingRenderToken ||
+    CURRENT_GROUP !== group ||
+    !isCarrotSettingTabActive() ||
+    (!allowHidden && screenItems?.style.display === "none")
+  ) {
+    return;
+  }
+
+  if (!list.length && detailMode) {
+    const empty = document.createElement("div");
+    empty.className = "setting-favorites-empty";
+    const emptyTitle = document.createElement("div");
+    emptyTitle.className = "setting-favorites-empty__title";
+    emptyTitle.textContent = getUIText("setting_not_found", "Setting not found");
+    const emptyDesc = document.createElement("div");
+    emptyDesc.className = "setting-favorites-empty__desc";
+    emptyDesc.textContent = detailName;
+    empty.appendChild(emptyTitle);
+    empty.appendChild(emptyDesc);
+    itemsBox.appendChild(empty);
+    itemsBox.dataset.renderedGroup = group;
+    itemsBox.dataset.renderedDetail = detailName;
+    requestAnimationFrame(resetSettingItemsViewport);
     return;
   }
 
@@ -2217,7 +2703,7 @@ async function renderItems(group, options = {}) {
     return;
   }
 
-  if (profile) appendSettingProfileHeader(profile, itemsBox);
+  if (profile && !detailMode) appendSettingProfileHeader(profile, itemsBox);
 
   const profileSectionCounts = new Map();
   if (profile) {
@@ -2227,15 +2713,76 @@ async function renderItems(group, options = {}) {
   }
   let lastProfileGroup = "";
   let currentProfileSectionBody = null;
+  let lastCategorySectionKey = null;
+  let currentCategoryCardBody = null;
+
+  if (detailMode && list.length) {
+    const detailBlock = document.createElement("section");
+    detailBlock.className = animateItems ? "setting-section-block ui-stagger-item" : "setting-section-block";
+    if (animateItems) detailBlock.style.setProperty("--i", "1");
+    const detailCard = document.createElement("div");
+    detailCard.className = "setting-group-card";
+    const detailBody = document.createElement("div");
+    detailBody.className = "setting-group-card__body";
+    detailCard.appendChild(detailBody);
+    detailBlock.appendChild(detailCard);
+    itemsBox.appendChild(detailBlock);
+    currentCategoryCardBody = detailBody;
+  }
+
+  // 즐겨찾기도 다른 하위메뉴와 같은 카드 박스(공통분모: setting-section-block +
+  // setting-group-card)에 담는다. 즐겨찾기는 소-섹션이 섞여 있으므로 단일 카드 1개로.
+  if (!detailMode && isSettingFavoritesGroup(group) && list.length) {
+    const favBlock = document.createElement("section");
+    favBlock.className = animateItems ? "setting-section-block ui-stagger-item" : "setting-section-block";
+    if (animateItems) favBlock.style.setProperty("--i", "1");
+    const favCard = document.createElement("div");
+    favCard.className = "setting-group-card";
+    const favBody = document.createElement("div");
+    favBody.className = "setting-group-card__body";
+    favCard.appendChild(favBody);
+    favBlock.appendChild(favCard);
+    itemsBox.appendChild(favBlock);
+    currentCategoryCardBody = favBody;
+  }
+
   list.forEach((p, index) => {
     const name = p.name;
     const originGroup = entries[index]?.group || group;
-    if (!(name in UNIT_INDEX)) UNIT_INDEX[name] = 0;
+    getSettingUnitIndex(name);
 
-    if (profile && originGroup !== lastProfileGroup) {
+    // 카테고리 모드: 소-섹션마다 카드(그룹박스) 생성 (프로필/즐겨찾기 뷰 제외).
+    // 라벨이 있으면 카드 제목으로, 없으면(단일 직속 섹션) 제목 없는 카드.
+    if (!detailMode && !profile && !isSettingFavoritesGroup(group) && p.__section) {
+      const secKey = p.__section.id || "";
+      if (secKey !== lastCategorySectionKey) {
+        lastCategorySectionKey = secKey;
+        const sectionBlock = document.createElement("section");
+        sectionBlock.className = animateItems ? "setting-section-block ui-stagger-item" : "setting-section-block";
+        sectionBlock.dataset.settingSectionId = secKey;
+        if (animateItems) sectionBlock.style.setProperty("--i", String(Math.min(index + 1, 14)));
+        const cardLabel = settingNodeLabel(p.__section);
+        if (cardLabel) {
+          const cardTitle = document.createElement("div");
+          cardTitle.className = "setting-group-card__title";
+          cardTitle.textContent = cardLabel;
+          sectionBlock.appendChild(cardTitle);
+        }
+        const card = document.createElement("div");
+        card.className = "setting-group-card";
+        const cardBody = document.createElement("div");
+        cardBody.className = "setting-group-card__body";
+        card.appendChild(cardBody);
+        sectionBlock.appendChild(card);
+        itemsBox.appendChild(sectionBlock);
+        currentCategoryCardBody = cardBody;
+      }
+    }
+
+    if (!detailMode && profile && originGroup !== lastProfileGroup) {
       lastProfileGroup = originGroup;
       const section = document.createElement("div");
-      section.className = animateItems ? "setting-profile-section ui-stagger-item" : "setting-profile-section";
+      section.className = animateItems ? "setting-section-block setting-profile-section ui-stagger-item" : "setting-section-block setting-profile-section";
       if (animateItems) section.style.setProperty("--i", String(Math.min(index + 1, 14)));
       const stateKey = `${profile.id}:${originGroup}`;
       const expanded = settingProfileSectionExpandedState.has(stateKey)
@@ -2259,7 +2806,7 @@ async function renderItems(group, options = {}) {
       const body = document.createElement("div");
       body.className = "setting-profile-section__body";
       const bodyInner = document.createElement("div");
-      bodyInner.className = "setting-profile-section__bodyInner";
+      bodyInner.className = "setting-group-card setting-group-card__body setting-profile-section__bodyInner";
       header.onclick = () => {
         const wasCollapsed = section.classList.contains("is-collapsed");
         const nextExpanded = wasCollapsed;
@@ -2286,6 +2833,10 @@ async function renderItems(group, options = {}) {
 
     const title = formatItemText(p, "title", "etitle", "");
     const descr = formatItemText(p, "descr", "edescr", "");
+    const rangeMeta = formatSettingRangeMeta(p);
+    const rangeMetaHtml = rangeMeta
+      ? `<div class="muted mt-sm">${escapeHtml(rangeMeta)}</div>`
+      : "";
 
     const el = document.createElement("div");
     el.className = animateItems ? "setting ui-stagger-item" : "setting";
@@ -2305,43 +2856,120 @@ async function renderItems(group, options = {}) {
         ${renderSettingFavoriteMark(name)}
       </div>
       ${settingMarqueeHtml(name, "name")}
-      <div class="muted mt-sm">
-        min=${p.min}, max=${p.max}, default=${p.default}
-      </div>
+      ${rangeMetaHtml}
     `;
 
+    const controlConfig = getSettingControlConfig(p);
+    const compactNumeric = controlConfig.kind === "slider";
     const ctrl = document.createElement("div");
-    ctrl.className = "ctrl";
-
-    const btnMinus = document.createElement("button");
-    btnMinus.type = "button";
-    btnMinus.className = "smallBtn";
-    btnMinus.textContent = "-";
+    ctrl.className = `ctrl ctrl--${compactNumeric ? "value" : controlConfig.kind}`;
 
     const val = document.createElement("button");
     val.type = "button";
-    val.className = "pill val";
+    val.className = compactNumeric ? "value-surface val setting-value-compact" : "value-surface val";
     val.setAttribute("aria-label", getUIText("setting_value_edit", "Edit value"));
 
-    const btnPlus = document.createElement("button");
-    btnPlus.type = "button";
-    btnPlus.className = "smallBtn";
-    btnPlus.textContent = "+";
+    let btnMinus = null;
+    let btnPlus = null;
+    let unitBtn = null;
+    let sliderInput = null;
+    let toggleInput = null;
+    let selectInput = null;
+    const segmentButtons = [];
 
-    const unitBtn = document.createElement("button");
-    unitBtn.type = "button";
-    unitBtn.className = "smallBtn";
-    unitBtn.textContent = "x" + UNIT_CYCLE[UNIT_INDEX[name]];
+    if (controlConfig.kind === "toggle") {
+      const switchLabel = document.createElement("label");
+      switchLabel.className = "setting-switch";
+      toggleInput = document.createElement("input");
+      toggleInput.type = "checkbox";
+      toggleInput.className = "setting-switch__input";
+      toggleInput.setAttribute("aria-label", title || name);
+      const switchTrack = document.createElement("span");
+      switchTrack.className = "setting-switch__track";
+      switchLabel.appendChild(toggleInput);
+      switchLabel.appendChild(switchTrack);
+      ctrl.appendChild(switchLabel);
+      ctrl.appendChild(val);
+    } else if (controlConfig.kind === "segmented") {
+      const segmentWrap = document.createElement("div");
+      segmentWrap.className = "setting-segments";
+      getSettingOptionValues(name, controlConfig).forEach((optionValue) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "setting-segment";
+        button.dataset.value = String(optionValue);
+        button.textContent = getSettingOptionLabel(name, optionValue);
+        button.setAttribute("aria-pressed", "false");
+        segmentButtons.push(button);
+        segmentWrap.appendChild(button);
+      });
+      ctrl.appendChild(segmentWrap);
+      ctrl.appendChild(val);
+    } else if (controlConfig.kind === "select") {
+      selectInput = document.createElement("button");
+      selectInput.type = "button";
+      selectInput.className = "setting-select setting-select--button";
+      selectInput.setAttribute("aria-label", title || name);
+      selectInput.setAttribute("aria-haspopup", "dialog");
+      ctrl.appendChild(selectInput);
+      ctrl.appendChild(val);
+    } else if (compactNumeric) {
+      btnMinus = document.createElement("button");
+      btnMinus.type = "button";
+      btnMinus.className = "smallBtn setting-value-arrow setting-value-arrow--prev";
+      btnMinus.textContent = "-";
+      btnMinus.setAttribute("aria-label", getUIText("setting_value_previous", "Previous value"));
 
-    unitBtn.onclick = () => {
-      UNIT_INDEX[name] = (UNIT_INDEX[name] + 1) % UNIT_CYCLE.length;
-      unitBtn.textContent = "x" + UNIT_CYCLE[UNIT_INDEX[name]];
-    };
+      btnPlus = document.createElement("button");
+      btnPlus.type = "button";
+      btnPlus.className = "smallBtn setting-value-arrow setting-value-arrow--next";
+      btnPlus.textContent = "+";
+      btnPlus.setAttribute("aria-label", getUIText("setting_value_next", "Next value"));
 
-    ctrl.appendChild(btnMinus);
-    ctrl.appendChild(val);
-    ctrl.appendChild(btnPlus);
-    ctrl.appendChild(unitBtn);
+      unitBtn = document.createElement("button");
+      unitBtn.type = "button";
+      unitBtn.className = "setting-unit-cycle";
+      setSettingUnitButtonLabel(unitBtn, name);
+
+      ctrl.appendChild(btnMinus);
+      ctrl.appendChild(val);
+      ctrl.appendChild(btnPlus);
+    } else {
+      const sliderWrap = document.createElement("div");
+      sliderWrap.className = "setting-slider";
+      sliderInput = document.createElement("input");
+      sliderInput.type = "range";
+      sliderInput.className = "setting-slider__input";
+      sliderInput.min = String(controlConfig.min);
+      sliderInput.max = String(controlConfig.max);
+      sliderInput.step = String(controlConfig.unit);
+      sliderInput.setAttribute("aria-label", title || name);
+      sliderWrap.appendChild(sliderInput);
+
+      btnMinus = document.createElement("button");
+      btnMinus.type = "button";
+      btnMinus.className = "smallBtn setting-step setting-step--minus";
+      btnMinus.textContent = "-";
+
+      btnPlus = document.createElement("button");
+      btnPlus.type = "button";
+      btnPlus.className = "smallBtn setting-step setting-step--plus";
+      btnPlus.textContent = "+";
+
+      unitBtn = document.createElement("button");
+      unitBtn.type = "button";
+      unitBtn.className = "setting-unit-cycle";
+      setSettingUnitButtonLabel(unitBtn, name);
+
+      ctrl.appendChild(sliderWrap);
+      ctrl.appendChild(btnMinus);
+      ctrl.appendChild(val);
+      ctrl.appendChild(btnPlus);
+    }
+
+    const popularEntry = getSettingPopularDisplayEntry(p, getSettingPopularValue(name));
+    const popularText = renderSettingPopularChipText(p, popularEntry);
+    const popularHtml = renderSettingPopularChipHtml(p, popularEntry);
 
     top.appendChild(left);
     top.appendChild(ctrl);
@@ -2352,14 +2980,96 @@ async function renderItems(group, options = {}) {
 
     el.appendChild(top);
     el.appendChild(d);
-    (currentProfileSectionBody || itemsBox).appendChild(el);
+
+    const popularTopValues = Array.isArray(popularEntry?.top_values) ? popularEntry.top_values : [];
+    let popularDetail = null;
+    if (detailMode && popularTopValues.length) {
+      popularDetail = document.createElement("div");
+      popularDetail.className = "setting-popular-detail-block";
+      popularDetail.innerHTML = renderSettingPopularDetailHtml(p, popularEntry);
+      el.appendChild(popularDetail);
+    }
+
+    // Footer actions row: optional unit-cycle (배율) plus a reset-to-default
+    // (기본값) button on every item. Pressing 기본값 confirms then restores
+    // the param to its declared default. commitSettingValue / normalizeSettingValue
+    // are hoisted function declarations below, so referencing them here is fine.
+    const actions = document.createElement("div");
+    actions.className = "setting-actions";
+    if (!detailMode && popularText && popularHtml) {
+      const popularChip = document.createElement("span");
+      popularChip.className = "setting-popular-value-chip";
+      popularChip.innerHTML = popularHtml;
+      popularChip.setAttribute("aria-label", popularText);
+      actions.appendChild(popularChip);
+    }
+    if (unitBtn) {
+      el.classList.add("setting--has-unit-cycle");
+      actions.appendChild(unitBtn);
+    }
+    if (name === "SoundLanguageSetting") {
+      const sampleBtn = document.createElement("button");
+      sampleBtn.type = "button";
+      sampleBtn.className = "setting-default-reset";
+      sampleBtn.textContent = getUIText("sound_sample_play", "Sample");
+      sampleBtn.setAttribute("aria-label", getUIText("sound_sample_play", "Sample"));
+      sampleBtn.onclick = async (event) => {
+        event.stopPropagation();
+        try {
+          await playSoundLanguageSample(val.dataset.rawValue ?? p.default);
+        } catch (e) {
+          showAppToast(e?.message || getUIText("failed", "Failed"), { tone: "error" });
+        }
+      };
+      actions.appendChild(sampleBtn);
+    }
+    const defaultBtn = document.createElement("button");
+    defaultBtn.type = "button";
+    defaultBtn.className = "setting-default-reset";
+    defaultBtn.textContent = getUIText("setting_reset_default", "Default");
+    defaultBtn.setAttribute("aria-label", getUIText("setting_reset_default_aria", "Reset to default"));
+    defaultBtn.onclick = async (event) => {
+      event.stopPropagation();
+      const normalizedDefault = normalizeSettingValue(p.default);
+      const target = normalizedDefault === null ? p.default : normalizedDefault;
+      const current = val.dataset.committedValue ?? val.dataset.rawValue;
+      if (String(target) === String(current)) {
+        showAppToast(getUIText("setting_already_default", "Already at default"));
+        return;
+      }
+      const ok = await appConfirm(
+        getUIText("setting_reset_default_confirm", "Reset to default ({value})?", {
+          value: formatSettingDisplayValue(p, target),
+        }),
+        {
+          title: getUIText("setting_reset_default_title", "Reset to default"),
+          confirmLabel: getUIText("ok", "OK"),
+          cancelLabel: getUIText("cancel", "Cancel"),
+        },
+      );
+      if (!ok) return;
+      await commitSettingValue(target);
+      showAppToast(getUIText("setting_reset_default_done", "Restored to default"));
+    };
+    actions.appendChild(defaultBtn);
+    el.classList.add("setting--has-actions");
+    el.appendChild(actions);
+
+    (currentProfileSectionBody || currentCategoryCardBody || itemsBox).appendChild(el);
 
     const cur = (name in values) ? values[name] : p.default;
-    val.textContent = String(cur);
+    syncSettingControlState(el, cur);
+    val.dataset.committedValue = String(cur);
 
     function normalizeSettingValue(raw) {
       const text = String(raw).trim();
       if (!text) return null;
+
+      if (name === "SoundLanguageSetting") {
+        const values = getSettingOptionValues(name, controlConfig);
+        const matched = values.find((value) => String(value).toLowerCase() === text.toLowerCase());
+        return matched || null;
+      }
 
       const num = Number(text);
       if (!Number.isFinite(num)) return null;
@@ -2386,7 +3096,8 @@ async function renderItems(group, options = {}) {
         } else {
           await setParam(name, next);
         }
-        val.textContent = String(next);
+        syncSettingControlState(el, next);
+        val.dataset.committedValue = String(next);
         if (!profile) {
           cacheSettingValue(name, next, group);
           if (originGroup !== group) cacheSettingValue(name, next, originGroup);
@@ -2396,78 +3107,262 @@ async function renderItems(group, options = {}) {
       }
     }
 
-    async function editValueDirect() {
-      const input = await appPrompt(
-        getUIText("setting_value_prompt", "Enter value for {name}\nRange: {min} - {max}", {
-          name,
-          min: p.min,
-          max: p.max,
-        }),
-        {
-          title: getUIText("setting_value_title", "Edit value"),
-          defaultValue: val.textContent,
-          placeholder: String(p.default),
-          confirmLabel: getUIText("ok", "OK"),
-          showCancel: false,
-          defaultActionLabel: getUIText("default_value", "Default"),
-          defaultActionValue: { settingDefaultAction: true, value: String(p.default) },
-        }
-      );
-      if (input === null) return;
-
-      if (input?.settingDefaultAction) {
-        const defaultValue = input.value;
-        const ok = await appConfirm(getUIText(
-          "default_value_confirm",
-          "Restore {name} to default value ({value})?",
-          { name, value: defaultValue }
-        ), {
-          title: getUIText("default_value", "Default"),
-          confirmLabel: getUIText("ok", "OK"),
-        });
-        if (!ok) return;
-
-        const nextDefault = normalizeSettingValue(defaultValue);
-        if (nextDefault === null) {
-          showAppToast(getUIText("setting_value_invalid", "Enter a valid number."), { tone: "error" });
-          return;
-        }
-        if (String(nextDefault) === String(val.textContent)) return;
-        await commitSettingValue(nextDefault);
-        return;
-      }
-
-      const next = normalizeSettingValue(input);
-      if (next === null) {
-        showAppToast(getUIText("setting_value_invalid", "Enter a valid number."), { tone: "error" });
-        return;
-      }
-      if (String(next) === String(val.textContent)) return;
-      await commitSettingValue(next);
+    function bindPopularDetailRows() {
+      if (!popularDetail) return;
+      popularDetail.querySelectorAll("[data-setting-popular-value]").forEach((button) => {
+        button.onclick = async (event) => {
+          event.stopPropagation();
+          const next = normalizeSettingValue(button.dataset.settingPopularValue);
+          if (next === null) {
+            showAppToast(getUIText("setting_value_invalid", "Enter a valid number."), { tone: "error" });
+            return;
+          }
+          if (String(next) === String(val.dataset.rawValue)) {
+            showAppToast(getUIText("setting_popular_value_already_applied", "Already using this value"));
+            return;
+          }
+          const ok = await appConfirm(
+            getUIText("setting_popular_value_apply_confirm", "Apply this setting value ({value})?", {
+              value: formatSettingPopularValue(p, next),
+            }),
+            {
+              title: getUIText("setting_popular_value_apply_title", "Apply setting value"),
+              confirmLabel: getUIText("ok", "OK"),
+              cancelLabel: getUIText("cancel", "Cancel"),
+            },
+          );
+          if (!ok) return;
+          await commitSettingValue(next);
+        };
+      });
     }
 
+    bindPopularDetailRows();
+
     async function applyDelta(sign) {
-      const step = UNIT_CYCLE[UNIT_INDEX[name]];
-      let curv = Number(val.textContent);
+      const step = getSettingUnitValue(name);
+      let curv = Number(val.dataset.rawValue);
       if (Number.isNaN(curv)) curv = Number(p.default);
 
       let next = curv + sign * step;
       next = clamp(next, Number(p.min), Number(p.max));
 
-      if (Number.isInteger(p.min) && Number.isInteger(p.max) && Number.isInteger(step)) {
+      if (Number.isInteger(Number(p.min)) && Number.isInteger(Number(p.max)) && Number.isInteger(step)) {
         next = Math.round(next);
       }
 
       await commitSettingValue(next);
     }
 
-    btnMinus.onclick = () => applyDelta(-1);
-    val.onclick = editValueDirect;
-    btnPlus.onclick = () => applyDelta(+1);
+    let deltaBusy = false;
+    async function requestDelta(sign) {
+      if (deltaBusy) return;
+      deltaBusy = true;
+      try {
+        await applyDelta(sign);
+      } finally {
+        deltaBusy = false;
+      }
+    }
+
+    function bindDeltaButton(button, sign) {
+      if (!button) return;
+
+      let holdTimer = null;
+      let repeatTimer = null;
+      let pointerActive = false;
+      let activePointerId = null;
+      let suppressClickUntil = 0;
+      const holdDelayMs = 900;
+      const repeatDelayMs = 160;
+      const clickSuppressMs = 450;
+
+      function clearTimers() {
+        if (holdTimer) {
+          clearTimeout(holdTimer);
+          holdTimer = null;
+        }
+        if (repeatTimer) {
+          clearTimeout(repeatTimer);
+          repeatTimer = null;
+        }
+      }
+
+      function stopHold() {
+        clearTimers();
+        pointerActive = false;
+        button.classList.remove("is-holding");
+        if (activePointerId !== null && typeof button.releasePointerCapture === "function") {
+          try {
+            button.releasePointerCapture(activePointerId);
+          } catch (_) {
+            /* pointer capture may already be released by the browser */
+          }
+        }
+        activePointerId = null;
+      }
+
+      function repeatDelta() {
+        if (!pointerActive) return;
+        requestDelta(sign);
+        repeatTimer = window.setTimeout(repeatDelta, repeatDelayMs);
+      }
+
+      button.addEventListener("pointerdown", (event) => {
+        if (event.button !== undefined && event.button !== 0) return;
+        event.stopPropagation();
+        event.preventDefault();
+        stopHold();
+        pointerActive = true;
+        activePointerId = event.pointerId;
+        suppressClickUntil = Date.now() + clickSuppressMs;
+        button.classList.add("is-holding");
+        if (typeof button.setPointerCapture === "function") {
+          try {
+            button.setPointerCapture(activePointerId);
+          } catch (_) {
+            /* pointer capture is best-effort for repeated input */
+          }
+        }
+        requestDelta(sign);
+        holdTimer = window.setTimeout(repeatDelta, holdDelayMs);
+      });
+
+      button.addEventListener("pointerup", (event) => {
+        event.stopPropagation();
+        suppressClickUntil = Date.now() + clickSuppressMs;
+        stopHold();
+      });
+      button.addEventListener("pointercancel", stopHold);
+      button.addEventListener("lostpointercapture", stopHold);
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        if (Date.now() < suppressClickUntil) {
+          event.preventDefault();
+          return;
+        }
+        requestDelta(sign);
+      });
+    }
+
+    async function promptSettingValue() {
+      const input = await appPrompt(
+        rangeMeta,
+        {
+          title: title || name,
+          defaultValue: val.dataset.rawValue ?? String(p.default),
+          placeholder: String(p.default),
+          confirmLabel: getUIText("ok", "OK"),
+          cancelLabel: getUIText("cancel", "Cancel"),
+          showCancel: true,
+        },
+      );
+      if (input === null) return;
+      const next = normalizeSettingValue(input);
+      if (next === null) {
+        showAppToast(getUIText("setting_value_invalid", "Enter a valid number."), { tone: "error" });
+        return;
+      }
+      if (String(next) === String(val.dataset.rawValue)) return;
+      await commitSettingValue(next);
+    }
+
+    async function promptSettingChoice() {
+      const current = String(val.dataset.rawValue ?? p.default);
+      const choices = getSettingOptionValues(name, controlConfig).map((optionValue) => {
+        const optionText = String(optionValue);
+        const isCurrent = optionText === current;
+        return {
+          label: getSettingOptionLabel(name, optionValue),
+          value: optionText,
+          selected: isCurrent,
+          className: "setting-choice-option",
+        };
+      });
+      const selected = await openAppDialog({
+        mode: "choice",
+        choiceLayout: "value-grid",
+        title: title || name,
+        html: true,
+        messageHtml: `<div class="setting-choice-dialog">${escapeHtml(name)}<br>${escapeHtml(rangeMeta)}</div>`,
+        choices,
+        cancelLabel: getUIText("cancel", "Cancel"),
+        showCancel: true,
+      });
+      if (selected === null) return;
+      const next = normalizeSettingValue(selected);
+      if (next === null || String(next) === String(val.dataset.rawValue)) return;
+      await commitSettingValue(next);
+    }
+
+    if (toggleInput) {
+      toggleInput.onchange = () => {
+        commitSettingValue(toggleInput.checked ? 1 : 0);
+      };
+    }
+
+    if (unitBtn) {
+      unitBtn.onclick = (event) => {
+        event.stopPropagation();
+        cycleSettingUnitValue(name);
+        setSettingUnitButtonLabel(unitBtn, name);
+      };
+    }
+
+    bindDeltaButton(btnMinus, -1);
+    bindDeltaButton(btnPlus, +1);
+
+    val.onclick = (event) => {
+      event.stopPropagation();
+      // Tapping the value opens the number-entry popup directly (both in the
+      // items list and the detail screen) — it no longer drills into the detail
+      // screen. The detail screen is still reachable by tapping the row's title.
+      if (controlConfig.kind === "slider") promptSettingValue();
+    };
+
+    segmentButtons.forEach((button) => {
+      button.onclick = (event) => {
+        event.stopPropagation();
+        const next = normalizeSettingValue(button.dataset.value);
+        if (next === null || String(next) === String(val.dataset.rawValue)) return;
+        commitSettingValue(next);
+      };
+    });
+
+    if (selectInput) {
+      selectInput.onclick = (event) => {
+        event.stopPropagation();
+        promptSettingChoice();
+      };
+    }
+
+    if (sliderInput) {
+      sliderInput.oninput = () => {
+        const next = normalizeSettingValue(sliderInput.value);
+        if (next !== null) syncSettingControlState(el, next);
+      };
+      sliderInput.onchange = () => {
+        const next = normalizeSettingValue(sliderInput.value);
+        if (next === null || String(next) === String(val.dataset.committedValue ?? val.dataset.rawValue)) return;
+        commitSettingValue(next);
+      };
+    }
+
+    if (!detailMode) {
+      el.onclick = (event) => {
+        if (el.dataset.settingSuppressClick === "1") return;
+        if (isSettingValueControlHit(event, el)) return;
+        if (isSettingInlineControlTarget(event.target)) return;
+        selectSettingDetail(originGroup, name).catch(() => {});
+      };
+    }
   });
 
   itemsBox.dataset.renderedGroup = group;
+  if (detailMode) itemsBox.dataset.renderedDetail = detailName;
   scheduleSettingOverflowSync(itemsBox);
+  window.CarrotMapboxTokenSettings?.sync?.();
+  window.CarrotYouTubeLiveSettings?.sync?.();
 
   if (pendingSettingFocus?.group === group) {
     requestAnimationFrame(() => focusSettingItem(pendingSettingFocus.name));
@@ -2497,14 +3392,14 @@ function bindSettingFavoriteLongPress() {
     press = null;
   }
 
-  function isIgnoredFavoritePressTarget(target) {
-    return Boolean(target?.closest?.(".ctrl, button, input, select, textarea, a"));
+  function isIgnoredFavoritePressTarget(event, row) {
+    return isSettingInlineControlTarget(event.target) || isSettingValueControlHit(event, row);
   }
 
   itemsBox.addEventListener("pointerdown", (event) => {
     if (event.button !== undefined && event.button !== 0) return;
     const row = event.target.closest(".setting[data-setting-name]");
-    if (!row || !itemsBox.contains(row) || isIgnoredFavoritePressTarget(event.target)) return;
+    if (!row || !itemsBox.contains(row) || isIgnoredFavoritePressTarget(event, row)) return;
 
     clearPress();
     const startX = event.clientX;
@@ -2519,6 +3414,10 @@ function bindSettingFavoriteLongPress() {
         if (!press || press.row !== row) return;
         press.fired = true;
         row.classList.remove("is-longpressing");
+        row.dataset.settingSuppressClick = "1";
+        window.setTimeout(() => {
+          if (row.dataset.settingSuppressClick === "1") delete row.dataset.settingSuppressClick;
+        }, 420);
         toggleSettingFavorite(row.dataset.settingName).catch(() => {});
       }, SETTING_FAVORITES_LONG_PRESS_MS),
     };
@@ -2544,6 +3443,106 @@ function bindSettingFavoriteLongPress() {
 }
 
 bindSettingFavoriteLongPress();
+
+// Let long titles / param names be panned left-right by the user. Automatic
+// movement uses transform, while manual movement uses scrollLeft; never allow
+// both coordinate systems to remain active at the same time.
+function bindSettingMarqueeDrag() {
+  ["items", "deviceItems"].forEach((id) => {
+    const box = document.getElementById(id);
+    if (!box || box.dataset.marqueeDragBound === "1") return;
+    box.dataset.marqueeDragBound = "1";
+
+    let drag = null;
+
+    function cancelManualReset(el) {
+      if (!el) return;
+      if (el._settingMarqueeResetTimer) {
+        clearTimeout(el._settingMarqueeResetTimer);
+        el._settingMarqueeResetTimer = null;
+      }
+      if (el._settingMarqueeRestoreTimer) {
+        clearTimeout(el._settingMarqueeRestoreTimer);
+        el._settingMarqueeRestoreTimer = null;
+      }
+    }
+
+    function beginManualScroll(el) {
+      cancelManualReset(el);
+      el._settingMarqueeResetting = false;
+      el.classList.add("is-manual");
+    }
+
+    function scheduleManualReset(el) {
+      if (!el) return;
+      cancelManualReset(el);
+      el._settingMarqueeResetTimer = window.setTimeout(() => {
+        el._settingMarqueeResetTimer = null;
+        el._settingMarqueeResetting = true;
+        el.scrollTo({ left: 0, behavior: "smooth" });
+        el._settingMarqueeRestoreTimer = window.setTimeout(() => {
+          el._settingMarqueeRestoreTimer = null;
+          el.scrollLeft = 0;
+          el.classList.remove("is-manual");
+          el._settingMarqueeResetting = false;
+        }, 320);
+      }, 1200);
+    }
+
+    function endDrag(event) {
+      if (!drag || (event && event.pointerId !== drag.pointerId)) return;
+      const el = drag.el;
+      try { el.releasePointerCapture(drag.pointerId); } catch (_) {}
+      el.classList.remove("is-dragging");
+      drag = null;
+      scheduleManualReset(el);
+    }
+
+    box.addEventListener("pointerdown", (event) => {
+      if (event.button !== undefined && event.button !== 0) return;
+      const marquee = event.target.closest(".setting-marquee");
+      if (!marquee || !box.contains(marquee) || !marquee.classList.contains("is-overflowing")) return;
+      beginManualScroll(marquee);
+      drag = {
+        el: marquee,
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startScroll: marquee.scrollLeft,
+        moved: false,
+      };
+      marquee.classList.add("is-dragging");
+    });
+
+    box.addEventListener("pointermove", (event) => {
+      if (!drag || event.pointerId !== drag.pointerId) return;
+      // Touch pans the overflow container natively — don't double-apply scroll.
+      if (event.pointerType === "touch") return;
+      const dx = event.clientX - drag.startX;
+      if (!drag.moved) {
+        if (Math.abs(dx) <= 4) return;
+        drag.moved = true;
+        try { drag.el.setPointerCapture(drag.pointerId); } catch (_) {}
+      }
+      drag.el.scrollLeft = drag.startScroll - dx;
+      if (event.cancelable) event.preventDefault();
+    });
+
+    box.addEventListener("scroll", (event) => {
+      const marquee = event.target;
+      if (!(marquee instanceof Element) || !marquee.classList.contains("setting-marquee")) return;
+      if (!marquee.classList.contains("is-manual")) return;
+      if (marquee._settingMarqueeResetting) return;
+      cancelManualReset(marquee);
+      if (!drag || drag.el !== marquee) scheduleManualReset(marquee);
+    }, true);
+
+    box.addEventListener("pointerup", endDrag);
+    box.addEventListener("pointercancel", endDrag);
+    box.addEventListener("lostpointercapture", endDrag);
+  });
+}
+
+bindSettingMarqueeDrag();
 
 async function syncSettingViewportLayout(options = {}) {
   if (CURRENT_PAGE !== "setting" || !SETTINGS) return;
@@ -2574,7 +3573,6 @@ async function syncSettingViewportLayout(options = {}) {
   }
 
   renderGroups({ animateGroups: animateChrome });
-  renderSettingSubnav();
 
   if (splitLandscape) {
     const targetGroup = CURRENT_GROUP || getLandscapeDefaultSettingGroup();
@@ -2582,9 +3580,12 @@ async function syncSettingViewportLayout(options = {}) {
     CURRENT_GROUP = targetGroup;
     showSettingScreen("items", false);
     syncSettingGroupChrome(targetGroup);
-    if (typeof centerActiveSettingSubnavTab === "function") centerActiveSettingSubnavTab("auto");
     if (!hasRenderedSettingItems(targetGroup)) {
-      await renderItems(targetGroup, { scrollMode: "restore", animateItems });
+      await renderItems(targetGroup, {
+        detailName: CURRENT_SETTING_DETAIL || "",
+        scrollMode: "restore",
+        animateItems,
+      });
     }
     return;
   }
@@ -2592,9 +3593,12 @@ async function syncSettingViewportLayout(options = {}) {
   if (CURRENT_GROUP) {
     syncSettingGroupChrome(CURRENT_GROUP);
     showSettingScreen("items", false);
-    if (typeof centerActiveSettingSubnavTab === "function") centerActiveSettingSubnavTab("auto");
     if (!hasRenderedSettingItems(CURRENT_GROUP)) {
-      await renderItems(CURRENT_GROUP, { scrollMode: "restore", animateItems });
+      await renderItems(CURRENT_GROUP, {
+        detailName: CURRENT_SETTING_DETAIL || "",
+        scrollMode: "restore",
+        animateItems,
+      });
     }
   } else {
     showSettingScreen("groups", false);
@@ -2638,6 +3642,7 @@ window.addEventListener("carrot:paramsrestored", (event) => {
   settingRestoreRefreshTimer = window.setTimeout(() => {
     settingRestoreRefreshTimer = null;
     renderItems(CURRENT_GROUP, {
+      detailName: CURRENT_SETTING_DETAIL || "",
       forceValues: true,
       scrollMode: "restore",
       scrollTop: currentTop,

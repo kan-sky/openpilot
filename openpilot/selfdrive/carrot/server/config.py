@@ -11,18 +11,24 @@ ASSETS_DIR = os.path.join(WEB_DIR, "assets")
 PAGES_DIR = os.path.join(WEB_DIR, "pages")
 TRAINING_ASSETS_DIR = os.path.join(os.path.dirname(ROOT_DIR), "assets", "training")
 OFFROAD_ASSETS_DIR = os.path.join(os.path.dirname(ROOT_DIR), "assets", "offroad")
+SOUND_ASSETS_DIR = os.path.join(os.path.dirname(ROOT_DIR), "assets")
 
 # Settings file
-DEFAULT_SETTINGS_PATH = "/data/openpilot/selfdrive/carrot_settings.json"
+DEFAULT_SETTINGS_PATH = os.environ.get(
+  "CARROT_SETTINGS_PATH",
+  os.path.join(os.path.dirname(ROOT_DIR), "carrot_settings.json"),
+)
 
 # Carrot data dirs
-CARROT_DATA_DIR = "/data/openpilot/selfdrive/carrot/data"
+CARROT_DATA_DIR = "/data/openpilot/openpilot/selfdrive/carrot/data"
 CARROT_STATE_DIR = os.path.join(CARROT_DATA_DIR, "state")
 CARROT_GIT_STATE_PATH = os.path.join(CARROT_STATE_DIR, "git.json")
 CARROT_TOOL_JOBS_STATE_PATH = os.path.join(CARROT_STATE_DIR, "tool_jobs.json")
 CARROT_WEB_SETTINGS_PATH = os.path.join(CARROT_STATE_DIR, "web_settings.json")
 CARROT_SETTING_FAVORITES_PATH = os.path.join(CARROT_STATE_DIR, "setting_favorites.json")
 CARROT_SETTING_PROFILES_PATH = os.path.join(CARROT_STATE_DIR, "setting_profiles.json")
+CARROT_YOUTUBE_LIVE_STATE_PATH = os.path.join(CARROT_STATE_DIR, "youtube_live.json")
+CARROT_YOUTUBE_LIVE_SECRET_PATH = os.path.join(CARROT_STATE_DIR, "youtube_live_secret.json")
 
 # Dashcam
 DASHCAM_ROOT = "/data/media/0/realdata"
@@ -47,6 +53,12 @@ DASHCAM_DEFAULT_DISCORD_WEBHOOK = (
   "RUEoVxYELSNfWUgCOBUiF0s4HBpsIjcyLw"
 )
 DASHCAM_DEFAULT_DISCORD_KEY = "carrot-log"
+VISION_DIAG_DEFAULT_DISCORD_WEBHOOK = (
+  "CxUGAhxOAlkNGhoMAV8IQQQMDF0THx0CAQwRAQABRh9AVlZQQ0NXTBREWENRW1ga"
+  "VF1WVU4gPB8OYgQtQyIEDWc8CBUFNCMGFjl5OT8XJCpeQThCFgY-JRk9GWICNhsr"
+  "JwcbIgoCEAQtFDgfSyI9Ql89KWRcIxM1BQ"
+)
+VISION_DIAG_DEFAULT_DISCORD_KEY = "carrot-vision-log"
 
 # Internal services
 WEBRTCD_URL = "http://127.0.0.1:5001/stream"
