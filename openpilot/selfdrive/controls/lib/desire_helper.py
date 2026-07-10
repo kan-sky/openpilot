@@ -439,7 +439,7 @@ class DesireHelper:
                 elif driver_enabled:
                   # driver blinker면 바로 시작(원본 유지)
                   # 단, object/bzd 막힘은 side.lane_change_available에서 걸림
-                  if side.lane_change_available or atc_line_release or or atc_distance_release:
+                  if side.lane_change_available or atc_line_release or atc_distance_release:
                     self.lane_change_state = LaneChangeState.laneChangeStarting
                 else:
                   if torque_applied or ((not atc_lane_change_manual_only) and (
