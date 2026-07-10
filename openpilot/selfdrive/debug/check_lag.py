@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
-import cereal.messaging as messaging
-from cereal.services import SERVICE_LIST
+import openpilot.cereal.messaging as messaging
+from openpilot.cereal.services import SERVICE_LIST
 
 TO_CHECK = ['carState']
 

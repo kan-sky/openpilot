@@ -2,7 +2,7 @@
 import subprocess
 import time
 import threading
-from cereal import car, messaging
+from openpilot.cereal import car, messaging
 from openpilot.common.params import Params
 from openpilot.common.realtime import Ratekeeper
 
@@ -16,7 +16,7 @@ class Beepd:
     self.startup_beep()
 
   def enable_gpio(self):
-    # 尝试 export，忽略已 export 的错误
+    # 弱앲캊 export竊뚦옙?ε럴 export ?꾦뵗瑥?
     try:
       subprocess.run("echo 42 | sudo tee /sys/class/gpio/export",
                      shell=True,
@@ -137,7 +137,7 @@ class Beepd:
 
 def main():
   s = Beepd()
-  s.beepd_thread(test=False)  # 改成 True 可启用模拟测试数据
+  s.beepd_thread(test=False)  # ?방닇 True ??맦?ⓩÆ?잍탩瑥뺞빊??
 
 if __name__ == "__main__":
   main()

@@ -1,6 +1,5 @@
 import numpy as np
-from openpilot.cereal import messaging
-from opendbc.car.structs import car
+from openpilot.cereal import car, messaging
 from opendbc.car import ACCELERATION_DUE_TO_GRAVITY
 from opendbc.car import structs
 from opendbc.car.lateral import get_friction, FRICTION_THRESHOLD
@@ -51,10 +50,8 @@ def simulate_straight_road_msgs(est):
   lat_accels = TORQUE_TUNE.latAccelFactor * steer_torques
   for t, steer_torque, lat_accel in zip(ts, steer_torques, lat_accels, strict=True):
     carOutput.actuatorsOutput.torque = float(-steer_torque)
-    livePose.orientationNED = {'x': float(np.deg2rad(ROLL_BIAS_DEG)), 'valid': True}
-    livePose.angularVelocityDevice = {'z': float(lat_accel / V_EGO), 'valid': True}
-    livePose.inputsOK, livePose.sensorsOK, livePose.posenetOK = True, True, True
-    livePose.timestamp = int(t * 1e9)
+    livePose.orientationNED.x = float(np.deg2rad(ROLL_BIAS_DEG))
+    livePose.angularVelocityDevice.z = float(lat_accel / V_EGO)
     for which, msg in (('carControl', carControl), ('carOutput', carOutput), ('carState', carState), ('livePose', livePose)):
       est.handle_log(t, which, msg)
 

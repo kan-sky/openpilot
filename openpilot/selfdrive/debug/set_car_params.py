@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import sys
 
-from cereal import car
+from openpilot.cereal import car
 from openpilot.common.params import Params
 from openpilot.tools.lib.route import Route
 from openpilot.tools.lib.logreader import LogReader
@@ -19,4 +19,4 @@ if __name__ == "__main__":
 
   cp_bytes = CP.to_bytes()
   for p in ("CarParams", "CarParamsCache", "CarParamsPersistent"):
-    Params().put(p, cp_bytes, block=True)
+    Params().put(p, cp_bytes)

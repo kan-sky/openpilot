@@ -2,7 +2,7 @@
 import argparse
 from tqdm import tqdm
 
-from cereal.services import SERVICE_LIST, QueueSize
+from openpilot.cereal.services import SERVICE_LIST, QueueSize
 from openpilot.tools.lib.logreader import LogReader
 
 

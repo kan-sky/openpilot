@@ -13,7 +13,7 @@ GLYPH_PADDING = 6
 EXTRA_CHARS = ("–‑✓×°§•X⚙✕◀▶✔⌫⇧␣○●↳çêüñ–‑✓×°§•€£¥"  
   "↑↓←→↖↗↘↙±÷℃℉✔✕✖■□◆◇…“”‘’") # Kans
 UNIFONT_LANGUAGES = {"th", "zh-CHT", "zh-CHS", "ko", "ja"}
-KR_FONTS = {"KaiGenGothicKR-Bold"} # Carrot
+KR_FONTS = {"NanumGothicBold"}
 
 def _languages():
   if not LANGUAGES_FILE.exists():
@@ -124,7 +124,7 @@ def _process_font(font_path: Path, codepoints: tuple[int, ...]):
     raise RuntimeError("raylib failed to load font data")
 
   rects_ptr = rl.ffi.new("Rectangle **")
-  image = rl.gen_image_font_atlas(glyphs, rects_ptr, glyph_count[0], font_size, GLYPH_PADDING, 0)
+  image = rl.gen_image_font_atlas(glyphs, rects_ptr, glyph_count[0], font_size, padding, 0)
   if image.width == 0 or image.height == 0:
     raise RuntimeError("raylib returned an empty atlas")
 
@@ -145,7 +145,7 @@ def main():
   for font in fonts:
     if "emoji" in font.name.lower():
       continue
-    glyphs = unifont_cp if font.stem.lower().startswith("unifont") else base_cp
+    glyphs = unifont_cp if font.stem.lower().startswith("unifont") or font.stem in KR_FONTS else base_cp
     _process_font(font, glyphs)
   return 0
 

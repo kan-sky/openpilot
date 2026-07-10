@@ -451,6 +451,10 @@ class CarInterfaceBase(ABC):
       if model is not None:
         Params().put_nonblocking("NNFFModelName", candidate.replace("_", " "))
         print(f"NNFF loaded... {model}")
+    
+
+    if Params().get_bool("DisableMinSteerSpeed"):
+      ret.minSteerSpeed = 0.
 
     # Vehicle mass is published curb weight plus assumed payload such as a human driver; notCars have no assumed payload
     if not ret.notCar:

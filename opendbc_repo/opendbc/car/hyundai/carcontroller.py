@@ -21,6 +21,24 @@ from openpilot.common.params import Params
 MAX_ANGLE = 85
 MAX_ANGLE_FRAMES = 89
 MAX_ANGLE_CONSECUTIVE_FRAMES = 2
+DRIVER_TORQUE_FILTER_TAU = 0.12
+PRE_OVERRIDE_PREDICTION_TIME = 0.15
+PRE_OVERRIDE_START_RATIO = 0.90
+PRE_OVERRIDE_FULL_RATIO = 1.05
+PRE_OVERRIDE_RAW_MIN_RATIO = 0.70
+PRE_OVERRIDE_FILTERED_MIN_RATIO = 0.65
+PRE_OVERRIDE_MIN_RATE_RATIO = 0.50
+PRE_OVERRIDE_CONFIRM_FRAMES = 2
+PRE_OVERRIDE_MAX_TORQUE_DELTA = -10.0
+LOW_SPEED_ANGLE_RATE_RAMP_SPEED = 15.0 * CV.KPH_TO_MS
+MID_SPEED_ANGLE_RATE_LIMIT_SPEED = 40.0 * CV.KPH_TO_MS
+
+# KIA_EV_SK3 note: do NOT toggle/knock the LKAS request bit to coax the MDPS into starting.
+# Field-tested and removed twice: (a) toggling with ToiFlt=1 faults the MDPS; (b) brief clean
+# cuts (ActToi=0/ToiFlt=0) while unlatched turn the MDPS's transient yields into full releases
+# ("more frequent drops"), and hands-off latching at speed happens with a steady request anyway.
+# Keep the request steady; the cluster warning (lkas_noact_frames) covers the unlatched state.
+
 
 vibrate_intervals = [
   (0.0, 0.5),
@@ -65,14 +83,27 @@ def apply_steer_angle_limits_physics(desired_sw_deg: float,
                                      lat_active: bool,
                                      wheelbase_m: float,
                                      steer_ratio: float,
-                                     steer_sw_max_deg: float) -> float:
-  max_lat_accel = 5.0   # m/s^2
+                                     steer_sw_max_deg: float,
+                                     model_v2=None) -> float:
+  max_lat_accel = 8.5   # m/s^2
   max_lat_jerk  = 4.0   # m/s^3
-  max_sw_rate_deg_per_tick = 2.0   # ★ EPS 보호용 상한
-
+  y_std_1s = 0.1
+  if model_v2 is not None and len(model_v2.position.yStd) > 10:
+    model_y_std_1s = float(model_v2.position.yStd[10])
+    if np.isfinite(model_y_std_1s) and model_y_std_1s >= 0.0:
+      y_std_1s = model_y_std_1s
+  max_sw_rate_deg_per_tick = float(np.interp(y_std_1s, [0.1, 0.2, 0.4], [2.0, 1.5, 0.8]))
   v = max(float(v_ego), 1.0)
 
   target_sw = float(np.clip(desired_sw_deg, -steer_sw_max_deg, steer_sw_max_deg))
+  if v_ego < MID_SPEED_ANGLE_RATE_LIMIT_SPEED:
+    # Keep low/mid-speed angle commands quieter without reducing LKAS_ANGLE_MAX_TORQUE.
+    # Allow the angle, but slow the arrival: 0~15 kph ramps 0.8->1.1 deg/tick,
+    # then 15~40 kph tapers 1.1->0.8 deg/tick. Above 40 kph, physics limits take over.
+    low_mid_speed_cap = float(np.interp(v_ego,
+                                        [0.0, LOW_SPEED_ANGLE_RATE_RAMP_SPEED, MID_SPEED_ANGLE_RATE_LIMIT_SPEED],
+                                        [0.8, 1.1, 0.8]))
+    max_sw_rate_deg_per_tick = min(max_sw_rate_deg_per_tick, low_mid_speed_cap)
 
   target_rw = target_sw / steer_ratio
   last_rw   = float(last_sw_deg) / steer_ratio
@@ -87,14 +118,15 @@ def apply_steer_angle_limits_physics(desired_sw_deg: float,
   max_drw_per_tick = max_drw_dt * DT_CTRL                        # rad/tick
   max_drw_per_tick_deg = float(np.degrees(max_drw_per_tick))
 
+  err = abs(target_sw - last_sw_deg)
+  if err > 20.0:
+    max_sw_rate_deg_per_tick = min(max_sw_rate_deg_per_tick, 1.0)
+
   max_drw_per_tick_deg = min(
     max_drw_per_tick_deg,
     max_sw_rate_deg_per_tick / steer_ratio
   )
-  err = abs(target_sw - last_sw_deg)
-  if err > 20.0:
-    max_drw_per_tick_deg *= 0.5
-  
+
   # --- rate limit ---
   cmd_rw = rate_limit(target_rw, last_rw, -max_drw_per_tick_deg, max_drw_per_tick_deg)
 
@@ -106,7 +138,7 @@ def apply_steer_angle_limits_physics(desired_sw_deg: float,
 
   cmd_sw = cmd_rw * steer_ratio
   return float(np.clip(cmd_sw, -steer_sw_max_deg, steer_sw_max_deg))
-  
+
 class CarController(CarControllerBase):
   def __init__(self, dbc_names, CP):
     super().__init__(dbc_names, CP)
@@ -114,6 +146,8 @@ class CarController(CarControllerBase):
     self.params = CarControllerParams(CP)
     self.packer = CANPacker(dbc_names[Bus.pt])
     self.angle_limit_counter = 0
+    self.lkas_noact_frames = 0
+    self.mdps_noact_frames = 0
 
     self.accel_last = 0
     self.apply_torque_last = 0
@@ -141,6 +175,15 @@ class CarController(CarControllerBase):
     self.apply_angle_last = 0
     self.lkas_max_torque = 0
     self.angle_max_torque = 250
+    self.steering_pressed_prev = False
+    self.recovering_from_override = False
+    self.full_recovery_frames = 0
+    self.repeated_override_count = 0
+    self.override_latched = False
+    self.override_release_frames = 0
+    self.driver_torque_filtered = 0.0
+    self.driver_torque_filtered_prev = 0.0
+    self.pre_override_frames = 0
 
     self.lkas11_active = False
 
@@ -187,7 +230,7 @@ class CarController(CarControllerBase):
         self.steerDeltaDownLC = steerDeltaDownLC
       else:
         self.steerDeltaDownLC = self.steerDeltaDown
-        
+
       self.soft_hold_mode = 1 if params.get_int("AutoCruiseControl") > 1 else 2
       self.hapticFeedbackWhenSpeedCamera = int(params.get_int("HapticFeedbackWhenSpeedCamera"))
 
@@ -209,7 +252,7 @@ class CarController(CarControllerBase):
     else:
       self.params.STEER_DELTA_UP = self.steerDeltaUp
       self.params.STEER_DELTA_DOWN = self.steerDeltaDown
-    
+
     angle_control = self.CP.flags & HyundaiFlags.ANGLE_CONTROL
 
     # steering torque
@@ -220,8 +263,16 @@ class CarController(CarControllerBase):
     self.angle_limit_counter, apply_steer_req = common_fault_avoidance(abs(CS.out.steeringAngleDeg) >= MAX_ANGLE, CC.latActive,
                                                                        self.angle_limit_counter, self.max_angle_frames,
                                                                        MAX_ANGLE_CONSECUTIVE_FRAMES)
+    if self.car_fingerprint == CAR.KIA_EV_SK3:
+      # The generic >85deg guard cuts the request 2 frames (with ToiFlt=1) about once per
+      # second while the angle stays large. This MDPS is request-bit sensitive: each cut
+      # drops the whole overlay, causing latch/drop cycling through every turn — while the
+      # >90deg EPS fault the guard prevents has never been observed on this car (overlay
+      # held at 89deg under high torque). Keep the request steady; revert if
+      # steerFaultTemporary starts appearing at deep angles.
+      apply_steer_req = CC.latActive
 
-    #apply_angle = apply_std_steer_angle_limits(actuators.steeringAngleDeg, self.apply_angle_last, CS.out.vEgoRaw, 
+    #apply_angle = apply_std_steer_angle_limits(actuators.steeringAngleDeg, self.apply_angle_last, CS.out.vEgoRaw,
     #                                           CS.out.steeringAngleDeg, CC.latActive, self.params.ANGLE_LIMITS)
 
     apply_angle = apply_steer_angle_limits_physics(
@@ -232,38 +283,157 @@ class CarController(CarControllerBase):
       CC.latActive,
       self.CP.wheelbase,
       self.CP.steerRatio,
-      self.params.ANGLE_LIMITS.STEER_ANGLE_MAX
+      self.params.ANGLE_LIMITS.STEER_ANGLE_MAX,
+      CS.modelV2,
     )
 
-    
+
     if angle_control:
       apply_steer_req = CC.latActive
 
-    if CS.out.steeringPressed:
-      #self.apply_angle_last = CS.out.steeringAngleDeg
-      self.lkas_max_torque = max(self.lkas_max_torque - 20, 25)
+    angle_torque_cap = self.angle_max_torque
+
+    steering_pressed_rising = CS.out.steeringPressed and not self.steering_pressed_prev
+    if steering_pressed_rising:
+      if 0 < self.full_recovery_frames < int(5.0 / DT_CTRL):
+        self.repeated_override_count = min(self.repeated_override_count + 1, 3)
+      self.full_recovery_frames = 0
+      self.recovering_from_override = True
+
+    torque_threshold = max(self.params.STEER_THRESHOLD, 1.0)
+    # Filter signed torque so alternating sensor noise cancels out before its
+    # magnitude is used for pre-override prediction.
+    driver_torque = float(CS.out.steeringTorque)
+    driver_torque_abs = abs(driver_torque)
+    if not CC.latActive:
+      self.driver_torque_filtered = driver_torque
+      self.driver_torque_filtered_prev = driver_torque
+      self.pre_override_frames = 0
     else:
-      target_torque = self.angle_max_torque
+      torque_filter_alpha = DT_CTRL / (DRIVER_TORQUE_FILTER_TAU + DT_CTRL)
+      self.driver_torque_filtered_prev = self.driver_torque_filtered
+      self.driver_torque_filtered += torque_filter_alpha * (driver_torque - self.driver_torque_filtered)
 
-      max_steering_tq = self.params.STEER_DRIVER_ALLOWANCE * 0.7
-      rate_ratio = max(20, max_steering_tq - abs(CS.out.steeringTorque)) / max_steering_tq
-      rate_up = self.params.ANGLE_TORQUE_UP_RATE * rate_ratio
-      rate_down = self.params.ANGLE_TORQUE_DOWN_RATE * rate_ratio
+    driver_torque_filtered_abs = abs(self.driver_torque_filtered)
+    driver_torque_filtered_prev_abs = abs(self.driver_torque_filtered_prev)
+    driver_torque_rate = max(0.0, (driver_torque_filtered_abs - driver_torque_filtered_prev_abs) / DT_CTRL)
+    torque_ratio = driver_torque_filtered_abs / torque_threshold
+    raw_torque_ratio = driver_torque_abs / torque_threshold
+    predicted_torque_ratio = (
+      driver_torque_filtered_abs + driver_torque_rate * PRE_OVERRIDE_PREDICTION_TIME
+    ) / torque_threshold
+    pre_override_candidate = (
+      CC.latActive and
+      not CS.out.steeringPressed and
+      raw_torque_ratio > PRE_OVERRIDE_RAW_MIN_RATIO and
+      torque_ratio > PRE_OVERRIDE_FILTERED_MIN_RATIO and
+      predicted_torque_ratio > PRE_OVERRIDE_START_RATIO and
+      driver_torque_rate > torque_threshold * PRE_OVERRIDE_MIN_RATE_RATIO
+    )
+    self.pre_override_frames = self.pre_override_frames + 1 if pre_override_candidate else 0
+    pre_override_yield = 0.0
+    if self.pre_override_frames >= PRE_OVERRIDE_CONFIRM_FRAMES:
+      pre_override_yield = float(np.interp(
+        predicted_torque_ratio,
+        [PRE_OVERRIDE_START_RATIO, PRE_OVERRIDE_FULL_RATIO],
+        [0.0, 1.0],
+      ))
+    recovery_allowed = False
 
-      if self.lkas_max_torque > target_torque:
-        self.lkas_max_torque = max(self.lkas_max_torque - rate_down, target_torque)
+    if CS.out.steeringPressed:
+      # Start yielding immediately when driver override is confirmed.
+      self.override_latched = True
+      self.override_release_frames = 0
+      torque_delta = -20.0
+    elif pre_override_yield > 0.0:
+      # Start handing off gently before steeringPressed flips to avoid a sharp torque drop.
+      torque_delta = PRE_OVERRIDE_MAX_TORQUE_DELTA * pre_override_yield
+    elif self.lkas_max_torque >= self.angle_max_torque:
+      # Once fully recovered, hold full authority until the next driver override.
+      torque_delta = 0.0
+    elif self.override_latched:
+      # Hold reduced authority until driver torque stays below 60% for 0.2 seconds.
+      self.override_release_frames = self.override_release_frames + 1 if torque_ratio < 0.6 else 0
+      if self.override_release_frames >= int(0.2 / DT_CTRL):
+        self.override_latched = False
+        self.override_release_frames = 0
+        recovery_allowed = True
       else:
-        self.lkas_max_torque = min(self.lkas_max_torque + rate_up, target_torque)
+        torque_delta = 0.0
+    else:
+      recovery_allowed = True
 
+    if recovery_allowed:
+      # Use one-second model uncertainty to set the base torque recovery time.
+      # Missing or invalid model data falls back to a moderate 1.5-second recovery.
+      y_std_1s = 0.2
+      if CS.modelV2 is not None and len(CS.modelV2.position.yStd) > 10:
+        model_y_std_1s = float(CS.modelV2.position.yStd[10])
+        if np.isfinite(model_y_std_1s) and model_y_std_1s >= 0.0:
+          y_std_1s = model_y_std_1s
+
+      recovery_time = float(np.interp(y_std_1s, [0.1, 0.2, 0.3, 0.4], [0.5, 0.8, 1.5, 3.0]))
+      recovery_time = max(recovery_time, float(np.interp(
+        self.repeated_override_count,
+        [0, 1, 2, 3],
+        [0.1, 1.0, 2.0, 3.0],
+      )))
+      base_rate_up = (self.angle_max_torque - self.params.ANGLE_MIN_TORQUE) * DT_CTRL / recovery_time
+
+      # During recovery, taper the rate to zero. Only steeringPressed can reduce authority.
+      torque_delta = base_rate_up * float(np.interp(torque_ratio, [0.6, 0.8], [1.0, 0.0]))
+    self.lkas_max_torque = float(np.clip(self.lkas_max_torque + torque_delta,
+                                         self.params.ANGLE_MIN_TORQUE, angle_torque_cap))
+
+    if not CS.out.steeringPressed and self.recovering_from_override and self.lkas_max_torque >= self.angle_max_torque:
+      self.recovering_from_override = False
+      self.full_recovery_frames = 1
+    elif not CS.out.steeringPressed and self.full_recovery_frames > 0:
+      self.full_recovery_frames += 1
+      if self.full_recovery_frames >= int(5.0 / DT_CTRL):
+        self.full_recovery_frames = 0
+        self.repeated_override_count = 0
 
     if not CC.latActive:
       apply_torque = 0
       self.lkas_max_torque = 0
+      self.recovering_from_override = False
+      self.full_recovery_frames = 0
+      self.repeated_override_count = 0
+      self.override_latched = False
+      self.override_release_frames = 0
+      self.driver_torque_filtered = 0.0
+      self.driver_torque_filtered_prev = 0.0
+      self.pre_override_frames = 0
+
+    self.steering_pressed_prev = CS.out.steeringPressed if CC.latActive else False
 
     self.apply_angle_last = apply_angle
 
+    # KIA_EV_SK3: this MDPS accepts the LKAS overlay start only when the REQUESTED TORQUE is
+    # near zero at its evaluation moment — every observed latch (7/7 in the low-speed toggle
+    # session, hands-off and driver-assisted alike) happened at |torque| <= 9, while steady
+    # torque of 30..409 was refused indefinitely. "Driver grip helps" was a proxy: the driver
+    # limits push our torque to ~0. So while the MDPS is not applying our torque (ToiActive=0,
+    # torque ignored anyway), request with ZERO torque so its next evaluation accepts, then
+    # ramp up from zero after the latch. Request bit stays steadily 1 (no knocking).
+    if self.car_fingerprint == CAR.KIA_EV_SK3 and CC.latActive and \
+       int(round(getattr(CS, "steer_state", 1))) == 0:
+      self.mdps_noact_frames += 1
+    else:
+      self.mdps_noact_frames = 0
+    if self.mdps_noact_frames >= 10 and not angle_control:  # small debounce vs misreads
+      apply_torque = 0
+
     # Hold torque with induced temporary fault when cutting the actuation bit
     torque_fault = CC.latActive and not apply_steer_req
+
+    # cluster "keep hands on wheel" warning while lat is active but the MDPS is not applying
+    if self.car_fingerprint == CAR.KIA_EV_SK3 and CC.latActive and \
+       CS.out.vEgoRaw >= 2.0 and int(round(getattr(CS, "steer_state", 1))) == 0:
+      self.lkas_noact_frames += 1
+    else:
+      self.lkas_noact_frames = 0
 
     self.apply_torque_last = apply_torque
 
@@ -278,7 +448,7 @@ class CarController(CarControllerBase):
 
     active_speed_decel = hud_control.activeCarrot == 3 and self.activeCarrot != 3 # 3: Speed Decel
     self.activeCarrot = hud_control.activeCarrot
-    if active_speed_decel and self.speedCameraHapticEndFrame < 0: # 과속카메라 감속시작      
+    if active_speed_decel and self.speedCameraHapticEndFrame < 0: # 과속카메라 감속시작
       self.speedCameraHapticEndFrame = self.frame + (8.0 / DT_CTRL)  #8초간 켜줌.
     elif not active_speed_decel:
       self.speedCameraHapticEndFrame = -1
@@ -327,7 +497,7 @@ class CarController(CarControllerBase):
         can_sends.extend(hyundaicanfd.create_steering_messages_camera_scc(self.frame, self.packer, self.CP, self.CAN, CC, apply_steer_req, apply_torque, CS, apply_angle, self.lkas_max_torque, angle_control))
       else:
         can_sends.extend(hyundaicanfd.create_steering_messages(self.packer, self.CP, self.CAN, CC.enabled, apply_steer_req, apply_torque, apply_angle, self.lkas_max_torque, angle_control))
-              
+
       # prevent LFA from activating on HDA2 by sending "no lane lines detected" to ADAS ECU
       if self.frame % 5 == 0 and hda2 and not camera_scc:
         can_sends.extend(hyundaicanfd.create_suppress_lfa(self.packer, self.CAN, CS))
@@ -378,7 +548,8 @@ class CarController(CarControllerBase):
           can_sends.append(hyundaican.create_lkas11(self.packer, self.frame, self.CP, apply_torque, apply_steer_req,
                                                     torque_fault, CS.lkas11, sys_warning, sys_state, CC.enabled,
                                                     hud_control.leftLaneVisible, hud_control.rightLaneVisible,
-                                                    left_lane_warning, right_lane_warning, self.is_ldws_car))
+                                                    left_lane_warning, right_lane_warning, self.is_ldws_car,
+                                                    noact_warning=self.lkas_noact_frames >= 100))
         self.lkas11_active = True
 
       if not self.CP.openpilotLongitudinalControl:
@@ -386,17 +557,17 @@ class CarController(CarControllerBase):
       if self.CP.carFingerprint in CAN_GEARS["send_mdps12"] and CS.mdps12 is not None:  # send mdps12 to LKAS to prevent LKAS error
         can_sends.append(hyundaican.create_mdps12(self.packer, self.frame, CS.mdps12))
 
-      casper_opt = self.CP.carFingerprint in (CAR.HYUNDAI_CASPER_EV)
+      casper_ev = self.CP.carFingerprint == CAR.HYUNDAI_CASPER_EV
       if self.frame % 2 == 0 and self.CP.openpilotLongitudinalControl:
         self.hyundai_jerk.make_jerk(self.CP, CS, accel, actuators, hud_control)
         self.hyundai_jerk.check_carrot_cruise(CC, CS, hud_control, stopping, accel, actuators.aTarget)
         #jerk = 3.0 if actuators.longControlState == LongCtrlState.pid else 1.0
         use_fca = self.CP.flags & HyundaiFlags.USE_FCA.value
         if camera_scc:
-          
+
           can_sends.extend(hyundaican.create_acc_commands_scc(self.packer, CC.enabled, accel, self.hyundai_jerk, int(self.frame / 2),
                                                           hud_control, set_speed_in_units, stopping,
-                                                          CC.cruiseControl.override, casper_opt, CS, self.soft_hold_mode))
+                                                          CC.cruiseControl.override, casper_ev, CS, self.soft_hold_mode))
         else:
           can_sends.extend(hyundaican.create_acc_commands(self.packer, CC.enabled, accel, self.hyundai_jerk, int(self.frame / 2),
                                                 hud_control, set_speed_in_units, stopping,
@@ -411,7 +582,7 @@ class CarController(CarControllerBase):
       if self.frame % 20 == 0 and self.CP.openpilotLongitudinalControl:
         if camera_scc:
           if CS.scc13 is not None:
-            if casper_opt:
+            if casper_ev:
               #can_sends.append(hyundaican.create_acc_opt_copy(CS, self.packer))
               pass
           pass
@@ -424,7 +595,10 @@ class CarController(CarControllerBase):
 
     new_actuators = actuators.as_builder()
     new_actuators.torque = apply_torque / self.params.STEER_MAX
-    new_actuators.torqueOutputCan = apply_torque
+    # torqueOutputCan reflects the steering authority value actually sent over CAN.
+    # Torque-control platforms send the signed torque command, while angle-control
+    # platforms send LKAS_ANGLE_MAX_TORQUE alongside the requested angle.
+    new_actuators.torqueOutputCan = self.lkas_max_torque if angle_control else apply_torque
     new_actuators.steeringAngleDeg = float(apply_angle)
     new_actuators.accel = accel
 
@@ -618,7 +792,7 @@ class HyundaiJerk:
             self.carrot_cruise_accel = max(carrot_cruise, self.carrot_cruise_accel - 1.0 * DT_CTRL) #  점진적으로 줄임.
     if self.carrot_cruise == 0:
       self.carrot_cruise_accel = CS.out.aEgo
-    
+
   def make_jerk(self, CP, CS, accel, actuators, hud_control):
     if actuators.longControlState == LongCtrlState.stopping:
       self.jerk = self.jerk_u_min / 2 - CS.out.aEgo

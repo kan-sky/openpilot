@@ -49,6 +49,7 @@ class LanePlanner:
     self.lane_width = 3.2
     self.lane_width_last = self.lane_width
     self.lane_change_multiplier = 1
+    #self.lane_width_updated_count = 0
 
     self.lll_prob = 0.
     self.rll_prob = 0.
@@ -101,6 +102,8 @@ class LanePlanner:
       self.r_lane_change_prob = desire_state[log.Desire.laneChangeRight]
 
   def get_d_path(self, CS, v_ego, path_t, path_xyz, curve_speed):
+    #if v_ego > 0.1:
+    #  self.lane_width_updated_count = max(0, self.lane_width_updated_count - 1)
     # Reduce reliance on lanelines that are too far apart or
     # will be in a few seconds
     l_prob, r_prob = self.lll_prob, self.rll_prob
@@ -108,6 +111,7 @@ class LanePlanner:
     prob_mods = []
     for t_check in (0.0, 1.5, 3.0):
       width_at_t = np.interp(t_check * (v_ego + 7), self.ll_x, width_pts)
+      #prob_mods.append(np.interp(width_at_t, [4.0, 5.0], [1.0, 0.0]))
       prob_mods.append(np.interp(width_at_t, [4.5, 6.0], [1.0, 0.0]))
     mod = min(prob_mods)
     l_prob *= mod
@@ -125,14 +129,18 @@ class LanePlanner:
     current_lane_width = abs(self.rll_y[0] - self.lll_y[0])
 
     both_lane_available = False
-    if l_prob > 0.5 and r_prob > 0.5:
+    #speed_lane_width = np.interp(v_ego*3.6, [0., 60.], [2.8, 3.5])
+    if l_prob > 0.5 and r_prob > 0.5 and self.lane_change_multiplier > 0.5:
       both_lane_available = True
+      #self.lane_width_updated_count = max_updated_count
       self.lane_width_estimate.update(current_lane_width)
       self.lane_width_last = self.lane_width_estimate.x
+    #elif self.lane_width_updated_count <= 0 and v_ego > 0.1:   # 양쪽차선이 없을때.... 일정시간후(10초)부터 speed차선폭 적용함.
+    #  self.lane_width_estimate.update(speed_lane_width)
     else:
       self.lane_width_estimate.update(self.lane_width_last)
 
-    self.lane_width = self.lane_width_estimate.x
+    self.lane_width =  self.lane_width_estimate.x
     clipped_lane_width = min(4.0, self.lane_width)
     path_from_left_lane = self.lll_y + clipped_lane_width / 2.0
     path_from_right_lane = self.rll_y - clipped_lane_width / 2.0
@@ -142,7 +150,7 @@ class LanePlanner:
     one_lane_good = max(l_prob, r_prob) > 0.6
     self.d_prob = 1.0 if both_lane_available else (0.65 if one_lane_good else 0.4)
 
-    # 좌/우의 차선폭을 필터링
+    # 좌/우의 차선폭을 필터링.
     if self.lane_width_left > 0:
       self.lane_width_left_filtered.update(self.lane_width_left)
     if self.lane_width_right > 0:
@@ -180,61 +188,28 @@ class LanePlanner:
 
     self.d_prob *= self.lane_change_multiplier  ## 차선변경중에는 꺼버림.
 
-    # laneless at lowspeed
-    self.d_prob *= np.interp(v_ego * 3.6, [5., 10.], [0.0, 1.0])
+    ## laneless at lowspeed
+    self.d_prob *= np.interp(v_ego*3.6, [5., 10.], [0.0, 1.0])
 
-    #adjustLane_xPos = self.params.get_float("LatMpcInputOffset") * 0.01
+    #self.debugText = "OFFSET({:.2f}={:.2f}+{:.2f}+{:.2f}),Vc:{:.2f},dp:{:.1f},lf:{},lrw={:.1f}|{:.1f}|{:.1f}".format(
+    #  self.lane_offset_filtered.x,
+    #  diff_center, offset_lane, offset_curve,
+    #  curve_speed,
+    #  self.d_prob, self.lanefull_mode,
+    #  self.lane_width_left_filtered.x, self.lane_width, self.lane_width_right_filtered.x)
+
+    #adjustLaneTime = self.params.get_float("LatMpcInputOffset") * 0.01 # 0.06 
     laneline_active = False
     self.d_prob_count = self.d_prob_count + 1 if self.d_prob > 0.3 else 0
-
-    # Kans: 커브 안쪽마진 적용시에도 양쪽 차선이 모두 유효할 때만 d_prob 신뢰도(0.7로) 유지.
-    # 한쪽 차선만 보이는 상태에서 lane_blend(=d_prob)를 강제로 살리면 한쪽 쏠림이 다시 발생할 수 있음.
-    lane_blend = self.d_prob
-
-    # Kans: 직선에서는 lane line 보정을 약하게, 커브에서는 강하게
-    curvature_abs = abs(curvature)
-    curve_blend_limit = float(np.interp(curvature_abs, [0.0003, 0.0012], [0.55, 0.70]))
-    lane_blend = min(lane_blend, curve_blend_limit)
-    # Kans: 한쪽 차선쏠림 방지용
-    if inside_margin_active and both_lane_available:
-      lane_blend = max(lane_blend, 0.70)
-
     if self.lanefull_mode and self.d_prob_count > int(1 / DT_MDL):
       laneline_active = True
+      # Kans: 시간축(ll_t)에서 위치축(ll_x)으로 변경
       lane_path_y_np = np.asarray(lane_path_y)
       ll_x_np = np.asarray(self.ll_x)
-
       safe_idxs = np.isfinite(ll_x_np) & np.isfinite(lane_path_y_np)
-      if np.any(safe_idxs):
+      if np.count_nonzero(safe_idxs) >= 2:
         lane_path_y_interp = np.interp(path_xyz[:, 0], ll_x_np[safe_idxs], lane_path_y_np[safe_idxs])
-        # Kans: 커브에서 차선 경로가 순간적으로 직선화되는 현상 완화
-        curvature_abs = abs(curvature)
-        if curvature_abs > 0.0010:
-          if hasattr(self, "prev_lane_path_y_interp"):
-            if (self.prev_lane_path_y_interp is not None and
-                len(self.prev_lane_path_y_interp) == len(lane_path_y_interp)):
-
-              near_idxs = (path_xyz[:, 0] > 3.0) & (path_xyz[:, 0] < 25.0)
-
-              if np.any(near_idxs):
-                delta = np.nanmax(np.abs(
-                  lane_path_y_interp[near_idxs] - self.prev_lane_path_y_interp[near_idxs]
-                ))
-
-                new_curve = np.nanmax(lane_path_y_interp[near_idxs]) - np.nanmin(lane_path_y_interp[near_idxs])
-                prev_curve = np.nanmax(self.prev_lane_path_y_interp[near_idxs]) - np.nanmin(self.prev_lane_path_y_interp[near_idxs])
-
-                curve_drop = prev_curve > 0.20 and new_curve < prev_curve * 0.70
-
-                if delta > 0.20 or curve_drop:
-                  d_prob_clip = float(np.clip(self.d_prob, 0.5, 1.0))
-                  smooth_blend = float(np.interp(d_prob_clip, [0.5, 1.0], [0.35, 0.05]))
-                  lane_path_y_interp = (
-                    smooth_blend * self.prev_lane_path_y_interp +
-                    (1.0 - smooth_blend) * lane_path_y_interp
-                  )
-        self.prev_lane_path_y_interp = lane_path_y_interp.copy()
-        path_xyz[:, 1] = lane_blend * lane_path_y_interp + (1.0 - lane_blend) * path_xyz[:, 1]
+        path_xyz[:, 1] = self.d_prob * lane_path_y_interp + (1.0 - self.d_prob) * path_xyz[:, 1]
 
     return path_xyz, laneline_active
 

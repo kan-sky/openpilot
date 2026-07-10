@@ -5,7 +5,7 @@ from opendbc.car.crc import CRC16_XMODEM
 from opendbc.car.hyundai.values import HyundaiFlags, HyundaiExtFlags
 from openpilot.common.params import Params
 from opendbc.car.common.conversions import Conversions as CV
-from cereal import log
+from openpilot.cereal import log
 
 LaneChangeState = log.LaneChangeState
 LaneChangeDirection = log.LaneChangeDirection
@@ -127,7 +127,7 @@ def create_steering_messages_camera_scc(frame, packer, CP, CAN, CC, lat_active, 
     if CS.lfa_alt is not None:
       values = copy.copy(CS.lfa_alt)
       rx_counter = values.pop("COUNTER", None)
-      if emergency_steering:      
+      if emergency_steering:
         pass
       else:
         #values = {} #CS.lfa_alt
@@ -154,7 +154,7 @@ def create_steering_messages_camera_scc(frame, packer, CP, CAN, CC, lat_active, 
         values["NEW_SIGNAL_1"] = 10
       ret.append(packer.make_can_msg("LFA", CAN.ECAN, values, rx_counter = rx_counter))
 
-  else:
+  elif CS.lfa is not None:
     values = {}
     values["LKA_MODE"] = 2
     values["LKA_ICON"] = 2 if lat_active else 1
@@ -164,7 +164,7 @@ def create_steering_messages_camera_scc(frame, packer, CP, CAN, CC, lat_active, 
     values["HAS_LANE_SAFETY"] = 0
     values["LKA_ACTIVE"] = 0 # NEW_SIGNAL_1
 
-    values["DampingGain"] = 0 if lat_active else 100  
+    values["DampingGain"] = 0 if lat_active else 100
     #values["VALUE63"] = 0
 
     #values["VALUE82_SET256"] = 0
@@ -208,6 +208,7 @@ def create_steering_messages(packer, CP, CAN, enabled, lat_active, apply_steer, 
       #"STEER_MODE": 0,
       "HAS_LANE_SAFETY": 0,  # hide LKAS settings
       "VALUE63": 0,
+      "VALUE64": 100,
     }
 
   if CP.flags & HyundaiFlags.CANFD_HDA2:
@@ -329,7 +330,7 @@ def create_lfa_icon_non_camera_scc(packer, CS, CAN, CC):
   return ret
 
 def create_acc_control_scc2(packer, CAN, enabled, accel_last, accel, stopping, gas_override, set_speed, hud_control, hyundai_jerk, CS):
-  
+
   if CS.scc_control is None:
     return None
   enabled = (enabled or CS.softHoldActive > 0) and CS.paddle_button_prev == 0
@@ -340,7 +341,7 @@ def create_acc_control_scc2(packer, CAN, enabled, accel_last, accel, stopping, g
     acc_mode = 4 if enabled else 0
     enabled = False
     accel = accel_last = 0.5
-   
+
   elif hyundai_jerk.carrot_cruise == 2:
     accel = accel_last = hyundai_jerk.carrot_cruise_accel
 
@@ -398,7 +399,7 @@ def create_acc_control_scc2(packer, CAN, enabled, accel_last, accel, stopping, g
   # AccelLimitBandUpper, Lower
   values["SysFailState"] = 0    # 1: Performance degredation, 2: system temporairy unavailble, 3: SCC Service required , 눈이 묻어 레이더오류시... 2가 됨. 이때 가속을 안함...
 
-  values["AccelLimitBandUpper"] = 0.0   # 이값이 1.26일때 가속을 안하는 증상이 보임.. 
+  values["AccelLimitBandUpper"] = 0.0   # 이값이 1.26일때 가속을 안하는 증상이 보임..
   values["AccelLimitBandLower"] = 0.0
 
   values["ZEROS_7"] = 1
@@ -501,6 +502,8 @@ def forward_button_message(packer, CAN, frame, CS, cruise_button, MainMode_ACC_t
   if frame % 2 == 0:
     if CS.cruise_buttons_msg is not None:
       values = copy.copy(CS.cruise_buttons_msg)
+      # A held MAIN is reported on this bit and switches some clusters to LIMIT mode.
+      values["NORMAL_CRUISE_MAIN_BTN"] = 0
       #rx_counter = values.pop("COUNTER", None)
       cruise_button_driver = values["CRUISE_BUTTONS"]
       if cruise_button_driver == 0:
@@ -567,7 +570,7 @@ def alt_cruise_buttons(packer, CP, CAN, buttons, cruise_btns_msg, cnt):
   cruise_btns_msg["COUNTER"] = (cruise_btns_msg["COUNTER"] + 1 + cnt) % 256
   bus = CAN.ECAN if CP.flags & HyundaiFlags.CANFD_HDA2 else CAN.CAM
   return packer.make_can_msg("CRUISE_BUTTONS_ALT", bus, cruise_btns_msg)
-  
+
 def hkg_can_fd_checksum(address: int, sig, d: bytearray) -> int:
   crc = 0
   for i in range(2, len(d)):
@@ -597,10 +600,10 @@ def _get_desire_and_lane_changing(md):
     desire = md.meta.desire.raw
     ds = md.meta.desireState
     if len(ds) > 4:
-      if ds[1] > 0.8: lane_changing = 1
-      if ds[2] > 0.8: lane_changing = 2
-      if ds[3] > 0.8: lane_changing = 3
-      if ds[4] > 0.8: lane_changing = 4
+      if ds[1] > 0.9: lane_changing = 1
+      if ds[2] > 0.9: lane_changing = 2
+      if ds[3] > 0.9: lane_changing = 3
+      if ds[4] > 0.9: lane_changing = 4
   return desire, lane_changing
 
 def _apply_lane_desire(values, desire):
@@ -642,6 +645,12 @@ def _apply_radar_blink(values, radar_pairs, frame, *,
     values[det_key] = 2 - blink
     values[dist_key] = min_dist
 
+def _suppress_trailer_mode_warning(values, CS):
+  # Logs from IONIQ 9 show ALERTS_5=6 is the periodic
+  # "driver assistance limited in trailer mode" popup.
+  if CS.trailer_connected and values.get("ALERTS_5") == 6:
+    values["ALERTS_5"] = 0
+
 def _make_ccnc_values(values, CS, lat_active, frame, hud_control,
                      lane_line=True, corner_radar=True,
                      desire=0,
@@ -676,7 +685,7 @@ def create_ccnc_messages(CP, packer, CAN, frame, CC, CS, hud_control,
                          enable_corner_radar, stopping, canfd_debug):
   ret = []
 
-  md = CS.MD
+  md = CS.modelV2
   if not hasattr(create_ccnc_messages, '_lane_line_check') or frame % 100 == 0:
     create_ccnc_messages._lane_line_check = Params().get_int("LaneLineCheck")
   lane_line_check = create_ccnc_messages._lane_line_check
@@ -696,11 +705,13 @@ def create_ccnc_messages(CP, packer, CAN, frame, CC, CS, hud_control,
 
       if CS.cruise_buttons_msg is not None:
         values = copy.copy(CS.cruise_buttons_msg)
+        # Keep the physical long press on ECAN for CarState, but don't forward it to CAM.
+        values["NORMAL_CRUISE_MAIN_BTN"] = 0
 
         if  HDA_LFA_SymSta == 0 and 0 < frame % 200 < 12:
           values["LFA_BTN"] = 1
 
-        if CC.enabled:          
+        if CC.enabled:
           if not CS.MainMode_ACC:
             if 10 < frame % 200 <= 16 and CS.out.vEgo > 3.:
               values["ADAPTIVE_CRUISE_MAIN_BTN"] = 1
@@ -749,14 +760,14 @@ def create_ccnc_messages(CP, packer, CAN, frame, CC, CS, hud_control,
         values["DISTANCE_CAR"] = 3 if hdp_active else 2 if cruise_enabled else 1 if main_enabled else 0
         values["DISTANCE_SPACING"] = 5 if hdp_active else 1 if cruise_enabled else 0
 
-        values["TARGET"] = 1 if main_enabled else 0
+        values["TARGET"] = 1 if hud_control.leadVisible and cruise_enabled else 0
         values["TARGET_DISTANCE"] = int(hud_control.leadDistance)
 
         values["BACKGROUND"] = 6 if CS.paddle_button_prev > 0 else 1 if cruise_enabled else 3 if lat_active else 7
         values["CENTERLINE"] = 1 if HDA_CntrlModSta > 0 else 0
         values["CAR_CIRCLE"] = 2 if hdp_active else 1 if cruise_enabled else 0
 
-        values["NAV_ICON"] = 2 if nav_active else 0
+        values["NAV_ICON"] = 2 if nav_active and cruise_enabled else 1 if main_enabled and nav_active else 0
         values["HDA_ICON"] = 5 if hdp_active else 2 if cruise_enabled else 1 if main_enabled else 0
         values["LFA_ICON"] = 5 if hdp_active else 2 if lat_active else 1 if lat_enabled else 0
         values["LKA_ICON"] = 4 if lat_active else 3 if lat_enabled else 0
@@ -782,40 +793,51 @@ def create_ccnc_messages(CP, packer, CAN, frame, CC, CS, hud_control,
           values["ALERTS_5"] = 0
 
         # curvature 표시(0x161쪽 기존 로직 유지)
+        _suppress_trailer_mode_warning(values, CS)
+
         curvature = round(CS.out.steeringAngleDeg / 3)
         values["LANELINE_CURVATURE"] = (min(abs(curvature), 15) + (-1 if curvature < 0 else 0)) if lat_active else 0
         values["LANELINE_CURVATURE_DIRECTION"] = 1 if curvature < 0 and lat_active else 0
 
-        lane_color = 6 if md is not None and md.meta.laneChangeAvailableLeft else 2
-        if lane_line_check >= 1:
-          lane_line_warn_left = CS.out.leftLaneLine % 10 not in (0, 5)   # 실선이면 주황
+        trailer_lane_change_blocked = CS.trailer_connected
+        if trailer_lane_change_blocked:
+          values["LANELINE_LEFT"] = 2 if hud_control.leftLaneVisible else 0
+          values["LANELINE_RIGHT"] = 2 if hud_control.rightLaneVisible else 0
         else:
-          lane_line_warn_left = CS.out.leftLaneLine >= 20                  # 노란색이면 주황
-        lane_color = 4 if lane_line_warn_left or CS.out.leftBlindspot else lane_color
-        if hud_control.leftLaneDepart:
-          values["LANELINE_LEFT"] = 4 if (frame // 50) % 2 == 0 else 1
-        else:
-          values["LANELINE_LEFT"] = lane_color if hud_control.leftLaneVisible else 0
+          lane_color = 6 if md is not None and md.meta.laneChangeAvailableLeft else 2
+          if lane_line_check >= 1:
+            lane_line_warn_left = CS.out.leftLaneLine % 10 not in (0, 5)
+          else:
+            lane_line_warn_left = CS.out.leftLaneLine // 10 == 2
+          lane_color = 4 if lane_line_warn_left or CS.out.leftBlindspot else lane_color
+          if hud_control.leftLaneDepart:
+            values["LANELINE_LEFT"] = 4 if (frame // 50) % 2 == 0 else 1
+          else:
+            values["LANELINE_LEFT"] = lane_color if hud_control.leftLaneVisible else 0
 
-        lane_color = 6 if md is not None and md.meta.laneChangeAvailableRight else 2
-        if lane_line_check >= 1:
-          lane_line_warn_right = CS.out.rightLaneLine % 10 not in (0, 5)
-        else:
-          lane_line_warn_right = CS.out.rightLaneLine >= 20
-        lane_color = 4 if lane_line_warn_right or CS.out.rightBlindspot else lane_color
-        if hud_control.rightLaneDepart:
-          values["LANELINE_RIGHT"] = 4 if (frame // 50) % 2 == 0 else 1
-        else:
-          values["LANELINE_RIGHT"] = lane_color if hud_control.rightLaneVisible else 0
+          lane_color = 6 if md is not None and md.meta.laneChangeAvailableRight else 2
+          if lane_line_check >= 1:
+            lane_line_warn_right = CS.out.rightLaneLine % 10 not in (0, 5)
+          else:
+            lane_line_warn_right = CS.out.rightLaneLine // 10 == 2
+          lane_color = 4 if lane_line_warn_right or CS.out.rightBlindspot else lane_color
+          if hud_control.rightLaneDepart:
+            values["LANELINE_RIGHT"] = 4 if (frame // 50) % 2 == 0 else 1
+          else:
+            values["LANELINE_RIGHT"] = lane_color if hud_control.rightLaneVisible else 0
 
         values["LCA_LEFT_ARROW"] = 2 if CS.out.leftBlinker else 0
         values["LCA_RIGHT_ARROW"] = 2 if CS.out.rightBlinker else 0
 
-        values["LCA_LEFT_ICON"] = 1 if CS.out.leftBlindspot else 2
-        values["LCA_RIGHT_ICON"] = 1 if CS.out.rightBlindspot else 2
+        if trailer_lane_change_blocked:
+          values["LCA_LEFT_ICON"] = 1 if lat_active else 0
+          values["LCA_RIGHT_ICON"] = 1 if lat_active else 0
+        else:
+          values["LCA_LEFT_ICON"] = (1 if CS.out.leftBlindspot else 2) if lat_active else 0
+          values["LCA_RIGHT_ICON"] = (1 if CS.out.rightBlindspot else 2) if lat_active else 0
 
-        values["LANE_LEFT"] = 1 if desire in (1, 3) else 0
-        values["LANE_RIGHT"] = 1 if desire in (2, 4) else 0
+        values["LANE_LEFT"] = 0 if trailer_lane_change_blocked else 1 if desire in (1, 3) else 0
+        values["LANE_RIGHT"] = 0 if trailer_lane_change_blocked else 1 if desire in (2, 4) else 0
 
         ret.append(packer.make_can_msg("ADRV_0x161", CAN.ECAN, values, rx_counter = rx_counter))
 
