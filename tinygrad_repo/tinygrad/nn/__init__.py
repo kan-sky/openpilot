@@ -2,7 +2,7 @@ from __future__ import annotations
 import math, functools
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import prod, make_tuple, flatten, USE_ATOMICS
+from tinygrad.helpers import prod, make_tuple, flatten, USE_ATOMICS, TRAINING
 from tinygrad.nn import optim, state, datasets  # noqa: F401
 
 class BatchNorm:
@@ -40,7 +40,7 @@ class BatchNorm:
 
   def calc_stats(self, x:Tensor) -> tuple[Tensor, Tensor]:
     shape_mask: list[int] = [1, -1, *([1]*(x.ndim-2))]
-    if self.track_running_stats and not Tensor.training: return self.running_mean, self.running_var.reshape(shape=shape_mask).expand(x.shape)
+    if self.track_running_stats and not TRAINING: return self.running_mean, self.running_var.reshape(shape=shape_mask).expand(x.shape)
     # This requires two full memory accesses to x
     # https://github.com/pytorch/pytorch/blob/c618dc13d2aa23625cb0d7ada694137532a4fa33/aten/src/ATen/native/cuda/Normalization.cuh
     # There's "online" algorithms that fix this, like https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_Online_algorithm
@@ -52,7 +52,7 @@ class BatchNorm:
   def __call__(self, x:Tensor) -> Tensor:
     batch_mean, batch_var = self.calc_stats(x)
     # NOTE: wow, this is done all throughout training in most PyTorch models
-    if self.track_running_stats and Tensor.training:
+    if self.track_running_stats and TRAINING:
       self.running_mean.assign((1-self.momentum) * self.running_mean + self.momentum * batch_mean.detach())
       self.running_var.assign((1-self.momentum) * self.running_var + self.momentum * x.numel()/(x.numel()-x.shape[1]) * batch_var.detach())
       self.num_batches_tracked += 1
@@ -350,10 +350,10 @@ def _embedding_bwd(grad_emb:UOp, call:UOp) -> tuple:
       global_token_id = idx_flat[i].cast(dtypes.weakint)
       local_token_id = (global_token_id - offset).clip(0, grad_weight.shape[0]-1)
       in_range = (global_token_id >= offset) & (global_token_id < (offset + local_vocab_size))
-      grad_val = in_range.where(grad_emb_flat[i, j].cast(dtypes.float), 0.0)
+      grad_val = in_range.where(grad_emb_flat[i, j].load().cast(dtypes.float), 0.0)
     else:
       local_token_id = idx_flat[i].clip(0, grad_weight.shape[0]-1).cast(dtypes.weakint)
-      grad_val = grad_emb_flat[i, j].cast(dtypes.float)
+      grad_val = grad_emb_flat[i, j].load().cast(dtypes.float)
     # atomic scatter-add: grad_weight[token_id, j] += grad_emb_flat[i, j]
     if device in ("CPU", "NULL"): atomic_arg = "__atomic_fetch_add({0}, {1}, __ATOMIC_RELAXED);"
     elif device == "AMD": atomic_arg = "__hip_atomic_fetch_add({0}, {1}, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);"
@@ -366,7 +366,7 @@ def _embedding_bwd(grad_emb:UOp, call:UOp) -> tuple:
   return (grad_weight_uop.cast(weight.dtype), None)
 
 def _embedding_fwd(weight:Tensor, idx:Tensor) -> Tensor:
-  arange = Tensor.arange(weight.shape[0], device=weight.device)
+  arange = Tensor.arange(weight.shape[0])
   return (arange == idx.unsqueeze(-1)).unsqueeze(-1).where(weight, 0).sum(-2, dtype=weight.dtype)
 
 @functools.cache
@@ -411,7 +411,7 @@ class LSTMCell:
     self.bias_hh: Tensor|None = Tensor.zeros(hidden_size*4) if bias else None
 
   def __call__(self, x:Tensor, hc:tuple[Tensor, Tensor]|None=None) -> tuple[Tensor, Tensor]:
-    if hc is None: hc = (Tensor.zeros(x.size(0), self.weight_hh.size(1), dtype=x.dtype, device=x.device, buffer=False),)*2
+    if hc is None: hc = (Tensor.zeros(x.size(0), self.weight_hh.size(1), dtype=x.dtype, buffer=False),)*2
     gates = x.linear(self.weight_ih.T, self.bias_ih) + hc[0].linear(self.weight_hh.T, self.bias_hh)
     i, f, g, o = gates.chunk(4, dim=1)
     i, f, g, o = i.sigmoid(), f.sigmoid(), g.tanh(), o.sigmoid()

@@ -22,6 +22,7 @@ llvm_lib = (
 clang_lib = win_llvm.replace("LLVM-C", "libclang") + (mac_llvm + other_llvm).replace("LLVM", "clang")
 
 webgpu_lib = "os.path.join(sysconfig.get_paths()['purelib'], 'pydawn', 'lib', 'libwebgpu_dawn.dll') if WIN else 'webgpu_dawn'"
+tinymesa_path = "os.path.join(sysconfig.get_paths()['platlib'], 'tinymesa')"
 nv_lib_path = ("[f'/{pre}/cuda/targets/{tgt}/lib' for pre in ['opt', 'usr/local'] for tgt in "
                "[sysconfig.get_config_vars().get(\"MULTIARCH\", \"\").rsplit(\"-\", 1)[0], 'sbsa-linux']]")
 
@@ -49,9 +50,10 @@ def load(name, files, **kwargs):
 
 def __getattr__(nm):
   match nm:
-    case "libc": return load("libc", lambda: (
-      [i for i in system("dpkg -L libc6-dev").split() if 'sys/mman.h' in i or 'sys/syscall.h' in i] +
-      ["/usr/include/string.h", "/usr/include/elf.h", "/usr/include/unistd.h", "/usr/include/asm-generic/mman-common.h"]), dll="'c'", errno=True)
+    case "libc":
+      return load("libc", lambda: ([i for i in system("dpkg -L libc6-dev").split() if 'sys/mman.h' in i or 'bits/mman-shared.h' in i] +
+                                   ["/usr/include/string.h", "/usr/include/elf.h", "/usr/include/unistd.h", "/usr/include/stdio.h", "/usr/include/asm-generic/mman-common.h"]),
+                  args=["-D__USE_GNU", "-D_GNU_SOURCE"], dll="'c'", errno=True, recsym=True, rules=[(r'([a-z]+) = \1', '')]) # removes stdin = stdin
     case "avcodec": return load("avcodec", ["{}/libavcodec/hevc/hevc.h", "{}/libavcodec/cbs_h265.h"], srcs=ffmpeg_src)
     case "opencl": return load("opencl", ["{}/CL/cl.h"], dll="'OpenCL'", args=["-I{}"], srcs=opencl_src)
     case "cuda": return load("cuda", ["{}/include/cuda.h"], dll="'nvcuda' if WIN else 'cuda'", args=["-D__CUDA_API_VERSION_INTERNAL"], srcs=cudart_src, macros=False, prolog=["from tinygrad.helpers import WIN"])
@@ -96,8 +98,6 @@ def __getattr__(nm):
       return load("io_uring", ["{}/liburing.h", "{}/usr/include/linux/io_uring.h", "{}/usr/include/asm-generic/unistd.h"],
                   args=["-I{}/usr/include"], srcs=[linux_headers_deb, liburing_src], rules=[('__NR', 'NR')],
                   preprocess=lambda path: subprocess.run(f"ar x {linux_headers_deb.split('/')[-1]} && tar xf data.tar.xz", cwd=path, shell=True, check=True))
-    case "ib": return load("ib", ["/usr/include/infiniband/verbs.h", "/usr/include/infiniband/verbs_api.h",
-                                  "/usr/include/infiniband/ib_user_ioctl_verbs.h", "/usr/include/rdma/ib_user_verbs.h"], dll="'ibverbs'", errno=True)
     case "llvm": return load("llvm", lambda: [system("llvm-config-20 --includedir")+"/llvm-c/**/*.h"], dll=llvm_lib,
                              args=lambda: system("llvm-config-20 --cflags").split(), recsym=True, prolog=["from tinygrad.helpers import WIN, OSX"])
     case "pci": return load("pci", ["{}/usr/include/linux/pci_regs.h"], srcs=linux_headers_deb,
@@ -120,7 +120,6 @@ def __getattr__(nm):
                                     *[f"{{}}/projects/rocr-runtime/runtime/hsa-runtime/inc/{s}.h" for s in [
                                         "hsa", "hsa_ext_amd", "amd_hsa_signal", "amd_hsa_queue", "amd_hsa_kernel_code",
                                         "hsa_ext_finalize", "hsa_ext_image", "hsa_ven_amd_aqlprofile"]]],
-      dll="[os.getenv('ROCM_PATH', '/opt/rocm')+'/lib/libhsa-runtime64.so', 'hsa-runtime64']",
       srcs=rocr_src, args=["-DLITTLEENDIAN_CPU"], prolog=["import os"])
     case "amdgpu_kd": return load("amdgpu_kd", lambda: [f"{system('llvm-config-20 --includedir')}/llvm/Support/AMDHSAKernelDescriptor.h"],
                                   args=lambda: system("llvm-config-20 --cflags").split() + ["-x", "c++"], recsym=True, macros=False)
@@ -155,10 +154,8 @@ def __getattr__(nm):
           *[f"python3 src/compiler/{s}_h.py > gen/{s.split('/')[-1]}.h" for s in ["nir/nir_opcodes", "nir/nir_builder_opcodes"]],
           *[f"python3 src/compiler/nir/nir_{s}_h.py --outdir gen" for s in ["intrinsics", "intrinsics_indices"]]]), cwd=path, shell=True, check=True),
   srcs="https://gitlab.freedesktop.org/mesa/mesa/-/archive/mesa-25.2.7/mesa-25.2.7.tar.gz",
-  dll="'tinymesa_cpu' if (_cpu:=DEV.renderer == 'LVP') else 'tinymesa', " \
-      'emsg="not available on this platform" if WIN or (OSX and (platform.machine() != "arm64" or (_mv:=platform.mac_ver()[0][:2]) not in {"14","15","26"})) or (platform.system() == "Linux" and platform.machine() not in {"x86_64", "aarch64"}) else ' \
-      'f"run `sudo curl -fL https://github.com/sirhcm/tinymesa/releases/download/v1/libtinymesa{\'_cpu\'*_cpu}-mesa-25.2.7-{\'macos-\'+_mv if OSX else \'linux\'}-{\'amd64\' if ARCH_X86 else \'arm64\'}.{\'dylib\' if OSX else \'so\'} -o /usr/local/lib/libtinymesa{\'_cpu\'*_cpu}.{\'dylib\' if OSX else \'so\'}`"',
-  prolog=["from tinygrad.helpers import DEV, ARCH_X86, WIN, OSX", "import gzip, base64, platform"],
+  dll=f"'tinymesa_cpu' if DEV.renderer == 'LVP' else 'tinymesa', {tinymesa_path}, emsg='pip install tinymesa==25.2.7.2'",
+  prolog=["from tinygrad.helpers import DEV", "import gzip, base64, platform, sysconfig, os"],
   epilog=lambda path: [system(f"{root}/extra/mesa/lvp_nir_options.sh {path}")])
     case "libclang":
       return load("libclang",

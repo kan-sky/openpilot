@@ -1,0 +1,277 @@
+import math
+import numpy as np
+from openpilot.cereal import log
+from openpilot.common.filter_simple import FirstOrderFilter
+from openpilot.common.realtime import DT_MDL
+# from openpilot.common.swaglog import cloudlog
+# from openpilot.common.logger import sLogger
+from openpilot.common.params import Params
+
+TRAJECTORY_SIZE = 33
+# positive numbers go right
+MIN_LANE_DISTANCE = 2.6
+MAX_LANE_DISTANCE = 3.7
+MAX_LANE_CENTERING_AWAY = 1.85
+KEEP_MIN_DISTANCE_FROM_LANE = 1.35
+KEEP_MIN_DISTANCE_FROM_EDGELANE = 1.15
+
+def clamp(num, min_value, max_value):
+  # weird broken case, do something reasonable
+  if min_value > num > max_value:
+    return (min_value + max_value) * 0.5
+  # ok, basic min/max below
+  if num < min_value:
+    return min_value
+  if num > max_value:
+    return max_value
+  return num
+
+def sigmoid(x, scale=1, offset=0):
+  return (1 / (1 + math.exp(x*scale))) + offset
+
+def lerp(start, end, t):
+  t = clamp(t, 0.0, 1.0)
+  return (start * (1.0 - t)) + (end * t)
+
+def max_abs(a, b):
+  return a if abs(a) > abs(b) else b
+
+class LanePlanner:
+  def __init__(self):
+    self.ll_t = np.zeros((TRAJECTORY_SIZE,))
+    self.ll_x = np.zeros((TRAJECTORY_SIZE,))
+    self.lll_y = np.zeros((TRAJECTORY_SIZE,))
+    self.rll_y = np.zeros((TRAJECTORY_SIZE,))
+    self.le_y = np.zeros((TRAJECTORY_SIZE,))
+    self.re_y = np.zeros((TRAJECTORY_SIZE,))
+    #self.lane_width_estimate = FirstOrderFilter(3.2, 9.95, DT_MDL)
+    self.lane_width_estimate = FirstOrderFilter(3.2, 3.0, DT_MDL)
+    self.lane_width = 3.2
+    self.lane_width_last = self.lane_width
+    self.lane_change_multiplier = 1
+
+    self.lll_prob = 0.
+    self.rll_prob = 0.
+    self.d_prob = 0.
+
+    self.lll_std = 0.
+    self.rll_std = 0.
+
+    self.l_lane_change_prob = 0.
+    self.r_lane_change_prob = 0.
+
+    self.debugText = ""
+    self.lane_width_left = 0.0
+    self.lane_width_right = 0.0
+    self.lane_width_left_filtered = FirstOrderFilter(1.0, 1.0, DT_MDL)
+    self.lane_width_right_filtered = FirstOrderFilter(1.0, 1.0, DT_MDL)
+
+    self.lanefull_mode = False
+    self.d_prob_count = 0
+
+    self.params = Params()
+    self.curvature = 0.0
+
+  def parse_model(self, md):
+
+    lane_lines = md.laneLines
+    edges = md.roadEdges
+
+    if len(lane_lines) >= 4 and len(lane_lines[0].t) == TRAJECTORY_SIZE:
+      self.ll_t = (np.array(lane_lines[1].t) + np.array(lane_lines[2].t))/2
+      # left and right ll x is the same
+      self.ll_x = lane_lines[1].x
+      self.lll_y = np.array(lane_lines[1].y)
+      self.rll_y = np.array(lane_lines[2].y)
+      self.lll_prob = md.laneLineProbs[1]
+      self.rll_prob = md.laneLineProbs[2]
+      self.lll_std = md.laneLineStds[1]
+      self.rll_std = md.laneLineStds[2]
+
+    if len(edges[0].t) == TRAJECTORY_SIZE:
+      self.le_y = np.array(edges[0].y) + md.roadEdgeStds[0] * 0.4
+      self.re_y = np.array(edges[1].y) - md.roadEdgeStds[1] * 0.4
+    else:
+      self.le_y = self.lll_y
+      self.re_y = self.rll_y
+
+    desire_state = md.meta.desireState
+    if len(desire_state):
+      self.l_lane_change_prob = desire_state[log.Desire.laneChangeLeft]
+      self.r_lane_change_prob = desire_state[log.Desire.laneChangeRight]
+
+  def get_d_path(self, CS, v_ego, path_t, path_xyz, curve_speed):
+    # Reduce reliance on lanelines that are too far apart or
+    # will be in a few seconds
+    l_prob, r_prob = self.lll_prob, self.rll_prob
+    width_pts = self.rll_y - self.lll_y
+    prob_mods = []
+    for t_check in (0.0, 1.5, 3.0):
+      width_at_t = np.interp(t_check * (v_ego + 7), self.ll_x, width_pts)
+      prob_mods.append(np.interp(width_at_t, [4.5, 6.0], [1.0, 0.0]))
+    mod = min(prob_mods)
+    l_prob *= mod
+    r_prob *= mod
+
+    # Reduce reliance on uncertain lanelines
+    l_std_mod = np.interp(self.lll_std, [.15, .3], [1.0, 0.0])
+    r_std_mod = np.interp(self.rll_std, [.15, .3], [1.0, 0.0])
+    l_prob *= l_std_mod
+    r_prob *= r_std_mod
+
+    self.l_prob, self.r_prob = l_prob, r_prob
+
+    # Find current lanewidth
+    current_lane_width = abs(self.rll_y[0] - self.lll_y[0])
+
+    both_lane_available = False
+    if l_prob > 0.5 and r_prob > 0.5:
+      both_lane_available = True
+      self.lane_width_estimate.update(current_lane_width)
+      self.lane_width_last = self.lane_width_estimate.x
+    else:
+      self.lane_width_estimate.update(self.lane_width_last)
+
+    self.lane_width = self.lane_width_estimate.x
+    clipped_lane_width = min(4.0, self.lane_width)
+    path_from_left_lane = self.lll_y + clipped_lane_width / 2.0
+    path_from_right_lane = self.rll_y - clipped_lane_width / 2.0
+
+    # Kans: 좌/우 차선 모두 유효할 때만 차선 기반(=d_prob=lanemode)신뢰도값 사용.
+    # 한쪽 차선만 강한 경우 max(l_prob, r_prob)로 끌려가는 현상 방지. 
+    one_lane_good = max(l_prob, r_prob) > 0.6
+    self.d_prob = 1.0 if both_lane_available else (0.65 if one_lane_good else 0.4)
+
+    # 좌/우의 차선폭을 필터링
+    if self.lane_width_left > 0:
+      self.lane_width_left_filtered.update(self.lane_width_left)
+    if self.lane_width_right > 0:
+      self.lane_width_right_filtered.update(self.lane_width_right)
+
+    # select lane path
+    if self.lane_width < 2.5:
+      if r_prob > 0.5 and self.lane_width_right_filtered.x < self.lane_width_left_filtered.x:
+        lane_path_y = path_from_right_lane
+      elif l_prob > 0.5 and self.lane_width_left_filtered.x < 2.0:
+        lane_path_y = path_from_left_lane
+      else:
+        lane_path_y = path_from_left_lane if l_prob > 0.5 or l_prob > r_prob else path_from_right_lane
+    elif l_prob > 0.7 and r_prob > 0.7:
+      lane_path_y = (path_from_left_lane + path_from_right_lane) / 2.
+    else:
+      lane_path_y = (l_prob * path_from_left_lane + r_prob * path_from_right_lane) / (l_prob + r_prob + 0.0001)
+
+    # Kans: 안쪽차선 마진 .5m, 최소곡률 .0008(=완만한 커브에도 적용), 차선폭 2.8미터 미만은 미적용.
+    INSIDE_LANE_MARGIN = 0.5
+    CURVE_THRESHOLD = 0.0008
+    MIN_LANE_WIDTH_FOR_MARGIN = 2.8
+    curvature = getattr(self, "curvature", 0.0)
+    inside_margin_active = (abs(curvature) > CURVE_THRESHOLD and self.lane_width >= MIN_LANE_WIDTH_FOR_MARGIN)
+
+    if inside_margin_active:
+      # +값=왼쪽 커브, 좌측 차선이 안쪽 -> +마진 더해주기
+      if curvature > 0.0:
+        if l_prob > 0.5:
+          lane_path_y = np.maximum(lane_path_y, self.lll_y + INSIDE_LANE_MARGIN)
+      # -값=오른쪽 커브, 우측 차선이 안쪽 -> -마진 더해주기
+      else:
+        if r_prob > 0.5:
+          lane_path_y = np.minimum(lane_path_y, self.rll_y - INSIDE_LANE_MARGIN)
+
+    self.d_prob *= self.lane_change_multiplier  ## 차선변경중에는 꺼버림.
+
+    # laneless at lowspeed
+    self.d_prob *= np.interp(v_ego * 3.6, [5., 10.], [0.0, 1.0])
+
+    #adjustLane_xPos = self.params.get_float("LatMpcInputOffset") * 0.01
+    laneline_active = False
+    self.d_prob_count = self.d_prob_count + 1 if self.d_prob > 0.3 else 0
+
+    # Kans: 커브 안쪽마진 적용시에도 양쪽 차선이 모두 유효할 때만 d_prob 신뢰도(0.7로) 유지.
+    # 한쪽 차선만 보이는 상태에서 lane_blend(=d_prob)를 강제로 살리면 한쪽 쏠림이 다시 발생할 수 있음.
+    lane_blend = self.d_prob
+
+    # Kans: 직선에서는 lane line 보정을 약하게, 커브에서는 강하게
+    curvature_abs = abs(curvature)
+    curve_blend_limit = float(np.interp(curvature_abs, [0.0003, 0.0012], [0.55, 0.70]))
+    lane_blend = min(lane_blend, curve_blend_limit)
+    # Kans: 한쪽 차선쏠림 방지용
+    if inside_margin_active and both_lane_available:
+      lane_blend = max(lane_blend, 0.70)
+
+    if self.lanefull_mode and self.d_prob_count > int(1 / DT_MDL):
+      laneline_active = True
+      lane_path_y_np = np.asarray(lane_path_y)
+      ll_x_np = np.asarray(self.ll_x)
+
+      safe_idxs = np.isfinite(ll_x_np) & np.isfinite(lane_path_y_np)
+      if np.any(safe_idxs):
+        lane_path_y_interp = np.interp(path_xyz[:, 0], ll_x_np[safe_idxs], lane_path_y_np[safe_idxs])
+        # Kans: 커브에서 차선 경로가 순간적으로 직선화되는 현상 완화
+        curvature_abs = abs(curvature)
+        if curvature_abs > 0.0010:
+          if hasattr(self, "prev_lane_path_y_interp"):
+            if (self.prev_lane_path_y_interp is not None and
+                len(self.prev_lane_path_y_interp) == len(lane_path_y_interp)):
+
+              near_idxs = (path_xyz[:, 0] > 3.0) & (path_xyz[:, 0] < 25.0)
+
+              if np.any(near_idxs):
+                delta = np.nanmax(np.abs(
+                  lane_path_y_interp[near_idxs] - self.prev_lane_path_y_interp[near_idxs]
+                ))
+
+                new_curve = np.nanmax(lane_path_y_interp[near_idxs]) - np.nanmin(lane_path_y_interp[near_idxs])
+                prev_curve = np.nanmax(self.prev_lane_path_y_interp[near_idxs]) - np.nanmin(self.prev_lane_path_y_interp[near_idxs])
+
+                curve_drop = prev_curve > 0.20 and new_curve < prev_curve * 0.70
+
+                if delta > 0.20 or curve_drop:
+                  d_prob_clip = float(np.clip(self.d_prob, 0.5, 1.0))
+                  smooth_blend = float(np.interp(d_prob_clip, [0.5, 1.0], [0.35, 0.05]))
+                  lane_path_y_interp = (
+                    smooth_blend * self.prev_lane_path_y_interp +
+                    (1.0 - smooth_blend) * lane_path_y_interp
+                  )
+        self.prev_lane_path_y_interp = lane_path_y_interp.copy()
+        path_xyz[:, 1] = lane_blend * lane_path_y_interp + (1.0 - lane_blend) * path_xyz[:, 1]
+
+    return path_xyz, laneline_active
+
+  def calculate_plan_yaw_and_yaw_rate(self, path_xyz):
+    if path_xyz.shape[0] < 3:
+      # 너무 짧으면 직진 가정
+      N = path_xyz.shape[0]
+      return np.zeros(N), np.zeros(N)
+
+    # x, y 추출
+    x = path_xyz[:, 0]
+    y = path_xyz[:, 1]
+
+    # 모두 동일한 점인지 확인
+    if np.allclose(x, x[0]) and np.allclose(y, y[0]):
+      return np.zeros(len(x)), np.zeros(len(x))
+
+    # 안전한 diff 계산
+    dx = np.diff(x)
+    dy = np.diff(y)
+    mask = (dx == 0) & (dy == 0)
+    dx[mask] = 1e-4
+    dy[mask] = 0.0
+
+    yaw = np.arctan2(dy, dx)
+    yaw = np.append(yaw, yaw[-1])  # N-1 → N
+    yaw = np.unwrap(yaw)
+
+    dx_full = np.clip(np.diff(x), 1e-4, None)
+    yaw_rate = np.diff(yaw) / dx_full
+    yaw_rate = np.append(yaw_rate, yaw_rate[-1])
+    yaw_rate = np.append(yaw_rate, 0.0)
+
+    # NaN/Inf 방어
+    if np.any(np.isnan(yaw_rate)) or np.any(np.isinf(yaw_rate)):
+      yaw_rate = np.zeros_like(yaw_rate)
+    if np.any(np.isnan(yaw)) or np.any(np.isinf(yaw)):
+      yaw = np.zeros_like(yaw)
+
+    return yaw, yaw_rate

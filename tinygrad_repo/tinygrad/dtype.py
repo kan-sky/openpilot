@@ -2,8 +2,8 @@ from __future__ import annotations
 from typing import Final, ClassVar, Callable, Literal
 import math, struct, ctypes, functools
 from dataclasses import dataclass, fields
-from tinygrad.helpers import ceildiv, getenv, prod, round_up, OSX
-from enum import Enum, auto
+from tinygrad.helpers import getenv, prod, round_up, OSX
+from enum import IntEnum, auto
 
 class ConstFloat(float):
   """Float subclass that distinguishes -0.0 from 0.0 and where nan == nan."""
@@ -49,9 +49,10 @@ class DTypeMetaClass(type):
     DTypeMetaClass.dcache[args] = ret = super().__call__(*args)
     return ret
 
-class AddrSpace(Enum):
-  def __repr__(self): return str(self)
-  GLOBAL = auto(); LOCAL = auto(); REG = auto()  # noqa: E702
+class AddrSpace(IntEnum):
+  def __str__(self): return repr(self)
+  def __repr__(self): return f"{self.__class__.__name__}.{self.name}"
+  GLOBAL = auto(); LOCAL = auto(); REG = auto(); ALU = auto()  # noqa: E702
 
 @dataclass(frozen=True, eq=False)
 class DType(metaclass=DTypeMetaClass):
@@ -136,15 +137,6 @@ class ImageDType(PtrDType):
   @property
   def pitch(self): return (round_up(self.shape[1], 256) if OSX else self.shape[1]) * 4 * self.itemsize
 
-  # get list of (height, width) that do not require pitch padding
-  @staticmethod
-  def valid_dims(ptr:PtrDType, arch:str) -> list[tuple[int,int]]:
-    if (ALIGN:=next((int(p.split('=')[1]) for p in arch.split(',') if p.startswith("IMAGE_PITCH_ALIGNMENT=")), 0)) == 0: return []
-    MAXW, pxls = 16384, ptr.size // 4
-    if ptr.base not in (dtypes.half, dtypes.float) or ptr.size > 4*MAXW*MAXW: return []
-    # height=1 images just need to abide by alignment requirements in bytes, not pixels!
-    if ptr.size % (ALIGN * 4) != 0: return [] if ptr.nbytes() % (64 if OSX else ALIGN) != 0 or pxls > MAXW else [(1, pxls)]
-    return [(pxls//ALIGN//k, ALIGN*k) for k in range(ceildiv(pxls//ALIGN, MAXW), min(pxls//ALIGN, MAXW//ALIGN)+1) if (pxls//ALIGN)%k == 0]
 
 class dtypes:
   @staticmethod

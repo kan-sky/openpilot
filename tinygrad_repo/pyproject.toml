@@ -12,7 +12,7 @@ requires-python = ">=3.11"
 dependencies = []
 
 [build-system]
-requires = ["setuptools"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
@@ -20,6 +20,7 @@ include-package-data = true
 packages = [
   'tinygrad',
   'tinygrad.codegen',
+  'tinygrad.codegen.decomp',
   'tinygrad.codegen.opt',
   'tinygrad.codegen.late',
   'tinygrad.engine',
@@ -110,6 +111,7 @@ docs = [
   "black",
   "numpy",
 ]
+mesa = ["tinymesa==25.2.7.2"]
 
 
 [tool.mutmut]
@@ -126,8 +128,8 @@ do_not_mutate = [
   "tinygrad/viz/*",
   "tinygrad/device.py",
   "tinygrad/dtype.py",
-  "tinygrad/gradient.py",
   "tinygrad/helpers.py",
+  "tinygrad/mixin/gradient.py",
   "tinygrad/tensor.py",
 ]
 tests_dir = ["test/test_tiny.py", "test/backend/test_ops.py"]

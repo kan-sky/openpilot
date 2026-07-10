@@ -232,6 +232,7 @@ BO_ 258 ESC_50: 48 XXX
  SG_ Regen_Braking : 123|1@1+ (1,0) [0|7] "" XXX
  SG_ Standstill : 171|1@0+ (1,0) [0|1] "" XXX
  SG_ Longitudinal_Speed : 181|10@1+ (0.25,0) [0|255] "Unit_KilometerPerHour" XXX
+ SG_ EPB_Status : 317|3@1+ (1,0) [0|7] "" XXX
 
 BO_ 261 VMM_01: 8 XXX
  SG_ CRC : 0|8@1+ (1,0) [0|255] "" XXX
@@ -600,7 +601,7 @@ BO_ 706 Motor_41: 8 Gateway
  SG_ MO_OelMessung_Dauer : 52|4@1+ (15,15) [15|225] "Unit_Secon" Vector__XXX
  SG_ TSK_vMax_FahrerInfo : 56|8@1+ (1,15) [16|270] "" Vector__XXX
 
-BO_ 768 MEB_ACC_01: 48 XXX
+BO_ 768 ACC_19: 48 XXX
  SG_ ACC_Tempolimit : 64|5@1+ (1,0) [0|31] "" OTA_FC
  SG_ ACC_Wunschgeschw_Farbe : 69|1@1+ (1,0) [0|1] "" Vector__XXX
  SG_ ACC_Warnung_Verkehrszeichen_1 : 70|1@1+ (1,0) [0|1] "" Vector__XXX

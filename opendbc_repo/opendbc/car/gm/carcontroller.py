@@ -79,6 +79,27 @@ class CarController(CarControllerBase):
     self.steerDeltaUpOrg = self.steerDeltaUp = self.steerDeltaUpLC = self.params.STEER_DELTA_UP
     self.steerDeltaDownOrg = self.steerDeltaDown = self.steerDeltaDownLC = self.params.STEER_DELTA_DOWN
 
+
+  @staticmethod
+  def calc_pedal_command(accel: float, long_active: bool, car_velocity) -> tuple[float, bool]:
+    if not long_active: return 0., False
+    press_regen_paddle = False
+
+    if accel < -0.3: #-0.15:
+      press_regen_paddle = True
+      pedal_gas = 0
+    else:
+      # pedaloffset = 0.24
+      pedaloffset = np.interp(car_velocity, [0., 3, 6, 30], [0.08, 0.175, 0.240, 0.240])
+      pedal_gas = np.clip((pedaloffset + accel * 0.6), 0.0, 1.0)
+
+      ####for safety.
+      pedal_gas_max = np.interp(car_velocity, [0.0, 5, 30], [0.21, 0.3175, 0.3525])
+      pedal_gas = np.clip(pedal_gas, 0.0, pedal_gas_max)
+      ####for safety. end.
+
+    return pedal_gas, press_regen_paddle
+
   def update(self, CC, CS, now_nanos):
     params = Params()
     if self.frame % 50 == 0:
@@ -522,6 +543,7 @@ class CarController(CarControllerBase):
     new_actuators.gas = self.apply_gas
     new_actuators.brake = self.apply_brake
     new_actuators.speed = self.apply_speed # kans: button spam
+    new_actuators.steeringAngleDeg = CS.out.steeringAngleDeg  # Kans: torqueLimits
 
     self.frame += 1
     return new_actuators, can_sends

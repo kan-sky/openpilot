@@ -1,4 +1,4 @@
-using Cxx = import "./include/c++.capnp";
+using Cxx = import "/include/c++.capnp";
 $Cxx.namespace("cereal");
 
 @0x8e2af1e708af8b8d;
@@ -397,6 +397,8 @@ struct CarControl {
   orientationNED @13 :List(Float32);
   angularVelocity @14 :List(Float32);
   currentCurvature @17 :Float32;  # From vehicle model
+
+  driverMonitoringEscalation @18 :Bool; # trigger the car's stock driver monitoring escalation
 
   cruiseControl @4 :CruiseControl;
   hudControl @5 :HUDControl;

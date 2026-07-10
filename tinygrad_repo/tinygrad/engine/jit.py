@@ -1,11 +1,11 @@
 from typing import TypeVar, Generic, Callable, Any
 import functools, collections
-from tinygrad.tensor import Tensor
+from tinygrad.tensor import Tensor, all_tensors
 from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, JIT, JIT_BATCH_SIZE, dedup, pluralize, VIZ
 from tinygrad.device import Buffer, Compiled, Device, MultiBuffer
 from tinygrad.dtype import DType, dtypes
 from tinygrad.uop.ops import UOp, PatternMatcher, Variable, sym_infer, Ops, buffers, track_rewrites, graph_rewrite
-from tinygrad.engine.realize import capturing, Estimates, compile_linear, run_linear, graph_cache, estimate_uop, get_runtime
+from tinygrad.engine.realize import capturing, Estimates, compile_linear, link_linear, run_linear, graph_cache, estimate_uop, get_runtime
 from tinygrad.engine.realize import unwrap_multi, resolve_params, get_call_arg_uops, get_call_outs_ins
 from tinygrad.schedule.memory import memory_plan_rewrite, _collect_bufs
 from tinygrad.nn.state import get_parameters
@@ -60,7 +60,7 @@ def graph_split_rewrite(linear:UOp, max_batch_size:int=0) -> UOp:
   return linear.replace(src=tuple(new_src))
 
 def _copy_input(u:UOp) -> UOp:
-  run_linear(UOp(Ops.LINEAR, src=(u.copy_to_device(u.device).call(new:=UOp.new_buffer(u.device, u.arg, u.dtype), u, metadata=()),)))
+  run_linear(UOp(Ops.LINEAR, src=(u.copy_to_device(u.device).call(new:=UOp.new_buffer(u.device, u.max_numel(), u.dtype), u, metadata=()),)))
   return new
 
 @track_rewrites(lambda linear,held_bufs,input_uops,ret=(): f"JIT {pluralize('call', len(linear.src))}")
@@ -69,8 +69,8 @@ def jit_lower(linear:UOp, held_bufs:set[UOp], input_uops:list[UOp]) -> UOp:
 
   # parametrize input buffers: map each input buffer UOp to a PARAM with the correct slot index
   linear = linear.substitute({u: UOp.param(i, u.dtype, u.shape, u.device) for i,u in enumerate(input_uops)}, walk=True)
-  linear = compile_linear(linear, beam=getenv("JITBEAM", BEAM.value))
   linear = memory_plan_rewrite(linear, held_bufs)
+  linear = compile_linear(linear, beam=getenv("JITBEAM", BEAM.value))
   if JIT < 2: linear = graph_split_rewrite(linear, max_batch_size=JIT_BATCH_SIZE.value)
   if VIZ: graph_rewrite(linear, PatternMatcher([]), name="View graphed linear")
   return linear
@@ -86,6 +86,34 @@ def _check_no_non_tensor_return(ret):
   raise JitError(f"JIT return contains non-Tensor value of type {type(ret).__name__}")
 
 def graph_class(dev): return dev.graph.func if isinstance(dev.graph, functools.partial) else dev.graph
+
+class DepsTracker:
+  def __init__(self):
+    # tracks (offset, end, dep) ranges per base buffer id to handle suballocated buffers correctly.
+    self.w_dependency_map: dict[int, list[tuple[int, int, Any]]] = collections.defaultdict(list)
+    self.r_dependency_map: dict[int, list[tuple[int, int, Any]]] = collections.defaultdict(list)
+
+  @staticmethod
+  def _key(buf:Any) -> tuple[Any, int, int]: return id(buf.base), buf.offset, buf.offset + buf.nbytes
+
+  def access_resources(self, bufs:list[Any], write:list[int], new_dependency:Any):
+    wait_nodes = []
+    for i,buf in enumerate(bufs):
+      key, s, e = self._key(buf)
+      wait_nodes += [dep for st,en,dep in self.w_dependency_map[key] if st < e and s < en]
+      if i in write: wait_nodes += [dep for st,en,dep in self.r_dependency_map[key] if st < e and s < en]
+    for i,buf in enumerate(bufs):
+      key, s, e = self._key(buf)
+      if i in write:
+        for dmap in [self.w_dependency_map, self.r_dependency_map]:
+          kept = []
+          for st,en,dep in dmap[key]:
+            if st < min(s, en): kept.append((st, min(s, en), dep))
+            if max(e, st) < en: kept.append((max(e, st), en, dep))
+          dmap[key] = kept
+        self.w_dependency_map[key].append((s, e, new_dependency))
+      else: self.r_dependency_map[key].append((s, e, new_dependency))
+    return list({id(x):x for x in wait_nodes}.values())
 
 class GraphRunner:
   def __init__(self, linear:UOp, input_uops:tuple[UOp, ...]=()):
@@ -123,9 +151,8 @@ class GraphRunner:
 
     estimates = sum((estimate_uop(call) for call in self.linear.src), Estimates())
 
-    # used in MultiGraphRunner. tracks (offset, end, dep) ranges per base buffer id to handle suballocated buffers correctly.
-    self.w_dependency_map: dict[int, list[tuple[int, int, Any]]] = collections.defaultdict(list)
-    self.r_dependency_map: dict[int, list[tuple[int, int, Any]]] = collections.defaultdict(list)
+    # used in MultiGraphRunner
+    self.deps = DepsTracker()
 
     self.device, self.estimates = self.calls[0][2][0].device.split(":")[0], estimates.simplify()
 
@@ -142,23 +169,7 @@ class GraphRunner:
       yield j, (dims[gl] if gl is not None else self.launch_dims_base[j][0]), (dims[lc] if lc is not None else self.launch_dims_base[j][1])
 
   def _access_resources(self, bufs:list[Buffer], write:list[int], new_dependency:Any):
-    wait_nodes = []
-    for i,buf in enumerate(bufs):
-      key, s, e = id(buf.base._buf), buf.offset, buf.offset + buf.nbytes
-      wait_nodes += [dep for st,en,dep in self.w_dependency_map[key] if st < e and s < en]
-      if i in write: wait_nodes += [dep for st,en,dep in self.r_dependency_map[key] if st < e and s < en]
-    for i,buf in enumerate(bufs):
-      key, s, e = id(buf.base._buf), buf.offset, buf.offset + buf.nbytes
-      if i in write:
-        for dmap in [self.w_dependency_map, self.r_dependency_map]:
-          kept = []
-          for st,en,dep in dmap[key]:
-            if st < min(s, en): kept.append((st, min(s, en), dep))
-            if max(e, st) < en: kept.append((max(e, st), en, dep))
-          dmap[key] = kept
-        self.w_dependency_map[key].append((s, e, new_dependency))
-      else: self.r_dependency_map[key].append((s, e, new_dependency))
-    return list({id(x):x for x in wait_nodes}.values())
+    return self.deps.access_resources(bufs, write, new_dependency)
 
   @staticmethod
   def _all_devs(batch_devs:list[Compiled], new_call:UOp) -> list[Compiled]:
@@ -180,11 +191,14 @@ ReturnType = TypeVar('ReturnType')
 @dataclass
 class CapturedJit(Generic[ReturnType]):
   ret: Any  # includes the Tensors or any other returned object
-  linear: UOp
+  _linear: UOp
   expected_names: list[int|str]
   expected_input_info: list[tuple[UOp, tuple[Variable, ...], DType, str]]  # (view, variables, dtype, device) per input
 
-  def __reduce__(self): return self.__class__, (self.ret, self.linear, self.expected_names, self.expected_input_info)
+  @functools.cached_property
+  def linear(self) -> UOp: return link_linear(self._linear)
+
+  def __reduce__(self): return self.__class__, (self.ret, self._linear, self.expected_names, self.expected_input_info)
 
   @functools.cached_property
   def _written_uops(self) -> set[UOp]:
@@ -220,8 +234,7 @@ def _prepare_jit_inputs(args, kwargs):
     it = x if isinstance(x, (tuple,list)) else x.values() if isinstance(x, dict) else []
     tensors += [t for t in it if t.__class__ is Tensor and not any(t is y for y in tensors)]
   def get_input_uops() -> list[UOp]: return flatten([t.uop.src if t.uop.op is Ops.MULTI else [t.uop] for t in tensors])
-  # TODO: drop the CONST branch once all CONST are deviceless
-  if any(u.device is None or u.base.op is Ops.CONST for u in get_input_uops()): raise JitError("JIT inputs must be real buffers; use .clone()")
+  if any(u.device is None for u in get_input_uops()): raise JitError("JIT inputs must be real buffers; use .clone()")
   if len(unrealized_tensors := [x for x in tensors if not x.uop.is_realized]): Tensor.realize(*unrealized_tensors)
   input_uops = get_input_uops()
   # collect buffer UOps (including MultiBuffer)
@@ -285,7 +298,8 @@ class TinyJit(Generic[ReturnType]):
         if DEBUG >= 1: print(f"pruned from {len(big_linear.src) + len(onetime_linear.src)} -> {len(big_linear.src)} kernels")
         run_linear(onetime_linear, var_vals)
 
-      held_bufs = set(buffers) | {t.uop.buf_uop for t in get_parameters(ret) if t.uop.buf_uop.op is Ops.BUFFER}
+      # hold all buffers reachable from live Tensors (e.g. lazy .grad created during capture), the memory planner can't suballocate those
+      held_bufs = set(buffers) | {u for tref in list(all_tensors) if (t:=tref()) is not None for u in t.uop.toposort() if u.op is Ops.BUFFER}
       linear = jit_lower(big_linear, held_bufs, input_buf_uops)
       self.captured = CapturedJit(ret, linear, names, expected_input_info)
       ret = self.captured(input_buf_uops, var_vals)

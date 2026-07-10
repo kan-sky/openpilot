@@ -1,13 +1,13 @@
 ﻿import copy
 from opendbc.can import CANDefine, CANParser
-from cereal import car
+from openpilot.cereal import car
 from openpilot.common.params import Params #kans
 import numpy as np
 from opendbc.car import Bus, create_button_events, structs
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.interfaces import CarStateBase
 from opendbc.car.gm.values import DBC, AccState, CruiseButtons, STEER_THRESHOLD, CAR, GMFlags, CAMERA_ACC_CAR, EV_CAR, SDGM_CAR, ALT_ACCS
-import cereal.messaging as messaging
+import openpilot.cereal.messaging as messaging
 import time
 
 ButtonType = structs.CarState.ButtonEvent.Type
@@ -34,6 +34,7 @@ class CarState(CarStateBase):
     self.cam_lka_steering_cmd_counter = 0
     self.buttons_counter = 0
     self.single_pedal_mode = False
+    self.pedal_steady = 0.
     self.cruise_buttons = 0
     # GAP_DIST
     self.distance_button = 0
@@ -198,7 +199,6 @@ class CarState(CarStateBase):
 
     if self.CP.enableGasInterceptorDEPRECATED:
       ret.gas = (pt_cp.vl["GAS_SENSOR"]["INTERCEPTOR_GAS"] + pt_cp.vl["GAS_SENSOR"]["INTERCEPTOR_GAS2"]) / 2.
-      # Panda 515 threshold = 10.88. Set lower to avoid panda blocking messages and GasInterceptor faulting.
       threshold = 20 if self.CP.carFingerprint in CAMERA_ACC_CAR else 4
       ret.gasPressed = ret.gas > threshold
     else:
