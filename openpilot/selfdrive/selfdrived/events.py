@@ -10,6 +10,7 @@ from opendbc.car.structs import car
 import openpilot.cereal.messaging as messaging
 from openpilot.common.constants import CV
 from openpilot.common.git import get_short_branch
+from openpilot.common.params import Params
 from openpilot.common.realtime import DT_CTRL, DT_DMON
 from openpilot.selfdrive.locationd.calibrationd import MIN_SPEED_FILTER
 from openpilot.selfdrive.monitoring.policy import DRIVER_MONITOR_SETTINGS
@@ -153,12 +154,11 @@ EmptyAlert = Alert("" , "", AlertStatus.normal, AlertSize.none, Priority.LOWEST,
 class NoEntryAlert(Alert):
   def __init__(self, alert_text_2: str,
                alert_text_1: str = "openpilot Unavailable",
-               visual_alert: car.CarControl.HUDControl.VisualAlert=VisualAlert.none,
-               priority: Priority = Priority.LOW):
+               visual_alert: car.CarControl.HUDControl.VisualAlert=VisualAlert.none):
     if HARDWARE.get_device_type() == 'mici':
       alert_text_1, alert_text_2 = alert_text_2, alert_text_1
     super().__init__(alert_text_1, alert_text_2, AlertStatus.normal,
-                     AlertSize.mid, priority, visual_alert,
+                     AlertSize.mid, Priority.LOW, visual_alert,
                      AudibleAlert.refuse, 3.)
 
 
@@ -282,6 +282,21 @@ def audio_feedback_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubM
     priority=Priority.LOW)
 
 
+def torque_nn_load_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
+  model_name = Params().get("NNFFModelName")
+  if model_name == "":
+    return Alert(
+      "NNFF Torque Controller not available",
+      "Donate logs to Twilsonco to get it added!",
+      AlertStatus.userPrompt, AlertSize.mid,
+      Priority.LOW, VisualAlert.none, AudibleAlert.prompt, 6.0)
+  else:
+    return Alert(
+      "NNFF Torque Controller loaded",
+      model_name,
+      AlertStatus.userPrompt, AlertSize.mid,
+      Priority.LOW, VisualAlert.none, AudibleAlert.prompt, 5.0)
+
 # *** debug alerts ***
 
 def out_of_space_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
@@ -399,6 +414,15 @@ def invalid_lkas_setting_alert(CP: car.CarParams, CS: car.CarState, sm: messagin
     text = "Disable your car's stock LKAS to engage"
   return NormalPermanentAlert("Invalid LKAS setting", text)
 
+def car_parser_result(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
+  results = Params().get("CanParserResult")
+  if results is None:
+    results = ""
+  return Alert(
+    "CAN Error: Check Connections!!",
+    results,
+    AlertStatus.normal, AlertSize.small,
+    Priority.LOW, VisualAlert.none, AudibleAlert.none, 1., creation_delay=1.)
 
 
 EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
@@ -528,7 +552,7 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
       "Pay Attention",
       "",
       AlertStatus.normal, AlertSize.small,
-      Priority.LOW, VisualAlert.none, AudibleAlert.preAlert, .1),
+      Priority.LOW, VisualAlert.none, AudibleAlert.none, .1),
   },
 
   EventName.driverDistracted2: {
@@ -595,7 +619,7 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
     ET.WARNING: Alert(
       "Steer Left to Start Lane Change Once Safe",
       "",
-      AlertStatus.normal, AlertSize.small,
+      AlertStatus.normal, AlertSize.none,
       Priority.LOW, VisualAlert.none, AudibleAlert.none, .1),
   },
 
@@ -603,7 +627,7 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
     ET.WARNING: Alert(
       "Steer Right to Start Lane Change Once Safe",
       "",
-      AlertStatus.normal, AlertSize.small,
+      AlertStatus.normal, AlertSize.none,
       Priority.LOW, VisualAlert.none, AudibleAlert.none, .1),
   },
 
@@ -611,15 +635,15 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
     ET.WARNING: Alert(
       "Car Detected in Blindspot",
       "",
-      AlertStatus.userPrompt, AlertSize.small,
-      Priority.LOW, VisualAlert.none, AudibleAlert.prompt, .1),
+      AlertStatus.userPrompt, AlertSize.none,
+      Priority.LOW, VisualAlert.none, AudibleAlert.bsdWarning, .1),
   },
 
   EventName.laneChange: {
     ET.WARNING: Alert(
       "Changing Lanes",
       "",
-      AlertStatus.normal, AlertSize.small,
+      AlertStatus.normal, AlertSize.none,
       Priority.LOW, VisualAlert.none, AudibleAlert.none, .1),
   },
 
@@ -627,8 +651,8 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
     ET.WARNING: Alert(
       "Take Control",
       "Turn Exceeds Steering Limit",
-      AlertStatus.userPrompt, AlertSize.mid,
-      Priority.LOW, VisualAlert.steerRequired, AudibleAlert.promptRepeat, 2.),
+      AlertStatus.normal, AlertSize.small,
+      Priority.LOW, VisualAlert.none, AudibleAlert.none, 1.),
   },
 
   # Thrown when the fan is driven at >50% but is not rotating
@@ -795,7 +819,7 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
   },
 
   EventName.tooDistracted: {
-    ET.NO_ENTRY: too_distracted_alert,
+    ET.NO_ENTRY: NoEntryAlert("Distraction Level Too High"),
   },
 
   EventName.excessiveActuation: {
@@ -810,7 +834,8 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
   },
 
   EventName.wrongGear: {
-    ET.SOFT_DISABLE: user_soft_disable_alert("Gear not D"),
+    ET.USER_DISABLE: EngagementAlert(AudibleAlert.disengage), #carrot
+    #ET.SOFT_DISABLE: user_soft_disable_alert("Gear not D"),
     ET.NO_ENTRY: NoEntryAlert("Gear not D"),
   },
 
@@ -952,28 +977,30 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
   # - CAN data is received, but some message are not received at the right frequency
   # If you're not writing a new car port, this is usually cause by faulty wiring
   EventName.canError: {
+    ET.PERMANENT: car_parser_result,
     ET.IMMEDIATE_DISABLE: ImmediateDisableAlert("Unknown Vehicle Variant"),
-    ET.PERMANENT: Alert(
-      "Unknown Vehicle Variant",
-      "",
-      AlertStatus.normal, AlertSize.small,
-      Priority.LOW, VisualAlert.none, AudibleAlert.none, 1., creation_delay=1.),
+    #ET.PERMANENT: Alert(
+    # "Unknown Vehicle Variant",
+    #  "",
+    #  AlertStatus.normal, AlertSize.small,
+    #  Priority.LOW, VisualAlert.none, AudibleAlert.none, 1., creation_delay=1.),
     ET.NO_ENTRY: NoEntryAlert("Unknown Vehicle Variant"),
   },
 
   EventName.canBusMissing: {
+    ET.PERMANENT: car_parser_result,
     ET.IMMEDIATE_DISABLE: ImmediateDisableAlert("CAN Bus Disconnected"),
-    ET.PERMANENT: Alert(
-      "CAN Bus Disconnected: Likely Faulty Cable",
-      "",
-      AlertStatus.normal, AlertSize.small,
-      Priority.LOW, VisualAlert.none, AudibleAlert.none, 1., creation_delay=1.),
+    #ET.PERMANENT: Alert(
+    #  "CAN Bus Disconnected: Likely Faulty Cable",
+    #  "",
+    #  AlertStatus.normal, AlertSize.small,
+    #  Priority.LOW, VisualAlert.none, AudibleAlert.none, 1., creation_delay=1.),
     ET.NO_ENTRY: NoEntryAlert("CAN Bus Disconnected: Check Connections"),
   },
 
   EventName.steerUnavailable: {
     ET.IMMEDIATE_DISABLE: ImmediateDisableAlert("LKAS Fault: Restart the Car"),
-    ET.PERMANENT: NormalPermanentAlert("LKAS Fault: Restart the car to engage"),
+    ET.PERMANENT: ImmediateDisableAlert("LKAS Fault: Restart the car to engage"),
     ET.NO_ENTRY: NoEntryAlert("LKAS Fault: Restart the Car"),
   },
 
@@ -981,9 +1008,9 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
     ET.PERMANENT: Alert(
       "Reverse\nGear",
       "",
-      AlertStatus.normal, AlertSize.full,
-      Priority.LOWEST, VisualAlert.none, AudibleAlert.none, .2, creation_delay=0.5),
-    ET.USER_DISABLE: ImmediateDisableAlert("Reverse Gear"),
+      AlertStatus.normal, AlertSize.none,
+      Priority.LOWEST, VisualAlert.none, AudibleAlert.reverseGear, .2, creation_delay=0.5),
+    ET.SOFT_DISABLE: SoftDisableAlert("Reverse Gear"),
     ET.NO_ENTRY: NoEntryAlert("Reverse Gear"),
   },
 
@@ -1038,9 +1065,111 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
   EventName.audioFeedback: {
     ET.PERMANENT: audio_feedback_alert,
   },
+
+  EventName.softHold: {
+    ET.WARNING: Alert(
+      "SoftHold",
+      "",
+      AlertStatus.normal, AlertSize.small,
+      Priority.LOW, VisualAlert.none, AudibleAlert.none, .1),
+  },
+  EventName.trafficStopping: {
+    ET.WARNING: EngagementAlert(AudibleAlert.stopping),
+    #ET.WARNING: Alert(
+    #  "신호 감속정지중입니다.",
+    #  "",
+    #  AlertStatus.normal, AlertSize.small,
+    #  Priority.LOW, VisualAlert.none, AudibleAlert.stopping, 3.),
+  },
+  EventName.audioPrompt: {
+     ET.WARNING: EngagementAlert(AudibleAlert.prompt),
+  },
+  EventName.audioRefuse: {
+     ET.WARNING: EngagementAlert(AudibleAlert.refuse),
+  },
+  EventName.stopStop: {
+     ET.WARNING: EngagementAlert(AudibleAlert.stopStop),
+  },
+  EventName.audioLaneChange: {
+     ET.WARNING: EngagementAlert(AudibleAlert.laneChange),
+  },
+  EventName.audioTurn: {
+     ET.WARNING: EngagementAlert(AudibleAlert.audioTurn),
+  },
+  EventName.trafficSignGreen: {
+    ET.WARNING: EngagementAlert(AudibleAlert.trafficSignGreen),
+    #ET.WARNING: Alert(
+    #  "출발합니다.",
+    #  "",
+    #  AlertStatus.normal, AlertSize.small,
+    #  Priority.LOW, VisualAlert.none, AudibleAlert.trafficSignGreen, 3.),
+  },
+  EventName.trafficSignChanged: {
+    ET.WARNING: Alert(
+      "신호가바뀌었어요.",
+      "",
+      AlertStatus.normal, AlertSize.small,
+      Priority.LOW, VisualAlert.none, AudibleAlert.trafficSignChanged, 1.),
+  },
+  EventName.turningLeft: {
+    ET.WARNING: Alert(
+      "Turning Left",
+      "",
+      AlertStatus.normal, AlertSize.small,
+      Priority.LOW, VisualAlert.none, AudibleAlert.none, .1),
+  },
+
+  EventName.turningRight: {
+    ET.WARNING: Alert(
+      "Turning Right",
+      "",
+      AlertStatus.normal, AlertSize.small,
+      Priority.LOW, VisualAlert.none, AudibleAlert.none, .1),
+  },
+  EventName.audio1: {
+     ET.WARNING: EngagementAlert(AudibleAlert.audio1),
+  },
+  EventName.audio2: {
+     ET.WARNING: EngagementAlert(AudibleAlert.audio2),
+  },
+  EventName.audio3: {
+     ET.WARNING: EngagementAlert(AudibleAlert.audio3),
+  },
+  EventName.audio4: {
+     ET.WARNING: EngagementAlert(AudibleAlert.audio4),
+  },
+  EventName.audio5: {
+     ET.WARNING: EngagementAlert(AudibleAlert.audio5),
+  },
+  EventName.audio6: {
+     ET.WARNING: EngagementAlert(AudibleAlert.audio6),
+  },
+  EventName.audio7: {
+     ET.WARNING: EngagementAlert(AudibleAlert.audio7),
+  },
+  EventName.audio8: {
+     ET.WARNING: EngagementAlert(AudibleAlert.audio8),
+  },
+  EventName.audio9: {
+     ET.WARNING: EngagementAlert(AudibleAlert.audio9),
+  },
+  EventName.audio10: {
+     ET.WARNING: EngagementAlert(AudibleAlert.audio10),
+  },
+  EventName.audio0: {
+     ET.WARNING: EngagementAlert(AudibleAlert.longDisengaged),
+  },
+  EventName.torqueNNLoad: {
+    ET.PERMANENT: torque_nn_load_alert,
+  },
+  EventName.autoHold: {
+    ET.WARNING: Alert(
+      "오토홀드 작동.",
+      "",
+      AlertStatus.normal, AlertSize.small,
+      Priority.LOW, VisualAlert.none, AudibleAlert.autoHold, 2.),
+  },
 }
-
-
 if HARDWARE.get_device_type() == 'mici':
   EVENTS.update({
     EventName.driverDistracted1: {
@@ -1048,7 +1177,7 @@ if HARDWARE.get_device_type() == 'mici':
         "Pay Attention",
         "",
         AlertStatus.normal, AlertSize.small,
-        Priority.LOW, VisualAlert.none, AudibleAlert.preAlert, 2),
+        Priority.LOW, VisualAlert.none, AudibleAlert.none, 2),
     },
     EventName.driverDistracted2: {
       ET.PERMANENT: Alert(

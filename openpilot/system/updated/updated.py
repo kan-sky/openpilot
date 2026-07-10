@@ -32,11 +32,11 @@ FINALIZED = os.path.join(STAGING_ROOT, "finalized")
 OVERLAY_INIT = Path(os.path.join(BASEDIR, ".overlay_init"))
 
 # do not allow to engage after this many hours onroad and this many routes
-HOURS_NO_CONNECTIVITY_MAX = 27
-ROUTES_NO_CONNECTIVITY_MAX = 84
+HOURS_NO_CONNECTIVITY_MAX = 2700
+ROUTES_NO_CONNECTIVITY_MAX = 8400
 # send an offroad prompt after this many hours onroad and this many routes
-HOURS_NO_CONNECTIVITY_PROMPT = 23
-ROUTES_NO_CONNECTIVITY_PROMPT = 80
+HOURS_NO_CONNECTIVITY_PROMPT = 2300
+ROUTES_NO_CONNECTIVITY_PROMPT = 8000
 
 
 class UserRequest:
@@ -221,6 +221,17 @@ def handle_agnos_update() -> None:
   set_offroad_alert("Offroad_NeosUpdate", True)
 
   manifest_path = os.path.join(OVERLAY_MERGED, "openpilot/system/hardware/tici/agnos.json")
+  try:
+    with open("/sys/firmware/devicetree/base/model") as f:
+      model = f.read().replace("\x00", "").strip().lower().removeprefix("comma ")
+    print(f"[agnos] device model: {model}", flush=True)
+
+    if model in ("c3", "tici"):
+      manifest_path = os.path.join(OVERLAY_MERGED, "openpilot/common/hardware/tici/agnos-tici.json")
+      print(f"[agnos] manifest_path: {manifest_path}", flush=True)
+  except OSError as e:
+    print(f"[agnos] model read failed: {e}", flush=True)
+    pass
   target_slot_number = get_target_slot_number()
   flash_agnos_update(manifest_path, target_slot_number, cloudlog)
   set_offroad_alert("Offroad_NeosUpdate", False)
@@ -244,9 +255,6 @@ class Updater:
       b = self.get_branch(BASEDIR)
     b = {
       ("tizi", "release3"): "release-tizi",
-      ("tizi", "release3-staging"): "release-tizi-staging",
-      ("mici", "release3"): "release-mici",
-      ("mici", "release3-staging"): "release-mici-staging",
     }.get((HARDWARE.get_device_type(), b), b)
     return b
 

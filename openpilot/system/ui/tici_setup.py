@@ -108,9 +108,9 @@ class Setup(Widget):
                                                       text_color=rl.Color(255, 89, 79, 255),
                                                       text_padding=60)
     self._custom_software_warning_body_label = Label("Use caution when installing third-party software.\n\n"
-                                                     + "⚠️ It has not been tested by comma.\n\n"
-                                                     + "⚠️ It may not comply with relevant safety standards.\n\n"
-                                                     + "⚠️ It may cause damage to your device and/or vehicle.\n\n"
+                                                     + "?좑툘 It has not been tested by comma.\n\n"
+                                                     + "?좑툘 It may not comply with relevant safety standards.\n\n"
+                                                     + "?좑툘 It may cause damage to your device and/or vehicle.\n\n"
                                                      + "If you'd like to proceed, use https://flash.comma.ai "
                                                      + "to restore your device to a factory state later.",
                                                      68, text_alignment=rl.GuiTextAlignment.TEXT_ALIGN_LEFT, text_padding=60)

@@ -3,10 +3,10 @@
 if [ ! -f "./boot_finish" ]; then
   mount -o rw,remount /system
   chmod 755 ./restart.sh
-  chmod 755 ./selfdrive/apilot.py
-  chmod 755 ./selfdrive/debug/clear_dtc.py
-  chmod 755 ./selfdrive/debug/debug_console_carrot.py
-  chmod 755 ./selfdrive/debug/debug_console.py
+  chmod 755 ./openpilot/selfdrive/apilot.py
+  chmod 755 ./openpilot/selfdrive/debug/clear_dtc.py
+  chmod 755 ./openpilot/selfdrive/debug/debug_console_carrot.py
+  chmod 755 ./openpilot/selfdrive/debug/debug_console.py
 
   if [ ! -f "/data/params/d/DongleId" ]; then
     echo -n "UnregisteredDevice" > /data/params/d/DongleId
@@ -36,12 +36,12 @@ function agnos_init {
 
   # Check if AGNOS update is required
   if [ $(< /VERSION) != "$AGNOS_VERSION" ]; then
-    AGNOS_PY="$DIR/system/hardware/tici/agnos.py"
-    MANIFEST="$DIR/system/hardware/tici/agnos.json"
+    AGNOS_PY="$DIR/openpilot/common/hardware/tici/agnos.py"
+    MANIFEST="$DIR/openpilot/common/hardware/tici/agnos.json"
     if $AGNOS_PY --verify $MANIFEST; then
       sudo reboot
     fi
-    $DIR/system/hardware/tici/updater $AGNOS_PY $MANIFEST
+    $DIR/openpilot/common/hardware/tici/updater $AGNOS_PY $MANIFEST
   fi
 }
 
@@ -120,7 +120,7 @@ function launch {
 
 
   # start manager
-  cd system/manager
+  cd openpilot/system/manager
   if [ ! -f $DIR/prebuilt ]; then
     ./build.py
   fi
