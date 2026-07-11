@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 import time
 import argparse
-import cereal.messaging as messaging
-from cereal import car
+import openpilot.cereal.messaging as messaging
+from openpilot.cereal import car
 from opendbc.car.carlog import carlog
 from opendbc.car.fw_versions import get_fw_versions, match_fw_to_car
 from opendbc.car.vin import get_vin
@@ -45,6 +45,8 @@ if __name__ == "__main__":
       extra[(Ecu.unknown, 0x750, i)] = []
     extra = {"any": {"debug": extra}}
 
+  num_pandas = len(messaging.recv_one_retry(pandaStates_sock).pandaStates)
+
   t = time.monotonic()
   print("Getting vin...")
   set_obd_multiplexing(True)
@@ -54,7 +56,7 @@ if __name__ == "__main__":
   print()
 
   t = time.monotonic()
-  fw_vers = get_fw_versions(*can_callbacks, set_obd_multiplexing, query_brand=args.brand, extra=extra, progress=True)
+  fw_vers = get_fw_versions(*can_callbacks, set_obd_multiplexing, query_brand=args.brand, extra=extra, num_pandas=num_pandas, progress=True)
   _, candidates = match_fw_to_car(fw_vers, vin)
 
   print()

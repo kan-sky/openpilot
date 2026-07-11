@@ -161,9 +161,6 @@ struct CarState {
   canTimeout @40 :Bool;     # CAN bus dropped out
   canErrorCounter @48 :UInt32;
 
-  # process meta
-  cumLagMs @50 :Float32;
-
   # car speed
   vEgo @1 :Float32;            # best estimate of speed
   aEgo @16 :Float32;           # best estimate of aCAN cceleration
@@ -197,12 +194,10 @@ struct CarState {
   steeringTorque @8 :Float32;      # TODO: standardize units
   steeringTorqueEps @27 :Float32;  # TODO: standardize units
   steeringPressed @9 :Bool;        # if the user is using the steering wheel
-  steeringDisengage @78 :Bool;     # more force than steeringPressed, disengages for applicable brands
   steerFaultTemporary @35 :Bool;   # temporary EPS fault
   steerFaultPermanent @36 :Bool;   # permanent EPS fault
   invalidLkasSetting @55 :Bool;    # stock LKAS is incorrectly configured (i.e. on or off)
   stockAeb @30 :Bool;
-  stockLkas @79 :Bool;
   stockFcw @31 :Bool;
   espDisabled @32 :Bool;
   accFaulted @42 :Bool;
@@ -210,7 +205,6 @@ struct CarState {
   espActive @51 :Bool;
   vehicleSensorsInvalid @52 :Bool;  # invalid steering angle readings, etc.
   lowSpeedAlert @56 :Bool;  # lost steering control due to a dynamic min steering speed
-  blockPcmEnable @80 :Bool;  # whether to allow PCM to enable this frame
 
   # cruise state
   cruiseState @10 :CruiseState;
@@ -239,6 +233,9 @@ struct CarState {
   fuelGauge @41 :Float32; # battery or fuel tank level from 0.0 to 1.0
   charging @43 :Bool;
 
+  # process meta
+  cumLagMs @50 :Float32;
+
   vCluRatio @58 :Float32;
   logCarrot @59 :Text;
   softHoldActive @60 :Int16;    #0: not active, 1: active ready, 2: activated
@@ -255,11 +252,23 @@ struct CarState {
   leftLongDist @71 : Float32; # distance to left lane line in the direction of travel
   rightLongDist @72 : Float32; # distance to right lane line in the direction of travel
   carrotCruise @73 : Int16;
-  leftLaneLine @74 : Int16; # -1: no lane, 0: dashed, 1: solid, +10: white, +20: yellow, ex) 21: solid yellow
-  rightLaneLine @75 : Int16; # -1: no lane, 0: dashed, 1: solid, +10: white, +20: yellow, ex) 21: solid yellow
+  leftLaneLine @74 : Int16; # -1: no lane, 0: dashed, 1: solid, +10: white, +20: yellow, +30: blue, ex) 21: solid yellow
+  rightLaneLine @75 : Int16; # -1: no lane, 0: dashed, 1: solid, +10: white, +20: yellow, +30: blue, ex) 21: solid yellow
   datetime @76 :UInt64; # timestamp in milliseconds since epoch
-  accStatus @77 :UInt16;
-  autoHoldActivated @81 :Bool;
+  leftRearLongDist @77 :Float32; # rear-left corner radar longitudinal distance
+  rightRearLongDist @78 :Float32; # rear-right corner radar longitudinal distance
+  leftRearLatDist @79 :Float32; # rear-left corner radar lateral distance
+  rightRearLatDist @80 :Float32; # rear-right corner radar lateral distance
+  trailerConnected @81 :Bool; # trailer connection state after disconnect debounce
+  ureaGauge @87 :Float32; # diesel exhaust fluid/urea tank level from 0.0 to 1.0
+  steeringDisengage @82 :Bool;     # more force than steeringPressed, disengages for applicable brands
+  stockLkas @83 :Bool;
+  blockPcmEnable @84 :Bool;  # whether to allow PCM to enable this frame
+  accStatus @85 :UInt16;
+  autoHoldActivated @86 :Bool;
+  cruiseSpeedBigStep @88 :Bool; # VW: cruise +/- button is a stage-2 (swipe/long) press -> use big increment
+  steeringCurvature @89 :Float32; # VW MEB: measured road curvature from EPS (QFK_01), rad/m. Used for closed-loop curvature correction.
+
 
   struct Tpms {
     fl @0 :Float32;
@@ -398,8 +407,6 @@ struct CarControl {
   angularVelocity @14 :List(Float32);
   currentCurvature @17 :Float32;  # From vehicle model
 
-  driverMonitoringEscalation @18 :Bool; # trigger the car's stock driver monitoring escalation
-
   cruiseControl @4 :CruiseControl;
   hudControl @5 :HUDControl;
 
@@ -457,9 +464,9 @@ struct CarControl {
     leadRadar @15: Int16;
     modelDesire @16: Int16;
     atcDistance @17: Float32;
-    naviSpeedLimit @18: Int16;  # VW MEB cluster: TMAP ´Ü¼ÓÄ«¸Þ¶ó/±¸°£´Ü¼Ó Á¦ÇÑ¼Óµµ (kph, 0=¾øÀ½) -> ACC_Tempolimit + event 5
-    naviEventType @19: Int16;   # VW MEB cluster: 0=¾øÀ½ 1=Ä¿ºê(event 6) 2=±³Â÷·Î È¸Àü(event 9) 3=ºÐ±â/°í¼Óµµ·Î Ãâ±¸(event 11)
-    naviEventSpeed @20: Int16;  # VW MEB cluster: Ä¿ºê/±³Â÷·Î ¸ñÇ¥¼Óµµ (kph) -> ACC_Event_Wunschgeschw
+    naviSpeedLimit @18: Int16;  # VW MEB cluster: TMAP ë‹¨ì†ì¹´ë©”ë¼/êµ¬ê°„ë‹¨ì† ì œí•œì†ë„ (kph, 0=ì—†ìŒ) -> ACC_Tempolimit + event 5
+    naviEventType @19: Int16;   # VW MEB cluster: 0=ì—†ìŒ 1=ì»¤ë¸Œ(event 6) 2=êµì°¨ë¡œ íšŒì „(event 9) 3=ë¶„ê¸°/ê³ ì†ë„ë¡œ ì¶œêµ¬(event 11)
+    naviEventSpeed @20: Int16;  # VW MEB cluster: ì»¤ë¸Œ/êµì°¨ë¡œ ëª©í‘œì†ë„ (kph) -> ACC_Event_Wunschgeschw
 
     # not used with the dash, TODO: separate structs for dash UI and device UI
     audibleAlert @5: AudibleAlert;
@@ -490,7 +497,7 @@ struct CarControl {
       prompt @6;
       promptRepeat @7;
       promptDistracted @8;
-      audioTurn @9;
+
       longEngaged @10;
       longDisengaged @11;
       trafficSignGreen @12;
@@ -504,6 +511,7 @@ struct CarControl {
       bsdWarning @20;
       speedDown @21;
       stopStop @22;
+      audioTurn @9;
       reverseGear @23;
       audio1 @24;
       audio2 @25;
@@ -726,7 +734,8 @@ struct CarParams {
   enum SteerControlType {
     torque @0;
     angle @1;
-    curvature @2;
+
+    curvatureDEPRECATED @2;
   }
 
   enum TransmissionType {
