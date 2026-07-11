@@ -299,7 +299,11 @@ struct GPSNMEAData {
   nmea @2 :Text;
 }
 
+# android sensor_event_t
 struct SensorEventData {
+  version @0 :Int32;
+  sensor @1 :Int32;
+  type @2 :Int32;
   timestamp @3 :Int64;
 
   union {
@@ -318,10 +322,7 @@ struct SensorEventData {
 
   struct SensorVec {
     v @0 :List(Float32);
-
-    deprecated :group {
-      status @1 :Int8;
-    }
+    status @1 :Int8;
   }
 
   enum SensorSource {
@@ -339,11 +340,7 @@ struct SensorEventData {
     mmc5603nj @11;
   }
 
-  # formerly based on android sensor_event_t
   deprecated :group {
-    version @0 :Int32;
-    sensor @1 :Int32;
-    type @2 :Int32;
     uncalibrated @10 :Bool;
   }
 }
@@ -565,6 +562,7 @@ struct PandaState @0xa7649e2575e4591e {
   heartbeatLost @22 :Bool;
   interruptLoad @25 :Float32;
   fanPower @28 :UInt8;
+  fanStallCount @34 :UInt8;
 
   spiErrorCount @33 :UInt16;
 
@@ -700,7 +698,6 @@ struct PandaState @0xa7649e2575e4591e {
     usbPowerMode @12 :Deprecated.UsbPowerModeDEPRECATED;
     safetyParam @20 :Int16;
     safetyParam2 @26 :UInt32;
-    fanStallCount @34 :UInt8;
   }
 }
 
@@ -2222,6 +2219,8 @@ struct DriverMonitoringStateDEPRECATED @0xb83cda094a1da284 {
 
 struct DriverMonitoringState {
   lockout @0 :Bool;
+  alertCountLockoutPercent @1 :Int8;
+  alertTimeLockoutPercent @2 :Int8;
   lockoutRecoveryPercent @11 :Int8;
   alert3Count @12 :Int8;
   noResponseCount @13 :Int8;
@@ -2288,11 +2287,6 @@ struct DriverMonitoringState {
   struct CalibrationState {
     calibratedPercent @0 :Int8;
     offset @1 :Float32;
-  }
-
-  deprecated :group {
-    alertCountLockoutPercent @1 :Int8;
-    alertTimeLockoutPercent @2 :Int8;
   }
 }
 

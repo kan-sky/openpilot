@@ -72,6 +72,7 @@ _services: dict[str, tuple] = {
   "drivingModelData": (True, 20., 10),
   "modelV2": (True, 20., None, QueueSize.BIG),
   "managerState": (True, 2., 1),
+  "uploaderState": (True, 0., 1),
   "navInstruction": (True, 1., 10),
   "navRoute": (True, 0.),
   "navRouteNavd": (True, 0.),
