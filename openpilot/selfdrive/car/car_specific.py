@@ -74,7 +74,7 @@ class CarSpecificEvents:
     elif self.CP.brand == 'gm':
       # Enabling at a standstill with brake is allowed
       # TODO: verify 17 Volt can enable for the first time at a stop and allow for all GMs
-      if CS.vEgo < self.CP.minEnableSpeed and not (CS.standstill and CS.brakePressed and
+      if CS.vEgo < self.CP.minEnableSpeed and not (CS.standstill and CS.brake >= 20 and
                                                    self.CP.networkLocation == NetworkLocation.fwdCamera):
         events.add(EventName.belowEngageSpeed)
       if CS.cruiseState.standstill:
@@ -131,7 +131,7 @@ class CarSpecificEvents:
       events.add(EventName.brakeHold)
     if CS.parkingBrake:
       events.add(EventName.parkBrake)
-    if CS.accFaulted:
+    if CS.accFaulted and not CS.brakePressed:
       events.add(EventName.accFaulted)
     if CS.steeringPressed:
       events.add(EventName.steerOverride)
@@ -168,9 +168,11 @@ class CarSpecificEvents:
         # if the user overrode recently, show a less harsh alert
         if self.silent_steer_warning or CS.standstill or self.steering_unpressed < int(1.5 / DT_CTRL):
           self.silent_steer_warning = True
-          events.add(EventName.steerTempUnavailableSilent)
+          if CS.vEgo < self.CP.minSteerSpeed:
+            events.add(EventName.steerTempUnavailableSilent)
         else:
-          events.add(EventName.steerTempUnavailable)
+          if CS.vEgo < self.CP.minSteerSpeed:
+            events.add(EventName.steerTempUnavailable)
     else:
       self.no_steer_warning = False
       self.silent_steer_warning = False

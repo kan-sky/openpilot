@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import math
 from numbers import Number
+import numpy as np
 
 from openpilot.cereal import log
 from opendbc.car.structs import car
