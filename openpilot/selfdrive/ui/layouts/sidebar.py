@@ -194,9 +194,9 @@ class Sidebar(Widget):
         calib = messaging.log_from_bytes(calib_bytes, log.Event).liveCalibration
         pitch = math.degrees(calib.rpyCalib[1])
         yaw = math.degrees(calib.rpyCalib[2])
-        desc += str("{:.2f}¡Æ {} | {:.2f}¡Æ {}").format(
-          abs(pitch), str("¡é") if pitch > 0 else str("¡è"),
-          abs(yaw), str("¡ç") if yaw > 0 else str("¡æ"))
+        desc += str("{:.2f}Â° {} | {:.2f}Â° {}").format(
+          abs(pitch), str("â†“") if pitch > 0 else str("â†‘"),
+          abs(yaw), str("â†") if yaw > 0 else str("â†’"))
       except Exception:
         cloudlog.exception("invalid CalibrationParams")
     device_text_y = rect.y + 800

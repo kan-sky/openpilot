@@ -101,7 +101,6 @@ class SelfdriveD:
     # read params
     self.is_metric = self.params.get_bool("IsMetric")
     self.is_ldw_enabled = self.params.get_bool("IsLdwEnabled")
-    self.disengage_on_accelerator = self.params.get_bool("DisengageOnAccelerator")
 
     car_recognized = self.CP.brand != 'mock'
 
@@ -338,7 +337,7 @@ class SelfdriveD:
           self.events.add(EventName.cameraFrameRate)
     if not REPLAY and self.rk.lagging:
       self.events.add(EventName.selfdrivedLagging)
-    if self.CP.openpilotLongitudinalControl:
+    if not self.CP.radarUnavailable:
       if self.sm['radarState'].radarErrors.canError:
         self.events.add(EventName.canError)
       elif self.sm['radarState'].radarErrors.radarUnavailableTemporary:
@@ -555,8 +554,6 @@ class SelfdriveD:
   def params_thread(self, evt):
     while not evt.is_set():
       self.is_metric = self.params.get_bool("IsMetric")
-      self.is_ldw_enabled = self.params.get_bool("IsLdwEnabled")
-      self.disengage_on_accelerator = self.params.get_bool("DisengageOnAccelerator")
       self.experimental_mode = self.params.get_bool("ExperimentalMode") and self.CP.openpilotLongitudinalControl
       self.personality = self.params.get("LongitudinalPersonality", return_default=True)
       time.sleep(0.1)
