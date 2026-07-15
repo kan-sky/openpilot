@@ -1,6 +1,9 @@
-import numpy as np
+﻿import numpy as np
 from openpilot.common.constants import ACCELERATION_DUE_TO_GRAVITY
 from openpilot.common.realtime import DT_CTRL, DT_MDL
+# Kans
+from openpilot.common.params import Params
+params = Params()
 
 MIN_SPEED = 1.0
 CONTROL_N = 17
@@ -13,7 +16,17 @@ MIN_STABLE_DELAY = 0.3
 # EU guidelines
 MAX_LATERAL_JERK = 5.0  # m/s^3
 MAX_LATERAL_ACCEL_NO_ROLL = 3.0  # m/s^2
+MAX_LATERAL_ACCEL_NO_ROLL_LOW_SPEED = 4.5  # m/s^2
 
+# Kans:
+def apply_deadzone(error, deadzone):
+  if error > deadzone:
+    error -= deadzone
+  elif error < - deadzone:
+    error += deadzone
+  else:
+    error = 0.
+  return error
 
 def clamp(val, min_val, max_val):
   clamped_val = float(np.clip(val, min_val, max_val))
@@ -31,9 +44,20 @@ def clip_curvature(v_ego, prev_curvature, new_curvature, roll) -> tuple[float, b
                           prev_curvature - max_curvature_rate * DT_CTRL,
                           prev_curvature + max_curvature_rate * DT_CTRL)
 
+  # Kans: 저속에서는 튜닝값 기반으로 횡가속 제한 완화, 고속일수록 기본값 3.0까지 부드럽게 전환.
+  # 값이 높으면 조향 권한 증가, 낮으면 조향 권한 감소.
+  max_lat_accel_low_speed = params.get_int("MaxLatAccelNoRollLowSpeed") * 0.1
+  if max_lat_accel_low_speed <= 0.0:
+    max_lat_accel_low_speed = MAX_LATERAL_ACCEL_NO_ROLL_LOW_SPEED
+  max_lat_accel_low_speed = float(np.clip(max_lat_accel_low_speed, 3.5, 4.5))
+
   roll_compensation = roll * ACCELERATION_DUE_TO_GRAVITY
-  max_lat_accel = MAX_LATERAL_ACCEL_NO_ROLL + roll_compensation
-  min_lat_accel = -MAX_LATERAL_ACCEL_NO_ROLL + roll_compensation
+  max_lateral_accel_no_roll = float(np.interp(v_ego,
+    [80 / 3.6, 120 / 3.6],
+    [max_lat_accel_low_speed, MAX_LATERAL_ACCEL_NO_ROLL]))
+
+  max_lat_accel = max_lateral_accel_no_roll + roll_compensation
+  min_lat_accel = -max_lateral_accel_no_roll + roll_compensation
   new_curvature, limited_accel = clamp(new_curvature, min_lat_accel / v_ego ** 2, max_lat_accel / v_ego ** 2)
 
   new_curvature, limited_max_curv = clamp(new_curvature, -MAX_CURVATURE, MAX_CURVATURE)

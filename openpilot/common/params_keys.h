@@ -326,7 +326,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"PathOffset", {PERSISTENT, INT, "0"}},
     {"CameraYawTrimDeg", {PERSISTENT, INT, "0"}},
 
-    {"LateralTorqueCustom", {PERSISTENT, INT, "1"}},
+    {"LateralTorqueCustom", {PERSISTENT, BOOL, "1"}},
     {"LateralTorqueAccelFactor", {PERSISTENT, INT, "2100"}},
     {"LateralTorqueFriction", {PERSISTENT, INT, "150"}},
     {"LateralTorqueKpV", {PERSISTENT, INT, "138"}},
@@ -372,6 +372,6 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"AccelForce", {PERSISTENT, INT, "950"}},
     {"PsiDampingStraight", {PERSISTENT, INT, "85"}},
     {"PsiDampingSCurve", {PERSISTENT, INT, "65"}},
-    {"MaxLatAccelNoRollLowSpeed", {PERSISTENT, INT, "42"}},
+    {"MaxLatAccelNoRollLowSpeed", {PERSISTENT, INT, "38"}},
     {"LatSmoothDebug", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION, STRING}},
 };

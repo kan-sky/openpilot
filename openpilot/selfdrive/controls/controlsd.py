@@ -40,7 +40,7 @@ class Controls:
     self.CI = interfaces[self.CP.carFingerprint](self.CP)
 
     self.sm = messaging.SubMaster(['liveDelay', 'liveParameters', 'liveTorqueParameters', 'modelV2', 'selfdriveState',
-                                   'liveCalibration', 'livePose', 'longitudinalPlan', 'lateralManeuverPlan', 'carState', 'carOutput',
+                                   'liveCalibration', 'livePose', 'longitudinalPlan', 'carState', 'carOutput',
                                    'driverMonitoringState', 'onroadEvents', 'driverAssistance'], poll='selfdriveState')
     self.pm = messaging.PubMaster(['carControl', 'controlsState'])
 
@@ -120,15 +120,25 @@ class Controls:
     actuators.accel = float(self.LoC.update(CC.longActive, CS, long_plan.aTarget, long_plan.shouldStop, pid_accel_limits))
 
     # Steering PID loop and lateral MPC
-    # Reset desired curvature to current to avoid violating the limits on engage
-    if self.sm.valid['lateralManeuverPlan']:
-      new_desired_curvature = self.sm['lateralManeuverPlan'].desiredCurvature if CC.latActive else self.curvature
+    # Carrot:
+    steer_actuator_delay = self.params.get_float("SteerActuatorDelay") * 0.01
+    if steer_actuator_delay == 0.0:
+      steer_actuator_delay = self.sm['liveDelay'].lateralDelay
+
+    def smooth_value(val, prev_val, tau):
+      alpha = 1 - np.exp(-DT_CTRL / tau) if tau > 0 else 1
+      return alpha * val + (1 - alpha) * prev_val
+
+    if not CC.latActive:
+      new_desired_curvature = self.curvature
+
     else:
-      new_desired_curvature = model_v2.action.desiredCurvature if CC.latActive else self.curvature
+      new_desired_curvature = smooth_value(model_v2.action.desiredCurvature, self.desired_curvature, 0.1)
+
     self.desired_curvature, curvature_limited = clip_curvature(CS.vEgo, self.desired_curvature, new_desired_curvature, lp.roll)
     lat_delay = self.sm["liveDelay"].lateralDelay + LAT_SMOOTH_SECONDS
 
-    actuators.curvature = self.desired_curvature
+    actuators.curvature = float(self.desired_curvature)
     steer, lateral_output, lac_log = self.LaC.update(CC.latActive, CS, self.VM, lp,
                                                      self.steer_limited_by_safety, self.desired_curvature,
                                                      curvature_limited, lat_delay)
