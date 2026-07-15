@@ -254,8 +254,8 @@ def below_steer_speed_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.S
   return Alert(
     f"Steer Assist Unavailable Below {get_display_speed(CP.minSteerSpeed, metric)}",
     "",
-    AlertStatus.userPrompt, AlertSize.small,
-    Priority.LOW, VisualAlert.none, AudibleAlert.prompt, 0.4)
+    AlertStatus.userPrompt, AlertSize.none,
+    Priority.LOW, VisualAlert.none, AudibleAlert.none, 0.4)
 
 
 def calibration_incomplete_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
@@ -520,11 +520,11 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
       "Steering Assist Temporarily Unavailable",
       "",
       AlertStatus.userPrompt, AlertSize.small,
-      Priority.LOW, VisualAlert.steerRequired, AudibleAlert.prompt, 1.8),
+      Priority.LOW, VisualAlert.steerRequired, AudibleAlert.none, 1.8),
   },
 
   EventName.driverDistracted1: {
-    ET.PERMANENT: Alert(
+    ET.WARNING: Alert(
       "Pay Attention",
       "",
       AlertStatus.normal, AlertSize.small,
@@ -532,7 +532,7 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
   },
 
   EventName.driverDistracted2: {
-    ET.PERMANENT: Alert(
+    ET.WARNING: Alert(
       "Pay Attention",
       "Driver Distracted",
       AlertStatus.userPrompt, AlertSize.mid,
@@ -540,7 +540,7 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
   },
 
   EventName.driverDistracted3: {
-    ET.PERMANENT: Alert(
+    ET.WARNING: Alert(
       "DISENGAGE IMMEDIATELY",
       "Driver Distracted",
       AlertStatus.critical, AlertSize.full,
@@ -548,7 +548,7 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
   },
 
   EventName.driverUnresponsive1: {
-    ET.PERMANENT: Alert(
+    ET.WARNING: Alert(
       "Touch Steering Wheel: No Face Detected",
       "",
       AlertStatus.normal, AlertSize.small,
@@ -556,7 +556,7 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
   },
 
   EventName.driverUnresponsive2: {
-    ET.PERMANENT: Alert(
+    ET.WARNING: Alert(
       "Touch Steering Wheel",
       "Driver Unresponsive",
       AlertStatus.userPrompt, AlertSize.mid,
@@ -564,7 +564,7 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
   },
 
   EventName.driverUnresponsive3: {
-    ET.PERMANENT: Alert(
+    ET.WARNING: Alert(
       "DISENGAGE IMMEDIATELY",
       "Driver Unresponsive",
       AlertStatus.critical, AlertSize.full,
@@ -583,7 +583,7 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
     ET.WARNING: Alert(
       "Press Resume to Exit Standstill",
       "",
-      AlertStatus.userPrompt, AlertSize.small,
+      AlertStatus.userPrompt, AlertSize.none,
       Priority.LOW, VisualAlert.none, AudibleAlert.none, .2),
   },
 
@@ -595,7 +595,7 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
     ET.WARNING: Alert(
       "Steer Left to Start Lane Change Once Safe",
       "",
-      AlertStatus.normal, AlertSize.small,
+      AlertStatus.normal, AlertSize.none,
       Priority.LOW, VisualAlert.none, AudibleAlert.none, .1),
   },
 
@@ -603,7 +603,7 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
     ET.WARNING: Alert(
       "Steer Right to Start Lane Change Once Safe",
       "",
-      AlertStatus.normal, AlertSize.small,
+      AlertStatus.normal, AlertSize.none,
       Priority.LOW, VisualAlert.none, AudibleAlert.none, .1),
   },
 
@@ -611,7 +611,7 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
     ET.WARNING: Alert(
       "Car Detected in Blindspot",
       "",
-      AlertStatus.userPrompt, AlertSize.small,
+      AlertStatus.userPrompt, AlertSize.none,
       Priority.LOW, VisualAlert.none, AudibleAlert.prompt, .1),
   },
 
@@ -619,7 +619,7 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
     ET.WARNING: Alert(
       "Changing Lanes",
       "",
-      AlertStatus.normal, AlertSize.small,
+      AlertStatus.normal, AlertSize.none,
       Priority.LOW, VisualAlert.none, AudibleAlert.none, .1),
   },
 
@@ -627,8 +627,8 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
     ET.WARNING: Alert(
       "Take Control",
       "Turn Exceeds Steering Limit",
-      AlertStatus.userPrompt, AlertSize.mid,
-      Priority.LOW, VisualAlert.steerRequired, AudibleAlert.promptRepeat, 2.),
+      AlertStatus.normal, AlertSize.small,
+      Priority.LOW, VisualAlert.none, AudibleAlert.none, 1.),
   },
 
   # Thrown when the fan is driven at >50% but is not rotating
@@ -981,9 +981,9 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
     ET.PERMANENT: Alert(
       "Reverse\nGear",
       "",
-      AlertStatus.normal, AlertSize.full,
+      AlertStatus.normal, AlertSize.none,
       Priority.LOWEST, VisualAlert.none, AudibleAlert.none, .2, creation_delay=0.5),
-    ET.USER_DISABLE: ImmediateDisableAlert("Reverse Gear"),
+    ET.SOFT_DISABLE: SoftDisableAlert("Reverse Gear"),
     ET.NO_ENTRY: NoEntryAlert("Reverse Gear"),
   },
 

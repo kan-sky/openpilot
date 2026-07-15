@@ -33,11 +33,17 @@ cdef extern from "common/params.h":
     c_Params(string) except + nogil
     string get(string, bool) nogil
     bool getBool(string, bool) nogil
+    int getInt(string, bool) nogil
+    float getFloat(string, bool) nogil
     int remove(string) nogil
     int put(string, string) nogil
     void putNonBlocking(string, string) nogil
     void putBoolNonBlocking(string, bool) nogil
+    void putIntNonBlocking(string, int) nogil
+    void putFloatNonBlocking(string, float) nogil
     int putBool(string, bool) nogil
+    int putInt(string, int) nogil
+    int putFloat(string, float) nogil
     bool checkKey(string) nogil
     ParamKeyType getKeyType(string) nogil
     optional[string] getKeyDefaultValue(string) nogil
@@ -141,7 +147,21 @@ cdef class Params:
     cdef ParamKeyType t = self.p.getKeyType(k)
     return ensure_bytes(self.python2cpp(type(dat), t, dat, key))
 
-  def put(self, key, dat, bool block = False):
+  def get_int(self, key, bool block=False):
+    cdef string k = self.check_key(key)
+    cdef int r
+    with nogil:
+      r = self.p.getInt(k, block)
+    return r
+
+  def get_float(self, key, bool block=False):
+    cdef string k = self.check_key(key)
+    cdef float r
+    with nogil:
+      r = self.p.getFloat(k, block)
+    return r
+
+  def put(self, key, dat, bool block = True):
     """
     Warning: block=True blocks until the param is written to disk!
     In very rare cases this can take over a second, and your code will hang.
@@ -156,13 +176,44 @@ cdef class Params:
       else:
         self.p.putNonBlocking(k, dat_bytes)
 
-  def put_bool(self, key, bool val, bool block = False):
+  def put_bool(self, key, bool val, bool block = True):
     cdef string k = self.check_key(key)
     with nogil:
       if block:
         self.p.putBool(k, val)
       else:
         self.p.putBoolNonBlocking(k, val)
+
+  def put_int(self, key, int val):
+    cdef string k = self.check_key(key)
+    with nogil:
+      self.p.putInt(k, val)
+
+  def put_float(self, key, float val):
+    cdef string k = self.check_key(key)
+    with nogil:
+      self.p.putFloat(k, val)
+
+  def put_nonblocking(self, key, dat):
+    cdef string k = self.check_key(key)
+    cdef string dat_bytes = self._put_cast(key, dat)
+    with nogil:
+      self.p.putNonBlocking(k, dat_bytes)
+
+  def put_bool_nonblocking(self, key, bool val):
+    cdef string k = self.check_key(key)
+    with nogil:
+      self.p.putBoolNonBlocking(k, val)
+
+  def put_int_nonblocking(self, key, int val):
+    cdef string k = self.check_key(key)
+    with nogil:
+      self.p.putIntNonBlocking(k, val)
+
+  def put_float_nonblocking(self, key, float val):
+    cdef string k = self.check_key(key)
+    with nogil:
+      self.p.putFloatNonBlocking(k, val)
 
   def remove(self, key):
     cdef string k = self.check_key(key)
