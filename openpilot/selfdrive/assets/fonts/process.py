@@ -9,10 +9,11 @@ SELFDRIVE_DIR = FONT_DIR.parents[1]
 TRANSLATIONS_DIR = SELFDRIVE_DIR / "ui" / "translations"
 LANGUAGES_FILE = TRANSLATIONS_DIR / "languages.json"
 
-GLYPH_PADDING = 6
-EXTRA_CHARS = "–‑✓×°§•X⚙✕◀▶✔⌫⇧␣○●↳çêüñ–‑✓×°§•€£¥"
+GLYPH_PADDING = 5
+EXTRA_CHARS = ("–‑✓×°§•X⚙✕◀▶✔⌫⇧␣○●↳çêüñ–‑✓×°§•€£¥"  
+  "↑↓←→↖↗↘↙±÷℃℉✔✕✖■□◆◇…“”‘’") # Kans
 UNIFONT_LANGUAGES = {"th", "zh-CHT", "zh-CHS", "ko", "ja"}
-
+KR_FONTS = {"NanumGothicBold"}
 
 def _languages():
   if not LANGUAGES_FILE.exists():
@@ -25,6 +26,7 @@ def _char_sets():
   base = set(map(chr, range(32, 127))) | set(EXTRA_CHARS)
   unifont = set(base)
 
+  unifont.update(map(chr, range(0xAC00, 0xD7A4)))
   for language, code in _languages().items():
     unifont.update(language)
     po_path = TRANSLATIONS_DIR / f"app_{code}.po"
@@ -33,6 +35,11 @@ def _char_sets():
     except FileNotFoundError:
       continue
     (unifont if code in UNIFONT_LANGUAGES else base).update(chars)
+    # Kans
+    base.update(chars)
+
+    if code in UNIFONT_LANGUAGES:
+      unifont.update(chars)
 
   return tuple(sorted(ord(c) for c in base)), tuple(sorted(ord(c) for c in unifont))
 
@@ -89,10 +96,20 @@ def _write_bmfont(path: Path, font_size: int, face: str, atlas_name: str, line_h
 def _process_font(font_path: Path, codepoints: tuple[int, ...]):
   print(f"Processing {font_path.name}...")
 
-  font_size = {
-    "unifont.otf": 16,  # unifont is only 16x8 or 16x16 pixels per glyph
-  }.get(font_path.name, 200)
+  #font_size = {
+  #  "unifont.otf": 16,  # unifont is only 16x8 or 16x16 pixels per glyph
+  #}.get(font_path.name, 200)
+  font_size = 200
+  padding = GLYPH_PADDING
 
+  if font_path.name == "unifont.otf":
+    font_size = 16
+    padding = GLYPH_PADDING
+
+  if font_path.stem in KR_FONTS:
+    font_size = 45
+    padding = 2
+    
   data = font_path.read_bytes()
   file_buf = rl.ffi.new("unsigned char[]", data)
   cp_buffer = rl.ffi.new("int[]", codepoints)
@@ -106,7 +123,7 @@ def _process_font(font_path: Path, codepoints: tuple[int, ...]):
     raise RuntimeError("raylib failed to load font data")
 
   rects_ptr = rl.ffi.new("Rectangle **")
-  image = rl.gen_image_font_atlas(glyphs, rects_ptr, glyph_count[0], font_size, GLYPH_PADDING, 0)
+  image = rl.gen_image_font_atlas(glyphs, rects_ptr, glyph_count[0], font_size, padding, 0)
   if image.width == 0 or image.height == 0:
     raise RuntimeError("raylib returned an empty atlas")
 
@@ -127,7 +144,7 @@ def main():
   for font in fonts:
     if "emoji" in font.name.lower():
       continue
-    glyphs = unifont_cp if font.stem.lower().startswith("unifont") else base_cp
+    glyphs = unifont_cp if font.stem.lower().startswith("unifont") or font.stem in KR_FONTS else base_cp
     _process_font(font, glyphs)
   return 0
 

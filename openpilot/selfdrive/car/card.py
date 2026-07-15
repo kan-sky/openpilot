@@ -80,7 +80,7 @@ class Car:
 
     self.can_callbacks = can_comm_callbacks(self.can_sock, self.pm.sock['sendcan'])
 
-    is_release = self.params.get_bool("IsReleaseBranch")
+    is_release = True # Carrot: self.params.get_bool("IsReleaseBranch")
 
     if CI is None:
       # wait for one pandaState and one CAN packet
