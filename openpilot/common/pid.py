@@ -1,4 +1,4 @@
-import numpy as np
+ï»¿import numpy as np
 from numbers import Number
 
 class PIDController:
@@ -72,8 +72,8 @@ class PIDController:
 
 
 class MultiplicativeUnwindPID:
-  # infiniteCable2 Æ÷ÆÃ: LatControlCurvature(VW MEB °î·ü Æó·çÇÁ)¿¡¼­ »ç¿ë.
-  # override(¿îÀüÀÚ °³ÀÔ) ½Ã ÀûºĞÇ×À» °ö¼ÀÀûÀ¸·Î Ç®¾îÁÖ´Â(unwind) PID.
+  # infiniteCable2 í¬íŒ…: LatControlCurvature(VW MEB ê³¡ë¥  íë£¨í”„)ì—ì„œ ì‚¬ìš©.
+  # override(ìš´ì „ì ê°œì…) ì‹œ ì ë¶„í•­ì„ ê³±ì…ˆì ìœ¼ë¡œ í’€ì–´ì£¼ëŠ”(unwind) PID.
   def __init__(self, k_p, k_i, k_f=0., k_d=0., pos_limit=1e308, neg_limit=-1e308, rate=100, min_cmd=1e-10, ki_red_time=1.0):
     if isinstance(k_p, Number):
       k_p = [[0], [k_p]]
