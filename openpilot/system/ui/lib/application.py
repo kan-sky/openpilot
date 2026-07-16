@@ -21,6 +21,8 @@ from openpilot.common.swaglog import cloudlog
 from openpilot.common.hardware import HARDWARE, PC
 from openpilot.system.ui.lib.multilang import multilang
 from openpilot.common.realtime import Ratekeeper
+import datetime
+from openpilot.common.params import Params
 
 _DEFAULT_FPS = int(os.getenv("FPS", {'tizi': 20}.get(HARDWARE.get_device_type(), 60)))
 FPS_LOG_INTERVAL = 5  # Seconds between logging FPS drops
@@ -88,7 +90,9 @@ DEFAULT_TEXT_COLOR = rl.Color(255, 255, 255, int(255 * 0.9))
 
 # Qt draws fonts accounting for ascent/descent differently, so compensate to match old styles
 # The real scales for the fonts below range from 1.212 to 1.266
-FONT_SCALE = 1.242 if BIG_UI else 1.16
+# Kans:
+lang = Params().get("LanguageSetting") or "en"
+FONT_SCALE = (1.242 if BIG_UI else 1.16) * (0.9 if lang == "ko" else 1.0)
 
 ASSETS_DIR = files("openpilot.selfdrive").joinpath("assets")
 FONT_DIR = ASSETS_DIR.joinpath("fonts")
@@ -99,18 +103,20 @@ class FontWeight(StrEnum):
   MEDIUM = "Inter-Medium.fnt"
   BOLD = "Inter-Bold.fnt"
   SEMI_BOLD = "Inter-SemiBold.fnt"
+  PRETENDARD = "Pretendard-SemiBold.fnt"
   UNIFONT = "unifont.fnt"
 
   # Small UI fonts
   DISPLAY_REGULAR = "Inter-Regular.fnt"
   ROMAN = "Inter-Regular.fnt"
-  DISPLAY = "Inter-Bold.fnt"
+  #DISPLAY = "Inter-Bold.fnt"
+  DISPLAY = "NanumGothicBold.fnt"
 
 
 def font_fallback(font: rl.Font) -> rl.Font:
   """Fall back to unifont for languages that require it."""
   if multilang.requires_unifont():
-    return gui_app.font(FontWeight.UNIFONT)
+    return gui_app.font(FontWeight.DISPLAY)
   return font
 
 

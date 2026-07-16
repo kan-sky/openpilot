@@ -2,7 +2,8 @@ import numpy as np
 from numbers import Number
 
 class PIDController:
-  def __init__(self, k_p, k_i, k_d=0., pos_limit=1e308, neg_limit=-1e308, rate=100):
+  def __init__(self, k_p, k_i, k_f=0., k_d=0., pos_limit=1e308, neg_limit=-1e308, rate=100):
+    self.k_f = float(k_f) if isinstance(k_f, Number) else k_f
     self._k_p: list[list[float]] = [[0], [k_p]] if isinstance(k_p, Number) else k_p
     self._k_i: list[list[float]] = [[0], [k_i]] if isinstance(k_i, Number) else k_i
     self._k_d: list[list[float]] = [[0], [k_d]] if isinstance(k_d, Number) else k_d
@@ -26,6 +27,10 @@ class PIDController:
   def k_d(self):
     return np.interp(self.speed, self._k_d[0], self._k_d[1])
 
+  @property
+  def error_integral(self):
+    return self.i/self.k_i
+
   def reset(self):
     self.p = 0.0
     self.i = 0.0
@@ -37,20 +42,23 @@ class PIDController:
     self.pos_limit = pos_limit
     self.neg_limit = neg_limit
 
-  def update(self, error, error_rate=0.0, speed=0.0, feedforward=0., freeze_integrator=False):
+  def update(self, error, error_rate=0.0, speed=0.0, override=False, feedforward=0., freeze_integrator=False):
     self.speed = speed
     self.p = self.k_p * float(error)
-    self.d = self.k_d * error_rate
-    self.f = feedforward
+    self.d = self.k_d * float(error_rate)
+    self.f = float(feedforward) * float(self.k_f)
 
-    if not freeze_integrator:
-      i = self.i + self.k_i * self.i_dt * error
+    if override:
+      i -= self.i_unwind_rate * float(np.sign(self.i))
+    else:
+      if not freeze_integrator:
+        i = self.i + self.k_i * self.i_dt * float(error)
 
-      # Don't allow windup if already clipping
-      test_control = self.p + i + self.d + self.f
-      i_upperbound = self.i if test_control > self.pos_limit else self.pos_limit
-      i_lowerbound = self.i if test_control < self.neg_limit else self.neg_limit
-      self.i = np.clip(i, i_lowerbound, i_upperbound)
+        # Don't allow windup if already clipping
+        test_control = self.p + i + self.d + self.f
+        i_upperbound = self.i if test_control > self.pos_limit else self.pos_limit
+        i_lowerbound = self.i if test_control < self.neg_limit else self.neg_limit
+        self.i = np.clip(i, i_lowerbound, i_upperbound)
 
     control = self.p + self.i + self.d + self.f
     self.control = np.clip(control, self.neg_limit, self.pos_limit)
