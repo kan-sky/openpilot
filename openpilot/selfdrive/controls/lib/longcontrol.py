@@ -56,21 +56,16 @@ class LongControl:
 
     self.params = Params()
     self.readParamCount = 0
-    self.stopping_accel = self._read_stopping_accel()
-    self.stop_debug_printed = False
-
-  def _read_stopping_accel(self):
-    stopping_accel = self.params.get_float("StoppingAccel") * 0.01
-    return stopping_accel if stopping_accel < 0.0 else self.CP.stopAccel
-
+    self.debug_frame = 0
   def reset(self):
     self.pid.reset()
 
   def update(self, active, CS, a_target, should_stop, accel_limits):
+    self.debug_frame += 1
+
     self.readParamCount += 1
     if self.readParamCount >= 100:
       self.readParamCount = 0
-      self.stopping_accel = self._read_stopping_accel()
     elif self.readParamCount == 10:
       if len(self.CP.longitudinalTuning.kpBP) == 1 and len(self.CP.longitudinalTuning.kiBP)==1:
         longitudinalTuningKpV = self.params.get_float("LongTuningKpV") * 0.01
@@ -84,6 +79,16 @@ class LongControl:
     self.pid.neg_limit = accel_limits[0]
     self.pid.pos_limit = accel_limits[1]
 
+    # Kans: debug
+    if self.debug_frame % 20 == 0:
+      print(
+        f"[LONG_IN] "
+        f"active={active} "
+        f"state={self.long_control_state} "
+        f"vEgo={CS.vEgo:.3f} "
+        f"aTarget={a_target:.3f} "
+        f"shouldStop={should_stop} "
+        f"accelLimits=({accel_limits[0]:.2f},{accel_limits[1]:.2f})")
     self.long_control_state = long_control_state_trans(self.CP, active, self.long_control_state, CS.vEgo,
                                                        should_stop, CS.brakePressed,
                                                        CS.cruiseState.standstill)
@@ -92,9 +97,10 @@ class LongControl:
       output_accel = 0.
 
     elif self.long_control_state == LongCtrlState.stopping:
-      output_accel = min(self.last_output_accel, 0.0)
-      output_accel = max(output_accel - self.CP.stoppingDecelRate * DT_CTRL, self.stopping_accel)
-
+      output_accel = self.last_output_accel
+      if output_accel > self.CP.stopAccel:
+        output_accel = min(output_accel, 0.0)
+        output_accel -= self.CP.stoppingDecelRate * DT_CTRL
       self.reset()
 
     elif self.long_control_state == LongCtrlState.starting:
@@ -107,18 +113,4 @@ class LongControl:
                                      feedforward=a_target)
 
     self.last_output_accel = np.clip(output_accel, accel_limits[0], accel_limits[1])
-    # Kans: stopping debug
-    if not self.stop_debug_printed and should_stop and (self.long_control_state != LongCtrlState.stopping or
-        self.last_output_accel > self.stopping_accel + 0.05):
-      self.stop_debug_printed = True
-      print(f"[STOPDBG] "
-        f"state={self.long_control_state} "
-        f"should={should_stop} "
-        f"v={CS.vEgo:.2f} "
-        f"aEgo={CS.aEgo:.2f} "
-        f"aTar={a_target:.2f} "
-        f"out={self.last_output_accel:.2f} "
-        f"stopA={self.stopping_accel:.2f} "
-        f"limMin={accel_limits[0]:.2f}"
-      )
     return self.last_output_accel
