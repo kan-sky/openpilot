@@ -130,7 +130,7 @@ class Controls:
     actuators.curvature = self.desired_curvature
     steer, lateral_output, lac_log = self.LaC.update(CC.latActive, CS, self.VM, lp,
                                                      self.steer_limited_by_safety, self.desired_curvature,
-                                                     curvature_limited, lat_delay)
+                                                     CC, curvature_limited, model_data=self.sm['modelV2'], lat_delay=lat_delay)
     actuators.torque = float(steer)
     if self.CP.steerControlType == car.CarParams.SteerControlType.curvature:
       actuators.curvature = float(lateral_output)

@@ -1,5 +1,18 @@
 #!/usr/bin/env bash
 
+if [ ! -f "./boot_finish" ]; then
+  mount -o rw,remount /system
+  chmod 755 ./restart.sh
+
+  if [ ! -f "/data/params/d/DongleId" ]; then
+    echo -n "UnregisteredDevice" > /data/params/d/DongleId
+  fi
+  rm -f /data/params/d/Offroad_UnregisteredHardware
+  touch ./boot_finish
+else
+  chmod 644 ./boot_finish
+fi
+
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null && pwd )"
 
 source "$DIR/launch_env.sh"

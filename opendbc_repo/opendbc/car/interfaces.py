@@ -16,6 +16,9 @@ from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.common.simple_kalman import KF1D, get_kalman_gain
 from opendbc.car.values import PLATFORMS
 from opendbc.can import CANParser
+# NNFF
+from openpilot.common.params import Params
+from opendbc.car.torque_nn import FluxModel, get_nn_model
 
 GearShifter = structs.CarState.GearShifter
 ButtonType = structs.CarState.ButtonEvent.Type
@@ -110,6 +113,32 @@ class CarInterfaceBase(ABC):
     dbc_names = {bus: cp.dbc_name for bus, cp in self.can_parsers.items()}
     self.CC: CarControllerBase = self.CarController(dbc_names, CP)
 
+    # Twilsonco full NNFF model. The controller decides whether to use it.
+    self.extended_torque_nn_model: FluxModel | None = None
+    self.extended_nnff_model_path: str | None = None
+
+    if CP.steerControlType == structs.CarParams.SteerControlType.torque:
+      eps_firmware = next((fw.fwVersion for fw in CP.carFw if fw.ecu == "eps"), b"")
+
+      if isinstance(eps_firmware, bytes):
+        eps_firmware = eps_firmware.decode("utf-8", errors="ignore")
+      else:
+        eps_firmware = str(eps_firmware)
+
+      self.extended_torque_nn_model, self.extended_nnff_model_path = get_nn_model(CP.carFingerprint, eps_firmware)
+
+    self.extended_nnff_available = self.extended_torque_nn_model is not None
+
+    params = Params()
+    if params.get_bool("NNFF"):
+      if self.extended_nnff_available:
+        params.put_nonblocking("NNFFModelName", CP.carFingerprint.replace("_", " "))
+        print(f"NNFF loaded... {self.extended_nnff_model_path}")
+      else:
+        params.put_nonblocking("NNFFModelName", "")
+    else:
+      params.remove("NNFFModelName")
+
   def apply(self, c: structs.CarControl, now_nanos: int | None = None) -> tuple[structs.CarControl.Actuators, list[CanData]]:
     if now_nanos is None:
       now_nanos = int(time.monotonic() * 1e9)
@@ -181,6 +210,16 @@ class CarInterfaceBase(ABC):
 
   def torque_from_lateral_accel(self) -> TorqueFromLateralAccelCallbackType:
     return self.torque_from_lateral_accel_linear
+
+  def torque_from_lateral_accel_context(self, lateral_acceleration: float, torque_params: structs.CarParams.LateralTorqueTuning,
+                                        roll_compensation: float, v_ego: float, a_ego: float, gravity_adjusted: bool) -> float:
+    # Optional richer callback for vehicle models such as NanoFF. The default keeps current behavior.
+    return self.torque_from_lateral_accel()(lateral_acceleration, torque_params)
+
+  def get_extended_torque_nn_ff(self, inputs: list[float]) -> float:
+    if self.extended_torque_nn_model is None:
+      raise RuntimeError("Extended NNFF model is unavailable")
+    return self.extended_torque_nn_model.evaluate(inputs)
 
   def lateral_accel_from_torque_linear(self, torque: float, torque_params: structs.CarParams.LateralTorqueTuning) -> float:
     return torque * float(torque_params.latAccelFactor)

@@ -7,6 +7,7 @@ import wave
 from openpilot.cereal import log, messaging
 from openpilot.common.basedir import BASEDIR
 from openpilot.common.filter_simple import FirstOrderFilter
+from openpilot.common.params import Params
 from openpilot.common.realtime import Ratekeeper
 from openpilot.common.utils import retry
 from openpilot.common.swaglog import cloudlog
@@ -17,7 +18,7 @@ from openpilot.common.hardware import HARDWARE
 SAMPLE_RATE = 48000
 SAMPLE_BUFFER = 4096 # (approx 100ms)
 MAX_VOLUME = 1.0
-MIN_VOLUME = 0.1
+MIN_VOLUME = 0.4
 ALERT_RAMP_TIME = 4 # seconds to ramp to max volume for warningImmediate
 SELFDRIVE_STATE_TIMEOUT = 5 # 5 seconds
 FILTER_DT = 1. / (micd.SAMPLE_RATE / micd.FFT_SAMPLES)
@@ -47,10 +48,37 @@ sound_list: dict[int, tuple[str, int | None, float]] = {
 
   AudibleAlert.warningSoft: ("warning_soft.wav", None, MAX_VOLUME),
   AudibleAlert.warningImmediate: ("warning_immediate.wav", None, MAX_VOLUME),
+
+  AudibleAlert.longEngaged: ("tici_engaged.wav", 1, MAX_VOLUME),
+  AudibleAlert.longDisengaged: ("tici_disengaged.wav", 1, MAX_VOLUME),
+  AudibleAlert.trafficSignGreen: ("traffic_sign_green.wav", 1, MAX_VOLUME),
+  AudibleAlert.trafficSignChanged: ("traffic_sign_changed.wav", 1, MAX_VOLUME),
+  AudibleAlert.trafficError: ("audio_traffic_error.wav", None, MAX_VOLUME),
+  AudibleAlert.bsdWarning: ("audio_car_watchout.wav", None, MAX_VOLUME),
+  AudibleAlert.laneChange: ("audio_lane_change.wav", None, MAX_VOLUME),
+  AudibleAlert.stopStop: ("audio_stopstop.wav", None, MAX_VOLUME),
+  AudibleAlert.stopping: ("audio_stopping.wav", None, MAX_VOLUME),
+  AudibleAlert.autoHold: ("audio_auto_hold.wav", 1, MAX_VOLUME),
+  AudibleAlert.engage2: ("audio_engage.wav", None, MAX_VOLUME),
+  AudibleAlert.disengage2: ("audio_disengage.wav", None, MAX_VOLUME),
+  AudibleAlert.speedDown: ("audio_speed_down.wav", None, MAX_VOLUME),
+  AudibleAlert.audioTurn: ("audio_turn.wav", None, MAX_VOLUME),
+  AudibleAlert.reverseGear: ("reverse_gear.wav", 1, MAX_VOLUME),
+  AudibleAlert.audio1: ("audio_1.wav", None, MAX_VOLUME),
+  AudibleAlert.audio2: ("audio_2.wav", None, MAX_VOLUME),
+  AudibleAlert.audio3: ("audio_3.wav", None, MAX_VOLUME),
+  AudibleAlert.audio4: ("audio_4.wav", None, MAX_VOLUME),
+  AudibleAlert.audio5: ("audio_5.wav", None, MAX_VOLUME),
+  AudibleAlert.audio6: ("audio_6.wav", None, MAX_VOLUME),
+  AudibleAlert.audio7: ("audio_7.wav", None, MAX_VOLUME),
+  AudibleAlert.audio8: ("audio_8.wav", None, MAX_VOLUME),
+  AudibleAlert.audio9: ("audio_9.wav", None, MAX_VOLUME),
+  AudibleAlert.audio10: ("audio_10.wav", None, MAX_VOLUME),
+  AudibleAlert.nnff: ("nnff.wav", 1, MAX_VOLUME),
 }
 if HARDWARE.get_device_type() == "tizi":
   sound_list.update({
-    AudibleAlert.engage: ("engage_tizi.wav", 1, MAX_VOLUME),
+    AudibleAlert.engage: ("tici_engaged.wav", 1, MAX_VOLUME),
     AudibleAlert.disengage: ("disengage_tizi.wav", 1, MAX_VOLUME),
   })
 
@@ -62,6 +90,31 @@ def check_selfdrive_timeout_alert(sm):
       return True
 
   return False
+
+def linear_resample(samples, original_rate, new_rate):
+    if original_rate == new_rate:
+        return samples
+
+    # Calculate the resampling factor and the number of samples in the resampled signal
+    resampling_factor = float(new_rate) / original_rate
+    num_resampled_samples = int(len(samples) * resampling_factor)
+
+    # Create the resampled signal array
+    resampled = np.zeros(num_resampled_samples, dtype=np.float32)
+
+    for i in range(num_resampled_samples):
+        # Calculate the original sample index
+        orig_index = i / resampling_factor
+
+        # Find the two nearest original samples
+        lower_index = int(orig_index)
+        upper_index = min(lower_index + 1, len(samples) - 1)
+
+        # Perform linear interpolation
+        resampled[i] = (samples[lower_index] * (upper_index - orig_index) +
+                        samples[upper_index] * (orig_index - lower_index))
+
+    return resampled
 
 
 class Soundd:
@@ -87,12 +140,28 @@ class Soundd:
       filename, play_count, volume = sound_list[sound]
 
       with wave.open(BASEDIR + "/openpilot/selfdrive/assets/sounds/" + filename, 'r') as wavefile:
-        assert wavefile.getnchannels() == 1
+
+        #assert wavefile.getnchannels() == 1
         assert wavefile.getsampwidth() == 2
-        assert wavefile.getframerate() == SAMPLE_RATE
+        #assert wavefile.getframerate() == SAMPLE_RATE
+
+        actual_sample_rate = wavefile.getframerate()
+
+        nchannels = wavefile.getnchannels()
+        #print("nchannels=", nchannels, ",sound=", sound_list[sound])
+        assert nchannels in [1,2]
+        #print("loading...")
 
         length = wavefile.getnframes()
-        self.loaded_sounds[sound] = np.frombuffer(wavefile.readframes(length), dtype=np.int16).astype(np.float32) / (2**16/2)
+        frames = wavefile.readframes(length)
+        samples = np.frombuffer(frames, dtype=np.int16)
+
+        if nchannels == 2:
+          samples = samples[0::2] / 2 + samples[1::2] / 2
+
+        resampled_samples = linear_resample(samples, actual_sample_rate, SAMPLE_RATE) * volume
+
+        self.loaded_sounds[sound] = resampled_samples.astype(np.float32) / (2**16/2)
 
   def get_sound_data(self, frames): # get "frames" worth of data from the current alert sound, looping when required
 
@@ -144,7 +213,7 @@ class Soundd:
 
   def calculate_volume(self, weighted_db):
     volume = ((weighted_db - AMBIENT_DB) / DB_SCALE) * (MAX_VOLUME - MIN_VOLUME) + MIN_VOLUME
-    return math.pow(VOLUME_BASE, (np.clip(volume, MIN_VOLUME, MAX_VOLUME) - 1))
+    return math.pow(40, (np.clip(volume, MIN_VOLUME, MAX_VOLUME) - 1))
 
   @retry(attempts=10, delay=3)
   def get_stream(self, sd):

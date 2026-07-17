@@ -9,6 +9,7 @@ from opendbc.car.gm.carstate import CarState
 from opendbc.car.gm.radar_interface import RadarInterface, RADAR_HEADER_MSG, CAMERA_DATA_HEADER_MSG
 from opendbc.car.gm.values import CAR, CarControllerParams, EV_CAR, CAMERA_ACC_CAR, SDGM_CAR, ALT_ACCS, CanBus, GMSafetyFlags
 from opendbc.car.interfaces import CarInterfaceBase, TorqueFromLateralAccelCallbackType, LateralAccelFromTorqueCallbackType
+from opendbc.car.torque_nn import NEURAL_PARAMS_PATH, NanoFFModel, get_nano_ff_platforms
 
 TransmissionType = structs.CarParams.TransmissionType
 NetworkLocation = structs.CarParams.NetworkLocation
@@ -65,14 +66,31 @@ class CarInterface(CarInterfaceBase):
     return torque_values, lataccel_values
 
   def torque_from_lateral_accel(self) -> TorqueFromLateralAccelCallbackType:
+    # Full Flux NNFF supplies the final feedforward in LatControlTorque, so use a deterministic
+    # physical mapping here for feedback/error conversion instead of stacking NanoFF twice.
+    if not self.extended_nnff_available and self.CP.carFingerprint in get_nano_ff_platforms():
+      self.neural_ff_model = NanoFFModel(NEURAL_PARAMS_PATH, self.CP.carFingerprint)
+
+      def torque_from_lateral_accel_neural(lateral_acceleration: float, torque_params: structs.CarParams.LateralTorqueTuning):
+        inputs = [lateral_acceleration, 0.0, 0.0, 0.0]
+        return self.neural_ff_model.predict(inputs)
+      return torque_from_lateral_accel_neural
+
     if self.CP.carFingerprint in NON_LINEAR_TORQUE_PARAMS:
       torque_values, lataccel_values = self.get_lataccel_torque_siglin()
 
       def torque_from_lateral_accel_siglin(lateral_acceleration: float, torque_params: structs.CarParams.LateralTorqueTuning):
-        return np.interp(lateral_acceleration, lataccel_values, torque_values)
+        return float(np.interp(lateral_acceleration, lataccel_values, torque_values))
       return torque_from_lateral_accel_siglin
-    else:
-      return self.torque_from_lateral_accel_linear
+
+    return self.torque_from_lateral_accel_linear
+
+  def torque_from_lateral_accel_context(self, lateral_acceleration: float, torque_params: structs.CarParams.LateralTorqueTuning,
+                                        roll_compensation: float, v_ego: float, a_ego: float, gravity_adjusted: bool) -> float:
+    if hasattr(self, "neural_ff_model"):
+      nn_lateral_acceleration = lateral_acceleration + roll_compensation if gravity_adjusted else lateral_acceleration
+      return float(self.neural_ff_model.predict([nn_lateral_acceleration, roll_compensation, v_ego, a_ego]))
+    return self.torque_from_lateral_accel()(lateral_acceleration, torque_params)
 
   def lateral_accel_from_torque(self) -> LateralAccelFromTorqueCallbackType:
     if self.CP.carFingerprint in NON_LINEAR_TORQUE_PARAMS:
@@ -153,15 +171,7 @@ class CarInterface(CarInterfaceBase):
     ret.longitudinalActuatorDelay = 0.3  # large delay to initially start braking
 
     if candidate == CAR.CHEVROLET_VOLT:
-      is_torque = False
-      if is_torque:
-        CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
-      else:  
-        ret.lateralTuning.pid.kpBP = [0., 33.]
-        ret.lateralTuning.pid.kpV = [0., 0.22]
-        ret.lateralTuning.pid.kiBP = [0.]
-        ret.lateralTuning.pid.kiV = [0.1]
-        ret.lateralTuning.pid.kf = 0.87  # get_steer_feedforward_volt()
+      CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
       ret.steerActuatorDelay = 0.37
 
     elif candidate == CAR.GMC_ACADIA:

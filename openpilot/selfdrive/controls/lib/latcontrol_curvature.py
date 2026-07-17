@@ -26,7 +26,7 @@ class LatControlCurvature(LatControl):
     if self.pid is not None:
       self.pid.reset()
 
-  def update(self, active, CS, VM, params, steer_limited_by_safety, desired_curvature, curvature_limited, lat_delay):
+  def update(self, active, CS, VM, params, steer_limited_by_safety, desired_curvature, CC, curvature_limited, model_data=None, lat_delay=0.0):
     curvature_log = log.ControlsState.LateralCurvatureState.new_message()
     actual_curvature = -VM.calc_curvature(math.radians(CS.steeringAngleDeg - params.angleOffsetDeg), CS.vEgo, params.roll)
     error = desired_curvature - actual_curvature
