@@ -131,7 +131,7 @@ class CarSpecificEvents:
       events.add(EventName.brakeHold)
     if CS.parkingBrake:
       events.add(EventName.parkBrake)
-    if CS.accFaulted:
+    if CS.accFaulted and not CS.brakePressed:
       events.add(EventName.accFaulted)
     if CS.steeringPressed:
       events.add(EventName.steerOverride)
@@ -168,9 +168,11 @@ class CarSpecificEvents:
         # if the user overrode recently, show a less harsh alert
         if self.silent_steer_warning or CS.standstill or self.steering_unpressed < int(1.5 / DT_CTRL):
           self.silent_steer_warning = True
-          events.add(EventName.steerTempUnavailableSilent)
+          if CS.vEgo < self.CP.minSteerSpeed:
+            events.add(EventName.steerTempUnavailableSilent)
         else:
-          events.add(EventName.steerTempUnavailable)
+          if CS.vEgo < self.CP.minSteerSpeed:
+            events.add(EventName.steerTempUnavailable)
     else:
       self.no_steer_warning = False
       self.silent_steer_warning = False

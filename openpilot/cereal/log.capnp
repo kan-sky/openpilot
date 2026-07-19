@@ -730,10 +730,20 @@ struct UsbState {
 
 struct RadarState @0x9a185389d6fdd05f {
   mdMonoTime @6 :UInt64;  # for debugging
+  carStateMonoTime @11 :UInt64;
   radarErrors @13 :Car.RadarData.Error;
 
   leadOne @3 :LeadData;
   leadTwo @4 :LeadData;
+
+  leadLeft @18 :LeadData;
+  leadRight @14 :LeadData;
+  leadsCenter @15 : List(LeadData);
+  leadsLeft @16 : List(LeadData);
+  leadsRight @17 : List(LeadData);
+  leadsLeft2 @19 : List(LeadData);
+  leadsRight2 @20 : List(LeadData);
+  leadsCutIn @21 : List(LeadData);
 
   struct LeadData {
     dRel @0 :Float32;  # m from the front bumper of the car
@@ -747,13 +757,13 @@ struct RadarState @0x9a185389d6fdd05f {
     modelProb @13 :Float32;  # vision model lead probability
     radar @14 :Bool;  # true if lead is radar-matched (vs vision-only)
     radarTrackId @15 :Int32 = -1;  # for debugging
-
     aRel @3 :Float32;
     aLead @5 :Float32;
     dPath @6 :Float32;
     vLat @7 :Float32;
     fcw @10 :Bool;
-
+    jLead @16 :Float32;
+    score @17 :Float32;
   }
 
   deprecated :group {
@@ -765,7 +775,6 @@ struct RadarState @0x9a185389d6fdd05f {
     calPerc @9 :Int8;
     canMonoTimes @10 :List(UInt64);
     cumLagMs @5 :Float32;
-    carStateMonoTime @11 :UInt64;
     radarErrors @12 :List(Car.RadarData.ErrorDEPRECATED);
   }
 }

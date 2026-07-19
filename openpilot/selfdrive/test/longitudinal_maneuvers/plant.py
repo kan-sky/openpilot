@@ -89,6 +89,7 @@ class Plant:
     lead.dRel = float(d_rel)
     lead.yRel = 0.0
     lead.vRel = float(v_rel)
+    lead.aRel = float(a_lead - self.acceleration)
     lead.vLead = float(v_lead)
     lead.vLeadK = float(v_lead)
     lead.aLeadK = float(a_lead)

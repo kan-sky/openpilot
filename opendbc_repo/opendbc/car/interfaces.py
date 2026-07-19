@@ -1,3 +1,4 @@
+from collections import deque
 import os
 import numpy as np
 import time
@@ -17,7 +18,10 @@ from opendbc.car.common.simple_kalman import KF1D, get_kalman_gain
 from opendbc.car.values import PLATFORMS
 from opendbc.can import CANParser
 # NNFF
+from collections import deque
+import math
 from openpilot.common.params import Params
+from openpilot.common.filter_simple import FirstOrderFilter
 from opendbc.car.torque_nn import FluxModel, get_nn_model
 
 GearShifter = structs.CarState.GearShifter
@@ -77,6 +81,82 @@ def get_torque_params():
 
   return torque_params
 
+
+class MyTrack:
+  def __init__(self, track_id: int, radar_point, dt: float):
+    self.track_id = track_id
+    self.cnt = 0
+    self.dRel = radar_point.dRel
+    self.vRel = radar_point.vRel
+    self.yRel = radar_point.yRel
+    self.yvRel = radar_point.yvRel
+    self.vLead = radar_point.vLead
+    self.v_lead_filtered_last = self.vLead
+    self.aLead = 0.0
+    self.jLead = 0.0
+    self.dt = dt
+    self.vLead_avg = FirstOrderFilter(self.vLead, 0.1, self.dt)
+    self.aLead_avg = FirstOrderFilter(self.aLead, 0.15, self.dt)
+    self.jLead_avg = FirstOrderFilter(self.jLead, 0.4, self.dt)
+    self.yRel_avg = FirstOrderFilter(self.yRel, 0.1, self.dt)
+    self.yvRel_avg = FirstOrderFilter(self.yvRel, 0.1, self.dt)
+    self.cnt = 0
+
+  def init_point(self, radar_point):
+    self.dRel = radar_point.dRel
+    self.vRel = radar_point.vRel
+    self.yRel = radar_point.yRel
+    self.yvRel = radar_point.yvRel
+    self.vLead = radar_point.vLead
+    self.v_lead_filtered_last = self.vLead
+    self.aLead = 0.0
+    self.jLead = 0.0
+    self.vLead_avg.x = self.vLead
+    self.aLead_avg.x = self.aLead
+    self.jLead_avg.x = self.jLead
+    self.yRel_avg.x = self.yRel
+    self.yvRel_avg.x = self.yvRel
+        
+  def update(self, radar_point, a_ego):
+    if not radar_point.measured:
+      if self.cnt > 0:
+        self.init_point(radar_point)
+      self.cnt = 0
+    elif self.cnt < 1:
+      self.init_point(radar_point)
+      self.cnt += 1
+    else:      
+      self.vLead = radar_point.vLead
+      self.yRel = self.yRel_avg.update(radar_point.yRel)
+      self.yvRel = self.yvRel_avg.update(radar_point.yvRel)
+
+      if True: #math.isnan(radar_point.aRel): # 
+        v_lead_filtered = self.vLead_avg.update(self.vLead)
+        pseudo_stop = abs(v_lead_filtered) < 0.3 and abs(self.vLead - v_lead_filtered) < 0.05
+        a_raw = (v_lead_filtered - self.v_lead_filtered_last) / self.dt
+        self.v_lead_filtered_last = v_lead_filtered
+
+        self.noisy = abs(a_raw - self.aLead) > 3.0
+        if self.noisy:
+          self.cnt = 0
+        
+        a_lead = self.aLead_avg.update(np.clip(a_raw, -10.0, 5.0) if not pseudo_stop else 0.0)
+
+        j_lead = (a_lead - self.aLead) / self.dt
+        self.aLead = a_lead
+        self.jLead = self.jLead_avg.update(j_lead if self.cnt > 2 else 0.0)
+      else:
+        a_lead = radar_point.aRel + a_ego
+        j_lead = (a_lead - self.aLead) / self.dt
+        self.aLead = a_lead
+        self.jLead = self.jLead_avg.update(j_lead if self.cnt > 2 else 0.0)
+
+      # Store latest values
+      self.dRel = radar_point.dRel
+      self.vRel = radar_point.vRel
+
+      self.cnt += 1
+
 # generic car and radar interfaces
 
 
@@ -84,8 +164,55 @@ class RadarInterfaceBase(ABC):
   def __init__(self, CP: structs.CarParams):
     self.CP = CP
     self.rcp = None
+    self.tracks: dict[int, MyTrack] = {}
     self.pts: dict[int, structs.RadarData.RadarPoint] = {}
     self.frame = 0
+    delay = CP.radarDelay
+    self.v_ego_hist = deque([0.0], maxlen=int(round(delay / DT_CTRL)) + 1)
+    self.v_ego = 0.0
+    self.a_ego_hist = deque([0.0], maxlen=int(round(delay / DT_CTRL)) + 1)
+    self.a_ego = 0.0
+    self.last_timestamp = None
+    self.dt = None
+
+    self.init_samples = []
+    self.init_done = False
+
+     
+  def update_carrot(self, v_ego, a_ego, rcv_time, can_packets: list[tuple[int, list[CanData]]]) -> structs.RadarDataT | None:
+    self.v_ego_hist.append(v_ego)
+    self.v_ego = self.v_ego_hist[0]
+    self.a_ego_hist.append(a_ego)
+    self.a_ego = self.a_ego_hist[0]
+    ret = self.update(can_packets)
+
+    if ret is not None:
+      if not self.init_done:
+        self.estimate_dt(rcv_time)
+        return None
+
+      new_tracks = {}
+      for addr, radar_point in self.pts.items():
+        track_id = radar_point.trackId
+        if track_id not in self.tracks:
+          new_tracks[track_id] = MyTrack(track_id, radar_point, self.dt)
+        else:
+          new_tracks[track_id] = self.tracks[track_id]
+        new_tracks[track_id].update(radar_point, self.a_ego)
+
+        if new_tracks[track_id].cnt < 6:
+          radar_point.aLead = 0
+          radar_point.jLead = 0
+          radar_point.yRel = float(new_tracks[track_id].yRel)
+          radar_point.yvRel = float(new_tracks[track_id].yvRel)
+        else:
+          radar_point.aLead = float(new_tracks[track_id].aLead)
+          radar_point.jLead = float(new_tracks[track_id].jLead)
+          radar_point.yRel = float(new_tracks[track_id].yRel)
+          radar_point.yvRel = float(new_tracks[track_id].yvRel)
+                
+      self.tracks = new_tracks
+    return ret
 
   def update(self, can_packets: list[tuple[int, list[CanData]]]) -> structs.RadarDataT | None:
     self.frame += 1
@@ -139,9 +266,10 @@ class CarInterfaceBase(ABC):
     else:
       params.remove("NNFFModelName")
 
-  def apply(self, c: structs.CarControl, now_nanos: int | None = None) -> tuple[structs.CarControl.Actuators, list[CanData]]:
+  def apply(self, c: structs.CarControl, now_nanos: int | None = None, model_v2=None) -> tuple[structs.CarControl.Actuators, list[CanData]]:
     if now_nanos is None:
       now_nanos = int(time.monotonic() * 1e9)
+    self.CS.modelV2 = model_v2
     return self.CC.update(c, self.CS, now_nanos)
 
   @staticmethod
@@ -328,6 +456,10 @@ class CarStateBase(ABC):
     x0=[[0.0], [0.0]]
     K = get_kalman_gain(DT_CTRL, np.array(A), np.array(C), np.array(Q), R)
     self.v_ego_kf = KF1D(x0=x0, A=A, C=C[0], K=K)
+    self.is_metric = True
+    self.lkas_enabled = False
+
+    self.modelV2 = None
 
   @abstractmethod
   def update(self, can_parsers) -> structs.CarState:

@@ -152,14 +152,14 @@ struct OnroadEventDEPRECATED @0x9b1657f34caf3ad3 {
   }
 }
 
+# ******* main car state @ 100hz *******
+# all speeds in m/s
+
 struct CarState {
   # CAN health
   canValid @26 :Bool;       # invalid counter/checksums
   canTimeout @40 :Bool;     # CAN bus dropped out
   canErrorCounter @48 :UInt32;
-
-  # process meta
-  cumLagMs @50 :Float32;
 
   # car speed
   vEgo @1 :Float32;            # best estimate of speed
@@ -174,8 +174,14 @@ struct CarState {
   standstill @18 :Bool;
   wheelSpeeds @2 :WheelSpeeds;
 
+  # gas pedal, 0.0-1.0
+  gas @3 :Float32;        # this is user pedal only
   gasPressed @4 :Bool;    # this is user pedal only
 
+  engineRpm @46 :Float32;
+
+  # brake pedal, 0.0-1.0
+  brake @5 :Float32;      # this is user pedal only
   brakePressed @6 :Bool;  # this is user pedal only
   regenBraking @45 :Bool; # this is user pedal only
   parkingBrake @39 :Bool;
@@ -221,12 +227,47 @@ struct CarState {
   doorOpen @24 :Bool;           # ideally includes all doors
   seatbeltUnlatched @25 :Bool;  # driver seatbelt
 
+  # clutch (manual transmission only)
+  clutchPressed @28 :Bool;
+
   # blindspot sensors
   leftBlindspot @33 :Bool;  # Is there something blocking the left lane change
   rightBlindspot @34 :Bool; # Is there something blocking the right lane change
 
   fuelGauge @41 :Float32; # battery or fuel tank level from [0.0, 1.0]
   charging @43 :Bool;
+
+  # process meta
+  cumLagMs @50 :Float32;
+
+  activateCruise @61 :Int16;
+  latEnabled @62 :Bool;
+  pcmCruiseGap @63 :Int16;      #0: can't read, 1,2,3,4: gap setting
+  speedLimit @64 :Float32;
+  speedLimitDistance @65 :Float32;
+  gearStep @66 :Int16;          
+  tpms @67 : Tpms;
+  useLaneLineSpeed @68 : Float32;
+  leftLatDist @69 : Float32;  # distance to left lane line
+  rightLatDist @70 : Float32; # distance to right lane line
+  leftLongDist @71 : Float32; # distance to left lane line in the direction of travel
+  rightLongDist @72 : Float32; # distance to right lane line in the direction of travel
+  carrotCruise @73 : Int16;
+  leftLaneLine @74 : Int16; # -1: no lane, 0: dashed, 1: solid, +10: white, +20: yellow, ex) 21: solid yellow
+  rightLaneLine @75 : Int16; # -1: no lane, 0: dashed, 1: solid, +10: white, +20: yellow, ex) 21: solid yellow
+  datetime @76 :UInt64; # timestamp in milliseconds since epoch
+  accStatus @77 :UInt16;
+  vCluRatio @78 :Float32;
+  logCarrot @79 :Text;
+  softHoldActive @80 :Int16;    #0: not active, 1: active ready, 2: activated
+  autoHoldActivated @81 :Bool;
+
+  struct Tpms {
+    fl @0 :Float32;
+    fr @1 :Float32;
+    rl @2 :Float32;
+    rr @3 :Float32;
+  }
 
   struct WheelSpeeds {
     # optional wheel speeds
@@ -241,10 +282,9 @@ struct CarState {
     speed @1 :Float32;
     speedCluster @6 :Float32;  # Set speed as shown on instrument cluster
     available @2 :Bool;
+    speedOffset @3 :Float32;
     standstill @4 :Bool;
     nonAdaptive @5 :Bool;
-
-    speedOffsetDEPRECATED @3 :Float32;
   }
 
   enum GearShifter {
@@ -278,20 +318,20 @@ struct CarState {
       setCruise @9;
       resumeCruise @10;
       gapAdjustCruise @11;
+
+      lfaButton @12;
+      paddleLeft @13;
+      paddleRight @14;
     }
   }
 
   # deprecated
   errorsDEPRECATED @0 :List(OnroadEventDEPRECATED.EventName);
-  gasDEPRECATED @3 :Float32;
-  brakeDEPRECATED @5 :Float32;
-  brakeLightsDEPRECATED @19 :Bool;
+  brakeLights @19 :Bool;
   steeringRateLimitedDEPRECATED @29 :Bool;
   canMonoTimesDEPRECATED @12: List(UInt64);
   canRcvTimeoutDEPRECATED @49 :Bool;
   eventsDEPRECATED @13 :List(OnroadEventDEPRECATED);
-  clutchPressedDEPRECATED @28 :Bool;
-  engineRpmDEPRECATED @46 :Float32;
 }
 
 # ******* radar state @ 20hz *******
@@ -315,10 +355,23 @@ struct RadarData @0x888ad6581cf0aacb {
     yRel @2 :Float32;    # m
     vRel @3 :Float32;    # m/s
 
-    deprecated :group {
-      aRel @4 :Float32; # m/s^2
-      yvRel @5 :Float32; # m/s
-      measured @6 :Bool;  # measurement VS estimate flag
+    # these are optional and valid if they are not NaN
+    aRel @4 :Float32; # m/s^2
+    yvRel @5 :Float32; # m/s
+
+    # some radars flag measurements VS estimates
+    measured @6 :Bool;
+
+    vLead @7 :Float32; # m/s
+    aLead @8 :Float32; # m/s^2
+    jLead @9 :Float32; # m/s^3
+    radarSource @10 :RadarSource;
+
+    enum RadarSource {
+      frontRadar @0;
+      scc @1;
+      corner235 @2;
+      corner180 @3;
     }
   }
 
@@ -374,6 +427,9 @@ struct CarControl {
     torqueOutputCan @8: Float32;   # value sent over can to the car
     speed @6: Float32;  # m/s
 
+    jerk @9: Float32;  # m/s^3
+    aTarget @10: Float32;  # m/s^2
+
     enum LongControlState @0xe40f3a917d908282{
       off @0;
       pid @1;
@@ -401,6 +457,18 @@ struct CarControl {
     rightLaneDepart @8: Bool;
     leftLaneDepart @9: Bool;
     leadDistanceBars @10: Int8;  # 1-3: 1 is closest, 3 is farthest. some ports may utilize 2-4 bars instead
+
+    activeCarrot @11: Int16;
+    leadDistance @12: Float32;
+    leadRelSpeed @13: Float32;
+    leadDPath @14: Float32;
+    leadRadar @15: Int16;
+    modelDesire @16: Int16;
+    atcDistance @17: Float32;
+    naviSpeedLimit @18: Int16;  # VW MEB cluster: TMAP 단속카메라/구간단속 제한속도 (kph, 0=없음) -> ACC_Tempolimit + event 5
+    naviEventType @19: Int16;   # VW MEB cluster: 0=없음 1=커브 2=교차로 3=분기/출구 4=로터리 5=병목 8=도로제한제어중
+    naviEventSpeed @20: Int16;  # VW MEB cluster: 목표속도 kph (커브는 부호=방향: +우/-좌) -> ACC_Event_Wunschgeschw
+    leadLimiting @21: Bool;     # VW MEB cluster: 앞차가 속도를 제한 중(xState lead) -> 앞차 하이라이트 우선
 
     # not used with the dash, TODO: separate structs for dash UI and device UI
     audibleAlert @5: AudibleAlert;
@@ -460,9 +528,11 @@ struct CarParams {
   notCar @66 :Bool;  # flag for non-car robotics platforms
 
   pcmCruise @3 :Bool;        # is openpilot's state tied to the PCM's cruise state?
+  enableDsu @5 :Bool;        # driving support unit
   enableBsm @56 :Bool;       # blind spot monitoring
   flags @64 :UInt32;         # flags for car specific quirks
   alphaLongitudinalAvailable @71 :Bool;
+  extFlags @78 :UInt32;     # carrot ext car flags
 
   minEnableSpeed @7 :Float32;
   minSteerSpeed @8 :Float32;
@@ -729,6 +799,5 @@ struct CarParams {
   maxSteeringAngleDegDEPRECATED @54 :Float32;
   longitudinalActuatorDelayLowerBoundDEPRECATED @61 :Float32;
   stoppingControlDEPRECATED @31 :Bool; # Does the car allow full control even at lows speeds when stopping
-  radarTimeStepDEPRECATED @45: Float32 = 0.05;  # time delta between radar updates, 20Hz is very standard
-  enableDsuDEPRECATED @5 :Bool;        # driving support unit
+  radarTimeStep @45: Float32;  # time delta between radar updates, 20Hz is very standard
 }

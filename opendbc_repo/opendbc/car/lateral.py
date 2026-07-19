@@ -6,7 +6,10 @@ from opendbc.car.vehicle_model import VehicleModel
 
 FRICTION_THRESHOLD = 0.2
 
-# - ISO 11270
+# Add extra tolerance for average banked road since safety doesn't have the roll
+AVERAGE_ROAD_ROLL = 0.06  # ~3.4 degrees, 6% superelevation. higher actual roll lowers lateral acceleration
+
+# ISO 11270
 ISO_LATERAL_ACCEL = 3.0  # m/s^2
 ISO_LATERAL_JERK = 5.0  # m/s^3
 
@@ -20,13 +23,28 @@ MAX_LATERAL_JERK = 3.0 + (ACCELERATION_DUE_TO_GRAVITY * AVERAGE_ROAD_ROLL)  # ~3
 
 # TODO: deprecate in favor of vehicle-model-based limiting
 #  (need to solve cars having different steering ratios, etc.)
+
+# VW MEB curvature steering (ported from infiniteCable2/opendbc)
+MAX_LATERAL_ACCEL_MEB = ISO_LATERAL_ACCEL + (9.81 * AVERAGE_ROAD_ROLL)  # ~3.6 m/s^2
+
+
+@dataclass
+class CurvatureSteeringLimits:
+  # Max accepted by the EPS
+  CURVATURE_MAX: float
+  MAX_LATERAL_ACCEL: float = MAX_LATERAL_ACCEL
+  MAX_LATERAL_JERK: float = MAX_LATERAL_JERK
+
+
 @dataclass
 class AngleSteeringLimits:
   # uses apply_std_steer_angle_limits
   STEER_ANGLE_MAX: float
   ANGLE_RATE_LIMIT_UP: tuple[list[float], list[float]]
   ANGLE_RATE_LIMIT_DOWN: tuple[list[float], list[float]]
-
+  MAX_LATERAL_ACCEL: float = ISO_LATERAL_ACCEL * .7  # ~2.1m/s^2, 70% ISO limits as default, but ideally this is set manually for comfortable limits?
+  MAX_LATERAL_JERK: float = ISO_LATERAL_JERK * .5  # ~2.5m/s^3, 50% of ISO limits as default, but ideally this is set manually for comfortable limits?
+  MAX_ANGLE_RATE: float = math.inf
 
 @dataclass
 class AngleSteeringLimitsVM:
@@ -134,16 +152,16 @@ def apply_std_steer_angle_limits(apply_angle: float, apply_angle_last: float, v_
   return float(np.clip(new_apply_angle, -limits.STEER_ANGLE_MAX, limits.STEER_ANGLE_MAX))
 
 
-def get_max_angle_delta_vm(v_ego_raw: float, VM: VehicleModel, limits):
-  """Calculate the maximum steering angle rate based on lateral jerk limits."""
-  max_curvature_rate_sec = limits.ANGLE_LIMITS.MAX_LATERAL_JERK / (v_ego_raw ** 2)  # (1/m)/s
+def get_max_angle_delta_vm(v_ego_raw: float, steer_step: int, VM: VehicleModel, max_lateral_jerk: float):
+  """ Calculate the maximum steering angle rate based on lateral jerk limits. """
+  max_curvature_rate_sec = max_lateral_jerk / (v_ego_raw ** 2)  # (1/m)/s
   max_angle_rate_sec = math.degrees(VM.get_steer_from_curvature(max_curvature_rate_sec, v_ego_raw, 0))  # deg/s
-  return max_angle_rate_sec * (DT_CTRL * limits.STEER_STEP)
+  return max_angle_rate_sec * (DT_CTRL * steer_step)
 
 
-def get_max_angle_vm(v_ego_raw: float, VM: VehicleModel, limits):
-  """Calculate the maximum steering angle based on lateral acceleration limits."""
-  max_curvature = limits.ANGLE_LIMITS.MAX_LATERAL_ACCEL / (v_ego_raw ** 2)  # 1/m
+def get_max_angle_vm(v_ego_raw: float, VM: VehicleModel, max_lateral_accel: float):
+  """ Calculate the maximum steering angle based on lateral acceleration limits. """
+  max_curvature = max_lateral_accel / (v_ego_raw ** 2)  # 1/m
   return math.degrees(VM.get_steer_from_curvature(max_curvature, v_ego_raw, 0))  # deg
 
 

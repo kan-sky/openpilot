@@ -1053,9 +1053,16 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
 
   EventName.audioFeedback: {
     ET.PERMANENT: audio_feedback_alert,
+  },
   EventName.torqueNNLoad: {
     ET.PERMANENT: torque_nn_load_alert,
   },
+  EventName.autoHold: {
+    ET.WARNING: Alert(
+      "AutoHold Activated.",
+      "",
+      AlertStatus.normal, AlertSize.small,
+      Priority.LOW, VisualAlert.none, AudibleAlert.autoHold, 2.),
   },
 }
 

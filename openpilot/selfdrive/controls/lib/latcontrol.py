@@ -2,6 +2,9 @@ import numpy as np
 from abc import abstractmethod, ABC
 
 
+MIN_LATERAL_CONTROL_SPEED = 0.3  # m/s
+
+
 class LatControl(ABC):
   def __init__(self, CP, CI, dt):
     self.dt = dt

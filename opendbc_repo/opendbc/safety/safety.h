@@ -59,6 +59,9 @@ bool vehicle_moving = false;
 bool acc_main_on = false;  // referred to as "ACC off" in ISO 15622:2018
 int cruise_button_prev = 0;
 bool safety_rx_checks_invalid = false;
+int gas_interceptor_prev = 0;
+int cruise_main_prev = 0;
+
 
 // for safety modes with torque steering control
 int desired_torque_last = 0;       // last desired steer torque
@@ -93,6 +96,7 @@ uint16_t current_safety_mode = SAFETY_SILENT;
 uint16_t current_safety_param = 0;
 static const safety_hooks *current_hooks = &nooutput_hooks;
 safety_config current_safety_config;
+bool enable_gas_interceptor = false;
 
 static void generic_rx_checks(void);
 static void stock_ecu_check(bool stock_ecu_detected);
@@ -465,6 +469,11 @@ int set_safety_hooks(uint16_t mode, uint16_t param) {
   controls_allowed = false;
   relay_malfunction_reset();
   safety_rx_checks_invalid = false;
+
+  // GM variables
+  enable_gas_interceptor = false;
+  gas_interceptor_prev = 0;
+  cruise_main_prev = 0;
 
   current_safety_config.rx_checks = NULL;
   current_safety_config.rx_checks_len = 0;
