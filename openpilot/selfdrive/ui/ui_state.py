@@ -1,3 +1,4 @@
+import pyray as rl
 import numpy as np
 import time
 import threading
@@ -34,6 +35,7 @@ class UIState:
 
   def _initialize(self):
     self.params = Params()
+    self.params_memory = Params("/dev/shm/params")
     self.sm = messaging.SubMaster(
       [
         "modelV2",
@@ -58,6 +60,11 @@ class UIState:
         "liveParameters",
         "testJoystick",
         "rawAudioData",
+        "carrotMan",
+        "peripheralState",
+        "liveDelay",
+        "liveTorqueParameters",
+        "lateralPlan",
       ]
     )
 
@@ -65,6 +72,7 @@ class UIState:
 
     # UI Status tracking
     self.status: UIStatus = UIStatus.DISENGAGED
+    self.lat_active: bool = False
     self.started_frame: int = 0
     self.started_time: float = 0.0
     self._engaged_prev: bool = False
@@ -86,7 +94,7 @@ class UIState:
     self.is_body: bool | None = None
     self.CP: car.CarParams | None = None
     self.light_sensor: float = -1.0
-
+    self._param_update_time: float = 0.0
     self._params_thread: threading.Thread | None = None
 
     # Callbacks
@@ -94,6 +102,9 @@ class UIState:
     self._engaged_transition_callbacks: list[Callable[[], None]] = []
     self._on_body_changed_callbacks: list[Callable[[], None]] = []
 
+    self.show_model_view: int = 0
+
+    self.update_params()
   def add_offroad_transition_callback(self, callback: Callable[[], None]):
     self._offroad_transition_callbacks.append(callback)
 
@@ -122,6 +133,8 @@ class UIState:
     self.sm.update(0)
     self._update_state()
     self._update_status()
+    if time.monotonic() - self._param_update_time > 5.0:
+      self.update_params()
     device.update()
 
   def _params_refresh_worker(self):
@@ -141,7 +154,7 @@ class UIState:
         # Check ignition status across all pandas
         if self.panda_type != log.PandaState.PandaType.unknown:
           self.ignition = any(state.ignitionLine or state.ignitionCan for state in panda_states)
-    elif not self.sm.alive["pandaStates"]:
+    elif self.sm.frame - self.sm.recv_frame["pandaStates"] > 5 * rl.get_fps():
       self.panda_type = log.PandaState.PandaType.unknown
 
     # Handle wide road camera state updates
@@ -153,6 +166,12 @@ class UIState:
 
     # Update started state
     self.started = self.sm["deviceState"].started and self.ignition
+
+    # Update recording audio state
+    self.recording_audio = self.params.get_bool("RecordAudio") and self.started
+
+    self.is_metric = self.params.get_bool("IsMetric")
+    self.always_on_dm = self.params.get_bool("AlwaysOnDM")
 
     # Update body state
     if self.CP is not None and self.is_body != self.CP.notCar:
@@ -169,6 +188,8 @@ class UIState:
         self.status = UIStatus.OVERRIDE
       else:
         self.status = UIStatus.ENGAGED if ss.enabled else UIStatus.DISENGAGED
+
+      self.lat_active = self.sm["carControl"].latActive
 
     # Check for engagement state changes
     if self.engaged != self._engaged_prev:
@@ -205,7 +226,12 @@ class UIState:
     self.experimental_mode = self.params.get_bool("ExperimentalMode")
     self.usbgpu = self.params.get_bool("UsbGpuPresent")
     self.usbgpu_compiled = self.params.get_bool("UsbGpuCompiled")
+    self.show_debug_ui = self.params.get_int("ShowDebugUI")
+    self.show_date_time = self.params.get_int("ShowDateTime")
+    self.show_radar_info = self.params.get_int("ShowRadarInfo")
+    self.show_model_view = self.params.get_int("ShowModelView")
 
+    self._param_update_time = time.monotonic()
 
 class Device:
   def __init__(self):

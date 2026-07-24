@@ -28,20 +28,55 @@ from openpilot.selfdrive.modeld.helpers import usbgpu_present, modeld_pkl_path, 
 
 PROCESS_NAME = "openpilot.selfdrive.modeld.modeld"
 SEND_RAW_PRED = os.getenv('SEND_RAW_PRED')
+SIMULATION = os.getenv('SIMULATION') == '1'
 
 LAT_SMOOTH_SECONDS = 0.0
 LONG_SMOOTH_SECONDS = 0.3
 MIN_LAT_CONTROL_SPEED = 0.3
 
 
+def get_lat_smooth_seconds_dynamic(model_output: dict[str, np.ndarray],
+                                   base_lat_smooth_seconds: float) -> tuple[float, float, float]:
+  if base_lat_smooth_seconds <= 0.0:
+    return 0.0, 0.0, 0.0
+
+  try:
+    y_std_1s = float(model_output['plan_stds'][0, 10, Plan.POSITION, 1])
+  except Exception:
+    y_std_1s = 0.0
+
+  # Kans: base_lat_smooth_seconds(LatSmoothSec)=0.1일 때 기준
+  # 최종 다이나믹값 범위: 0.1에서 0.2사이에 고정됨.
+  # y_std_1s = 0.01~0.15까지 LAT_SMOOTH_SECONDS=0.1로 안정적인 상태.
+  # y_std_1s = 0.18~0.25까지 LAT_SMOOTH_SECONDS=0.12~0.166으로 증가. 필터링 증가 
+  # y_std_1s = 0.30~0.40까지 LAT_SMOOTH_SECONDS=0.20으로 최대값 고정.
+
+  max_lat_smooth_seconds = 0.20
+  extra_max = max(0.0, max_lat_smooth_seconds - base_lat_smooth_seconds)
+
+  extra_smooth_seconds = float(np.interp(y_std_1s, [0.15, 0.30], [0.0, extra_max]))
+
+  extra_smooth_seconds = float(np.clip(extra_smooth_seconds, 0.0, extra_max))
+
+  dynamic_lat_smooth_seconds = float(np.clip(base_lat_smooth_seconds + extra_smooth_seconds, 0.0, max_lat_smooth_seconds))
+
+  return dynamic_lat_smooth_seconds, y_std_1s, extra_smooth_seconds
+
+
 def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.ModelDataV2.Action,
-                          lat_action_t: float, long_action_t: float, v_ego: float) -> log.ModelDataV2.Action:
+                          lat_action_t: float, long_action_t: float, v_ego: float, lat_smooth_seconds: float, vEgoStopping: float) -> log.ModelDataV2.Action:
+  plan = model_output['plan'][0]
+  desired_accel, should_stop, _, desired_velocity_now = get_accel_from_plan(plan[:,Plan.VELOCITY][:,0],
+                                                   plan[:,Plan.ACCELERATION][:,0],
+                                                   ModelConstants.T_IDXS,
+                                                   action_t=long_action_t,
+                                                   vEgoStopping=vEgoStopping)
   if 'action' not in model_output:
-    plan = model_output['plan'][0]
-    desired_accel, should_stop = get_accel_from_plan(plan[:,Plan.VELOCITY][:,0],
-                                                     plan[:,Plan.ACCELERATION][:,0],
-                                                     ModelConstants.T_IDXS,
-                                                     action_t=long_action_t)
+    #plan = model_output['plan'][0]
+    #desired_accel, should_stop = get_accel_from_plan(plan[:,Plan.VELOCITY][:,0],
+    #                                                 plan[:,Plan.ACCELERATION][:,0],
+    #                                                 ModelConstants.T_IDXS,
+    #                                                 action_t=long_action_t)
     desired_curvature = get_curvature_from_plan(plan[:,Plan.T_FROM_CURRENT_EULER][:,2],
                                                 plan[:,Plan.ORIENTATION_RATE][:,2],
                                                 ModelConstants.T_IDXS,
@@ -50,17 +85,79 @@ def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.
   else:
     desired_accel = model_output['action'][0,1]
     desired_curvature = model_output['action'][0,0] / (max(1.0, v_ego))**2
-    should_stop = (v_ego < 0.3 and desired_accel < 0.1)
+    #should_stop = (v_ego < 0.3 and desired_accel < 0.1)
+
+  # Kans: 깊은 커브에서 모델 곡률이 갑자기 줄어들 때 핸들 급풀림 방지
+  raw_curv = float(desired_curvature)
+  prev_curv = float(prev_action.desiredCurvature)
+
+  same_curve = raw_curv * prev_curv > 0.0
+  prev_abs = abs(prev_curv)
+  raw_abs = abs(raw_curv)
+
+  if same_curve and prev_abs > 0.0025 and raw_abs < prev_abs * 0.70:
+    desired_curvature = 0.8 * prev_curv + 0.2 * raw_curv  # 과하게 낮춘 값을 따라가지 않고 80%만 반영한다.
+  else:
+    desired_curvature = raw_curv
+
+  # Kans: 큰 곡률로 이어지는 커브 판단
+  abs_curvature = abs(desired_curvature)
+
+  # Kans: 곡률에 따른 smoothing 상한.
+  # 기존 [0.15, 0.10, 0.08]은 변화폭이 커서 조향이 감겼다 풀렸다 할 수 있음.
+  curve_smooth_max = float(np.interp(abs_curvature,
+    [0.0005, 0.0015, 0.0040],
+    [0.13, 0.12, 0.11]))
+
+  # 속도에 따른 smoothing 상한값
+  speed_smooth_max = float(np.interp(v_ego,
+    [5.0, 15.0, 30.0],
+    [0.08, 0.10, 0.18]))
+
+  # Kans: model uncertainty 기반 dynamic smoothing
+  dynamic_lat_smooth_seconds, y_std_1s, extra_smooth_seconds = get_lat_smooth_seconds_dynamic(model_output, lat_smooth_seconds)
+  base_lat_smooth_seconds = dynamic_lat_smooth_seconds
+
+  applied_lat_smooth_seconds = float(np.clip(
+    min(base_lat_smooth_seconds, curve_smooth_max, speed_smooth_max), 0.08, 0.18))
+
+  # Kans: common smoothing
   desired_accel = smooth_value(desired_accel, prev_action.desiredAcceleration, LONG_SMOOTH_SECONDS)
+  desired_velocity_now = smooth_value(desired_velocity_now, prev_action.desiredVelocity, LONG_SMOOTH_SECONDS)
+
   if v_ego > MIN_LAT_CONTROL_SPEED:
-    desired_curvature = smooth_value(desired_curvature, prev_action.desiredCurvature, LAT_SMOOTH_SECONDS)
+    desired_curvature = smooth_value(desired_curvature, prev_action.desiredCurvature, applied_lat_smooth_seconds)
   else:
     desired_curvature = prev_action.desiredCurvature
 
-  return log.ModelDataV2.Action(desiredCurvature=float(desired_curvature),
-                                desiredAcceleration=float(desired_accel),
-                                shouldStop=bool(should_stop))
+  # Kans: nan protection
+  desired_curvature = float(np.nan_to_num(
+    desired_curvature,
+    nan=prev_action.desiredCurvature,
+    posinf=prev_action.desiredCurvature,
+    neginf=prev_action.desiredCurvature))
 
+  desired_accel = float(np.nan_to_num(
+    desired_accel,
+    nan=prev_action.desiredAcceleration,
+    posinf=prev_action.desiredAcceleration,
+    neginf=prev_action.desiredAcceleration))
+
+  desired_velocity_now = float(np.nan_to_num(
+    desired_velocity_now,
+    nan=prev_action.desiredVelocity,
+    posinf=prev_action.desiredVelocity,
+    neginf=0.0))
+  desired_velocity_now = max(0.0, desired_velocity_now)
+
+  return (log.ModelDataV2.Action(
+      desiredCurvature=float(desired_curvature),
+      desiredAcceleration=float(desired_accel),
+      shouldStop=bool(should_stop),
+      desiredVelocity=float(desired_velocity_now)
+    ),
+    curve_smooth_max,
+    applied_lat_smooth_seconds)
 
 class FrameMeta:
   frame_id: int = 0
@@ -100,15 +197,38 @@ class ModelState:
     return parsed_model_outputs
 
   def run(self, bufs: dict[str, VisionBuf], transforms: dict[str, np.ndarray],
-          inputs: dict[str, np.ndarray]) -> dict[str, np.ndarray] | None:
+          inputs: dict[str, np.ndarray], prepare_only: bool) -> dict[str, np.ndarray] | None:
     for key in bufs.keys():
-      ptr = np.frombuffer(bufs[key].data, dtype=np.uint8).ctypes.data
-      yuv_size = self.frame_buf_params[key][3]
-      # There is a ringbuffer of imgs, just cache tensors pointing to all of them
-      cache_key = (key, ptr)
-      if cache_key not in self._blob_cache:
-        self._blob_cache[cache_key] = Tensor.from_blob(ptr, (yuv_size,), dtype='uint8', device=self.WARP_DEV)
-      self.full_frames[key] = self._blob_cache[cache_key]
+      stride, y_height, uv_height, yuv_size = self.frame_buf_params[key]
+      frame_data = np.frombuffer(bufs[key].data, dtype=np.uint8)
+      if self.WARP_DEV.split(':', 1)[0] in ('CUDA', 'NV'):
+        # VisionIPC buffers are host memory on discrete GPUs. from_blob would
+        # incorrectly treat their address as a GPU pointer and fault.
+        uv_offset = stride * y_height
+        if len(frame_data) != yuv_size or bufs[key].stride != stride or bufs[key].uv_offset != uv_offset:
+          # PC camera sources may provide tightly packed NV12. Convert them to
+          # the Venus layout expected by the compiled model warp.
+          src_stride = bufs[key].stride
+          src_uv_offset = bufs[key].uv_offset
+          packed_frame = np.zeros(yuv_size, dtype=np.uint8)
+          src_y_height = min(bufs[key].height, src_uv_offset // src_stride)
+          src_uv_height = min(bufs[key].height // 2, max(0, len(frame_data) - src_uv_offset) // src_stride)
+          copy_width = min(bufs[key].width, src_stride, stride)
+          src_y = frame_data[:src_stride * src_y_height].reshape(src_y_height, src_stride)
+          src_uv = frame_data[src_uv_offset:src_uv_offset + src_stride * src_uv_height].reshape(src_uv_height, src_stride)
+          dst_y = packed_frame[:uv_offset].reshape(y_height, stride)
+          dst_uv = packed_frame[uv_offset:uv_offset + stride * uv_height].reshape(uv_height, stride)
+          dst_y[:src_y_height, :copy_width] = src_y[:, :copy_width]
+          dst_uv[:src_uv_height, :copy_width] = src_uv[:, :copy_width]
+          frame_data = packed_frame
+        self.full_frames[key] = Tensor(frame_data, device=self.WARP_DEV).realize()
+      else:
+        ptr = frame_data.ctypes.data
+        # Integrated GPUs can access the VisionIPC ringbuffer directly.
+        cache_key = (key, ptr)
+        if cache_key not in self._blob_cache:
+          self._blob_cache[cache_key] = Tensor.from_blob(ptr, (yuv_size,), dtype='uint8', device=self.WARP_DEV)
+        self.full_frames[key] = self._blob_cache[cache_key]
 
     # Model decides when action is completed, so desire input is just a pulse triggered on rising edge
     inputs['desire_pulse'][0] = 0
@@ -120,6 +240,9 @@ class ModelState:
     self.npy['big_tfm'][:,:] = transforms['big_img'][:,:]
 
     warped = self.warp(**{k: self.input_queues[k] for k in WARP_INPUTS}, frame=self.full_frames['img'], big_frame=self.full_frames['big_img'])
+
+    if prepare_only:
+      return None
 
     outs, = self.run_policy(
       **{k: self.input_queues[k] for k in POLICY_INPUTS if k in self.input_queues}, warped=warped
@@ -175,7 +298,7 @@ def main(demo=False):
 
   # messaging
   pm = PubMaster(["modelV2", "drivingModelData", "cameraOdometry"])
-  sm = SubMaster(["deviceState", "carState", "roadCameraState", "liveCalibration", "driverMonitoringState", "carControl", "liveDelay"])
+  sm = SubMaster(["deviceState", "carState", "roadCameraState", "liveCalibration", "driverMonitoringState", "carControl", "liveDelay", "carrotMan", "radarState"])
 
   publish_state = PublishState()
   params = Params()
@@ -201,12 +324,27 @@ def main(demo=False):
 
   # TODO this needs more thought, use .2s extra for now to estimate other delays
   # TODO Move smooth seconds to action function
+  lat_delay = CP.steerActuatorDelay + LAT_SMOOTH_SECONDS
   long_delay = CP.longitudinalActuatorDelay + LONG_SMOOTH_SECONDS
   prev_action = log.ModelDataV2.Action()
 
   DH = DesireHelper()
 
+  frame = 0
+  custom_lat_delay = 0.0
+  lat_smooth_seconds = LAT_SMOOTH_SECONDS
+  vEgoStopping = params.get_float("VEgoStopping") * 0.01
+
+  lat_delay_dynamic = lat_smooth_seconds
   while True:
+    frame += 1
+    if frame % 100 == 0:
+      custom_lat_delay = params.get_float("SteerActuatorDelay") * 0.01
+      lat_smooth_seconds = params.get_float("LatSmoothSec") * 0.01
+      long_delay = params.get_float("LongActuatorDelay")*0.01
+      vEgoStopping = params.get_float("VEgoStopping") * 0.01
+
+
     # Keep receiving frames until we are at least 1 frame ahead of previous extra frame
     while meta_main.timestamp_sof < meta_extra.timestamp_sof + 25000000:
       buf_main = vipc_client_main.recv()
@@ -244,7 +382,7 @@ def main(demo=False):
     is_rhd = sm["driverMonitoringState"].isRHD
     frame_id = sm["roadCameraState"].frameId
     v_ego = max(sm["carState"].vEgo, 0.)
-    lat_delay = sm["liveDelay"].lateralDelay + LAT_SMOOTH_SECONDS
+    #lat_delay = sm["liveDelay"].lateralDelay + LAT_SMOOTH_SECONDS
     if sm.updated["liveCalibration"] and sm.seen['roadCameraState'] and sm.seen['deviceState']:
       device_from_calib_euler = np.array(sm["liveCalibration"].rpyCalib, dtype=np.float32)
       dc = DEVICE_CAMERAS[(str(sm['deviceState'].deviceType), str(sm['roadCameraState'].sensor))]
@@ -269,12 +407,15 @@ def main(demo=False):
     run_count = run_count + 1
 
     frame_drop_ratio = frames_dropped / (1 + frames_dropped)
+    prepare_only = vipc_dropped_frames > 0
+    if prepare_only:
+      cloudlog.error(f"skipping model eval. Dropped {vipc_dropped_frames} frames")
 
     bufs = {name: buf_extra if 'big' in name else buf_main for name in model.vision_input_names}
     transforms = {name: model_transform_extra if 'big' in name else model_transform_main for name in model.vision_input_names}
     frame_delay = DT_MDL # compensate for time passed since the frame was captured: current_time - timestamp_eof is 50ms on average
     action_delay = DT_MDL / 2 # middle of the interval between model output (current state) and next frame (expected state)
-    lat_action_t = lat_delay + frame_delay + action_delay
+    lat_action_t = lat_delay_dynamic + frame_delay + action_delay
     long_action_t = long_delay + frame_delay + action_delay
     inputs: dict[str, np.ndarray] = {
       'desire_pulse': vec_desire,
@@ -283,7 +424,7 @@ def main(demo=False):
     }
 
     mt1 = time.perf_counter()
-    model_output = model.run(bufs, transforms, inputs)
+    model_output = model.run(bufs, transforms, inputs, prepare_only)
     mt2 = time.perf_counter()
     model_execution_time = mt2 - mt1
 
@@ -292,7 +433,30 @@ def main(demo=False):
       drivingdata_send = messaging.new_message('drivingModelData')
       posenet_send = messaging.new_message('cameraOdometry')
 
-      action = get_action_from_model(model_output, prev_action, lat_action_t, long_action_t, v_ego)
+      lat_smooth_seconds_dynamic, y_std_1s, lat_smooth_extra = get_lat_smooth_seconds_dynamic(
+          model_output, lat_smooth_seconds)
+      if custom_lat_delay > 0.0:
+        lat_delay_dynamic = custom_lat_delay + lat_smooth_seconds_dynamic
+      else:
+        lat_delay_dynamic = sm["liveDelay"].lateralDelay + lat_smooth_seconds_dynamic
+
+      action, curve_smooth_max, applied_lat_smooth_seconds = get_action_from_model(model_output, prev_action, lat_delay_dynamic + frame_delay + action_delay,
+        long_delay + frame_delay + action_delay, v_ego, lat_smooth_seconds_dynamic, vEgoStopping)
+
+      # Kans: LatSmoothDebug
+      if frame % 100 == 0:
+        if 'action' in model_output:
+          model_curv = float(model_output['action'][0, 0]) / (max(1.0, v_ego) ** 2)
+          params.put_nonblocking("LatSmoothDebug",
+            f"fin:{applied_lat_smooth_seconds:.3f}"
+            f"max:{curve_smooth_max:.3f}"
+            f"curv:{abs(model_curv):.4f}")
+        else:
+          params.put_nonblocking("LatSmoothDebug",
+            f"fin:{applied_lat_smooth_seconds:.3f}"
+            f"max:{curve_smooth_max:.3f}"
+            f"curv:{action.desiredCurvature:.4f}")
+
       prev_action = action
       fill_model_msg(modelv2_send, model_output, action,
                      publish_state, meta_main.frame_id, meta_extra.frame_id, frame_id,
@@ -302,12 +466,30 @@ def main(demo=False):
       l_lane_change_prob = desire_state[log.Desire.laneChangeLeft]
       r_lane_change_prob = desire_state[log.Desire.laneChangeRight]
       lane_change_prob = l_lane_change_prob + r_lane_change_prob
-      DH.update(sm['carState'], sm['carControl'].latActive, lane_change_prob)
+      DH.update(sm['carState'], modelv2_send.modelV2, sm['carControl'].latActive, lane_change_prob, sm['carrotMan'], sm['radarState'])
       modelv2_send.modelV2.meta.laneChangeState = DH.lane_change_state
       modelv2_send.modelV2.meta.laneChangeDirection = DH.lane_change_direction
+      modelv2_send.modelV2.meta.desireLog = DH.desireLog #carrot
+      drivingdata_send.drivingModelData.meta.laneChangeState = DH.lane_change_state
+      drivingdata_send.drivingModelData.meta.laneChangeDirection = DH.lane_change_direction
+
+      modelv2_send.modelV2.meta.laneWidthLeft = float(DH.left.lane_width)
+      modelv2_send.modelV2.meta.laneWidthRight = float(DH.right.lane_width)
+      modelv2_send.modelV2.meta.distanceToRoadEdgeLeft = float(DH.left.dist_to_edge)
+      modelv2_send.modelV2.meta.distanceToRoadEdgeRight = float(DH.right.dist_to_edge)
+      modelv2_send.modelV2.meta.desire = DH.desire
+      modelv2_send.modelV2.meta.laneChangeProb = DH.lane_change_ll_prob
+      modelv2_send.modelV2.meta.modelTurnSpeed = float(DH.model_turn_speed)
+      modelv2_send.modelV2.meta.laneChangeAvailableLeft = DH.lane_change_available_left
+      modelv2_send.modelV2.meta.laneChangeAvailableRight = DH.lane_change_available_right
+      mt3 = time.perf_counter()
+      drivingdata_send.drivingModelData.modelExecutionTime = mt3 - mt1
 
       fill_driving_model_data(drivingdata_send, modelv2_send)
-      fill_pose_msg(posenet_send, model_output, meta_main.frame_id, vipc_dropped_frames, meta_main.timestamp_eof, live_calib_seen)
+      # Slow PC inference can exceed locationd's rewind window. The simulator
+      # pose represents current simulated motion, so timestamp it at publish.
+      pose_timestamp_eof = time.monotonic_ns() if SIMULATION else meta_main.timestamp_eof
+      fill_pose_msg(posenet_send, model_output, meta_main.frame_id, vipc_dropped_frames, pose_timestamp_eof, live_calib_seen)
       pm.send('modelV2', modelv2_send)
       pm.send('drivingModelData', drivingdata_send)
       pm.send('cameraOdometry', posenet_send)

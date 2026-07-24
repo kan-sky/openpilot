@@ -36,6 +36,22 @@ class CurvatureSteeringLimits:
   MAX_LATERAL_JERK: float = MAX_LATERAL_JERK
 
 
+def apply_std_curvature_limits(apply_curvature: float, apply_curvature_last: float, v_ego: float, curvature: float,
+                               steer_step: int, lat_active: bool, limits: CurvatureSteeringLimits) -> float:
+  # ISO lateral jerk limit (rate of curvature change)
+  max_jerk = get_max_curvature_jerk(v_ego, steer_step)
+  new_apply_curvature = float(np.clip(apply_curvature, apply_curvature_last - max_jerk, apply_curvature_last + max_jerk))
+
+  # ISO lateral accel limit (average road roll tolerance included)
+  min_curvature, max_curvature = get_max_curvature_average(v_ego)
+  new_apply_curvature = float(np.clip(new_apply_curvature, min_curvature, max_curvature))
+
+  # set output curvature as current curvature when inactive
+  if not lat_active:
+    new_apply_curvature = curvature
+
+  return float(np.clip(new_apply_curvature, -limits.CURVATURE_MAX, limits.CURVATURE_MAX))
+
 @dataclass
 class AngleSteeringLimits:
   # uses apply_std_steer_angle_limits

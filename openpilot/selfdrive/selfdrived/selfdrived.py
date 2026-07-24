@@ -23,7 +23,6 @@ from openpilot.selfdrive.selfdrived.state import StateMachine
 from openpilot.selfdrive.selfdrived.alertmanager import AlertManager, set_offroad_alert
 
 from openpilot.common.version import get_build_metadata
-from openpilot.selfdrive.controls.lib.cutin_alert import CutinAlertCandidate, CutinAlertTracker
 from openpilot.common.hardware import HARDWARE
 
 REPLAY = "REPLAY" in os.environ
@@ -92,6 +91,7 @@ class SelfdriveD:
     self.sm = messaging.SubMaster(['deviceState', 'pandaStates', 'peripheralState', 'modelV2', 'liveCalibration',
                                    'carOutput', 'driverMonitoringState', 'longitudinalPlan', 'livePose', 'liveDelay',
                                    'managerState', 'liveParameters', 'radarState', 'liveTorqueParameters',
+                                   'carrotMan',
                                    'controlsState', 'carControl', 'driverAssistance', 'alertDebug', 'userBookmark', 'audioFeedback'] + \
                                    self.camera_packets + self.sensor_packets + self.gps_packets,
                                   ignore_alive=ignore, ignore_avg_freq=ignore,
@@ -128,10 +128,17 @@ class SelfdriveD:
     self.personality = self.read_personality_param()
     self.recalibrating_seen = False
     self.dm_lockout_set = False
-    self.cutin_audio_tracker = CutinAlertTracker()
     self.dm_uncertain_alerted = False
     self.state_machine = StateMachine()
     self.rk = Ratekeeper(100, print_delay_threshold=None)
+    self.atc_type_last = ""
+
+
+    # some comma three with NVMe experience NVMe dropouts mid-drive that
+    # cause loggerd to crash on write, so ignore it only on that platform
+    self.ignored_processes = set()
+    if HARDWARE.get_device_type() == 'tici' and os.path.exists('/dev/nvme0'):
+      self.ignored_processes = {'loggerd', }
 
     # Determine startup event
     self.startup_event = EventName.startup
@@ -184,19 +191,6 @@ class SelfdriveD:
     if self.CP.passive:
       return
 
-    cutin_enabled = self.enabled and self.sm.valid['radarState']
-    cutin_candidates = tuple(
-      CutinAlertCandidate(
-        int(lead.radarTrackId),
-        float(lead.dRel),
-        float(lead.yRel),
-        float(lead.vRel),
-      )
-      for lead in self.sm['radarState'].leadsCutIn
-    ) if cutin_enabled else ()
-    if self.cutin_audio_tracker.update(cutin_candidates, cutin_enabled):
-      self.events.add(EventName.audioPrompt)
-
     # Block resume if cruise never previously enabled
     resume_pressed = any(be.type in (ButtonType.accelCruise, ButtonType.resumeCruise) for be in CS.buttonEvents)
     if not self.CP.pcmCruise and CS.vCruise > 250 and resume_pressed:
@@ -240,6 +234,9 @@ class SelfdriveD:
         (CS.brakePressed and (not self.CS_prev.brakePressed or not CS.standstill)) or \
         (CS.regenBraking and (not self.CS_prev.regenBraking or not CS.standstill)):
         self.events.add(EventName.pedalPressed)
+
+      if CS.latEnabled != self.CS_prev.latEnabled:
+        self.events.add(EventName.audioPrompt)
 
       if CS.autoHoldActivated:
         self.events.add(EventName.autoHold)
@@ -299,6 +296,18 @@ class SelfdriveD:
       self.events.add(EventName.excessiveActuation)
     # ******************************************************************************************
 
+    if self.sm.alive['carrotMan']:
+      atc_type = self.sm['carrotMan'].atcType
+      if atc_type != self.atc_type_last:
+        if "prepare" not in atc_type and "prepare" in self.atc_type_last: # fork left/right prepare -> fork left/right
+          if "fork" in atc_type:
+            self.events.add(EventName.audioLaneChange)
+        elif "prepare" in atc_type:
+          pass
+        elif "turn" in atc_type and "turn" not in self.atc_type_last:   # fork left/right -> turn left/right
+          self.events.add(EventName.audioTurn)
+        self.atc_type_last = atc_type
+
     # Handle lane change
     if self.sm['modelV2'].meta.laneChangeState == LaneChangeState.preLaneChange:
       direction = self.sm['modelV2'].meta.laneChangeDirection
@@ -341,7 +350,7 @@ class SelfdriveD:
       if not_running != self.not_running_prev:
         cloudlog.event("process_not_running", not_running=not_running, error=True)
       self.not_running_prev = not_running
-    if self.sm.recv_frame['managerState'] and not_running:
+    if self.sm.recv_frame['managerState'] and (not_running - self.ignored_processes):
       self.events.add(EventName.processNotRunning)
     else:
       if not SIMULATION and not self.rk.lagging:

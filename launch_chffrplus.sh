@@ -3,6 +3,7 @@
 if [ ! -f "./boot_finish" ]; then
   mount -o rw,remount /system
   chmod 755 ./restart.sh
+  chmod 755 ./selfdrive/apilot.py
 
   if [ ! -f "/data/params/d/DongleId" ]; then
     echo -n "UnregisteredDevice" > /data/params/d/DongleId
@@ -54,7 +55,7 @@ function launch {
   # 2. The FINALIZED consistent file has to exist, indicating there's an update
   #    that completed successfully and synced to disk.
 
-  if [ -f "${DIR}/.overlay_init" ]; then
+  if false && [ -f "${DIR}/.overlay_init" ]; then
     find ${DIR}/.git -newer ${DIR}/.overlay_init | grep -q '.' 2> /dev/null
     if [ $? -eq 0 ]; then
       echo "${DIR} has been modified, skipping overlay update installation"
@@ -104,10 +105,7 @@ function launch {
   if [ ! -f $DIR/prebuilt ]; then
     ./build.py
   fi
-  ./manager.py
-
-  # if broken, keep on screen error
-  while true; do sleep 1; done
+  exec ./manager.py
 }
 
 launch

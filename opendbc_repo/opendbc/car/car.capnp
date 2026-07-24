@@ -189,18 +189,15 @@ struct CarState {
 
   # steering wheel
   steeringAngleDeg @7 :Float32;
-  steeringAngleOffsetDeg @37 :Float32; # Offset between sensors in case there multiple
-  steeringRateDeg @15 :Float32;    # optional
-  steeringTorque @8 :Float32;      # Native CAN units, only needed on cars where it's used for control
-  steeringTorqueEps @27 :Float32;  # Native CAN units, only needed on cars where it's used for control
-  steeringPressed @9 :Bool;        # is the user overring the steering wheel?
-  steeringDisengage @58 :Bool;     # more force than steeringPressed, disengages for applicable brands
-  steerFaultTemporary @35 :Bool;
-  steerFaultPermanent @36 :Bool;
-
+  steeringAngleOffsetDeg @37 :Float32; # Offset betweens sensors in case there multiple
+  steeringRateDeg @15 :Float32;
+  steeringTorque @8 :Float32;      # TODO: standardize units
+  steeringTorqueEps @27 :Float32;  # TODO: standardize units
+  steeringPressed @9 :Bool;        # if the user is using the steering wheel
+  steerFaultTemporary @35 :Bool;   # temporary EPS fault
+  steerFaultPermanent @36 :Bool;   # permanent EPS fault
   invalidLkasSetting @55 :Bool;    # stock LKAS is incorrectly configured (i.e. on or off)
   stockAeb @30 :Bool;
-  stockLkas @59 :Bool;
   stockFcw @31 :Bool;
   espDisabled @32 :Bool;
   accFaulted @42 :Bool;
@@ -208,7 +205,6 @@ struct CarState {
   espActive @51 :Bool;
   vehicleSensorsInvalid @52 :Bool;  # invalid steering angle readings, etc.
   lowSpeedAlert @56 :Bool;  # lost steering control due to a dynamic min steering speed
-  blockPcmEnable @60 :Bool;  # whether to allow PCM to enable this frame
 
   # cruise state
   cruiseState @10 :CruiseState;
@@ -224,22 +220,25 @@ struct CarState {
   genericToggle @23 :Bool;
 
   # lock info
-  doorOpen @24 :Bool;           # ideally includes all doors
-  seatbeltUnlatched @25 :Bool;  # driver seatbelt
+  doorOpen @24 :Bool;
+  seatbeltUnlatched @25 :Bool;
 
   # clutch (manual transmission only)
   clutchPressed @28 :Bool;
 
   # blindspot sensors
-  leftBlindspot @33 :Bool;  # Is there something blocking the left lane change
+  leftBlindspot @33 :Bool; # Is there something blocking the left lane change
   rightBlindspot @34 :Bool; # Is there something blocking the right lane change
 
-  fuelGauge @41 :Float32; # battery or fuel tank level from [0.0, 1.0]
+  fuelGauge @41 :Float32; # battery or fuel tank level from 0.0 to 1.0
   charging @43 :Bool;
 
   # process meta
   cumLagMs @50 :Float32;
 
+  vCluRatio @58 :Float32;
+  logCarrot @59 :Text;
+  softHoldActive @60 :Int16;    #0: not active, 1: active ready, 2: activated
   activateCruise @61 :Int16;
   latEnabled @62 :Bool;
   pcmCruiseGap @63 :Int16;      #0: can't read, 1,2,3,4: gap setting
@@ -253,14 +252,23 @@ struct CarState {
   leftLongDist @71 : Float32; # distance to left lane line in the direction of travel
   rightLongDist @72 : Float32; # distance to right lane line in the direction of travel
   carrotCruise @73 : Int16;
-  leftLaneLine @74 : Int16; # -1: no lane, 0: dashed, 1: solid, +10: white, +20: yellow, ex) 21: solid yellow
-  rightLaneLine @75 : Int16; # -1: no lane, 0: dashed, 1: solid, +10: white, +20: yellow, ex) 21: solid yellow
+  leftLaneLine @74 : Int16; # -1: no lane, 0: dashed, 1: solid, +10: white, +20: yellow, +30: blue, ex) 21: solid yellow
+  rightLaneLine @75 : Int16; # -1: no lane, 0: dashed, 1: solid, +10: white, +20: yellow, +30: blue, ex) 21: solid yellow
   datetime @76 :UInt64; # timestamp in milliseconds since epoch
-  accStatus @77 :UInt16;
-  vCluRatio @78 :Float32;
-  logCarrot @79 :Text;
-  softHoldActive @80 :Int16;    #0: not active, 1: active ready, 2: activated
-  autoHoldActivated @81 :Bool;
+  leftRearLongDist @77 :Float32; # rear-left corner radar longitudinal distance
+  rightRearLongDist @78 :Float32; # rear-right corner radar longitudinal distance
+  leftRearLatDist @79 :Float32; # rear-left corner radar lateral distance
+  rightRearLatDist @80 :Float32; # rear-right corner radar lateral distance
+  trailerConnected @81 :Bool; # trailer connection state after disconnect debounce
+  ureaGauge @82 :Float32; # diesel exhaust fluid/urea tank level from 0.0 to 1.0
+  cruiseSpeedBigStep @83 :Bool; # VW: cruise +/- button is a stage-2 (swipe/long) press -> use big increment
+  steeringCurvature @84 :Float32; # VW MEB: measured road curvature from EPS (QFK_01), rad/m. Used for closed-loop curvature correction.
+  steeringDisengage @85 :Bool;     # more force than steeringPressed, disengages for applicable brands
+  stockLkas @86 :Bool;
+  blockPcmEnable @87 :Bool;  # whether to allow PCM to enable this frame
+  accStatus @88 :UInt16;
+  autoHoldActivated @89 :Bool;
+
 
   struct Tpms {
     fl @0 :Float32;
@@ -348,12 +356,14 @@ struct RadarData @0x888ad6581cf0aacb {
   }
 
   # similar to LiveTracks
+  # is one timestamp valid for all? I think so
   struct RadarPoint {
-    # all fields required
     trackId @0 :UInt64;  # no trackId reuse
-    dRel @1 :Float32;    # m from the front bumper of the car
-    yRel @2 :Float32;    # m
-    vRel @3 :Float32;    # m/s
+
+    # these 3 are the minimum required
+    dRel @1 :Float32; # m from the front bumper of the car
+    yRel @2 :Float32; # m
+    vRel @3 :Float32; # m/s
 
     # these are optional and valid if they are not NaN
     aRel @4 :Float32; # m/s^2
@@ -617,15 +627,15 @@ struct CarParams {
   }
 
   struct LateralTorqueTuning {
+    useSteeringAngle @0 :Bool;
+    kp @1 :Float32;
+    ki @2 :Float32;
+    kd @8 : Float32;
     friction @3 :Float32;
+    kf @4 :Float32;
     steeringAngleDeadzoneDeg @5 :Float32;
     latAccelFactor @6 :Float32;
     latAccelOffset @7 :Float32;
-    useSteeringAngleDEPRECATED @0 :Bool;
-    kpDEPRECATED @1 :Float32;
-    kiDEPRECATED @2 :Float32;
-    kfDEPRECATED @4 :Float32;
-    kdDEPRECATED @8 : Float32;
   }
 
   struct LongitudinalPIDTuning {

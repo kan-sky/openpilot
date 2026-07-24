@@ -51,7 +51,7 @@ class DeviceLayout(Widget):
     self._reset_calib_btn.set_description_opened_callback(self._update_calib_description)
 
     # Kans: triple btn for Pwr Off
-    self._power_off_btn = triple_button_item(lambda: tr("Reset Calibration"), lambda: tr("Reboot"), lambda: tr("Power Off"),
+    self._power_off_btn = triple_button_item(lambda: tr("ReCalibration"), lambda: tr("Reboot"), lambda: tr("Power Off"),
                             left_callback=self._reset_calibration_prompt, mid_callback=self._reboot_prompt, right_callback=self._power_off_prompt)
     items = [
       text_item(lambda: tr("Dongle ID"), self._params.get("DongleId") or (lambda: tr("N/A"))),
@@ -65,6 +65,7 @@ class DeviceLayout(Widget):
                   self._on_review_training_guide, enabled=ui_state.is_offroad),
       button_item(lambda: tr("Regulatory"), lambda: tr("VIEW"), callback=self._on_regulatory, enabled=ui_state.is_offroad),
       button_item(lambda: tr("Change Language"), lambda: tr("CHANGE"), callback=self._show_language_dialog),
+      self._power_off_btn,
     ]
     return items
 
@@ -87,7 +88,7 @@ class DeviceLayout(Widget):
       self._select_language_dialog = None
 
     self._select_language_dialog = MultiOptionDialog(tr("Select a language"), multilang.languages, multilang.codes[multilang.language],
-                                                     option_font_weight=FontWeight.UNIFONT, callback=handle_language_selection)
+                                                     option_font_weight=FontWeight.DISPLAY, callback=handle_language_selection)
     gui_app.push_widget(self._select_language_dialog)
 
   def _reset_calibration_prompt(self):
@@ -158,6 +159,21 @@ class DeviceLayout(Widget):
                "Resetting calibration will restart openpilot if the car is powered on.")
 
     self._reset_calib_btn.set_description(desc)
+
+  def _update_device_position(self):
+    calib_bytes = self._params.get("CalibrationParams")
+    if calib_bytes:
+      try:
+        calib = messaging.log_from_bytes(calib_bytes, log.Event).liveCalibration
+
+        if calib.calStatus != log.LiveCalibrationData.Status.uncalibrated:
+          pitch = math.degrees(calib.rpyCalib[1])
+          yaw = math.degrees(calib.rpyCalib[2])
+
+          position = f"{abs(pitch):.1f}° {'↓' if pitch > 0 else '↑'} {abs(yaw):.1f}° {'←' if yaw > 0 else '→'}"
+          self._params.put("DevicePosition", position)
+      except Exception:
+        cloudlog.exception("invalid CalibrationParams")
 
   def _reboot_prompt(self):
     if ui_state.engaged:

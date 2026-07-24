@@ -415,6 +415,15 @@ def invalid_lkas_setting_alert(CP: car.CarParams, CS: car.CarState, sm: messagin
     text = "Disable your car's stock LKAS to engage"
   return NormalPermanentAlert("Invalid LKAS setting", text)
 
+def car_parser_result(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
+  results = Params().get("CanParserResult")
+  if results is None:
+    results = ""
+  return Alert(
+    "CAN Error: Check Connections!!",
+    results,
+    AlertStatus.normal, AlertSize.small,
+    Priority.LOW, VisualAlert.none, AudibleAlert.none, 1., creation_delay=1.)
 
 
 EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
@@ -968,28 +977,30 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
   # - CAN data is received, but some message are not received at the right frequency
   # If you're not writing a new car port, this is usually cause by faulty wiring
   EventName.canError: {
+    ET.PERMANENT: car_parser_result,
     ET.IMMEDIATE_DISABLE: ImmediateDisableAlert("Unknown Vehicle Variant"),
-    ET.PERMANENT: Alert(
-      "Unknown Vehicle Variant",
-      "",
-      AlertStatus.normal, AlertSize.small,
-      Priority.LOW, VisualAlert.none, AudibleAlert.none, 1., creation_delay=1.),
+    #ET.PERMANENT: Alert(
+    # "Unknown Vehicle Variant",
+    #  "",
+    #  AlertStatus.normal, AlertSize.small,
+    #  Priority.LOW, VisualAlert.none, AudibleAlert.none, 1., creation_delay=1.),
     ET.NO_ENTRY: NoEntryAlert("Unknown Vehicle Variant"),
   },
 
   EventName.canBusMissing: {
+    ET.PERMANENT: car_parser_result,
     ET.IMMEDIATE_DISABLE: ImmediateDisableAlert("CAN Bus Disconnected"),
-    ET.PERMANENT: Alert(
-      "CAN Bus Disconnected: Likely Faulty Cable",
-      "",
-      AlertStatus.normal, AlertSize.small,
-      Priority.LOW, VisualAlert.none, AudibleAlert.none, 1., creation_delay=1.),
+    #ET.PERMANENT: Alert(
+    #  "CAN Bus Disconnected: Likely Faulty Cable",
+    #  "",
+    #  AlertStatus.normal, AlertSize.small,
+    #  Priority.LOW, VisualAlert.none, AudibleAlert.none, 1., creation_delay=1.),
     ET.NO_ENTRY: NoEntryAlert("CAN Bus Disconnected: Check Connections"),
   },
 
   EventName.steerUnavailable: {
     ET.IMMEDIATE_DISABLE: ImmediateDisableAlert("LKAS Fault: Restart the Car"),
-    ET.PERMANENT: NormalPermanentAlert("LKAS Fault: Restart the car to engage"),
+    ET.PERMANENT: ImmediateDisableAlert("LKAS Fault: Restart the car to engage"),
     ET.NO_ENTRY: NoEntryAlert("LKAS Fault: Restart the Car"),
   },
 
@@ -1053,6 +1064,100 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
 
   EventName.audioFeedback: {
     ET.PERMANENT: audio_feedback_alert,
+  },
+
+  EventName.softHold: {
+    ET.WARNING: Alert(
+      "SoftHold",
+      "",
+      AlertStatus.normal, AlertSize.small,
+      Priority.LOW, VisualAlert.none, AudibleAlert.none, .1),
+  },
+  EventName.trafficStopping: {
+    ET.WARNING: EngagementAlert(AudibleAlert.stopping),
+    #ET.WARNING: Alert(
+    #  "신호 감속정지중입니다.",
+    #  "",
+    #  AlertStatus.normal, AlertSize.small,
+    #  Priority.LOW, VisualAlert.none, AudibleAlert.stopping, 3.),
+  },
+  EventName.audioPrompt: {
+     ET.WARNING: EngagementAlert(AudibleAlert.prompt),
+  },
+  EventName.audioRefuse: {
+     ET.WARNING: EngagementAlert(AudibleAlert.refuse),
+  },
+  EventName.stopStop: {
+     ET.WARNING: EngagementAlert(AudibleAlert.stopStop),
+  },
+  EventName.audioLaneChange: {
+     ET.WARNING: EngagementAlert(AudibleAlert.laneChange),
+  },
+  EventName.audioTurn: {
+     ET.WARNING: EngagementAlert(AudibleAlert.audioTurn),
+  },
+  EventName.trafficSignGreen: {
+    ET.WARNING: EngagementAlert(AudibleAlert.trafficSignGreen),
+    #ET.WARNING: Alert(
+    #  "출발합니다.",
+    #  "",
+    #  AlertStatus.normal, AlertSize.small,
+    #  Priority.LOW, VisualAlert.none, AudibleAlert.trafficSignGreen, 3.),
+  },
+  EventName.trafficSignChanged: {
+    ET.WARNING: Alert(
+      "신호가바뀌었어요.",
+      "",
+      AlertStatus.normal, AlertSize.small,
+      Priority.LOW, VisualAlert.none, AudibleAlert.trafficSignChanged, 1.),
+  },
+  EventName.turningLeft: {
+    ET.WARNING: Alert(
+      "Turning Left",
+      "",
+      AlertStatus.normal, AlertSize.small,
+      Priority.LOW, VisualAlert.none, AudibleAlert.none, .1),
+  },
+
+  EventName.turningRight: {
+    ET.WARNING: Alert(
+      "Turning Right",
+      "",
+      AlertStatus.normal, AlertSize.small,
+      Priority.LOW, VisualAlert.none, AudibleAlert.none, .1),
+  },
+  EventName.audio1: {
+     ET.WARNING: EngagementAlert(AudibleAlert.audio1),
+  },
+  EventName.audio2: {
+     ET.WARNING: EngagementAlert(AudibleAlert.audio2),
+  },
+  EventName.audio3: {
+     ET.WARNING: EngagementAlert(AudibleAlert.audio3),
+  },
+  EventName.audio4: {
+     ET.WARNING: EngagementAlert(AudibleAlert.audio4),
+  },
+  EventName.audio5: {
+     ET.WARNING: EngagementAlert(AudibleAlert.audio5),
+  },
+  EventName.audio6: {
+     ET.WARNING: EngagementAlert(AudibleAlert.audio6),
+  },
+  EventName.audio7: {
+     ET.WARNING: EngagementAlert(AudibleAlert.audio7),
+  },
+  EventName.audio8: {
+     ET.WARNING: EngagementAlert(AudibleAlert.audio8),
+  },
+  EventName.audio9: {
+     ET.WARNING: EngagementAlert(AudibleAlert.audio9),
+  },
+  EventName.audio10: {
+     ET.WARNING: EngagementAlert(AudibleAlert.audio10),
+  },
+  EventName.audio0: {
+     ET.WARNING: EngagementAlert(AudibleAlert.longDisengaged),
   },
   EventName.torqueNNLoad: {
     ET.PERMANENT: torque_nn_load_alert,

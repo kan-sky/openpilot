@@ -63,6 +63,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"IsOffroad", {CLEAR_ON_MANAGER_START, BOOL}},
     {"IsRhdDetected", {PERSISTENT, BOOL}},
     {"IsReleaseBranch", {CLEAR_ON_MANAGER_START, BOOL}},
+    {"IsTakingSnapshot", {CLEAR_ON_MANAGER_START, BOOL}},
     {"IsTestedBranch", {CLEAR_ON_MANAGER_START, BOOL}},
     {"JoystickDebugMode", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION, BOOL}},
     {"LanguageSetting", {PERSISTENT, STRING, "en"}},
@@ -93,6 +94,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"Offroad_ConnectivityNeeded", {CLEAR_ON_MANAGER_START, JSON}},
     {"Offroad_ConnectivityNeededPrompt", {CLEAR_ON_MANAGER_START, JSON}},
     {"Offroad_ExcessiveActuation", {PERSISTENT, JSON}},
+    {"Offroad_IsTakingSnapshot", {CLEAR_ON_MANAGER_START, JSON}},
     {"Offroad_NeosUpdate", {CLEAR_ON_MANAGER_START, JSON}},
     {"Offroad_NoFirmware", {CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION, JSON}},
     {"Offroad_Recalibration", {CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION, JSON}},
@@ -103,6 +105,8 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"OnroadCycleRequested", {CLEAR_ON_MANAGER_START, BOOL}},
     {"OpenpilotEnabledToggle", {PERSISTENT, BOOL, "1"}},
     {"PandaHeartbeatLost", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION, BOOL}},
+    {"PandaSomResetTriggered", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION, BOOL}},
+    {"PandaSignatures", {CLEAR_ON_MANAGER_START, BYTES}},
     {"PrimeType", {PERSISTENT, INT}},
     {"RecordAudio", {PERSISTENT, BOOL}},
     {"RecordAudioFeedback", {PERSISTENT, BOOL, "0"}},
@@ -207,7 +211,6 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"DisableMinSteerSpeed", {PERSISTENT, INT, "0"}},
     {"AutoCurveSpeedLowerLimit", {PERSISTENT, INT, "30"}},
     {"AutoCurveSpeedFactor", {PERSISTENT, INT, "110"}},
-    {"AutoCurveSpeedAggressiveness", {PERSISTENT, INT, "85"}},
 
     {"AutoTurnControl", {PERSISTENT, INT, "2"}},
     {"AutoTurnControlSpeedTurn", {PERSISTENT, INT, "85"}},
@@ -274,7 +277,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
 
     {"RadarReactionFactor", {PERSISTENT, INT, "20"}},
     {"EnableRadarTracks", {PERSISTENT, INT, "3"}},
-
+    {"RadarLatFactor", {PERSISTENT, INT, "30"}},
     {"EnableCornerRadar", {PERSISTENT, INT, "0"}},
     {"RadarLeadModelMode", {PERSISTENT, INT, "0"}},
 

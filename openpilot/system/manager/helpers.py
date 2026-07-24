@@ -54,7 +54,10 @@ def save_bootlog():
   def fn(tmpdir):
     env = os.environ.copy()
     env['PARAMS_COPY_PATH'] = tmpdir
-    subprocess.call("./bootlog", cwd=os.path.join(BASEDIR, "openpilot/system/loggerd"), env=env)
+    loggerd_dir = os.path.join(BASEDIR, "openpilot/system/loggerd")
+    bootlog = os.path.join(loggerd_dir, "bootlog")
+    if os.path.exists(bootlog):
+      subprocess.call(bootlog, cwd=loggerd_dir, env=env)
     shutil.rmtree(tmpdir)
   t = threading.Thread(target=fn, args=(tmp, ))
   t.daemon = True

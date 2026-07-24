@@ -2,7 +2,7 @@ from opendbc.can import CANParser
 from opendbc.car import Bus, structs
 from opendbc.car.interfaces import CarStateBase
 from opendbc.car.common.conversions import Conversions as CV
-from opendbc.car.volkswagen.values import DBC, CanBus, NetworkLocation, TransmissionType, GearShifter, \
+from opendbc.car.volkswagen.values import DBC, CANBUS, NetworkLocation, TransmissionType, GearShifter, \
                                                       CarControllerParams, VolkswagenFlags
 
 ButtonType = structs.CarState.ButtonEvent.Type
@@ -13,15 +13,32 @@ class CarState(CarStateBase):
     super().__init__(CP)
     self.frame = 0
     self.eps_init_complete = False
-    self.cruise_recovery_timer = 0
     self.CCP = CarControllerParams(CP)
     self.button_states = {button.event_type: False for button in self.CCP.BUTTONS}
     self.esp_hold_confirmation = False
     self.upscale_lead_car_signal = False
     self.eps_stock_values = False
-    self.acc_type = 0
+    # MEB (VW ID.4/ID.5) state - ported from infiniteCable2 via id4-meb branch
+    self.klr_stock_values = {}
+    self.ea_hud_stock_values = {}
+    self.ea_control_stock_values = {}
     self.travel_assist_available = False
-    self.curvature_meas = 0.
+    self.left_blinker_active = False
+    self.right_blinker_active = False
+    self.curvature = 0.
+    self.cruise_recovery_timer = 0  # update_acc_fault 디바운스용 (infiniteCable2)
+
+  def update_acc_fault(self, acc_fault, parking_brake=False, drive_mode=True, recovery_frames_max=100):
+    # infiniteCable2 포팅: 주차 중(EPB+비주행)엔 TSK fault를 무시하고, 주행 전환 직후
+    # recovery_frames_max(100) 동안 grace를 줘서 출발 직후 일시적 TSK 글리치로 인한
+    # 불필요한 Cruise Fault 해제를 막는다.
+    fault = acc_fault
+    if parking_brake and not drive_mode:
+      fault = False
+      self.cruise_recovery_timer = self.frame
+    elif self.frame - self.cruise_recovery_timer < recovery_frames_max:
+      fault = False
+    return fault
 
   def update_button_enable(self, buttonEvents: list[structs.CarState.ButtonEvent]):
     if not self.CP.pcmCruise:
@@ -49,13 +66,11 @@ class CarState(CarStateBase):
     pt_cp = can_parsers[Bus.pt]
     cam_cp = can_parsers[Bus.cam]
     ext_cp = pt_cp if self.CP.networkLocation == NetworkLocation.fwdCamera else cam_cp
-    alt_cp = can_parsers[Bus.alt]
 
     if self.CP.flags & VolkswagenFlags.PQ:
       return self.update_pq(pt_cp, cam_cp, ext_cp)
-    elif self.CP.flags & VolkswagenFlags.MLB:
-      return self.update_mlb(pt_cp, cam_cp, ext_cp, alt_cp)
-    elif self.CP.flags & VolkswagenFlags.MEB:
+
+    if self.CP.flags & VolkswagenFlags.MEB:
       return self.update_meb(pt_cp, cam_cp, ext_cp)
 
     ret = structs.CarState()
@@ -63,6 +78,7 @@ class CarState(CarStateBase):
     if self.CP.transmissionType == TransmissionType.direct:
       ret.gearShifter = self.parse_gear_shifter(self.CCP.shifter_values.get(pt_cp.vl["Motor_EV_01"]["MO_Waehlpos"], None))
     elif self.CP.transmissionType == TransmissionType.manual:
+      ret.clutchPressed = not pt_cp.vl["Motor_14"]["MO_Kuppl_schalter"]
       if bool(pt_cp.vl["Gateway_72"]["BCM1_Rueckfahrlicht_Schalter"]):
         ret.gearShifter = GearShifter.reverse
       else:
@@ -72,19 +88,23 @@ class CarState(CarStateBase):
 
     if True:
       # MQB-specific
-      if self.CP.flags & VolkswagenFlags.KOMBI_PRESENT:
-        self.upscale_lead_car_signal = bool(pt_cp.vl["Kombi_03"]["KBI_Variante"])  # Analog vs digital instrument cluster
+      self.upscale_lead_car_signal = bool(pt_cp.vl["Kombi_03"]["KBI_Variante"])  # Analog vs digital instrument cluster
 
-      self.parse_wheel_speeds(ret,
+      ret.wheelSpeeds = self.get_wheel_speeds(
         pt_cp.vl["ESP_19"]["ESP_VL_Radgeschw_02"],
         pt_cp.vl["ESP_19"]["ESP_VR_Radgeschw_02"],
         pt_cp.vl["ESP_19"]["ESP_HL_Radgeschw_02"],
         pt_cp.vl["ESP_19"]["ESP_HR_Radgeschw_02"],
       )
 
+      ret.yawRate = pt_cp.vl["ESP_02"]["ESP_Gierrate"] * (1, -1)[int(pt_cp.vl["ESP_02"]["ESP_VZ_Gierrate"])] * CV.DEG_TO_RAD
+      hca_status = self.CCP.hca_status_values.get(pt_cp.vl["LH_EPS_03"]["EPS_HCA_Status"])
       if self.CP.flags & VolkswagenFlags.STOCK_HCA_PRESENT:
         ret.carFaultedNonCritical = bool(cam_cp.vl["HCA_01"]["EA_Ruckfreigabe"]) or cam_cp.vl["HCA_01"]["EA_ACC_Sollstatus"] > 0  # EA
 
+      drive_mode = True
+      ret.gas = pt_cp.vl["Motor_20"]["MO_Fahrpedalrohwert_01"] / 100.0
+      ret.brake = pt_cp.vl["ESP_05"]["ESP_Bremsdruck"] / 250.0  # FIXME: this is pressure in Bar, not sure what OP expects
       brake_pedal_pressed = bool(pt_cp.vl["Motor_14"]["MO_Fahrer_bremst"])
       brake_pressure_detected = bool(pt_cp.vl["ESP_05"]["ESP_Fahrer_bremst"])
       ret.brakePressed = brake_pedal_pressed or brake_pressure_detected
@@ -118,11 +138,17 @@ class CarState(CarStateBase):
       ret.rightBlinker = bool(pt_cp.vl["Blinkmodi_02"]["Comfort_Signal_Right"])
 
     # Shared logic
-    ret.vEgoCluster = pt_cp.vl["Kombi_01"]["KBI_angez_Geschw"] * CV.KPH_TO_MS
 
-    self.parse_mlb_mqb_steering_state(ret, pt_cp)
+    ret.vEgoRaw = float(np.mean([ret.wheelSpeeds.fl, ret.wheelSpeeds.fr, ret.wheelSpeeds.rl, ret.wheelSpeeds.rr]))
+    ret.vEgo, ret.aEgo = self.update_speed_kf(ret.vEgoRaw)
 
-    ret.gasPressed = pt_cp.vl["Motor_20"]["MO_Fahrpedalrohwert_01"] > 0
+    ret.steeringAngleDeg = pt_cp.vl["LWI_01"]["LWI_Lenkradwinkel"] * (1, -1)[int(pt_cp.vl["LWI_01"]["LWI_VZ_Lenkradwinkel"])]
+    ret.steeringRateDeg = pt_cp.vl["LWI_01"]["LWI_Lenkradw_Geschw"] * (1, -1)[int(pt_cp.vl["LWI_01"]["LWI_VZ_Lenkradw_Geschw"])]
+    ret.steeringTorque = pt_cp.vl["LH_EPS_03"]["EPS_Lenkmoment"] * (1, -1)[int(pt_cp.vl["LH_EPS_03"]["EPS_VZ_Lenkmoment"])]
+    ret.steeringPressed = abs(ret.steeringTorque) > self.CCP.STEER_DRIVER_ALLOWANCE
+    ret.steerFaultTemporary, ret.steerFaultPermanent = self.update_hca_state(hca_status, drive_mode)
+
+    ret.gasPressed = ret.gas > 0
     ret.espActive = bool(pt_cp.vl["ESP_21"]["ESP_Eingriff"])
     ret.espDisabled = pt_cp.vl["ESP_21"]["ESP_Tastung_passiv"] != 0
     ret.seatbeltUnlatched = pt_cp.vl["Airbag_02"]["AB_Gurtschloss_FA"] != 3
@@ -139,36 +165,177 @@ class CarState(CarStateBase):
 
     ret.buttonEvents = self.create_button_events(pt_cp, self.CCP.BUTTONS)
 
-    ret.lowSpeedAlert = self.update_low_speed_alert(ret.vEgo)
+    self.frame += 1
+    return ret
+
+  def update_meb(self, pt_cp, cam_cp, ext_cp) -> structs.CarState:
+    ret = structs.CarState()
+
+    # 바퀴 속도 및 차량 속도
+    ret.wheelSpeeds = self.get_wheel_speeds(
+      pt_cp.vl["ESC_51"]["VL_Radgeschw"],
+      pt_cp.vl["ESC_51"]["VR_Radgeschw"],
+      pt_cp.vl["ESC_51"]["HL_Radgeschw"],
+      pt_cp.vl["ESC_51"]["HR_Radgeschw"],
+    )
+    ret.vEgoRaw = (ret.wheelSpeeds.fl + ret.wheelSpeeds.fr + ret.wheelSpeeds.rl + ret.wheelSpeeds.rr) / 4.0
+    ret.vEgo, ret.aEgo = self.update_speed_kf(ret.vEgoRaw)
+    ret.standstill = ret.vEgoRaw == 0
+
+    # 조향각/조향속도/조향토크 (부호 분리 신호)
+    ret.steeringAngleDeg = pt_cp.vl["LWI_01"]["LWI_Lenkradwinkel"] * (1, -1)[int(pt_cp.vl["LWI_01"]["LWI_VZ_Lenkradwinkel"])]
+    ret.steeringRateDeg  = pt_cp.vl["LWI_01"]["LWI_Lenkradw_Geschw"] * (1, -1)[int(pt_cp.vl["LWI_01"]["LWI_VZ_Lenkradw_Geschw"])]
+    ret.steeringTorque   = pt_cp.vl["LH_EPS_03"]["EPS_Lenkmoment"] * (1, -1)[int(pt_cp.vl["LH_EPS_03"]["EPS_VZ_Lenkmoment"])]
+    ret.steeringPressed  = abs(ret.steeringTorque) > self.CCP.STEER_DRIVER_ALLOWANCE
+
+    # MEB curvature 피드백: QFK_01.Curvature(40비트) + Curvature_VZ(55비트)
+    # QFK_01 곡률은 openpilot 곡률 부호 관례와 반대 -> 음수화 (infiniteCable2: ret.steeringCurvature = -QFK...)
+    # 조향 해제 시 "현재 곡률 유지"에 쓰여, 부호가 틀리면 핸들이 반대로 당겨짐
+    self.curvature = -pt_cp.vl["QFK_01"]["Curvature"] * (1, -1)[int(pt_cp.vl["QFK_01"]["Curvature_VZ"])]
+    # controlsd 폐루프 곡률 보정(useCarSteerCurvature)이 차량 실측 곡률을 보도록 노출
+    ret.steeringCurvature = self.curvature
+    # 깜빡이 실제 점등 상태 (EA 깜빡이 중계 시 순정이 이미 켜져 있으면 OP 중복 방지용)
+    self.left_blinker_active = bool(pt_cp.vl["Blinkmodi_02"]["BM_links"])
+    self.right_blinker_active = bool(pt_cp.vl["Blinkmodi_02"]["BM_rechts"])
+
+    # Yaw rate
+    ret.yawRate = -pt_cp.vl["ESC_50"]["Yaw_Rate"] * (1, -1)[int(pt_cp.vl["ESC_50"]["Yaw_Rate_Sign"])] * CV.DEG_TO_RAD
+
+    # HCA 상태 (QFK_01) - vw_meb.dbc는 소문자 값 정의, update_hca_state는 대문자 비교 → 변환
+    hca_status_raw = self.CCP.hca_status_values.get(pt_cp.vl["QFK_01"]["LatCon_HCA_Status"])
+    hca_status = hca_status_raw.upper() if hca_status_raw else hca_status_raw
+    drive_mode = pt_cp.vl["Getriebe_11"]["GE_Fahrstufe"] != 0  # 0 = Park/Neutral
+    ret.steerFaultTemporary, ret.steerFaultPermanent = self.update_hca_state_meb(hca_status, drive_mode=drive_mode)
+
+    # 기어
+    ret.gearShifter = self.parse_gear_shifter(self.CCP.shifter_values.get(pt_cp.vl["Getriebe_11"]["GE_Fahrstufe"], None))
+
+    # 가속/브레이크 페달
+    ret.gasPressed   = pt_cp.vl["Motor_51"]["Accel_Pedal_Pressure"] > 0
+    ret.brakePressed = bool(pt_cp.vl["Motor_14"]["MO_Fahrer_bremst"])
+    ret.brake        = pt_cp.vl["ESC_51"]["Brake_Pressure"]
+
+    # 주차 브레이크: infiniteCable2 DBC의 ESC_50.EPB_Status(317비트, 3비트)를 포팅해 사용.
+    # (1,4) = EPB 잠기는 중/잠김. ACC 정차홀드는 HMS(브레이크 홀드)라 EPB는 안 잠기므로
+    # 매 정차마다 오인되지 않음. 실제 전자식 주차브레이크 작동 시에만 True.
+    ret.parkingBrake = pt_cp.vl["ESC_50"]["EPB_Status"] in (1, 4)
+
+    # 도어
+    ret.doorOpen = any([pt_cp.vl["Gateway_72"]["ZV_FT_offen"],
+                        pt_cp.vl["Gateway_72"]["ZV_BT_offen"],
+                        pt_cp.vl["Gateway_72"]["ZV_HFS_offen"],
+                        pt_cp.vl["Gateway_72"]["ZV_HBFS_offen"],
+                        pt_cp.vl["Gateway_72"]["ZV_HD_offen"]])
+
+    # 안전벨트
+    ret.seatbeltUnlatched = pt_cp.vl["Airbag_02"]["AB_Gurtschloss_FA"] != 3
+
+    # BSM (블라인드 스팟) - 당근파일럿 vw_meb.dbc는 Left/Right 신호명 사용
+    if self.CP.enableBsm:
+      ret.leftBlindspot  = bool(ext_cp.vl["MEB_Side_Assist_01"]["Blind_Spot_Info_Left"]) or \
+                           bool(ext_cp.vl["MEB_Side_Assist_01"]["Blind_Spot_Warn_Left"])
+      ret.rightBlindspot = bool(ext_cp.vl["MEB_Side_Assist_01"]["Blind_Spot_Info_Right"]) or \
+                           bool(ext_cp.vl["MEB_Side_Assist_01"]["Blind_Spot_Warn_Right"])
+
+    # LDW HUD 스톡 값 (LDW_02 → create_lka_hud_control 사용)
+    self.ldw_stock_values = cam_cp.vl["LDW_02"]
+    # EA(Emergency Assist) HUD 스톡 값 - 핸들 아이콘/핸즈오프 램프 중계용 (create_blinker_control)
+    if self.CP.flags & VolkswagenFlags.STOCK_EA_PRESENT:
+      self.ea_hud_stock_values = cam_cp.vl["EA_02"]
+      self.ea_control_stock_values = cam_cp.vl["EA_01"]
+
+    ret.stockFcw = False
+    ret.stockAeb = False
+
+    self.acc_type = 2  # ACC stop and go
+    self.eps_stock_values = pt_cp.vl["LH_EPS_03"]
+    # 정전식 핸들 터치(KLR_01) stock 값 - Emergency Assist 핸즈온 pacification용
+    self.klr_stock_values = pt_cp.vl["KLR_01"] if self.CP.flags & VolkswagenFlags.STOCK_KLR_PRESENT else {}
+    # Travel Assist 가용성 (순정 TA_01) - TA_01 송신 게이트 = 스티어링휠 버튼 LED/핸들 아이콘 (infiniteCable2 방식)
+    self.travel_assist_available = bool(cam_cp.vl["TA_01"]["Travel_Assist_Available"])
+
+    # ESP 홀드 (정차 확인): infiniteCable2와 동일하게 ESC_50.Motion_State == 3(완전정지) 사용.
+    # 기존 Standstill(1비트)은 Motion_State(2비트)의 하위 1비트만 읽어 정차 판정 시점이
+    # 어긋났음 -> EPB 홀드/릴리스 타이밍 불일치로 재출발이 막힐 수 있었음.
+    self.esp_hold_confirmation = pt_cp.vl["ESC_50"]["Motion_State"] == 3
+
+    # ACC/크루즈 상태
+    ret.cruiseState.available  = pt_cp.vl["Motor_51"]["TSK_Status"] in (2, 3, 4, 5)
+    ret.cruiseState.enabled    = pt_cp.vl["Motor_51"]["TSK_Status"] in (3, 4, 5)
+    # accFaulted: 원시 TSK fault(6/7)를 update_acc_fault로 디바운스. 주차 중(EPB+비주행)엔 무시,
+    # 주행 전환 직후 100프레임 grace -> 출발 직후 일시적 TSK 글리치로 인한 오해제 방지. (infiniteCable2)
+    acc_drive_mode = ret.gearShifter == GearShifter.drive
+    ret.accFaulted = self.update_acc_fault(pt_cp.vl["Motor_51"]["TSK_Status"] in (6, 7),
+                                           parking_brake=ret.parkingBrake, drive_mode=acc_drive_mode)
+    ret.cruiseState.standstill = self.CP.pcmCruise and self.esp_hold_confirmation
+    ret.cruiseState.nonAdaptive = bool(pt_cp.vl["Motor_51"]["TSK_Limiter_ausgewaehlt"])
+
+    if self.CP.pcmCruise:
+      ret.cruiseState.speed = int(round(ext_cp.vl["MEB_ACC_01"]["ACC_Wunschgeschw_02"])) * CV.KPH_TO_MS
+      if ret.cruiseState.speed > 90:
+        ret.cruiseState.speed = 0
+
+    # 방향지시등
+    ret.leftBlinker, ret.rightBlinker = self.update_blinker_from_stalk(
+      240,
+      pt_cp.vl["SMLS_01"]["BH_Blinker_li"],
+      pt_cp.vl["SMLS_01"]["BH_Blinker_re"],
+    )
+
+    # 버튼 이벤트 및 GRA 스톡 값
+    # 메인 스위치가 래칭(토글, GRA_Typ_Hauptschalter==0=gerastet)이면 물리 취소버튼(GRA_Abbrechen)을
+    # cancel로 쓰는 BUTTONS_ALT 사용. 모멘터리면 메인버튼을 cancel로 쓰는 BUTTONS. (infiniteCable2 방식)
+    # -> 래칭 메인스위치 off 시 cancel 이벤트가 안 떠 openpilot 전체가 꺼지지 않음.
+    main_cruise_latching = not bool(pt_cp.vl["GRA_ACC_01"]["GRA_Typ_Hauptschalter"])
+    buttons = self.CCP.BUTTONS_ALT if main_cruise_latching else self.CCP.BUTTONS
+    ret.buttonEvents    = self.create_button_events(pt_cp, buttons)
+    # 속도+/- 스토크 2단계(쓸어올리기/길게) = GRA_Tip_Stufe_2. cruise.py가 이걸 보고 +10(큰 단위) 적용.
+    ret.cruiseSpeedBigStep = bool(pt_cp.vl["GRA_ACC_01"]["GRA_Tip_Stufe_2"])
+    self.gra_stock_values = pt_cp.vl["GRA_ACC_01"]
+
+    # ESP 상태
+    ret.espDisabled = False
+    ret.espActive   = False
 
     self.frame += 1
     return ret
 
   def update_pq(self, pt_cp, cam_cp, ext_cp) -> structs.CarState:
     ret = structs.CarState()
+    # Update vehicle speed and acceleration from ABS wheel speeds.
+    ret.wheelSpeeds = self.get_wheel_speeds(
+      pt_cp.vl["Bremse_3"]["Radgeschw__VL_4_1"],
+      pt_cp.vl["Bremse_3"]["Radgeschw__VR_4_1"],
+      pt_cp.vl["Bremse_3"]["Radgeschw__HL_4_1"],
+      pt_cp.vl["Bremse_3"]["Radgeschw__HR_4_1"],
+    )
 
     # vEgo obtained from Bremse_1 vehicle speed rather than Bremse_3 wheel speeds because Bremse_3 isn't present on NSF
-    ret.vEgoRaw = pt_cp.vl["Bremse_1"]["BR1_Rad_kmh"] * CV.KPH_TO_MS
+    ret.vEgoRaw = pt_cp.vl["Bremse_1"]["Geschwindigkeit_neu__Bremse_1_"] * CV.KPH_TO_MS
     ret.vEgo, ret.aEgo = self.update_speed_kf(ret.vEgoRaw)
     ret.standstill = ret.vEgoRaw == 0
 
     # Update EPS position and state info. For signed values, VW sends the sign in a separate signal.
     ret.steeringAngleDeg = pt_cp.vl["Lenkhilfe_3"]["LH3_BLW"] * (1, -1)[int(pt_cp.vl["Lenkhilfe_3"]["LH3_BLWSign"])]
-    ret.steeringRateDeg = pt_cp.vl["Lenkwinkel_1"]["LW1_Lenk_Gesch"] * (1, -1)[int(pt_cp.vl["Lenkwinkel_1"]["LW1_Gesch_Sign"])]
+    ret.steeringRateDeg = pt_cp.vl["Lenkwinkel_1"]["Lenkradwinkel_Geschwindigkeit"] * (1, -1)[int(pt_cp.vl["Lenkwinkel_1"]["Lenkradwinkel_Geschwindigkeit_S"])]
     ret.steeringTorque = pt_cp.vl["Lenkhilfe_3"]["LH3_LM"] * (1, -1)[int(pt_cp.vl["Lenkhilfe_3"]["LH3_LMSign"])]
     ret.steeringPressed = abs(ret.steeringTorque) > self.CCP.STEER_DRIVER_ALLOWANCE
+    ret.yawRate = pt_cp.vl["Bremse_5"]["Giergeschwindigkeit"] * (1, -1)[int(pt_cp.vl["Bremse_5"]["Vorzeichen_der_Giergeschwindigk"])] * CV.DEG_TO_RAD
     hca_status = self.CCP.hca_status_values.get(pt_cp.vl["Lenkhilfe_2"]["LH2_Sta_HCA"])
     ret.steerFaultTemporary, ret.steerFaultPermanent = self.update_hca_state(hca_status)
 
     # Update gas, brakes, and gearshift.
-    ret.gasPressed = pt_cp.vl["Motor_3"]["MO3_Pedalwert"] > 0
-    ret.brakePressed = bool(pt_cp.vl["Motor_2"]["MO2_BLS"])
+    ret.gas = pt_cp.vl["Motor_3"]["Fahrpedal_Rohsignal"] / 100.0
+    ret.gasPressed = ret.gas > 0
+    ret.brake = pt_cp.vl["Bremse_5"]["Bremsdruck"] / 250.0  # FIXME: this is pressure in Bar, not sure what OP expects
+    ret.brakePressed = bool(pt_cp.vl["Motor_2"]["Bremslichtschalter"])
     ret.parkingBrake = bool(pt_cp.vl["Kombi_1"]["Bremsinfo"])
 
     # Update gear and/or clutch position data.
     if self.CP.transmissionType == TransmissionType.automatic:
-      ret.gearShifter = self.parse_gear_shifter(self.CCP.shifter_values.get(pt_cp.vl["Getriebe_1"]["GE1_Wahl_Pos"], None))
+      ret.gearShifter = self.parse_gear_shifter(self.CCP.shifter_values.get(pt_cp.vl["Getriebe_1"]["Waehlhebelposition__Getriebe_1_"], None))
     elif self.CP.transmissionType == TransmissionType.manual:
+      ret.clutchPressed = not pt_cp.vl["Motor_1"]["Kupplungsschalter"]
       reverse_light = bool(pt_cp.vl["Gate_Komf_1"]["GK1_Rueckfahr"])
       if reverse_light:
         ret.gearShifter = GearShifter.reverse
@@ -207,12 +374,12 @@ class CarState(CarStateBase):
 
     # Update ACC radar status.
     self.acc_type = ext_cp.vl["ACC_System"]["ACS_Typ_ACC"]
-    ret.cruiseState.available = bool(pt_cp.vl["Motor_5"]["MO5_GRA_Hauptsch"])
-    ret.cruiseState.enabled = pt_cp.vl["Motor_2"]["MO2_Sta_GRA"] in (1, 2)
+    ret.cruiseState.available = bool(pt_cp.vl["Motor_5"]["GRA_Hauptschalter"])
+    ret.cruiseState.enabled = pt_cp.vl["Motor_2"]["GRA_Status"] in (1, 2)
     if self.CP.pcmCruise:
       ret.accFaulted = ext_cp.vl["ACC_GRA_Anzeige"]["ACA_StaACC"] in (6, 7)
     else:
-      ret.accFaulted = pt_cp.vl["Motor_2"]["MO2_Sta_GRA"] == 3
+      ret.accFaulted = pt_cp.vl["Motor_2"]["GRA_Status"] == 3
 
     # Update ACC setpoint. When the setpoint reads as 255, the driver has not
     # yet established an ACC setpoint, so treat it as zero.
@@ -227,175 +394,10 @@ class CarState(CarStateBase):
     self.gra_stock_values = pt_cp.vl["GRA_Neu"]
 
     # Additional safety checks performed in CarInterface.
-    ret.espDisabled = bool(pt_cp.vl["Bremse_1"]["BR1_ESPASR_passive"])
-
-    ret.lowSpeedAlert = self.update_low_speed_alert(ret.vEgo)
+    ret.espDisabled = bool(pt_cp.vl["Bremse_1"]["ESP_Passiv_getastet"])
 
     self.frame += 1
     return ret
-
-  def update_meb(self, pt_cp, cam_cp, ext_cp) -> structs.CarState:
-    ret = structs.CarState()
-
-    self.parse_wheel_speeds(ret,
-      pt_cp.vl["ESC_51"]["VL_Radgeschw"],
-      pt_cp.vl["ESC_51"]["VR_Radgeschw"],
-      pt_cp.vl["ESC_51"]["HL_Radgeschw"],
-      pt_cp.vl["ESC_51"]["HR_Radgeschw"],
-    )
-    if self.CP.flags & VolkswagenFlags.KOMBI_PRESENT:
-      ret.vEgoCluster = pt_cp.vl["Kombi_01"]["KBI_angez_Geschw"] * CV.KPH_TO_MS
-    ret.standstill = ret.vEgoRaw == 0
-
-    # Update EPS position and state info. For signed values, VW sends the sign in a separate signal.
-    ret.steeringAngleDeg = pt_cp.vl["LWI_01"]["LWI_Lenkradwinkel"] * (1, -1)[int(pt_cp.vl["LWI_01"]["LWI_VZ_Lenkradwinkel"])]
-    ret.steeringRateDeg = pt_cp.vl["LWI_01"]["LWI_Lenkradw_Geschw"] * (1, -1)[int(pt_cp.vl["LWI_01"]["LWI_VZ_Lenkradw_Geschw"])]
-    ret.steeringTorque = pt_cp.vl["LH_EPS_03"]["EPS_Lenkmoment"] * (1, -1)[int(pt_cp.vl["LH_EPS_03"]["EPS_VZ_Lenkmoment"])]
-    ret.steeringPressed = self.update_steering_pressed(abs(ret.steeringTorque) > self.CCP.STEER_DRIVER_ALLOWANCE, 5)
-    self.curvature_meas = -pt_cp.vl["QFK_01"]["Curvature"] * (1, -1)[int(pt_cp.vl["QFK_01"]["Curvature_VZ"])]
-    ret.yawRate = -pt_cp.vl["ESC_50"]["Yaw_Rate"] * (1, -1)[int(pt_cp.vl["ESC_50"]["Yaw_Rate_Sign"])] * CV.DEG_TO_RAD
-
-    if self.CP.flags & VolkswagenFlags.ALT_GEAR:
-      ret.gearShifter = self.parse_gear_shifter(self.CCP.shifter_values.get(pt_cp.vl["Gateway_73"]["GE_Fahrstufe"], None))
-    else:
-      ret.gearShifter = self.parse_gear_shifter(self.CCP.shifter_values.get(pt_cp.vl["Getriebe_11"]["GE_Fahrstufe"], None))
-    drive_mode = ret.gearShifter == GearShifter.drive
-
-    hca_status = self.CCP.hca_status_values.get(pt_cp.vl["QFK_01"]["LatCon_HCA_Status"])
-    ret.steerFaultTemporary, ret.steerFaultPermanent = self.update_hca_state(hca_status, drive_mode)
-
-    ret.carFaultedNonCritical = cam_cp.vl["EA_01"]["EA_Funktionsstatus"] in (3, 4, 5, 6)
-
-    ret.gasPressed = pt_cp.vl["Motor_51"]["Accel_Pedal_Pressure"] > 0
-    ret.brakePressed = bool(pt_cp.vl["Motor_14"]["MO_Fahrer_bremst"])
-    ret.parkingBrake = pt_cp.vl["ESC_50"]["EPB_Status"] in (1, 4) # EPB closing or closed (candidate for all platforms)
-    #ret.parkingBrake = pt_cp.vl["Gateway_73"]["EPB_Status"] in (1, 4) # this signal is not working for newer models
-    ret.seatbeltUnlatched = pt_cp.vl["Airbag_02"]["AB_Gurtschloss_FA"] != 3
-    doors = pt_cp.vl["ZV_02"] if bool(pt_cp.vl["Gateway_72"]["ZV_02_alt"]) else pt_cp.vl["Gateway_72"]
-    ret.doorOpen = any([doors["ZV_FT_offen"],
-                        doors["ZV_BT_offen"],
-                        doors["ZV_HFS_offen"],
-                        doors["ZV_HBFS_offen"],
-                        doors["ZV_HD_offen"]])
-    ret.espDisabled = bool(pt_cp.vl["ESP_21"]["ESP_Tastung_passiv"])
-    ret.espActive = bool(pt_cp.vl["ESP_21"]["ESP_Eingriff"])
-
-    self.acc_type = ext_cp.vl["ACC_18"]["ACC_Typ"]
-    self.esp_hold_confirmation = bool(pt_cp.vl["ESC_50"]["Standstill"])
-    self.travel_assist_available = bool(cam_cp.vl["TA_01"]["Travel_Assist_Available"])
-    ret.stockFcw = bool(ext_cp.vl["AWV_03"]["FCW_Active"])
-
-    ret.cruiseState.available = pt_cp.vl["Motor_51"]["TSK_Status"] in (2, 3, 4, 5)
-    ret.cruiseState.enabled = pt_cp.vl["Motor_51"]["TSK_Status"] in (3, 4, 5)
-    ret.cruiseState.standstill = self.CP.pcmCruise and self.esp_hold_confirmation
-    if self.CP.pcmCruise:
-      ret.cruiseState.nonAdaptive = bool(ext_cp.vl["ACC_19"]["ACC_Limiter_Mode"])
-      ret.cruiseState.speed = ext_cp.vl["ACC_19"]["ACC_Wunschgeschw_02"] * CV.KPH_TO_MS
-      if ret.cruiseState.speed > 90:  # 255 kph in m/s == no current setpoint
-        ret.cruiseState.speed = 0
-    else:
-      ret.cruiseState.nonAdaptive = bool(pt_cp.vl["Motor_51"]["TSK_Limiter_ausgewaehlt"])
-    accFaulted = pt_cp.vl["Motor_51"]["TSK_Status"] in (6, 7)
-    ret.accFaulted = self.update_acc_fault(accFaulted, parking_brake=ret.parkingBrake, drive_mode=drive_mode,
-                                            brake_pressed=ret.brakePressed)
-
-    ret.leftBlinker, ret.rightBlinker = self.update_blinker_from_stalk(240, pt_cp.vl["SMLS_01"]["BH_Blinker_li"],
-                                                                            pt_cp.vl["SMLS_01"]["BH_Blinker_re"])
-
-    if self.CP.enableBsm:
-      if self.CP.flags & VolkswagenFlags.MEB_GEN2:
-        ret.leftBlindspot = (bool(pt_cp.vl["MEB_Side_Assist_01"]["Blind_Spot_Info_Driver"]) or
-                             bool(pt_cp.vl["MEB_Side_Assist_01"]["Blind_Spot_Warn_Driver"]))
-        ret.rightBlindspot = (bool(pt_cp.vl["MEB_Side_Assist_01"]["Blind_Spot_Info_Passenger"]) or
-                              bool(pt_cp.vl["MEB_Side_Assist_01"]["Blind_Spot_Warn_Passenger"]))
-      else:
-        ret.leftBlindspot = (bool(ext_cp.vl["MEB_Side_Assist_01"]["Blind_Spot_Info_Left"]) or
-                             bool(ext_cp.vl["MEB_Side_Assist_01"]["Blind_Spot_Warn_Left"]))
-        ret.rightBlindspot = (bool(ext_cp.vl["MEB_Side_Assist_01"]["Blind_Spot_Info_Right"]) or
-                              bool(ext_cp.vl["MEB_Side_Assist_01"]["Blind_Spot_Warn_Right"]))
-
-    self.eps_stock_values = pt_cp.vl["LH_EPS_03"]
-    self.ldw_stock_values = cam_cp.vl["LDW_02"] if self.CP.networkLocation == NetworkLocation.fwdCamera else {}
-    self.gra_stock_values = pt_cp.vl["GRA_ACC_01"]
-    self.klr_stock_values = pt_cp.vl["KLR_01"] if self.CP.flags & VolkswagenFlags.STOCK_KLR_PRESENT else {}
-
-    ret.buttonEvents = self.create_button_events(pt_cp, self.CCP.BUTTONS)
-    ret.lowSpeedAlert = self.update_low_speed_alert(ret.vEgo)
-
-    self.frame += 1
-    return ret
-
-  def update_mlb(self, pt_cp, cam_cp, ext_cp, alt_cp) -> structs.CarState:
-    ret = structs.CarState()
-
-    self.parse_wheel_speeds(ret,
-      pt_cp.vl["ESP_03"]["ESP_VL_Radgeschw"],
-      pt_cp.vl["ESP_03"]["ESP_VR_Radgeschw"],
-      pt_cp.vl["ESP_03"]["ESP_HL_Radgeschw"],
-      pt_cp.vl["ESP_03"]["ESP_HR_Radgeschw"],
-    )
-
-    ret.gasPressed = pt_cp.vl["Motor_03"]["MO_Fahrpedalrohwert_01"] > 0
-    ret.gearShifter = self.parse_gear_shifter(self.CCP.shifter_values.get(alt_cp.vl["Getriebe_03"]["GE_Waehlhebel"], None))
-
-    # TODO: We don't have a true mainswitch state yet, might need stateful tracking on LS_01 if momentary-press is a thing
-    # TSK_04.TSK_Status_GRA_ACC_02 0 = not engaged, 1 = engaged, 2 = engaged with driver accel override, 3 = fault
-    ret.cruiseState.available = alt_cp.vl["TSK_04"]["TSK_Status_GRA_ACC_02"] in (0, 1, 2)
-    ret.cruiseState.available = alt_cp.vl["TSK_04"]["TSK_Status_GRA_ACC_02"] in (1, 2)
-    ret.accFaulted = alt_cp.vl["TSK_04"]["TSK_Status_GRA_ACC_02"] == 3
-    ret.cruiseState.speed = ext_cp.vl["ACC_02"]["ACC_Wunschgeschw_02"] * CV.KPH_TO_MS
-
-    self.parse_mlb_mqb_steering_state(ret, pt_cp)
-
-    brake_pedal_pressed = bool(pt_cp.vl["Motor_03"]["MO_Fahrer_bremst"])
-    brake_pressure_detected = bool(pt_cp.vl["ESP_05"]["ESP_Fahrer_bremst"])
-    ret.brakePressed = brake_pedal_pressed or brake_pressure_detected
-    ret.parkingBrake = bool(pt_cp.vl["Kombi_01"]["KBI_Handbremse"])
-    ret.espDisabled = pt_cp.vl["ESP_01"]["ESP_Tastung_passiv"] != 0
-
-    ret.leftBlinker = bool(pt_cp.vl["BCM"]["BLINKER_LEFT"])
-    ret.rightBlinker = bool(pt_cp.vl["BCM"]["BLINKER_RIGHT"])
-
-    ret.seatbeltUnlatched = bool(pt_cp.vl["Airbag_01"]["AB_Gurtwarn_VF"])
-    ret.doorOpen = any([alt_cp.vl["Gateway_05"]["FT_Tuer_geoeffnet"],
-                        alt_cp.vl["Gateway_05"]["BT_Tuer_geoeffnet"],
-                        alt_cp.vl["Gateway_05"]["HL_Tuer_geoeffnet"],
-                        alt_cp.vl["Gateway_05"]["HR_Tuer_geoeffnet"]])
-
-    # Consume blind-spot monitoring info/warning LED states, if available.
-    # Infostufe: BSM LED on, Warnung: BSM LED flashing
-    if self.CP.enableBsm:
-      ret.leftBlindspot = bool(ext_cp.vl["SWA_01"]["SWA_Infostufe_SWA_li"]) or bool(ext_cp.vl["SWA_01"]["SWA_Warnung_SWA_li"])
-      ret.rightBlindspot = bool(ext_cp.vl["SWA_01"]["SWA_Infostufe_SWA_re"]) or bool(ext_cp.vl["SWA_01"]["SWA_Warnung_SWA_re"])
-
-    self.ldw_stock_values = cam_cp.vl["LDW_02"] if self.CP.networkLocation == NetworkLocation.fwdCamera else {}
-    self.gra_stock_values = pt_cp.vl["LS_01"]
-
-    ret.buttonEvents = self.create_button_events(pt_cp, self.CCP.BUTTONS)
-
-    ret.cruiseState.standstill = self.CP.pcmCruise and self.esp_hold_confirmation
-    ret.standstill = ret.vEgoRaw == 0
-
-    self.frame += 1
-    return ret
-
-  def update_low_speed_alert(self, v_ego: float) -> bool:
-    # Low speed steer alert hysteresis logic
-    if (self.CP.minSteerSpeed - 1e-3) > CarControllerParams.DEFAULT_MIN_STEER_SPEED and v_ego < (self.CP.minSteerSpeed + 1.):
-      self.low_speed_alert = True
-    elif v_ego > (self.CP.minSteerSpeed + 2.):
-      self.low_speed_alert = False
-    return self.low_speed_alert
-
-  def parse_mlb_mqb_steering_state(self, ret, pt_cp, drive_mode=True):
-    ret.steeringAngleDeg = pt_cp.vl["LWI_01"]["LWI_Lenkradwinkel"] * (1, -1)[int(pt_cp.vl["LWI_01"]["LWI_VZ_Lenkradwinkel"])]
-    ret.steeringRateDeg = pt_cp.vl["LWI_01"]["LWI_Lenkradw_Geschw"] * (1, -1)[int(pt_cp.vl["LWI_01"]["LWI_VZ_Lenkradw_Geschw"])]
-    ret.steeringTorque = pt_cp.vl["LH_EPS_03"]["EPS_Lenkmoment"] * (1, -1)[int(pt_cp.vl["LH_EPS_03"]["EPS_VZ_Lenkmoment"])]
-    ret.steeringPressed = abs(ret.steeringTorque) > self.CCP.STEER_DRIVER_ALLOWANCE
-
-    hca_status = self.CCP.hca_status_values.get(pt_cp.vl["LH_EPS_03"]["EPS_HCA_Status"])
-    ret.steerFaultTemporary, ret.steerFaultPermanent = self.update_hca_state(hca_status, drive_mode)
-    return
 
   def update_hca_state(self, hca_status, drive_mode=True):
     # Treat FAULT as temporary for worst likely EPS recovery time, for cars without factory Lane Assist
@@ -405,68 +407,88 @@ class CarState(CarStateBase):
     temp_fault = drive_mode and hca_status in ("REJECTED", "PREEMPTED") or not self.eps_init_complete
     return temp_fault, perm_fault
 
-  def update_acc_fault(self, acc_fault, parking_brake=False, drive_mode=True, brake_pressed=False, recovery_frames_max=300):
-    # Ignore FAULT when not in drive mode and parked
-    # do not show misleading error during ignition in parked state
-    # grant a short time to recover a normal cruise state
-    # after hard brake, stock system prevents acc engage for ~3 seconds
-    fault = acc_fault
-    if (parking_brake and not drive_mode) or brake_pressed:
-      fault = False
-      self.cruise_recovery_timer = self.frame
-    elif self.frame - self.cruise_recovery_timer < recovery_frames_max:
-      fault = False
-    return fault
+  def update_hca_state_meb(self, hca_status, drive_mode=True):
+    # MEB EPS: HCA가 idle일 때 "disabled"(0)가 정상 상태. openpilot이 HCA_03을
+    # 보내기 시작하면 EPS가 ready/active로 전환됨. 따라서 disabled를 영구 결함으로 보지 않음.
+    self.eps_init_complete = self.eps_init_complete or (hca_status in ("DISABLED", "READY", "ACTIVE") or self.frame > 600)
+    perm_fault = self.eps_init_complete and hca_status == "FAULT"
+    temp_fault = (drive_mode and hca_status in ("REJECTED", "PREEMPTED")) or not self.eps_init_complete
+    return temp_fault, perm_fault
 
   @staticmethod
   def get_can_parsers(CP):
     if CP.flags & VolkswagenFlags.PQ:
       return CarState.get_can_parsers_pq(CP)
-    elif CP.flags & VolkswagenFlags.MEB:
+
+    if CP.flags & VolkswagenFlags.MEB:
       return CarState.get_can_parsers_meb(CP)
 
-    # manually configure some optional and variable-rate/edge-triggered messages
-    pt_messages, cam_messages, alt_messages = [], [], []
-
-    if not CP.flags & VolkswagenFlags.MLB:
-      pt_messages += [
-        ("Blinkmodi_02", 1)  # From J519 BCM (sent at 1Hz when no lights active, 50Hz when active)
-      ]
+    # another case of the 1-50Hz
+    cam_messages = []
     if CP.flags & VolkswagenFlags.STOCK_HCA_PRESENT:
       cam_messages += [
         ("HCA_01", 1),  # From R242 Driver assistance camera, 50Hz if steering/1Hz if not
       ]
 
     return {
-      Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], pt_messages, CanBus(CP).pt),
-      Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], cam_messages, CanBus(CP).cam),
-      Bus.alt: CANParser(DBC[CP.carFingerprint][Bus.pt], alt_messages, CanBus(CP).alt),
+      Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], [
+        # the 50->1Hz is currently too much for the CANParser to figure out
+        ("Blinkmodi_02", 1),  # From J519 BCM (sent at 1Hz when no lights active, 50Hz when active)
+      ], CANBUS.pt),
+      Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], cam_messages, CANBUS.cam),
     }
 
   @staticmethod
   def get_can_parsers_pq(CP):
     return {
-      Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], [], CanBus(CP).pt),
-      Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], [], CanBus(CP).cam),
-      Bus.alt: CANParser(DBC[CP.carFingerprint][Bus.pt], [], CanBus(CP).alt),
+      Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], [], CANBUS.pt),
+      Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], [], CANBUS.cam),
     }
 
   @staticmethod
   def get_can_parsers_meb(CP):
     pt_messages = [
-      # frequency changes too much for the CANParser to figure out
-      ("Blinkmodi_02", 1),  # From J519 BCM (sent at 1Hz when no lights active, 50Hz when active)
-      ("SMLS_01", 1),       # From Stalk Controls
+      ("ESC_51", 100),      # From ESC (바퀴속도, 제동압)
+      ("LH_EPS_03", 100),   # From EPS (조향토크)
+      ("QFK_01", 100),      # From EPS (HCA 상태, 곡률)
+      ("LWI_01", 100),      # From EPS (조향각)
+      ("ESC_50", 50),       # From ESC (Yaw Rate, EPB, Motion State)
+      ("Motor_51", 50),     # From ECM (TSK Status, ACC)
+      ("Motor_14", 10),     # From ECM (제동등 스위치)
+      ("GRA_ACC_01", 33),   # From Gateway (ACC 버튼)
+      ("Gateway_72", 10),   # From Gateway (도어)
+      ("Airbag_02", 5),     # From 에어백 모듈 (안전벨트)
+      ("Getriebe_11", 50),  # From 변속기 (기어)
+      ("ESP_21", 50),       # From ESC (ESP 상태)
+      ("Blinkmodi_02", 1),  # From BCM (방향지시등)
+      ("SMLS_01", 1),       # From 스탈크 컨트롤
     ]
-    if CP.networkLocation == NetworkLocation.fwdCamera:
-      pt_messages.append(("AWV_03", 1)) # Front Collision Detection (1 Hz when inactive, 50 Hz when active)
 
-    cam_messages = []
+    if CP.flags & VolkswagenFlags.STOCK_KLR_PRESENT:
+      pt_messages += [("KLR_01", 50)]  # 정전식 핸들 터치 (EA 핸즈온)
+
+    cam_messages = [
+      ("TA_01", 50),  # Travel Assist 상태 (버튼 LED/핸들 아이콘 게이트 = Travel_Assist_Available)
+    ]
+
+    if CP.flags & VolkswagenFlags.STOCK_EA_PRESENT:
+      cam_messages += [("EA_01", 10), ("EA_02", 10)]  # Emergency Assist HUD (핸들 아이콘 중계)
+
     if CP.networkLocation == NetworkLocation.gateway:
-      cam_messages.append(("AWV_03", 1)) # Front Collision Detection (1 Hz when inactive, 50 Hz when active)
+      cam_messages += [
+        ("MEB_ACC_01", 50),   # From 레이더 (ACC 설정속도 = ACC_Wunschgeschw_02)
+      ]
+      if CP.enableBsm:
+        cam_messages += [("MEB_Side_Assist_01", 10)]
+    else:
+      pt_messages += [
+        ("MEB_ACC_01", 50),
+      ]
+      if CP.enableBsm:
+        pt_messages += [("MEB_Side_Assist_01", 10)]
 
     return {
-      Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], pt_messages, CanBus(CP).pt),
-      Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], cam_messages, CanBus(CP).cam),
-      Bus.alt: CANParser(DBC[CP.carFingerprint][Bus.pt], [], CanBus(CP).alt),
+      Bus.pt:  CANParser(DBC[CP.carFingerprint][Bus.pt], pt_messages, CANBUS.pt),
+      Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], cam_messages, CANBUS.cam),
     }
+

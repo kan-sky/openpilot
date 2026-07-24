@@ -89,6 +89,7 @@ class Sidebar(Widget):
     self._on_settings_click: Callable | None = None
     self._on_flag_click: Callable | None = None
     self._open_settings_callback: Callable | None = None
+    self._ip_address = "N/A"
     # Kans: Device Position
     self._params = Params()
 
@@ -124,6 +125,11 @@ class Sidebar(Widget):
     self._net_type = NETWORK_TYPES.get(device_state.networkType.raw, tr_noop("Unknown"))
     strength = device_state.networkStrength
     self._net_strength = max(0, min(5, strength.raw + 1)) if strength.raw > 0 else 0
+
+    try:
+      self._ip_address = str(device_state.ipAddress or "N/A")
+    except Exception:
+      self._ip_address = "N/A"
 
   def _update_temperature_status(self, device_state):
     thermal_status = device_state.thermalStatus
@@ -216,10 +222,10 @@ class Sidebar(Widget):
       y = int(y_pos + dot_size // 2)
       rl.draw_circle(x, y, dot_size // 2, color)
 
-    # Network type text
+    # Network type text -> IP text
     text_y = rect.y + 247
-    text_pos = rl.Vector2(rect.x + 58, text_y)
-    rl.draw_text_ex(self._font_regular, tr(self._net_type), text_pos, FONT_SIZE, 0, Colors.WHITE)
+    text_pos = rl.Vector2(rect.x + 32, text_y)
+    rl.draw_text_ex(self._font_regular, self._ip_address, text_pos, FONT_SIZE-1, 0, Colors.WHITE)
 
   def _draw_metrics(self, rect: rl.Rectangle):
     metrics = [(self._temp_status, 338), (self._panda_status, 496), (self._connect_status, 654)]

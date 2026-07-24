@@ -70,6 +70,7 @@ def get_friction_torque(lateral_accel_error: float,
 
   return friction_lataccel / lat_accel_factor
 
+
 class LatControlTorque(LatControl):
   def __init__(self, CP, CI, dt):
     super().__init__(CP, CI, dt)
@@ -147,56 +148,6 @@ class LatControlTorque(LatControl):
     self.torque_params.friction = friction
     self.update_limits()
 
-  def update_custom_torque_params(self):
-    custom_enabled = self.params.get_bool("LateralTorqueCustom")
-    custom_was_enabled = self.lateralTorqueCustom
-
-    if custom_enabled:
-      # Reset both PIDs only on the False-to-True Custom Torque transition
-      if not custom_was_enabled:
-        self.pid.reset()
-        self.nn_pid.reset()
-      lat_accel_factor = self.params.get_float("LateralTorqueAccelFactor") * 0.001
-      friction = self.params.get_float("LateralTorqueFriction") * 0.001
-
-      nnff_kp = self.params.get_float("LateralTorqueKpV") * 0.01
-      nnff_ki = self.params.get_float("LateralTorqueKiV") * 0.01
-      nnff_kd = self.params.get_float("LateralTorqueKd") * 0.01
-      nnff_kf = self.params.get_float("LateralTorqueKf") * 0.01
-
-      if lat_accel_factor > 1e-6:
-        self.torque_params.latAccelFactor = lat_accel_factor
-
-      self.torque_params.latAccelOffset = self.latAccelOffset_default
-      self.torque_params.friction = friction
-
-      self.nn_pid._k_p = ([0.0], [nnff_kp])
-      self.nn_pid._k_i = ([0.0], [nnff_ki])
-      self.nn_pid._k_d = ([0.0], [nnff_kd])
-      self.nn_pid.k_f = nnff_kf
-
-      self.update_limits()
-
-    elif custom_was_enabled:
-      # Custom True ¡æ False:
-      # immediatly read to early restored Live Torques
-      self.torque_params.latAccelFactor = self.live_lat_accel_factor
-      self.torque_params.latAccelOffset = self.live_lat_accel_offset
-      self.torque_params.friction = self.live_friction
-
-      # restore to basic NNff gain for Full NNFF PID
-      self.nn_pid._k_p = ([0.0], [self.nnff_kp_default])
-      self.nn_pid._k_i = ([0.0], [self.nnff_ki_default])
-      self.nn_pid._k_d = ([0.0], [self.nnff_kd_default])
-      self.nn_pid.k_f = self.nnff_kf_default
-
-      self.pid.reset()
-      self.nn_pid.reset()
-      self.update_limits()
-
-    self.lateralTorqueCustom = custom_enabled
-
-
   def update_limits(self):
     self.pid.set_limits(self.lateral_accel_from_torque(self.steer_max, self.torque_params),
                         self.lateral_accel_from_torque(-self.steer_max, self.torque_params))
@@ -269,7 +220,53 @@ class LatControlTorque(LatControl):
   def update(self, active, CS, VM, params, steer_limited_by_safety, desired_curvature, CC, curvature_limited, model_data=None, lat_delay=0.0):
     self.frame += 1
     if self.frame % 10 == 0:
-      self.update_custom_torque_params()
+      custom_enabled = self.params.get_bool("LateralTorqueCustom")
+      custom_was_enabled = self.lateralTorqueCustom
+
+      if custom_enabled:
+        # Reset only when Custom Torque changes from False to True.
+        if not custom_was_enabled:
+          self.pid.reset()
+          self.nn_pid.reset()
+
+        lat_accel_factor = self.params.get_float("LateralTorqueAccelFactor") * 0.001
+        friction = self.params.get_float("LateralTorqueFriction") * 0.001
+
+        nnff_kp = self.params.get_float("LateralTorqueKpV") * 0.01
+        nnff_ki = self.params.get_float("LateralTorqueKiV") * 0.01
+        nnff_kd = self.params.get_float("LateralTorqueKd") * 0.01
+        nnff_kf = self.params.get_float("LateralTorqueKf") * 0.01
+
+        if lat_accel_factor > 1e-6:
+          self.torque_params.latAccelFactor = lat_accel_factor
+
+        self.torque_params.latAccelOffset = self.latAccelOffset_default
+        self.torque_params.friction = friction
+
+        self.nn_pid._k_p = ([0.0], [nnff_kp])
+        self.nn_pid._k_i = ([0.0], [nnff_ki])
+        self.nn_pid._k_d = ([0.0], [nnff_kd])
+        self.nn_pid.k_f = nnff_kf
+
+        self.update_limits()
+
+      elif custom_was_enabled:
+        # Custom True -> False: restore the latest Live Torque values immediately.
+        self.torque_params.latAccelFactor = self.live_lat_accel_factor
+        self.torque_params.latAccelOffset = self.live_lat_accel_offset
+        self.torque_params.friction = self.live_friction
+
+        # Restore the default Full NNFF PID gains.
+        self.nn_pid._k_p = ([0.0], [self.nnff_kp_default])
+        self.nn_pid._k_i = ([0.0], [self.nnff_ki_default])
+        self.nn_pid._k_d = ([0.0], [self.nnff_kd_default])
+        self.nn_pid.k_f = self.nnff_kf_default
+
+        self.pid.reset()
+        self.nn_pid.reset()
+        self.update_limits()
+
+      self.lateralTorqueCustom = custom_enabled
 
     pid_log = log.ControlsState.LateralTorqueState.new_message()
     pid_log.version = VERSION

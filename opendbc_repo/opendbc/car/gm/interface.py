@@ -10,12 +10,14 @@ from opendbc.car.gm.radar_interface import RadarInterface, RADAR_HEADER_MSG, CAM
 from opendbc.car.gm.values import CAR, CarControllerParams, EV_CAR, CAMERA_ACC_CAR, SDGM_CAR, ALT_ACCS, ASCM_INT, CanBus, GMSafetyFlags, GMFlags
 from opendbc.car.interfaces import CarInterfaceBase, TorqueFromLateralAccelCallbackType, LateralAccelFromTorqueCallbackType
 from opendbc.car.torque_nn import NEURAL_PARAMS_PATH, NanoFFModel, get_nano_ff_platforms
+from openpilot.common.params import Params
 
 TransmissionType = structs.CarParams.TransmissionType
 NetworkLocation = structs.CarParams.NetworkLocation
 LongCtrlState = structs.CarControl.Actuators.LongControlState
 
 ACCELERATOR_POS_MSG = 0xbe
+TPMS_POS_MSG = 0x52B ## TPMS
 
 NON_LINEAR_TORQUE_PARAMS = {
   CAR.CHEVROLET_BOLT_EUV: [2.6531724862969748, 1.0, 0.1919764879840985, 0.009054123646805178],
@@ -111,10 +113,13 @@ class CarInterface(CarInterfaceBase):
     ret.brand = "gm"
     ret.safetyConfigs = [get_safety_config(structs.CarParams.SafetyModel.gm)]
     ret.autoResumeSng = False
-    ret.enableBsm = 0x142 in fingerprint[CanBus.POWERTRAIN]
+    ret.enableBsm = 0x142 in fingerprint[CanBus.POWERTRAIN] or 0x142 in fingerprint[CanBus.CAMERA]
     ret.startAccel = 1.0
     ret.radarTimeStep = 0.067
     ret.alternativeExperience = 0
+    params = Params()
+
+    useEVTables = params.get_bool("EVTable")
 
     if PEDAL_MSG in fingerprint[0]:
       ret.enableGasInterceptorDEPRECATED = True
@@ -180,8 +185,8 @@ class CarInterface(CarInterfaceBase):
       ret.radarUnavailable = RADAR_HEADER_MSG not in fingerprint[CanBus.OBSTACLE] and CAMERA_DATA_HEADER_MSG not in fingerprint[CanBus.OBSTACLE] and not docs
       ret.pcmCruise = False  # stock non-adaptive cruise control is kept off
       # supports stop and go, but initial engage must (conservatively) be above 18mph
-      ret.minEnableSpeed = -1
-      ret.minSteerSpeed = 6.7 * CV.MPH_TO_MS
+      ret.minEnableSpeed = -1 * CV.MPH_TO_MS
+      ret.minSteerSpeed = (6.7 if useEVTables else 7) * CV.MPH_TO_MS
 
       # Tuning
       ret.longitudinalTuning.kiV = [2.4, 1.5]
@@ -199,7 +204,7 @@ class CarInterface(CarInterfaceBase):
     ret.steerActuatorDelay = 0.3  # Default delay, not measured yet
 
     ret.steerLimitTimer = 0.4
-    ret.longitudinalActuatorDelay = 0.3  # large delay to initially start braking
+    ret.longitudinalActuatorDelay = params.get_float("LongActuatorDelay")*0.01 # 0.5  # large delay to initially start braking
 
     if candidate == CAR.CHEVROLET_VOLT:
       ret.startingState = True

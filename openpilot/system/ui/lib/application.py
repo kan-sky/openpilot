@@ -6,6 +6,7 @@ import queue
 import time
 import signal
 import sys
+import struct
 import pyray as rl
 import threading
 import platform
@@ -33,6 +34,15 @@ FPS_CRITICAL_THRESHOLD = 0.5  # Critical threshold for triggering strict actions
 MOUSE_THREAD_RATE = 140  # touch controller runs at 140Hz
 MAX_TOUCH_SLOTS = 2
 TOUCH_HISTORY_TIMEOUT = 3.0  # Seconds before touch points fade out
+
+TOUCH_EVENT_DEVICE = "/dev/input/by-path/platform-894000.i2c-event"
+EVENT_FORMAT = "llHHi"
+EVENT_SIZE = struct.calcsize(EVENT_FORMAT)
+EV_SYN, EV_KEY, EV_ABS = 0x00, 0x01, 0x03
+SYN_REPORT = 0x00
+BTN_TOUCH = 0x14a
+ABS_MT_SLOT = 0x2f
+ABS_MT_TRACKING_ID = 0x39
 
 BIG_UI = os.getenv("BIG", "0") == "1"
 ENABLE_VSYNC = os.getenv("ENABLE_VSYNC", "0") == "1"
@@ -148,6 +158,10 @@ class MouseState:
     self._events: deque[MouseEvent] = deque(maxlen=MOUSE_THREAD_RATE)  # bound event list
     self._prev_mouse_event: list[MouseEvent | None] = [None] * MAX_TOUCH_SLOTS
 
+    self._slot_active: list[bool] = [False] * MAX_TOUCH_SLOTS
+    self._cur_slot = 0
+    self._saw_mt = False
+
     self._rk = Ratekeeper(MOUSE_THREAD_RATE, print_delay_threshold=None)
     self._lock = threading.Lock()
     self._exit_event = threading.Event()
@@ -171,34 +185,73 @@ class MouseState:
       self._thread.join()
 
   def _run_thread(self):
-    while not self._exit_event.is_set():
-      rl.poll_input_events()
-      self._handle_mouse_event()
-      self._rk.keep_time()
+    touch_fd = self._open_touch_device()
+    try:
+      while not self._exit_event.is_set():
+        rl.poll_input_events()
+        if touch_fd is not None:
+          self._read_touch_events(touch_fd)
+        else:
+          self._handle_mouse_event()
+        self._rk.keep_time()
+    finally:
+      if touch_fd is not None:
+        os.close(touch_fd)
+
+  def _open_touch_device(self) -> int | None:
+    if PC:
+      return None
+    try:
+      return os.open(TOUCH_EVENT_DEVICE, os.O_RDONLY | os.O_NONBLOCK)
+    except OSError as e:
+      cloudlog.warning(f"mouse: using raylib touch, can't open {TOUCH_EVENT_DEVICE}: {e}")
+      return None
+
+  def _read_touch_events(self, fd: int) -> None:
+    try:
+      data = os.read(fd, EVENT_SIZE * 64)
+    except (BlockingIOError, OSError):
+      return
+
+    for off in range(0, len(data) - EVENT_SIZE + 1, EVENT_SIZE):
+      _sec, _usec, etype, code, value = struct.unpack(EVENT_FORMAT, data[off:off + EVENT_SIZE])
+      if etype == EV_ABS:
+        if code == ABS_MT_SLOT:
+          self._cur_slot = value
+        elif code == ABS_MT_TRACKING_ID:
+          self._saw_mt = True
+          if 0 <= self._cur_slot < MAX_TOUCH_SLOTS:
+            self._slot_active[self._cur_slot] = value != -1
+      elif etype == EV_KEY and code == BTN_TOUCH and not self._saw_mt:
+        self._slot_active[0] = value != 0
+      elif etype == EV_SYN and code == SYN_REPORT:
+        for slot in range(MAX_TOUCH_SLOTS):
+          self._append_event(slot, self._slot_active[slot])
 
   def _handle_mouse_event(self):
-    # TODO: read touch events from evdev directly to get real kernel timestamps.
-    #  Polling at 140Hz with time.monotonic() causes timing jitter that makes scroll
-    #  velocity oscillate (alternating high/low). Real timestamps would also let us
-    #  detect swipe-stop-lift via event gaps instead of the fragile decel heuristic.
     for slot in range(MAX_TOUCH_SLOTS):
+      self._append_event(slot, rl.is_mouse_button_down(slot))
+
+  def _append_event(self, slot: int, down: bool) -> None:
+    prev = self._prev_mouse_event[slot]
+    prev_down = prev.left_down if prev is not None else False
+    pressed = down and not prev_down
+    released = prev_down and not down
+
+    if down:
       mouse_pos = rl.get_touch_position(slot)
       x = mouse_pos.x / self._scale if self._scale != 1.0 else mouse_pos.x
       y = mouse_pos.y / self._scale if self._scale != 1.0 else mouse_pos.y
-      ev = MouseEvent(
-        MousePos(x, y),
-        slot,
-        rl.is_mouse_button_pressed(slot),  # noqa: TID251
-        rl.is_mouse_button_released(slot),  # noqa: TID251
-        rl.is_mouse_button_down(slot),
-        time.monotonic(),
-      )
-      # Only add changes
-      prev = self._prev_mouse_event[slot]
-      if prev is None or ev[:-1] != prev[:-1]:
-        with self._lock:
-          self._events.append(ev)
-        self._prev_mouse_event[slot] = ev
+      pos = MousePos(x, y)
+    else:
+      pos = prev.pos if prev is not None else MousePos(0.0, 0.0)
+
+    ev = MouseEvent(pos, slot, pressed, released, down, time.monotonic())
+
+    if prev is None or ev[:-1] != prev[:-1]:
+      with self._lock:
+        self._events.append(ev)
+      self._prev_mouse_event[slot] = ev
 
 
 class GuiApplication:
@@ -249,6 +302,130 @@ class GuiApplication:
     self._profile_render_frames = PROFILE_RENDER
     self._render_profiler = None
     self._render_profile_start_time = None
+
+    self._record_enabled = False
+    self._record_dir = Path("/data/media/0/videos")
+    self._record_max_sec = 60
+    self._record_t0 = 0.0
+    self._record_every_n = 3
+    self._record_frame_idx = 0
+
+  def _new_record_path(self) -> Path:
+    self._record_dir.mkdir(parents=True, exist_ok=True)
+    name = datetime.datetime.now().strftime("%Y%m%d-%H%M%S") + ".mp4"
+    return self._record_dir / name
+  
+  def start_recording(self):
+    if self._record_enabled:
+      return
+
+    self._ensure_render_texture_for_recording()
+    if not self._render_texture:
+      return
+
+    out_path = self._new_record_path()
+    self._init_ffmpeg(out_path)
+
+    self._record_enabled = True
+    self._record_t0 = time.monotonic()
+    print(f"[REC] start -> {out_path}")
+
+  def stop_recording(self):
+    if not self._record_enabled:
+      return
+    self._record_enabled = False
+    self.close_ffmpeg()  # application.py에 이미 있는 close_ffmpeg 그대로 사용
+    print("[REC] stop")
+
+  def toggle_recording(self):
+    if self._record_enabled:
+      self.stop_recording()
+    else:
+      self.start_recording()
+
+  def is_recording(self) -> bool:
+    return self._record_enabled
+
+  def _ensure_render_texture_for_recording(self):
+    if self._render_texture is None:
+      self._render_texture = rl.load_render_texture(self._width, self._height)
+      rl.set_texture_filter(self._render_texture.texture, rl.TextureFilter.TEXTURE_FILTER_BILINEAR)
+
+  def _init_ffmpeg(self, out_path: Path):
+    self.close_ffmpeg()
+
+    # 내부 튜닝(원하면 여기만 조절)
+    record_quality = 23          # CRF
+    record_bitrate = ""          # e.g. "2000k" (원하면 사용)
+    record_speed = 1             # 배속(출력 fps = 입력 fps * speed)
+    preset = "ultrafast"
+
+    fps = self._target_fps if self._target_fps > 0 else _DEFAULT_FPS
+    output_fps = fps * record_speed
+
+    ffmpeg_args = [
+      "ffmpeg",
+      "-v", "warning",
+      "-nostats",
+      "-f", "rawvideo",
+      "-pix_fmt", "rgba",
+      "-s", f"{self._width}x{self._height}",
+      "-r", str(fps),
+      "-i", "pipe:0",
+      "-vf", "vflip,format=yuv420p",
+      "-r", str(output_fps),
+      "-c:v", "libx264",
+      "-preset", preset,
+      "-crf", str(record_quality),
+    ]
+
+    if record_bitrate:
+      ffmpeg_args += ["-b:v", record_bitrate, "-maxrate", record_bitrate, "-bufsize", record_bitrate]
+
+    ffmpeg_args += [
+      "-y",
+      "-f", "mp4",
+      str(out_path),
+    ]
+
+    self._ffmpeg_proc = subprocess.Popen(ffmpeg_args, stdin=subprocess.PIPE)
+    self._ffmpeg_queue = queue.Queue(maxsize=8) # 60 -> 8, 메모리 사용량 줄이기 위해 버퍼 크기 감소
+    self._ffmpeg_stop_event = threading.Event()
+    self._ffmpeg_thread = threading.Thread(target=self._ffmpeg_writer_thread, daemon=True)
+    self._ffmpeg_thread.start()
+
+  def close_ffmpeg(self):
+    if self._ffmpeg_thread is not None:
+      self._ffmpeg_stop_event.set()
+      try:
+        self._ffmpeg_queue.put(None, timeout=1.0)
+      except Exception:
+        pass
+      self._ffmpeg_thread.join(timeout=30)
+
+    if self._ffmpeg_proc is not None:
+      try:
+        if self._ffmpeg_proc.stdin:
+          try:
+            self._ffmpeg_proc.stdin.flush()
+          except Exception:
+            pass
+          self._ffmpeg_proc.stdin.close()
+        try:
+          self._ffmpeg_proc.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+          self._ffmpeg_proc.terminate()
+          self._ffmpeg_proc.wait()
+      except Exception:
+        try:
+          self._ffmpeg_proc.kill()
+        except Exception:
+          pass
+
+    self._ffmpeg_proc = None
+    self._ffmpeg_queue = None
+    self._ffmpeg_thread = None
+    self._ffmpeg_stop_event = None  
 
   @property
   def frame(self):
@@ -535,20 +712,65 @@ class GuiApplication:
     return texture
 
   def close_ffmpeg(self):
-    if self._ffmpeg_thread is not None:
-      # Signal thread to stop, send sentinel, then wait for it to drain
-      self._ffmpeg_stop_event.set()
-      self._ffmpeg_queue.put(None)
-      self._ffmpeg_thread.join(timeout=30)
+    th = self._ffmpeg_thread
+    q = self._ffmpeg_queue
+    ev = self._ffmpeg_stop_event
+    proc = self._ffmpeg_proc
 
-    if self._ffmpeg_proc is not None:
-      self._ffmpeg_proc.stdin.flush()
-      self._ffmpeg_proc.stdin.close()
+    # 먼저 참조 끊기(재진입/중복 호출 방지)
+    self._ffmpeg_thread = None
+    self._ffmpeg_queue = None
+    self._ffmpeg_stop_event = None
+    self._ffmpeg_proc = None
+
+    # thread stop
+    try:
+      if th is not None and ev is not None:
+        ev.set()
+      if th is not None and q is not None:
+        try:
+          q.put_nowait(None)
+        except Exception:
+          pass
+        th.join(timeout=30)
+    except Exception:
+      pass
+
+    # proc stop
+    if proc is not None:
       try:
-        self._ffmpeg_proc.wait(timeout=30)
-      except subprocess.TimeoutExpired:
-        self._ffmpeg_proc.terminate()
-        self._ffmpeg_proc.wait()
+        stdin = proc.stdin
+        if stdin is not None:
+          try:
+            # 이미 닫혔으면 flush 금지
+            if not getattr(stdin, "closed", False):
+              try:
+                stdin.flush()
+              except Exception:
+                pass
+              try:
+                stdin.close()
+              except Exception:
+                pass
+          except Exception:
+            pass
+
+        try:
+          proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+          try:
+            proc.terminate()
+          except Exception:
+            pass
+          try:
+            proc.wait(timeout=5)
+          except Exception:
+            pass
+      except Exception:
+        try:
+          proc.kill()
+        except Exception:
+          pass
 
   def close(self):
     if not rl.is_window_ready():
@@ -575,6 +797,8 @@ class GuiApplication:
 
     self.close_ffmpeg()
 
+    self.stop_recording()
+    self.close_ffmpeg()
     rl.close_window()
 
   @property
@@ -595,7 +819,6 @@ class GuiApplication:
 
       while not (self._window_close_requested or rl.window_should_close()):
         frame_start = time.monotonic()
-
         if PC:
           # Thread is not used on PC, need to manually add mouse events
           self._mouse._handle_mouse_event()
@@ -665,12 +888,22 @@ class GuiApplication:
 
         rl.end_drawing()
 
-        if RECORD:
-          image = rl.load_image_from_texture(self._render_texture.texture)
-          data_size = image.width * image.height * 4
-          data = bytes(rl.ffi.buffer(image.data, data_size))
-          self._ffmpeg_queue.put(data)  # Async write via background thread
-          rl.unload_image(image)
+        if RECORD or self._record_enabled:
+          self._record_frame_idx += 1
+          if self._record_frame_idx % self._record_every_n == 0:
+            image = rl.load_image_from_texture(self._render_texture.texture)
+            data_size = image.width * image.height * 4
+            data = bytes(rl.ffi.buffer(image.data, data_size))
+            try:
+              self._ffmpeg_queue.put_nowait(data)  # Async write via background thread
+            except queue.Full:
+              pass          
+            rl.unload_image(image)
+            
+          if self._record_enabled:
+            if (time.monotonic() - self._record_t0) >= self._record_max_sec:
+              self.stop_recording()
+              self.start_recording()
 
         self._monitor_fps()
         self._frame += 1
@@ -692,15 +925,58 @@ class GuiApplication:
     return self._height
 
   def _load_fonts(self):
-    for font_weight_file in FontWeight:
-      with as_file(FONT_DIR) as fspath:
-        fnt_path = fspath / font_weight_file
-        font = rl.load_font(fnt_path.as_posix())
-        if font_weight_file != FontWeight.UNIFONT:
-          rl.gen_texture_mipmaps(font.texture)
-          rl.set_texture_filter(font.texture, rl.TextureFilter.TEXTURE_FILTER_TRILINEAR)
-        self._fonts[font_weight_file] = font
+    for fw in FontWeight:
+      fnt_path = FONT_DIR / fw
+      font_path = self._resolve_font_path(fnt_path)
+      if font_path != fnt_path:
+        cloudlog.warning(f"Font atlas missing, loading source font instead: {font_path}")
+
+      font = self._load_font_path(font_path, fw)
+      if fw != FontWeight.UNIFONT and self._font_texture_valid(font):
+        rl.gen_texture_mipmaps(font.texture)
+        rl.set_texture_filter(font.texture, rl.TextureFilter.TEXTURE_FILTER_TRILINEAR)
+
+      self._fonts[fw] = font
+
     rl.gui_set_font(self._fonts[FontWeight.NORMAL])
+
+  def _resolve_font_path(self, fnt_path: Path) -> Path:
+    if fnt_path.exists():
+      return fnt_path
+
+    stem = fnt_path.with_suffix("")
+    for ext in FONT_SOURCE_EXTS:
+      source_path = stem.with_suffix(ext)
+      if source_path.exists():
+        return source_path
+    return fnt_path
+
+  def _load_font_path(self, font_path: Path, font_weight: FontWeight) -> rl.Font:
+    if font_path.suffix.lower() == ".fnt":
+      return rl.load_font(font_path.as_posix())
+
+    try:
+      font_size = 16 if font_weight == FontWeight.UNIFONT else 48 if font_weight == FontWeight.DISPLAY else 200
+      codepoints = self._font_codepoints(font_weight)
+      cp_buffer = rl.ffi.new("int[]", codepoints)
+      cp_ptr = rl.ffi.cast("int *", cp_buffer)
+      return rl.load_font_ex(font_path.as_posix(), font_size, cp_ptr, len(codepoints))
+    except Exception:
+      cloudlog.exception(f"Failed to load source font with codepoints: {font_path}")
+      return rl.load_font(font_path.as_posix())
+
+  def _font_codepoints(self, font_weight: FontWeight) -> list[int]:
+    codepoints = set(range(32, 127))
+    if font_weight in (FontWeight.DISPLAY, FontWeight.UNIFONT):
+      codepoints.update(range(0xAC00, 0xD7A4))
+    return sorted(codepoints)
+
+  @staticmethod
+  def _font_texture_valid(font: rl.Font) -> bool:
+    try:
+      return int(font.texture.id) > 0
+    except Exception:
+      return False
 
   def _set_styles(self):
     rl.gui_set_style(rl.GuiControl.DEFAULT, rl.GuiControlProperty.BORDER_WIDTH, 0)
