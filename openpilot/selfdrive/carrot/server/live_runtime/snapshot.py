@@ -323,7 +323,6 @@ def _build_car_state(service: Any, previous: dict[str, Any] | None = None) -> di
   p["vEgoCluster"] = safe_float(safe_get(service, "vEgoCluster"))
   p["vCruiseCluster"] = safe_float(safe_get(service, "vCruiseCluster"))
   p["steeringAngleDeg"] = safe_float(safe_get(service, "steeringAngleDeg"))
-  p["useLaneLineSpeed"] = safe_int(safe_get(service, "useLaneLineSpeed"))
   p["leftLaneLine"] = safe_int(safe_get(service, "leftLaneLine"))
   p["rightLaneLine"] = safe_int(safe_get(service, "rightLaneLine"))
   p["gearShifter"] = safe_text(safe_get(service, "gearShifter"))
@@ -508,11 +507,8 @@ def _build_gps(service: Any, previous: dict[str, Any] | None = None) -> dict[str
 def _build_lateral_plan(service: Any, previous: dict[str, Any] | None = None) -> dict[str, Any]:
   p = previous if isinstance(previous, dict) else {}
   p["pathMode"] = safe_text(safe_get(service, "pathMode"))
-  p["useLaneLineSpeed"] = safe_float(safe_get(service, "useLaneLineSpeed"))
   p["laneChangeState"] = safe_enum_int(safe_get(service, "laneChangeState"))
   p["laneChangeDirection"] = safe_enum_int(safe_get(service, "laneChangeDirection"))
-  p["latDebugText"] = safe_text(safe_get(service, "latDebugText"))
-  p["useLaneLines"] = safe_bool(safe_get(service, "useLaneLines"))
   _update_xyz_payload(_ensure_dict(p, "position"), safe_get(service, "position"))
   _fill_list(_ensure_list(p, "distances"), safe_get(service, "distances"), limit=33)
   return p

@@ -41,7 +41,6 @@ carrotRawCapnpGlobal.CarrotRawCapnp = (() => {
         softHoldActive: { kind: "int16", offset: 42 },    // @60 int16 slot 42
         carrotCruise: { kind: "int16", offset: 60 },      // @73 int16 slot 60
         gearStep: { kind: "int16", offset: 45 },          // @66 int16 slot 45
-        useLaneLineSpeed: { kind: "float32", offset: 25 },// @68 32-bit slot 25
         brakeLights: { kind: "bool", offset: 68 },        // @19 bool bit 68
         gearShifter: { kind: "enum", offset: 5, values: HUD_GEAR_NAMES }, // @14 enum16 slot 5
       },
@@ -204,7 +203,6 @@ carrotRawCapnpGlobal.CarrotRawCapnp = (() => {
     },
     lateralPlan: {
       fields: {
-        useLaneLines: { kind: "bool", offset: 166 }, // @29 bool bit 166 (capnp slot, not ordinal)
         latDebugText: { kind: "text", offset: 9 },
         position: { kind: "struct", offset: 10, schema: XYZT_SCHEMA },
         distances: { kind: "list<float32>", offset: 11 },

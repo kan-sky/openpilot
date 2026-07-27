@@ -2,8 +2,6 @@
 from openpilot.common.constants import ACCELERATION_DUE_TO_GRAVITY
 from openpilot.common.realtime import DT_CTRL, DT_MDL
 # carrot
-from openpilot.cereal import log
-from openpilot.selfdrive.modeld.constants import ModelConstants
 from opendbc.car.volkswagen.values import VolkswagenFlags
 
 
@@ -39,54 +37,6 @@ def apply_deadzone(error, deadzone):
   else:
     error = 0.
   return error
-
-# Carrot
-def get_lag_adjusted_curvature(CP, v_ego, psis, curvatures, steer_actuator_delay, distances):
-  if len(psis) != CONTROL_N:
-    psis = [0.0] * CONTROL_N
-    curvatures = [0.0] * CONTROL_N
-    distances = [0.0] * CONTROL_N
-  v_ego = max(MIN_SPEED, v_ego)
-
-  delay = max(0.01, steer_actuator_delay)
-
-  current_curvature_desired = curvatures[0]
-  delayed_curvature_desired = np.interp(delay, ModelConstants.T_IDXS[:CONTROL_N], curvatures)
-  future_curvature_desired = np.interp(1.2, ModelConstants.T_IDXS[:CONTROL_N], curvatures)
-
-  psi = np.interp(delay, ModelConstants.T_IDXS[:CONTROL_N], psis)
-  distance = max(np.interp(delay, ModelConstants.T_IDXS[:CONTROL_N], distances), 0.001)
-
-  psi_damping_straight = params.get_int("PsiDampingStraight") * 0.01
-  psi_damping_s_curve = params.get_int("PsiDampingSCurve") * 0.01
-
-  # 기본값 보정
-  if psi_damping_straight <= 0.0:
-    psi_damping_straight = 0.7  # 곡선 탈출시 heading변화량(psi)의 30% 정도만 풀어주고 70% 유지.
-  if psi_damping_s_curve <= 0.0:
-    psi_damping_s_curve = 0.5  # 반대방향 곡선 전환시 heading변화량(psi)의 50%만 반영해서 좀더 빨리 풀어줌.
-
-  # 전환구간 출렁임 방지용
-  psis_damping = 1.0  # 기본은 미래 heading 변화량을 그대로 반영 
-  if v_ego > 5 and abs(current_curvature_desired) > 0.0001:
-    # 커브 -> 직선
-    if abs(future_curvature_desired) < 0.0004:
-      psis_damping = psi_damping_straight
-    # S자 곡선
-    elif np.sign(current_curvature_desired) != np.sign(future_curvature_desired):
-      psis_damping = psi_damping_s_curve
-
-  psi *= psis_damping
-
-  average_curvature_desired = psi / distance
-  desired_curvature = 2 * average_curvature_desired - current_curvature_desired
-
-  max_curvature_rate = MAX_LATERAL_JERK / (v_ego ** 2)
-
-  safe_desired_curvature = np.clip(desired_curvature,
-                                current_curvature_desired - max_curvature_rate * DT_MDL,
-                                current_curvature_desired + max_curvature_rate * DT_MDL)
-  return safe_desired_curvature
 
 def clamp(val, min_val, max_val):
   clamped_val = float(np.clip(val, min_val, max_val))

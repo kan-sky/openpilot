@@ -877,7 +877,6 @@ const SETTING_DISPLAY_UNIT_TYPES = Object.freeze({
 });
 
 const SETTING_PARAM_DISPLAY_TYPES = Object.freeze({
-  PathOffset: "distanceCm",
   CruiseOnDist: "distanceCm",
   CruiseEcoControl: "speedKph",
   StopDistanceCarrot: "distanceCm",
@@ -896,8 +895,6 @@ const SETTING_PARAM_DISPLAY_TYPES = Object.freeze({
   AutoSpeedUptoRoadSpeedLimit: "percent",
   AutoRoadSpeedAdjust: "percent",
   ApplyModelSpeed: "percent",
-  UseLaneLineSpeed: "speedKph",
-  UseLaneLineCurveSpeed: "speedKph",
   AdjustLaneOffset: "distanceCm",
   SoundVolumeAdjust: "percent",
   SoundVolumeAdjustEngage: "percent",

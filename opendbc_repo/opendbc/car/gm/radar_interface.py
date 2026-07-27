@@ -42,7 +42,7 @@ class RadarInterface(RadarInterfaceBase):
     self.rcp = None if CP.radarUnavailable else create_radar_can_parser(CP.carFingerprint)
 
     # 한 프레임이 완성되었다고 보는 트리거 메시지
-    self.trigger_msg = RADAR_HEADER_MSG
+    self.trigger_msg = LAST_RADAR_MSG
     self.updated_messages = set()
 
     # Kans

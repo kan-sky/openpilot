@@ -477,7 +477,6 @@ class ModelRenderer(Widget):
     self._carrot_show_path_width = 1.0
     self._carrot_active_lane_line = False
     self._carrot_long_active = False
-    self._carrot_use_lane_line_speed_apply = 0
 
     self._carrot_path_draw_seq = 0.0
     self._carrot_pos_t = 0.0
@@ -1571,9 +1570,6 @@ class ModelRenderer(Widget):
     self._update_path_end_carrot(sm)
 
     car_state = sm['carState']
-    temp = int(car_state.useLaneLineSpeed)
-    if temp != self._carrot_use_lane_line_speed_apply:
-      self._carrot_use_lane_line_speed_apply = temp
 
     brake_valid = car_state.brakeLights
     radar_state = sm['radarState'] if sm.valid['radarState'] else None
