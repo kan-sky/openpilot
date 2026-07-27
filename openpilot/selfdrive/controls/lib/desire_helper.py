@@ -416,7 +416,7 @@ class DesireHelper:
                 elif bsd_active:
                   if torque_applied and (not block_lanechange_bsd):
                     self.lane_change_state = LaneChangeState.laneChangeStarting
-                elif self.laneChangeNeedTorque > 0 and driver_enabled  #Kans: or self.next_lane_change:
+                elif self.laneChangeNeedTorque > 0 and driver_enabled:  #Kans: or self.next_lane_change:
                   if torque_applied:
                     self.lane_change_state = LaneChangeState.laneChangeStarting
                 elif driver_enabled:
