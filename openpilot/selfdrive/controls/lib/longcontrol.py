@@ -12,7 +12,7 @@ LongCtrlState = car.CarControl.Actuators.LongControlState
 
 
 def long_control_state_trans(CP, active, long_control_state, v_ego,
-                             should_stop, brake_pressed, cruise_standstill, a_ego, stopping_accel, radarState):
+                             should_stop, brake_pressed, cruise_standstill):
   stopping_condition = should_stop
   starting_condition = (not should_stop and
                         not cruise_standstill and
@@ -37,17 +37,12 @@ def long_control_state_trans(CP, active, long_control_state, v_ego,
       elif starting_condition:
         long_control_state = LongCtrlState.pid
 
-    elif long_control_state in [LongCtrlState.starting, LongCtrlState.pid]:
+    elif long_control_state in (LongCtrlState.starting, LongCtrlState.pid):
       if stopping_condition:
-        stopping_accel = stopping_accel if stopping_accel < 0.0 else -0.5
-        leadOne = radarState.leadOne
-        fcw_stop = leadOne.present and leadOne.dRel < 4.0
-        if a_ego > stopping_accel or fcw_stop: # and v_ego < 1.0:
-          long_control_state = LongCtrlState.stopping
-        if long_control_state == LongCtrlState.starting:
-          long_control_state = LongCtrlState.stopping
+        long_control_state = LongCtrlState.stopping
       elif started_condition:
         long_control_state = LongCtrlState.pid
+
   return long_control_state
 
 class LongControl:
@@ -72,8 +67,7 @@ class LongControl:
   def reset(self):
     self.pid.reset()
 
-  def update(self, active, CS, long_plan, accel_limits, t_since_plan, radarState):
-
+  def update(self, active, CS, long_plan, accel_limits, t_since_plan):
     soft_hold_active = CS.softHoldActive > 0
     a_target_ff = long_plan.aTarget
     v_target_now = long_plan.vTargetNow
@@ -99,7 +93,7 @@ class LongControl:
 
     self.long_control_state = long_control_state_trans(self.CP, active, self.long_control_state, CS.vEgo,
                                                        should_stop, CS.brakePressed,
-                                                       CS.cruiseState.standstill, CS.aEgo, self.stopping_accel, radarState)
+                                                       CS.cruiseState.standstill)
     if active and soft_hold_active:
       self.long_control_state = LongCtrlState.stopping
 
