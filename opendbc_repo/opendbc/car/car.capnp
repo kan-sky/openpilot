@@ -260,14 +260,14 @@ struct CarState {
   leftRearLatDist @79 :Float32; # rear-left corner radar lateral distance
   rightRearLatDist @80 :Float32; # rear-right corner radar lateral distance
   trailerConnected @81 :Bool; # trailer connection state after disconnect debounce
-  ureaGauge @87 :Float32; # diesel exhaust fluid/urea tank level from 0.0 to 1.0
-  steeringDisengage @82 :Bool;     # more force than steeringPressed, disengages for applicable brands
-  stockLkas @83 :Bool;
-  blockPcmEnable @84 :Bool;  # whether to allow PCM to enable this frame
-  accStatus @85 :UInt16;
-  autoHoldActivated @86 :Bool;
-  cruiseSpeedBigStep @88 :Bool; # VW: cruise +/- button is a stage-2 (swipe/long) press -> use big increment
-  steeringCurvature @89 :Float32; # VW MEB: measured road curvature from EPS (QFK_01), rad/m. Used for closed-loop curvature correction.
+  ureaGauge @82 :Float32; # diesel exhaust fluid/urea tank level from 0.0 to 1.0
+  cruiseSpeedBigStep @83 :Bool; # VW: cruise +/- button is a stage-2 (swipe/long) press -> use big increment
+  steeringCurvature @84 :Float32; # VW MEB: measured road curvature from EPS (QFK_01), rad/m. Used for closed-loop curvature correction.
+  steeringDisengage @85 :Bool;     # more force than steeringPressed, disengages for applicable brands
+  stockLkas @86 :Bool;
+  blockPcmEnable @87 :Bool;  # whether to allow PCM to enable this frame
+  accStatus @88 :UInt16;
+  autoHoldActivated @89 :Bool;
 
 
   struct Tpms {
@@ -375,6 +375,14 @@ struct RadarData @0x888ad6581cf0aacb {
     vLead @7 :Float32; # m/s
     aLead @8 :Float32; # m/s^2
     jLead @9 :Float32; # m/s^3
+    radarSource @10 :RadarSource;
+
+    enum RadarSource {
+      frontRadar @0;
+      scc @1;
+      corner235 @2;
+      corner180 @3;
+    }
   }
 
   enum ErrorDEPRECATED {
@@ -383,9 +391,10 @@ struct RadarData @0x888ad6581cf0aacb {
     wrongConfig @2;
   }
 
-  # deprecated
-  canMonoTimesDEPRECATED @2 :List(UInt64);
-  errorsDEPRECATED @0 :List(ErrorDEPRECATED);
+  deprecated :group {
+    canMonoTimes @2 :List(UInt64);
+    errors @0 :List(ErrorDEPRECATED);
+  }
 }
 
 # ******* car controls @ 100hz *******
@@ -467,8 +476,9 @@ struct CarControl {
     modelDesire @16: Int16;
     atcDistance @17: Float32;
     naviSpeedLimit @18: Int16;  # VW MEB cluster: TMAP 단속카메라/구간단속 제한속도 (kph, 0=없음) -> ACC_Tempolimit + event 5
-    naviEventType @19: Int16;   # VW MEB cluster: 0=없음 1=커브(event 6) 2=교차로 회전(event 9) 3=분기/고속도로 출구(event 11)
-    naviEventSpeed @20: Int16;  # VW MEB cluster: 커브/교차로 목표속도 (kph) -> ACC_Event_Wunschgeschw
+    naviEventType @19: Int16;   # VW MEB cluster: 0=없음 1=커브 2=교차로 3=분기/출구 4=로터리 5=병목 8=도로제한제어중
+    naviEventSpeed @20: Int16;  # VW MEB cluster: 목표속도 kph (커브는 부호=방향: +우/-좌) -> ACC_Event_Wunschgeschw
+    leadLimiting @21: Bool;     # VW MEB cluster: 앞차가 속도를 제한 중(xState lead) -> 앞차 하이라이트 우선
 
     # not used with the dash, TODO: separate structs for dash UI and device UI
     audibleAlert @5: AudibleAlert;

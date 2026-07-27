@@ -7,11 +7,17 @@ from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.gm.carcontroller import CarController
 from opendbc.car.gm.carstate import CarState
 from opendbc.car.gm.radar_interface import RadarInterface, RADAR_HEADER_MSG, CAMERA_DATA_HEADER_MSG
-from opendbc.car.gm.values import CAR, CarControllerParams, EV_CAR, CAMERA_ACC_CAR, SDGM_CAR, ALT_ACCS, CanBus, GMSafetyFlags
+from opendbc.car.gm.values import CAR, CarControllerParams, EV_CAR, CAMERA_ACC_CAR, SDGM_CAR, ALT_ACCS, ASCM_INT, CanBus, GMSafetyFlags, GMFlags
 from opendbc.car.interfaces import CarInterfaceBase, TorqueFromLateralAccelCallbackType, LateralAccelFromTorqueCallbackType
+from opendbc.car.torque_nn import NEURAL_PARAMS_PATH, NanoFFModel, get_nano_ff_platforms
+from openpilot.common.params import Params
 
 TransmissionType = structs.CarParams.TransmissionType
 NetworkLocation = structs.CarParams.NetworkLocation
+LongCtrlState = structs.CarControl.Actuators.LongControlState
+
+ACCELERATOR_POS_MSG = 0xbe
+TPMS_POS_MSG = 0x52B ## TPMS
 
 NON_LINEAR_TORQUE_PARAMS = {
   CAR.CHEVROLET_BOLT_EUV: [2.6531724862969748, 1.0, 0.1919764879840985, 0.009054123646805178],
@@ -19,6 +25,7 @@ NON_LINEAR_TORQUE_PARAMS = {
   CAR.CHEVROLET_SILVERADO: [3.29974374, 1.0, 0.25571356, 0.0465122]
 }
 
+PEDAL_MSG = 0x201
 
 class CarInterface(CarInterfaceBase):
   CarState = CarState
@@ -65,14 +72,31 @@ class CarInterface(CarInterfaceBase):
     return torque_values, lataccel_values
 
   def torque_from_lateral_accel(self) -> TorqueFromLateralAccelCallbackType:
+    # Full Flux NNFF supplies the final feedforward in LatControlTorque, so use a deterministic
+    # physical mapping here for feedback/error conversion instead of stacking NanoFF twice.
+    if not self.extended_nnff_available and self.CP.carFingerprint in get_nano_ff_platforms():
+      self.neural_ff_model = NanoFFModel(NEURAL_PARAMS_PATH, self.CP.carFingerprint)
+
+      def torque_from_lateral_accel_neural(lateral_acceleration: float, torque_params: structs.CarParams.LateralTorqueTuning):
+        inputs = [lateral_acceleration, 0.0, 0.0, 0.0]
+        return self.neural_ff_model.predict(inputs)
+      return torque_from_lateral_accel_neural
+
     if self.CP.carFingerprint in NON_LINEAR_TORQUE_PARAMS:
       torque_values, lataccel_values = self.get_lataccel_torque_siglin()
 
       def torque_from_lateral_accel_siglin(lateral_acceleration: float, torque_params: structs.CarParams.LateralTorqueTuning):
-        return np.interp(lateral_acceleration, lataccel_values, torque_values)
+        return float(np.interp(lateral_acceleration, lataccel_values, torque_values))
       return torque_from_lateral_accel_siglin
-    else:
-      return self.torque_from_lateral_accel_linear
+
+    return self.torque_from_lateral_accel_linear
+
+  def torque_from_lateral_accel_context(self, lateral_acceleration: float, torque_params: structs.CarParams.LateralTorqueTuning,
+                                        roll_compensation: float, v_ego: float, a_ego: float, gravity_adjusted: bool) -> float:
+    if hasattr(self, "neural_ff_model"):
+      nn_lateral_acceleration = lateral_acceleration + roll_compensation if gravity_adjusted else lateral_acceleration
+      return float(self.neural_ff_model.predict([nn_lateral_acceleration, roll_compensation, v_ego, a_ego]))
+    return self.torque_from_lateral_accel()(lateral_acceleration, torque_params)
 
   def lateral_accel_from_torque(self) -> LateralAccelFromTorqueCallbackType:
     if self.CP.carFingerprint in NON_LINEAR_TORQUE_PARAMS:
@@ -89,30 +113,59 @@ class CarInterface(CarInterfaceBase):
     ret.brand = "gm"
     ret.safetyConfigs = [get_safety_config(structs.CarParams.SafetyModel.gm)]
     ret.autoResumeSng = False
-    ret.enableBsm = 0x142 in fingerprint[CanBus.POWERTRAIN]
+    ret.enableBsm = 0x142 in fingerprint[CanBus.POWERTRAIN] or 0x142 in fingerprint[CanBus.CAMERA]
+    ret.startAccel = 1.0
+    ret.radarTimeStep = 0.067
+    ret.alternativeExperience = 0
+    params = Params()
 
+    useEVTables = params.get_bool("EVTable")
+
+    if PEDAL_MSG in fingerprint[0]:
+      ret.enableGasInterceptorDEPRECATED = True
+      ret.safetyConfigs[0].safetyParam |= GMSafetyFlags.GAS_INTERCEPTOR.value
+      # When a pedal interceptor is present, always use normal longitudinal (block stock cruise)
+      alpha_long = False
     if candidate in EV_CAR:
       ret.transmissionType = TransmissionType.direct
       ret.safetyConfigs[0].safetyParam |= GMSafetyFlags.EV.value
     else:
       ret.transmissionType = TransmissionType.automatic
 
-    ret.longitudinalTuning.kiBP = [0.]
+    ret.longitudinalTuning.kiBP = [5., 35.]
 
-    if candidate in (CAMERA_ACC_CAR | SDGM_CAR):
-      ret.alphaLongitudinalAvailable = candidate not in SDGM_CAR
+    if candidate in (CAMERA_ACC_CAR | SDGM_CAR | ASCM_INT):
+      ret.alphaLongitudinalAvailable = candidate not in (ASCM_INT | SDGM_CAR)
       ret.networkLocation = NetworkLocation.fwdCamera
-      ret.radarUnavailable = True  # no radar
+      ret.radarUnavailable = 0x460 not in fingerprint[CanBus.OBSTACLE]
       ret.pcmCruise = True
-      ret.safetyConfigs[0].safetyParam |= GMSafetyFlags.HW_CAM.value
       ret.minEnableSpeed = -1 if candidate in SDGM_CAR else 5 * CV.KPH_TO_MS
       ret.minSteerSpeed = 10 * CV.KPH_TO_MS
+      if candidate in SDGM_CAR:
+        # Kans: SDGM은 0x2FF로 알파롱컨 사용
+        ret.alphaLongitudinalAvailable = 0x2FF in fingerprint[CanBus.CAMERA]
+        # SDGM은 항상 오파롱 사용
+        ret.safetyConfigs[0].safetyParam |= GMSafetyFlags.HW_SDGM.value
+        # BE(0xBE)가 없는 SDGM에서만 C9 브레이크 강제
+        if ACCELERATOR_POS_MSG not in fingerprint[CanBus.POWERTRAIN]:
+          ret.safetyConfigs[0].safetyParam |= GMSafetyFlags.FORCE_BRAKE_C9.value
+          ret.flags |= GMFlags.FORCE_BRAKE_C9.value
+        ret.minEnableSpeed = -1.  # engage speed is decided by pcm
+        ret.minSteerSpeed = 7 * CV.MPH_TO_MS
+      elif candidate in ASCM_INT:
+        ret.safetyConfigs[0].safetyParam |= GMSafetyFlags.HW_CAM.value
+        ret.minSteerSpeed = 7 * CV.MPH_TO_MS
+        ret.safetyConfigs[0].safetyParam |= GMSafetyFlags.ASCM_INT.value
+      else:
+        # CAMERA_ACC_CAR
+        ret.safetyConfigs[0].safetyParam |= GMSafetyFlags.HW_CAM.value
 
-      # Tuning for experimental long
-      ret.longitudinalTuning.kiV = [2.0, 1.5]
-      ret.stoppingDecelRate = 2.0  # reach brake quickly after enabling
+      # Tuning for alpha long
+      ret.longitudinalTuning.kiV = [0.0]
+      ret.stoppingDecelRate = 1.0  # reach brake quickly after enabling
       ret.vEgoStopping = 0.25
       ret.vEgoStarting = 0.25
+      ret.stopAccel = -0.20
 
       if alpha_long:
         ret.pcmCruise = False
@@ -133,44 +186,66 @@ class CarInterface(CarInterfaceBase):
       ret.pcmCruise = False  # stock non-adaptive cruise control is kept off
       # supports stop and go, but initial engage must (conservatively) be above 18mph
       ret.minEnableSpeed = -1 * CV.MPH_TO_MS
-      ret.minSteerSpeed = 7 * CV.MPH_TO_MS
+      ret.minSteerSpeed = (6.7 if useEVTables else 7) * CV.MPH_TO_MS
 
       # Tuning
-      ret.longitudinalTuning.kpV = [1.0]
-      ret.longitudinalTuning.kiV = [0.3]
+      ret.longitudinalTuning.kiV = [2.4, 1.5]
 
-    # These cars have been put into dashcam only due to both a lack of users and test coverage.
-    # These cars likely still work fine. Once a user confirms each car works and a test route is
-    # added to opendbc/car/tests/routes.py, we can remove it from this list.
-    ret.dashcamOnly = candidate in {CAR.CADILLAC_ATS, CAR.HOLDEN_ASTRA, CAR.CHEVROLET_MALIBU, CAR.BUICK_REGAL} or \
-                      (ret.networkLocation == NetworkLocation.gateway and ret.radarUnavailable)
+      if ret.enableGasInterceptorDEPRECATED:
+        # Need to set ASCM long limits when using pedal interceptor, instead of camera ACC long limits
+        ret.safetyConfigs[0].safetyParam |= GMSafetyFlags.HW_ASCM_LONG.value
+    #ret.dashcamOnly = candidate in {CAR.CADILLAC_ATS, CAR.HOLDEN_ASTRA, CAR.CHEVROLET_MALIBU, CAR.BUICK_REGAL} or \
+    #                  (ret.networkLocation == NetworkLocation.gateway and ret.radarUnavailable)
 
     # Start with a baseline tuning for all GM vehicles. Override tuning as needed in each model section below.
     ret.lateralTuning.pid.kiBP, ret.lateralTuning.pid.kpBP = [[0.], [0.]]
     ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.2], [0.00]]
     ret.lateralTuning.pid.kf = 0.00004   # full torque for 20 deg at 80mph means 0.00007818594
-    ret.steerActuatorDelay = 0.1  # Default delay, not measured yet
+    ret.steerActuatorDelay = 0.3  # Default delay, not measured yet
 
     ret.steerLimitTimer = 0.4
-    ret.longitudinalActuatorDelay = 0.5  # large delay to initially start braking
+    ret.longitudinalActuatorDelay = params.get_float("LongActuatorDelay")*0.01 # 0.5  # large delay to initially start braking
 
     if candidate == CAR.CHEVROLET_VOLT:
-      ret.stopAccel = -2.7
-      ret.stoppingDecelRate = 1.1 # brake_travel/s while trying to stop
-      ret.vEgoStopping = 0.6
-      ret.vEgoStarting = 0.5
-      ret.longitudinalTuning.kf = 1.
-      ret.longitudinalTuning.kpBP = [0.]
-      ret.longitudinalTuning.kpV = [1.1]
-      ret.longitudinalTuning.kiBP = [0.]
-      ret.longitudinalTuning.kiV = [0.0]
+      ret.startingState = True
+      ret.startAccel = 1.0
+      ret.autoResumeSng = True
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
-      ret.steerActuatorDelay = 0.2
 
     elif candidate == CAR.GMC_ACADIA:
       ret.minEnableSpeed = -1.  # engage speed is decided by pcm
       ret.steerActuatorDelay = 0.2
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
+
+    elif candidate == CAR.GMC_ACADIA_ASCM:
+      ret.minEnableSpeed = -1.  # engage speed is decided by pcm
+      ret.steerActuatorDelay = 0.2
+      CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
+
+    elif candidate == CAR.CHEVROLET_MALIBU:
+      ret.safetyConfigs[0].safetyParam |= GMSafetyFlags.HW_ASCM_LONG.value
+      ret.openpilotLongitudinalControl = True
+      ret.networkLocation = NetworkLocation.gateway
+      ret.radarUnavailable = False
+      ret.pcmCruise = False
+      ret.minEnableSpeed = -1 * CV.MPH_TO_MS
+      ret.minSteerSpeed = 7 * CV.MPH_TO_MS
+      ret.longitudinalTuning.kpV = [1.0]
+      ret.longitudinalTuning.kiV = [0.3]
+      ret.vEgoStopping = 0.1
+      ret.vEgoStarting = 0.25
+      ret.stopAccel = -0.5
+      ret.startingState = True
+      ret.startAccel = 1.0
+      ret.steerActuatorDelay = 0.2
+      CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
+      ret.autoResumeSng = True
+
+    elif candidate == CAR.CHEVROLET_MALIBU_SASCM:
+      ret.startingState = True
+      ret.startAccel = .9
+      CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
+      ret.autoResumeSng = True
 
     elif candidate == CAR.BUICK_LACROSSE:
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
@@ -194,6 +269,10 @@ class CarInterface(CarInterfaceBase):
       ret.steerActuatorDelay = 0.2
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
 
+      if ret.enableGasInterceptorDEPRECATED:
+        # ACC Bolts use pedal for full longitudinal control, not just sng
+        ret.flags |= GMFlags.PEDAL_LONG.value
+
     elif candidate == CAR.CHEVROLET_SILVERADO:
       # On the Bolt, the ECM and camera independently check that you are either above 5 kph or at a stop
       # with foot on brake to allow engagement, but this platform only has that check in the camera.
@@ -213,9 +292,20 @@ class CarInterface(CarInterfaceBase):
       ret.steerActuatorDelay = 0.2
       ret.minSteerSpeed = 30 * CV.MPH_TO_MS
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
+    elif candidate == CAR.CADILLAC_CT6_2019:
+      ret.networkLocation = NetworkLocation.fwdCamera
+      ret.minEnableSpeed = -1
+      ret.stoppingDecelRate = 1.2 # brake_travel/s while trying to stop
+      ret.vEgoStopping = 0.5
+      ret.vEgoStarting = 0.4
+      ret.stopAccel = -0.4
+      ret.startingState = True
+      ret.startAccel = .9
+      CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
 
     elif candidate == CAR.CHEVROLET_VOLT_2019:
       ret.steerActuatorDelay = 0.2
+      ret.minEnableSpeed = -1.  # engage speed is decided by pcm
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
 
     elif candidate == CAR.CHEVROLET_TRAVERSE:
@@ -227,4 +317,58 @@ class CarInterface(CarInterfaceBase):
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
       ret.dashcamOnly = True  # Needs steerRatio, tireStiffness, and lat accel factor tuning
 
+
+    if ret.enableGasInterceptorDEPRECATED:
+      ret.networkLocation = NetworkLocation.fwdCamera
+      ret.safetyConfigs[0].safetyParam |= GMSafetyFlags.HW_CAM.value
+      ret.minEnableSpeed = -1
+      ret.pcmCruise = False
+      ret.stoppingControl = True
+      ret.autoResumeSng = True
+      ret.safetyConfigs[0].safetyParam |= GMSafetyFlags.HW_CAM_LONG.value
+      ret.startingState = True
+      ret.vEgoStopping = 0.25
+      ret.vEgoStarting = 0.25
+
+    if ACCELERATOR_POS_MSG not in fingerprint[CanBus.POWERTRAIN]:
+      ret.flags |= GMFlags.NO_ACCELERATOR_POS_MSG.value
     return ret
+
+  ## GM autoHold
+  def update_auto_hold(self):
+    self.CS.autoHoldActivated = False
+    self.CS.out.autoHoldActivated = False
+
+    if not self.CS.autoHold:
+      self.CS.autoHoldActive = False
+      return
+
+    # 가스페달, 리제패들 해제
+    if self.CS.out.gasPressed or self.CS.out.regenBraking:
+      self.CS.autoHoldActive = False
+      return
+
+    # 이미 AutoHold 중이면 유지
+    if self.CS.autoHoldActive:
+      self.CS.autoHoldActivated = True
+      self.CS.out.autoHoldActivated = True
+      return
+
+    # 브레이크 압력 기준
+    if self.CP.flags & GMFlags.NO_ACCELERATOR_POS_MSG.value:
+      brake_hold_pressed = self.CS.out.brakePressed and self.CS.out.brake >= 0.04
+    else:
+      brake_hold_pressed = self.CS.out.brakePressed and self.CS.out.brake >= 8
+
+    # 운전자 브레이크로 충분히 정지했을 때만 AutoHold 진입
+    if self.CS.out.vEgo < 0.05 and brake_hold_pressed:
+      self.CS.autoHoldActive = True
+      self.CS.autoHoldActivated = True
+      self.CS.out.autoHoldActivated = True
+      return
+
+  def apply(self, c, now_nanos, model_v2=None):
+    self.CS.modelV2 = model_v2
+    self.update_auto_hold()
+    can_sends = self.CC.update(c, self.CS, now_nanos)
+    return can_sends

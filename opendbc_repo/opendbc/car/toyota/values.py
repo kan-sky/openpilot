@@ -589,8 +589,6 @@ EPS_SCALE = defaultdict(lambda: 73,
 # Toyota/Lexus Safety Sense 2.0 and 2.5
 TSS2_CAR = CAR.with_flags(ToyotaFlags.TSS2)
 
-NO_DSU_CAR = CAR.with_flags(ToyotaFlags.NO_DSU)
-
 # the DSU uses the AEB message for longitudinal on these cars
 UNSUPPORTED_DSU_CAR = CAR.with_flags(ToyotaFlags.UNSUPPORTED_DSU)
 
@@ -602,3 +600,13 @@ ANGLE_CONTROL_CAR = CAR.with_flags(ToyotaFlags.ANGLE_CONTROL)
 SECOC_CAR = CAR.with_flags(ToyotaFlags.SECOC)
 
 DBC = CAR.create_dbc_map()
+
+
+if __name__ == "__main__":
+  cars = []
+  for platform in CAR:
+    for doc in platform.config.car_docs:
+      cars.append(doc.name)
+  cars.sort()
+  for c in cars:
+    print(c)

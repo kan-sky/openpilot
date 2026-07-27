@@ -12,8 +12,8 @@ Ecu = CarParams.Ecu
 
 
 class CarControllerParams:
-  ACCEL_MIN = -3.5 # m/s
-  ACCEL_MAX = 2.0 # m/s
+  ACCEL_MIN = -3.5 # m/s^2
+  ACCEL_MAX = 2.0 # m/s^2
 
   def __init__(self, CP):
     self.STEER_DELTA_UP = 3
@@ -814,3 +814,14 @@ UNSUPPORTED_LONGITUDINAL_CAR = {
 }
 
 DBC = CAR.create_dbc_map()
+
+DBC = CAR.create_dbc_map()
+
+if __name__ == "__main__":
+  cars = []
+  for platform in CAR:
+    for doc in platform.config.car_docs:
+      cars.append(doc.name)
+  cars.sort()
+  for c in cars:
+    print(c)

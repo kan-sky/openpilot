@@ -1,6 +1,15 @@
 ﻿import numpy as np
 from openpilot.common.constants import ACCELERATION_DUE_TO_GRAVITY
 from openpilot.common.realtime import DT_CTRL, DT_MDL
+# carrot
+from opendbc.car.volkswagen.values import VolkswagenFlags
+
+
+def is_volkswagen_meb(CP) -> bool:
+  # VW MEB(ID.4/ID.5) 판별 단일 소스. 플랫폼 플래그 기반이라 향후 다른 VW angle 제어
+  # 차종이 추가되어도 MEB 전용 경로(곡률 폐루프, 리드선택, FCW 게이트)가 오활성되지 않음.
+  return CP.brand == "volkswagen" and bool(CP.flags & VolkswagenFlags.MEB)
+import numpy as np
 # Kans
 from openpilot.common.params import Params
 params = Params()
@@ -73,12 +82,18 @@ def get_accel_from_plan(speeds, accels, t_idxs, action_t=DT_MDL, vEgoStopping=0.
     else:
       v_target = np.interp(action_t, t_idxs, speeds)
     a_target = 2 * (v_target - v_now) / (action_t) - a_now
+    v_target_1sec = np.interp(action_t + 1.0, t_idxs, speeds)
+    v_max = np.max(speeds)
   else:
     v_now = 0.0
+    a_now = 0.0
     v_target = 0.0
+    v_target_1sec = 0.0
     a_target = 0.0
-  should_stop = (v_now < vEgoStopping and a_target < 0.1)
-  return a_target, should_stop
+    v_max = 0.0
+  should_stop = (v_target < vEgoStopping and
+                 v_target_1sec < vEgoStopping)
+  return a_target, should_stop, v_now, v_max #v_target #v_now
 
 def curv_from_psis(psi_target, psi_rate, vego, action_t):
   vego = np.clip(vego, MIN_SPEED, np.inf)
