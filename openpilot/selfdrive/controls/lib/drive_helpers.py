@@ -25,8 +25,14 @@ MIN_STABLE_DELAY = 0.3
 # EU guidelines
 MAX_LATERAL_JERK = 5.0  # m/s^3
 MAX_LATERAL_ACCEL_NO_ROLL = 3.0  # m/s^2
-# Carrot
+# Kans
 MAX_LATERAL_ACCEL_NO_ROLL_LOW_SPEED = 4.5  # m/s^2
+# 커브 안쪽 마진
+LANE_GUARD_CURVE_THRESHOLD = 0.0008
+LANE_GUARD_INSIDE_MARGIN = 0.5
+LANE_GUARD_OUTSIDE_MARGIN = 0.7
+LANE_GUARD_GAIN = 0.0005
+LANE_GUARD_MAX_CORRECTION = 0.0003
 
 # Kans:
 def apply_deadzone(error, deadzone):
@@ -45,6 +51,73 @@ def clamp(val, min_val, max_val):
 def smooth_value(val, prev_val, tau, dt=DT_MDL):
   alpha = 1 - np.exp(-dt/tau) if tau > 0 else 1
   return alpha * val + (1 - alpha) * prev_val
+
+# Kans: 커브안쪽 마진
+def apply_laneless_margin(model_v2, desired_curvature: float, lane_change_active: bool) -> tuple[float, bool]:
+  margin_guard_active = False
+  
+  if lane_change_active:
+    return desired_curvature, margin_guard_active
+
+  if abs(desired_curvature) < LANE_GUARD_CURVE_THRESHOLD:
+    return desired_curvature, False
+
+  if len(model_v2.position.x) < 2 or len(model_v2.position.y) < 2:
+    return desired_curvature, False
+
+  if len(model_v2.laneLines) < 3:
+    return desired_curvature, False
+
+  left_prob = float(model_v2.laneLineProbs[1])
+  right_prob = float(model_v2.laneLineProbs[2])
+
+  path_t = np.asarray(model_v2.position.t, dtype=float)
+  path_x = np.asarray(model_v2.position.x, dtype=float)
+  path_y = np.asarray(model_v2.position.y, dtype=float)
+
+  left_x = np.asarray(model_v2.laneLines[1].x, dtype=float)
+  left_y = np.asarray(model_v2.laneLines[1].y, dtype=float)
+  right_x = np.asarray(model_v2.laneLines[2].x, dtype=float)
+  right_y = np.asarray(model_v2.laneLines[2].y, dtype=float)
+
+  path_valid = (np.isfinite(path_t) & np.isfinite(path_x) & np.isfinite(path_y) & (path_t >= 0.5) & (path_t <= 2.0))
+
+  if np.count_nonzero(path_valid) < 2:
+    return desired_curvature, False
+
+  left_valid = np.isfinite(left_x) & np.isfinite(left_y)
+  right_valid = np.isfinite(right_x) & np.isfinite(right_y)
+
+  if np.count_nonzero(left_valid) < 2 or np.count_nonzero(right_valid) < 2:
+    return desired_curvature, False
+
+  check_x = path_x[path_valid]
+  check_y = path_y[path_valid]
+
+  left_lane_y = np.interp(check_x, left_x[left_valid], left_y[left_valid])
+  right_lane_y = np.interp(check_x, right_x[right_valid], right_y[right_valid])
+
+  if desired_curvature > 0.0 and left_prob > 0.5:
+    inside_clearance = float(np.min(check_y - left_lane_y))
+    outside_clearance = float(np.min(right_lane_y - check_y))
+    clearance_error = LANE_GUARD_INSIDE_MARGIN - inside_clearance
+
+    if clearance_error > 0.0 and outside_clearance > LANE_GUARD_OUTSIDE_MARGIN:
+      correction = min(LANE_GUARD_MAX_CORRECTION, clearance_error * LANE_GUARD_GAIN)
+      desired_curvature -= correction
+      margin_guard_active = True
+
+  elif desired_curvature < 0.0 and right_prob > 0.5:
+    inside_clearance = float(np.min(right_lane_y - check_y))
+    outside_clearance = float(np.min(check_y - left_lane_y))
+    clearance_error = LANE_GUARD_INSIDE_MARGIN - inside_clearance
+
+    if clearance_error > 0.0 and outside_clearance > LANE_GUARD_OUTSIDE_MARGIN:
+      correction = min(LANE_GUARD_MAX_CORRECTION, clearance_error * LANE_GUARD_GAIN)
+      desired_curvature += correction
+      margin_guard_active = True
+
+  return float(desired_curvature), margin_guard_active
 
 def clip_curvature(v_ego, prev_curvature, new_curvature, roll) -> tuple[float, bool]:
   # This function respects ISO lateral jerk and acceleration limits + a max curvature

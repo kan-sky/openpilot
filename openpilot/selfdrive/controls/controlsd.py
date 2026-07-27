@@ -18,7 +18,7 @@ from opendbc.car.car_helpers import interfaces
 from opendbc.car.vehicle_model import VehicleModel
 from opendbc.car.volkswagen.values import MEB_CURVATURE_PID_KP, MEB_CURVATURE_PID_KI, MEB_CURVATURE_PID_KF, MEB_CURVATURE_MAX
 
-from openpilot.selfdrive.controls.lib.drive_helpers import clip_curvature, is_volkswagen_meb
+from openpilot.selfdrive.controls.lib.drive_helpers import clip_curvature, apply_laneless_margin, is_volkswagen_meb
 from openpilot.selfdrive.controls.lib.latcontrol import LatControl, MIN_LATERAL_CONTROL_SPEED
 from openpilot.selfdrive.controls.lib.latcontrol_pid import LatControlPID
 from openpilot.selfdrive.controls.lib.latcontrol_angle import LatControlAngle, STEER_ANGLE_SATURATION_THRESHOLD
@@ -180,6 +180,9 @@ class Controls:
       alpha = 1 - np.exp(-DT_CTRL / tau) if tau > 0 else 1
       return alpha * val + (1 - alpha) * prev_val
 
+    # Kans
+    margin_guard_active = False
+
     if not CC.latActive:
       new_desired_curvature = self.curvature
     #elif self.sm.valid['lateralManeuverPlan']:
@@ -189,6 +192,10 @@ class Controls:
       new_desired_curvature = float(model_v2.action.desiredCurvature)  # raw 모델곡률 (if2 기본과 동일)
     else:
       new_desired_curvature = smooth_value(model_v2.action.desiredCurvature, self.desired_curvature, 0.1)
+
+    # Kans: 커브 안쪽마진함수 호줄
+    lane_change_active = (model_v2.meta.laneChangeState != log.LaneChangeState.off)
+    new_desired_curvature, margin_guard_active = apply_laneless_margin(model_v2, new_desired_curvature, lane_change_active)
 
     self.desired_curvature, curvature_limited = clip_curvature(CS.vEgo, self.desired_curvature, new_desired_curvature, lp.roll)
     lat_delay = self.sm["liveDelay"].lateralDelay + LAT_SMOOTH_SECONDS
