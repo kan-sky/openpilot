@@ -49,20 +49,31 @@ def get_lat_smooth_seconds_dynamic(model_output: dict[str, np.ndarray],
   # y_std_1s <= 0.15: LatSmoothSec 기본값 유지
   # y_std_1s 0.15~0.30: 기존 최대값 0.20까지 증가
   # y_std_1s 0.30~0.50: 새로운 최대값 0.35까지 점진적으로 증가
-
   max_lat_smooth_seconds = 0.35
   legacy_max_lat_smooth_seconds = min(0.20, max_lat_smooth_seconds)
 
-  extra_max = max(0.0, legacy_max_lat_smooth_seconds - base_lat_smooth_seconds)
+  extra_max = max(0.0, max_lat_smooth_seconds - base_lat_smooth_seconds)
+  legacy_extra_max = max(0.0, legacy_max_lat_smooth_seconds - base_lat_smooth_seconds)
 
-  extra_smooth_seconds = float(np.interp(y_std_1s, [0.15, 0.30, 0.50], [0.0, legacy_extra_max, extra_max]))
+  extra_smooth_seconds = float(np.interp(
+    y_std_1s,
+    [0.15, 0.30, 0.50],
+    [0.0, legacy_extra_max, extra_max],
+  ))
 
-  extra_smooth_seconds = float(np.clip(extra_smooth_seconds, 0.0, extra_max))
+  extra_smooth_seconds = float(np.clip(
+    extra_smooth_seconds,
+    0.0,
+    extra_max,
+  ))
 
-  dynamic_lat_smooth_seconds = float(np.clip(base_lat_smooth_seconds + extra_smooth_seconds, 0.0, max_lat_smooth_seconds))
+  dynamic_lat_smooth_seconds = float(np.clip(
+    base_lat_smooth_seconds + extra_smooth_seconds,
+    0.0,
+    max_lat_smooth_seconds,
+  ))
 
   return dynamic_lat_smooth_seconds, y_std_1s, extra_smooth_seconds
-
 
 def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.ModelDataV2.Action,
                           lat_action_t: float, long_action_t: float, v_ego: float, lat_smooth_seconds: float, vEgoStopping: float) -> log.ModelDataV2.Action:
