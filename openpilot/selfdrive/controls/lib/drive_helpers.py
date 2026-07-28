@@ -28,14 +28,6 @@ MAX_LATERAL_JERK = 5.0  # m/s^3
 MAX_LATERAL_ACCEL_NO_ROLL = 3.0  # m/s^2
 # Kans
 MAX_LATERAL_ACCEL_NO_ROLL_LOW_SPEED = 4.5  # m/s^2
-# 커브 안쪽 마진
-LANE_GUARD_CURVE_THRESHOLD = 0.0008
-LANE_GUARD_INSIDE_MARGIN = 0.5
-LANE_GUARD_MIN_LANE_PROB = 0.5
-LANE_GUARD_MIN_LANE_WIDTH = 2.4
-LANE_GUARD_MAX_LANE_WIDTH = 5.0
-LANE_GUARD_CHECK_T_START = 0.5
-LANE_GUARD_CHECK_T_END = 2.0
 
 # Kans:
 def apply_deadzone(error, deadzone):
@@ -46,21 +38,6 @@ def apply_deadzone(error, deadzone):
   else:
     error = 0.
   return error
-
-
-def clamp(val, min_val, max_val):
-  clamped_val = float(np.clip(val, min_val, max_val))
-  return clamped_val, clamped_val != val
-
-def smooth_value(val, prev_val, tau, dt=DT_MDL):
-  alpha = 1 - np.exp(-dt/tau) if tau > 0 else 1
-  return alpha * val + (1 - alpha) * prev_val
-
-class LanelessMarginGeometry(NamedTuple):
-  valid: bool
-  min_inside_clearance: float | None
-  inside_boundary_y: np.ndarray
-
 
 def get_lag_adjusted_curvature(CP, v_ego, psis, curvatures, steer_actuator_delay, distances):
   if len(psis) != CONTROL_N:
@@ -111,63 +88,13 @@ def get_lag_adjusted_curvature(CP, v_ego, psis, curvatures, steer_actuator_delay
 
   return safe_desired_curvature
 
-def get_laneless_margin_geometry(model_v2, desired_curvature: float) -> LanelessMarginGeometry:
-  empty = np.empty(0, dtype=float)
-  fallback = LanelessMarginGeometry(False, None, empty)
+def clamp(val, min_val, max_val):
+  clamped_val = float(np.clip(val, min_val, max_val))
+  return clamped_val, clamped_val != val
 
-  if (len(model_v2.laneLines) < 3 or len(model_v2.laneLineProbs) < 3 or
-      not np.isfinite(desired_curvature)):
-    return fallback
-
-  path_t = np.asarray(model_v2.position.t, dtype=float)
-  path_x = np.asarray(model_v2.position.x, dtype=float)
-  path_y = np.asarray(model_v2.position.y, dtype=float)
-  left_x = np.asarray(model_v2.laneLines[1].x, dtype=float)
-  left_y = np.asarray(model_v2.laneLines[1].y, dtype=float)
-  right_x = np.asarray(model_v2.laneLines[2].x, dtype=float)
-  right_y = np.asarray(model_v2.laneLines[2].y, dtype=float)
-  left_prob = float(model_v2.laneLineProbs[1])
-  right_prob = float(model_v2.laneLineProbs[2])
-
-  arrays = (path_t, path_x, path_y, left_x, left_y, right_x, right_y)
-  if (not np.isfinite(left_prob) or not np.isfinite(right_prob) or
-      len(path_t) != len(path_x) or len(path_x) != len(path_y) or len(path_x) < 3 or
-      len(left_x) != len(left_y) or len(right_x) != len(right_y) or
-      len(left_x) < 2 or len(right_x) < 2 or
-      not all(np.all(np.isfinite(a)) for a in arrays) or
-      not np.all(np.diff(path_x) > 0.0) or
-      not np.all(np.diff(left_x) > 0.0) or not np.all(np.diff(right_x) > 0.0)):
-    return fallback
-
-  if left_prob < LANE_GUARD_MIN_LANE_PROB or right_prob < LANE_GUARD_MIN_LANE_PROB:
-    return fallback
-
-  if path_x[0] < max(left_x[0], right_x[0]) or path_x[-1] > min(left_x[-1], right_x[-1]):
-    return fallback
-
-  left_lane_y = np.interp(path_x, left_x, left_y)
-  right_lane_y = np.interp(path_x, right_x, right_y)
-  lane_width = left_lane_y - right_lane_y
-  if not np.all((lane_width >= LANE_GUARD_MIN_LANE_WIDTH) &
-                (lane_width <= LANE_GUARD_MAX_LANE_WIDTH)):
-    return fallback
-
-  check_mask = ((path_t >= LANE_GUARD_CHECK_T_START) &
-                (path_t <= LANE_GUARD_CHECK_T_END))
-  if np.count_nonzero(check_mask) < 2:
-    return fallback
-
-  if desired_curvature > LANE_GUARD_CURVE_THRESHOLD:
-    inside_clearance = float(np.min(left_lane_y[check_mask] - path_y[check_mask]))
-    inside_boundary_y = left_lane_y - LANE_GUARD_INSIDE_MARGIN
-  elif desired_curvature < -LANE_GUARD_CURVE_THRESHOLD:
-    inside_clearance = float(np.min(path_y[check_mask] - right_lane_y[check_mask]))
-    inside_boundary_y = right_lane_y + LANE_GUARD_INSIDE_MARGIN
-  else:
-    return fallback
-
-  return LanelessMarginGeometry(True, inside_clearance, inside_boundary_y)
-
+def smooth_value(val, prev_val, tau, dt=DT_MDL):
+  alpha = 1 - np.exp(-dt/tau) if tau > 0 else 1
+  return alpha * val + (1 - alpha) * prev_val
 
 def clip_curvature(v_ego, prev_curvature, new_curvature, roll) -> tuple[float, bool]:
   # This function respects ISO lateral jerk and acceleration limits + a max curvature
