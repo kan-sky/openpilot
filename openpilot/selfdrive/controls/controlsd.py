@@ -195,7 +195,17 @@ class Controls:
 
     # Kans: 커브 안쪽마진함수 호줄
     lane_change_active = (model_v2.meta.laneChangeState != log.LaneChangeState.off)
-    new_desired_curvature, margin_guard_active = apply_laneless_margin(model_v2, new_desired_curvature, lane_change_active)
+    unguarded_desired_curvature = new_desired_curvature
+
+    if CC.latActive:
+      new_desired_curvature, margin_guard_active, min_inside_clearance = apply_laneless_margin(
+        model_v2, new_desired_curvature, lane_change_active)
+    else:
+      min_inside_clearance = None
+
+    if margin_guard_active and self.sm.frame % int(1.0 / DT_CTRL) == 0:
+      cloudlog.debug("laneless_margin_guard active=%s curv_before=%.6f curv_after=%.6f min_inside_clearance=%.3f",
+                     margin_guard_active, unguarded_desired_curvature, new_desired_curvature, min_inside_clearance)
 
     self.desired_curvature, curvature_limited = clip_curvature(CS.vEgo, self.desired_curvature, new_desired_curvature, lp.roll)
     lat_delay = self.sm["liveDelay"].lateralDelay + LAT_SMOOTH_SECONDS
