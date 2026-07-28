@@ -1,15 +1,15 @@
 ﻿import numpy as np
 from openpilot.common.constants import ACCELERATION_DUE_TO_GRAVITY
 from openpilot.common.realtime import DT_CTRL, DT_MDL
-# carrot
-from opendbc.car.volkswagen.values import VolkswagenFlags
 
+from openpilot.selfdrive.modeld.constants import ModelConstants
+from opendbc.car.volkswagen.values import VolkswagenFlags
+from typing import NamedTuple
 
 def is_volkswagen_meb(CP) -> bool:
   # VW MEB(ID.4/ID.5) 판별 단일 소스. 플랫폼 플래그 기반이라 향후 다른 VW angle 제어
   # 차종이 추가되어도 MEB 전용 경로(곡률 폐루프, 리드선택, FCW 게이트)가 오활성되지 않음.
   return CP.brand == "volkswagen" and bool(CP.flags & VolkswagenFlags.MEB)
-from typing import NamedTuple
 
 # Kans
 from openpilot.common.params import Params
@@ -31,20 +31,11 @@ MAX_LATERAL_ACCEL_NO_ROLL_LOW_SPEED = 4.5  # m/s^2
 # 커브 안쪽 마진
 LANE_GUARD_CURVE_THRESHOLD = 0.0008
 LANE_GUARD_INSIDE_MARGIN = 0.5
-LANE_GUARD_MIN_OUTSIDE_CLEARANCE = 0.7
-LANE_GUARD_GAIN = 0.0005
-LANE_GUARD_MAX_CORRECTION = 0.0003
 LANE_GUARD_MIN_LANE_PROB = 0.5
 LANE_GUARD_MIN_LANE_WIDTH = 2.4
 LANE_GUARD_MAX_LANE_WIDTH = 5.0
 LANE_GUARD_CHECK_T_START = 0.5
 LANE_GUARD_CHECK_T_END = 2.0
-
-
-class LanelessMarginGuardResult(NamedTuple):
-  curvature: float
-  active: bool
-  min_inside_clearance: float | None
 
 # Kans:
 def apply_deadzone(error, deadzone):
@@ -56,83 +47,123 @@ def apply_deadzone(error, deadzone):
     error = 0.
   return error
 
+
 def clamp(val, min_val, max_val):
   clamped_val = float(np.clip(val, min_val, max_val))
   return clamped_val, clamped_val != val
 
-def smooth_value(val, prev_val, tau, dt=DT_MDL):
-  alpha = 1 - np.exp(-dt/tau) if tau > 0 else 1
-  return alpha * val + (1 - alpha) * prev_val
+class LanelessMarginGeometry(NamedTuple):
+  valid: bool
+  min_inside_clearance: float | None
+  inside_boundary_y: np.ndarray
 
-def get_laneless_margin_guard(path_t, path_x, path_y, left_x, left_y, right_x, right_y,
-                              left_prob: float, right_prob: float, desired_curvature: float) -> LanelessMarginGuardResult:
-  """Apply a bounded curvature bias from reliable model-path lane clearance.
 
-  Model position, orientation, orientation rate, and action curvature are separate
-  predictions. Do not differentiate a clamped position path to replace the model
-  curvature: the resulting yaw rate is not guaranteed to match the model output.
-  """
-  fallback = LanelessMarginGuardResult(float(desired_curvature), False, None)
-  arrays = tuple(np.asarray(a, dtype=float) for a in (path_t, path_x, path_y, left_x, left_y, right_x, right_y))
-  path_t, path_x, path_y, left_x, left_y, right_x, right_y = arrays
+def get_lag_adjusted_curvature(CP, v_ego, psis, curvatures, steer_actuator_delay, distances):
+  if len(psis) != CONTROL_N:
+    psis = [0.0] * CONTROL_N
+    curvatures = [0.0] * CONTROL_N
+    distances = [0.0] * CONTROL_N
 
-  if (not np.isfinite(desired_curvature) or not np.isfinite(left_prob) or not np.isfinite(right_prob) or
+  v_ego = max(MIN_SPEED, v_ego)
+
+  delay = max(0.01, steer_actuator_delay)
+
+  current_curvature_desired = curvatures[0]
+  delayed_curvature_desired = np.interp(delay, ModelConstants.T_IDXS[:CONTROL_N], curvatures)
+  future_curvature_desired = np.interp(1.2, ModelConstants.T_IDXS[:CONTROL_N], curvatures)
+
+  psi = np.interp(delay, ModelConstants.T_IDXS[:CONTROL_N], psis)
+  distance = max(np.interp(delay, ModelConstants.T_IDXS[:CONTROL_N], distances), 0.001)
+
+  psi_damping_straight = params.get_int("PsiDampingStraight") * 0.01
+  psi_damping_s_curve = params.get_int("PsiDampingSCurve") * 0.01
+
+  # 기본값 보정
+  if psi_damping_straight <= 0.0:
+    psi_damping_straight = 0.7  # 곡선 탈출시 heading변화량(psi)의 30% 정도만 풀어주고 70% 유지.
+  if psi_damping_s_curve <= 0.0:
+    psi_damping_s_curve = 0.5  # 반대방향 곡선 전환시 heading변화량(psi)의 50%만 반영해서 좀더 빨리 풀어줌.
+
+  # 전환구간 출렁임 방지용
+  psis_damping = 1.0  # 기본은 미래 heading 변화량을 그대로 반영 
+  if v_ego > 5.0 and abs(current_curvature_desired) > 0.0001:
+    # 커브 -> 직선
+    if abs(future_curvature_desired) < 0.0004:
+      psis_damping = psi_damping_straight
+    # S자 곡선
+    elif np.sign(current_curvature_desired) != np.sign(future_curvature_desired):
+      psis_damping = psi_damping_s_curve
+
+  psi *= psis_damping
+
+  average_curvature_desired = psi / distance
+  desired_curvature = 2.0 * average_curvature_desired - current_curvature_desired
+
+  max_curvature_rate = MAX_LATERAL_JERK / (v_ego ** 2)
+
+  safe_desired_curvature = np.clip(desired_curvature,
+    current_curvature_desired - max_curvature_rate * DT_MDL,
+    current_curvature_desired + max_curvature_rate * DT_MDL)
+
+  return safe_desired_curvature
+
+def get_laneless_margin_geometry(model_v2, desired_curvature: float) -> LanelessMarginGeometry:
+  empty = np.empty(0, dtype=float)
+  fallback = LanelessMarginGeometry(False, None, empty)
+
+  if (len(model_v2.laneLines) < 3 or len(model_v2.laneLineProbs) < 3 or
+      not np.isfinite(desired_curvature)):
+    return fallback
+
+  path_t = np.asarray(model_v2.position.t, dtype=float)
+  path_x = np.asarray(model_v2.position.x, dtype=float)
+  path_y = np.asarray(model_v2.position.y, dtype=float)
+  left_x = np.asarray(model_v2.laneLines[1].x, dtype=float)
+  left_y = np.asarray(model_v2.laneLines[1].y, dtype=float)
+  right_x = np.asarray(model_v2.laneLines[2].x, dtype=float)
+  right_y = np.asarray(model_v2.laneLines[2].y, dtype=float)
+  left_prob = float(model_v2.laneLineProbs[1])
+  right_prob = float(model_v2.laneLineProbs[2])
+
+  arrays = (path_t, path_x, path_y, left_x, left_y, right_x, right_y)
+  if (not np.isfinite(left_prob) or not np.isfinite(right_prob) or
       len(path_t) != len(path_x) or len(path_x) != len(path_y) or len(path_x) < 3 or
-      len(left_x) != len(left_y) or len(right_x) != len(right_y) or len(left_x) < 2 or len(right_x) < 2 or
+      len(left_x) != len(left_y) or len(right_x) != len(right_y) or
+      len(left_x) < 2 or len(right_x) < 2 or
       not all(np.all(np.isfinite(a)) for a in arrays) or
+      not np.all(np.diff(path_x) > 0.0) or
       not np.all(np.diff(left_x) > 0.0) or not np.all(np.diff(right_x) > 0.0)):
     return fallback
 
-  path_valid = ((path_t >= LANE_GUARD_CHECK_T_START) & (path_t <= LANE_GUARD_CHECK_T_END))
-  if np.count_nonzero(path_valid) < 2:
+  if left_prob < LANE_GUARD_MIN_LANE_PROB or right_prob < LANE_GUARD_MIN_LANE_PROB:
     return fallback
 
-  check_x = path_x[path_valid]
-  check_y = path_y[path_valid]
-  if (not np.all(np.diff(check_x) > 0.0) or check_x[0] < max(left_x[0], right_x[0]) or
-      check_x[-1] > min(left_x[-1], right_x[-1])):
+  if path_x[0] < max(left_x[0], right_x[0]) or path_x[-1] > min(left_x[-1], right_x[-1]):
     return fallback
 
-  left_lane_y = np.interp(check_x, left_x, left_y)
-  right_lane_y = np.interp(check_x, right_x, right_y)
+  left_lane_y = np.interp(path_x, left_x, left_y)
+  right_lane_y = np.interp(path_x, right_x, right_y)
   lane_width = left_lane_y - right_lane_y
-  if not np.all((lane_width >= LANE_GUARD_MIN_LANE_WIDTH) & (lane_width <= LANE_GUARD_MAX_LANE_WIDTH)):
+  if not np.all((lane_width >= LANE_GUARD_MIN_LANE_WIDTH) &
+                (lane_width <= LANE_GUARD_MAX_LANE_WIDTH)):
     return fallback
 
-  # Vehicle/model coordinates use +y to the left. Positive desired curvature is a left turn.
+  check_mask = ((path_t >= LANE_GUARD_CHECK_T_START) &
+                (path_t <= LANE_GUARD_CHECK_T_END))
+  if np.count_nonzero(check_mask) < 2:
+    return fallback
+
   if desired_curvature > LANE_GUARD_CURVE_THRESHOLD:
-    inside_clearance = float(np.min(left_lane_y - check_y))
-    outside_clearance = float(np.min(check_y - right_lane_y))
-    correction_sign = -1.0
+    inside_clearance = float(np.min(left_lane_y[check_mask] - path_y[check_mask]))
+    inside_boundary_y = left_lane_y - LANE_GUARD_INSIDE_MARGIN
   elif desired_curvature < -LANE_GUARD_CURVE_THRESHOLD:
-    inside_clearance = float(np.min(check_y - right_lane_y))
-    outside_clearance = float(np.min(left_lane_y - check_y))
-    correction_sign = 1.0
+    inside_clearance = float(np.min(path_y[check_mask] - right_lane_y[check_mask]))
+    inside_boundary_y = right_lane_y + LANE_GUARD_INSIDE_MARGIN
   else:
     return fallback
 
-  result = LanelessMarginGuardResult(float(desired_curvature), False, inside_clearance)
-  if left_prob < LANE_GUARD_MIN_LANE_PROB or right_prob < LANE_GUARD_MIN_LANE_PROB:
-    return result
+  return LanelessMarginGeometry(True, inside_clearance, inside_boundary_y)
 
-  clearance_error = LANE_GUARD_INSIDE_MARGIN - inside_clearance
-  if clearance_error <= 0.0 or outside_clearance < LANE_GUARD_MIN_OUTSIDE_CLEARANCE:
-    return result
-
-  correction = min(LANE_GUARD_MAX_CORRECTION, clearance_error * LANE_GUARD_GAIN)
-  return LanelessMarginGuardResult(float(desired_curvature + correction_sign * correction), True, inside_clearance)
-
-
-def apply_laneless_margin(model_v2, desired_curvature: float, lane_change_active: bool) -> tuple[float, bool, float | None]:
-  if lane_change_active or len(model_v2.laneLines) < 3 or len(model_v2.laneLineProbs) < 3:
-    return float(desired_curvature), False, None
-
-  result = get_laneless_margin_guard(
-    model_v2.position.t, model_v2.position.x, model_v2.position.y,
-    model_v2.laneLines[1].x, model_v2.laneLines[1].y,
-    model_v2.laneLines[2].x, model_v2.laneLines[2].y,
-    float(model_v2.laneLineProbs[1]), float(model_v2.laneLineProbs[2]), desired_curvature)
-  return result.curvature, result.active, result.min_inside_clearance
 
 def clip_curvature(v_ego, prev_curvature, new_curvature, roll) -> tuple[float, bool]:
   # This function respects ISO lateral jerk and acceleration limits + a max curvature

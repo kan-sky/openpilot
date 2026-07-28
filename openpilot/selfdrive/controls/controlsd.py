@@ -18,12 +18,13 @@ from opendbc.car.car_helpers import interfaces
 from opendbc.car.vehicle_model import VehicleModel
 from opendbc.car.volkswagen.values import MEB_CURVATURE_PID_KP, MEB_CURVATURE_PID_KI, MEB_CURVATURE_PID_KF, MEB_CURVATURE_MAX
 
-from openpilot.selfdrive.controls.lib.drive_helpers import clip_curvature, apply_laneless_margin, is_volkswagen_meb
+from openpilot.selfdrive.controls.lib.drive_helpers import clip_curvature, get_lag_adjusted_curvature, is_volkswagen_meb
 from openpilot.selfdrive.controls.lib.latcontrol import LatControl, MIN_LATERAL_CONTROL_SPEED
 from openpilot.selfdrive.controls.lib.latcontrol_pid import LatControlPID
 from openpilot.selfdrive.controls.lib.latcontrol_angle import LatControlAngle, STEER_ANGLE_SATURATION_THRESHOLD
 from openpilot.selfdrive.controls.lib.latcontrol_curvature import LatControlCurvature
 from openpilot.selfdrive.controls.lib.latcontrol_torque import LatControlTorque
+from openpilot.selfdrive.controls.lib.lane_guard_mpc import LaneGuardMpc
 from openpilot.selfdrive.controls.lib.longcontrol import LongControl
 from openpilot.selfdrive.modeld.modeld import LAT_SMOOTH_SECONDS
 from openpilot.selfdrive.locationd.helpers import PoseCalibrator, Pose
@@ -89,6 +90,8 @@ class Controls:
     elif self.CP.lateralTuning.which() == 'torque':
       self.LaC = LatControlTorque(self.CP, self.CI, DT_CTRL)
     self.carrot_controls = CarrotControls(self.CP)
+    self.lane_guard_mpc = LaneGuardMpc(self.CP)
+    self.lane_guard_mpc_enabled = False
 
   def update(self):
     self.sm.update(15)
@@ -191,21 +194,58 @@ class Controls:
       # VW MEB(ID.4/ID.5): 기본은 레인리스(raw 모델곡률 = infiniteCable2 동일).
       new_desired_curvature = float(model_v2.action.desiredCurvature)  # raw 모델곡률 (if2 기본과 동일)
     else:
-      new_desired_curvature = smooth_value(model_v2.action.desiredCurvature, self.desired_curvature, 0.1)
+      model_curvature = float(model_v2.action.desiredCurvature)
+      curvature = model_curvature
 
-    # Kans: 커브 안쪽마진함수 호줄
-    lane_change_active = (model_v2.meta.laneChangeState != log.LaneChangeState.off)
+      psis, curvatures, distances = get_laneless_margin_geometry(model_v2)
+
+      geometry_valid = (
+        len(psis) == CONTROL_N and
+        len(curvatures) == CONTROL_N and
+        len(distances) == CONTROL_N and
+        np.all(np.isfinite(psis)) and
+        np.all(np.isfinite(curvatures)) and
+        np.all(np.isfinite(distances))
+      )
+
+      if geometry_valid:
+        lag_adjusted_curvature  = get_lag_adjusted_curvature(
+          self.CP, CS.vEgo, psis, curvatures, steer_actuator_delay + lat_smooth_seconds, distances,
+        )
+
+        if np.isfinite(lag_adjusted_curvature):
+          curvature = lag_adjusted_curvature
+
+      new_desired_curvature = smooth_value(curvature, self.desired_curvature, lat_smooth_seconds)
+
+    # Kans: 모델 경로를 유지하면서 커브 안쪽 차선 마진을 MPC로 보정.
+    lane_change_active = (model_v2.meta.laneChangeState != LaneChangeState.off)
     unguarded_desired_curvature = new_desired_curvature
+    margin_guard_active = False
+    min_inside_clearance = None
+    lane_guard_solution_valid = False
+    lane_guard_solve_time = 0.0
 
-    if CC.latActive:
-      new_desired_curvature, margin_guard_active, min_inside_clearance = apply_laneless_margin(
-        model_v2, new_desired_curvature, lane_change_active)
-    else:
-      min_inside_clearance = None
+    lane_guard_enabled = CC.latActive and not self.is_vw_meb
+    if lane_guard_enabled:
+      lane_guard_result = self.lane_guard_mpc.update(
+        model_v2, CS.vEgo, new_desired_curvature, lane_change_active,
+        steer_actuator_delay + lat_smooth_seconds)
+      new_desired_curvature = lane_guard_result.curvature
+      margin_guard_active = lane_guard_result.active
+      min_inside_clearance = lane_guard_result.min_inside_clearance
+      lane_guard_solution_valid = lane_guard_result.solution_valid
+      lane_guard_solve_time = lane_guard_result.solve_time
+    elif self.lane_guard_mpc_enabled:
+      self.lane_guard_mpc.reset(new_desired_curvature, CS.vEgo)
+    self.lane_guard_mpc_enabled = lane_guard_enabled
 
-    if margin_guard_active and self.sm.frame % int(1.0 / DT_CTRL) == 0:
-      cloudlog.debug("laneless_margin_guard active=%s curv_before=%.6f curv_after=%.6f min_inside_clearance=%.3f",
-                     margin_guard_active, unguarded_desired_curvature, new_desired_curvature, min_inside_clearance)
+    if (margin_guard_active and self.sm.frame % int(1.0 / DT_CTRL) == 0):
+      cloudlog.debug(
+        "lane_guard_mpc active=%s valid=%s curv_before=%.6f curv_after=%.6f "
+        "min_inside_clearance=%.3f solve_time=%.4f",
+        margin_guard_active, lane_guard_solution_valid, unguarded_desired_curvature,
+        new_desired_curvature, min_inside_clearance, lane_guard_solve_time)
 
     self.desired_curvature, curvature_limited = clip_curvature(CS.vEgo, self.desired_curvature, new_desired_curvature, lp.roll)
     lat_delay = self.sm["liveDelay"].lateralDelay + LAT_SMOOTH_SECONDS
