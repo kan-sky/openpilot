@@ -52,6 +52,10 @@ def clamp(val, min_val, max_val):
   clamped_val = float(np.clip(val, min_val, max_val))
   return clamped_val, clamped_val != val
 
+def smooth_value(val, prev_val, tau, dt=DT_MDL):
+  alpha = 1 - np.exp(-dt/tau) if tau > 0 else 1
+  return alpha * val + (1 - alpha) * prev_val
+
 class LanelessMarginGeometry(NamedTuple):
   valid: bool
   min_inside_clearance: float | None
