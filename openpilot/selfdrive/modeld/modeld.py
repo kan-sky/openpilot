@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+ï»¿#!/usr/bin/env python3
 import os
 os.environ['GMMU'] = '0' # for usbgpu fast loading, noop for qcom
 from tinygrad.tensor import Tensor
@@ -45,16 +45,17 @@ def get_lat_smooth_seconds_dynamic(model_output: dict[str, np.ndarray],
   except Exception:
     y_std_1s = 0.0
 
-  # Kans: base_lat_smooth_seconds(LatSmoothSec)=0.1ÀÏ ¶§ ±âÁØ
-  # ÃÖÁ¾ ´ÙÀÌ³ª¹Í°ª ¹üÀ§: 0.1¿¡¼­ 0.2»çÀÌ¿¡ °íÁ¤µÊ.
-  # y_std_1s = 0.01~0.15±îÁö LAT_SMOOTH_SECONDS=0.1·Î ¾ÈÁ¤ÀûÀÎ »óÅÂ.
-  # y_std_1s = 0.18~0.25±îÁö LAT_SMOOTH_SECONDS=0.12~0.166À¸·Î Áõ°¡. ÇÊÅÍ¸µ Áõ°¡ 
-  # y_std_1s = 0.30~0.40±îÁö LAT_SMOOTH_SECONDS=0.20À¸·Î ÃÖ´ë°ª °íÁ¤.
+  # Kans:
+  # y_std_1s <= 0.15: LatSmoothSec ê¸°ë³¸ê°’ ìœ ì§€
+  # y_std_1s 0.15~0.30: ê¸°ì¡´ ìµœëŒ€ê°’ 0.20ê¹Œì§€ ì¦ê°€
+  # y_std_1s 0.30~0.50: ìƒˆë¡œìš´ ìµœëŒ€ê°’ 0.35ê¹Œì§€ ì ì§„ì ìœ¼ë¡œ ì¦ê°€
 
-  max_lat_smooth_seconds = 0.20
-  extra_max = max(0.0, max_lat_smooth_seconds - base_lat_smooth_seconds)
+  max_lat_smooth_seconds = 0.35
+  legacy_max_lat_smooth_seconds = min(0.20, max_lat_smooth_seconds)
 
-  extra_smooth_seconds = float(np.interp(y_std_1s, [0.15, 0.30], [0.0, extra_max]))
+  extra_max = max(0.0, legacy_max_lat_smooth_seconds - base_lat_smooth_seconds)
+
+  extra_smooth_seconds = float(np.interp(y_std_1s, [0.15, 0.30, 0.50], [0.0, legacy_extra_max, extra_max]))
 
   extra_smooth_seconds = float(np.clip(extra_smooth_seconds, 0.0, extra_max))
 
@@ -87,7 +88,7 @@ def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.
     desired_curvature = model_output['action'][0,0] / (max(1.0, v_ego))**2
     #should_stop = (v_ego < 0.3 and desired_accel < 0.1)
 
-  # Kans: ±íÀº Ä¿ºê¿¡¼­ ¸ğµ¨ °î·üÀÌ °©ÀÚ±â ÁÙ¾îµé ¶§ ÇÚµé ±ŞÇ®¸² ¹æÁö
+  # Kans: ê¹Šì€ ì»¤ë¸Œì—ì„œ ëª¨ë¸ ê³¡ë¥ ì´ ê°‘ìê¸° ì¤„ì–´ë“¤ ë•Œ í•¸ë“¤ ê¸‰í’€ë¦¼ ë°©ì§€
   raw_curv = float(desired_curvature)
   prev_curv = float(prev_action.desiredCurvature)
 
@@ -96,25 +97,25 @@ def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.
   raw_abs = abs(raw_curv)
 
   if same_curve and prev_abs > 0.0025 and raw_abs < prev_abs * 0.70:
-    desired_curvature = 0.8 * prev_curv + 0.2 * raw_curv  # °úÇÏ°Ô ³·Ãá °ªÀ» µû¶ó°¡Áö ¾Ê°í 80%¸¸ ¹İ¿µÇÑ´Ù.
+    desired_curvature = 0.8 * prev_curv + 0.2 * raw_curv  # ê³¼í•˜ê²Œ ë‚®ì¶˜ ê°’ì„ ë”°ë¼ê°€ì§€ ì•Šê³  80%ë§Œ ë°˜ì˜í•œë‹¤.
   else:
     desired_curvature = raw_curv
 
-  # Kans: Å« °î·ü·Î ÀÌ¾îÁö´Â Ä¿ºê ÆÇ´Ü
+  # Kans: í° ê³¡ë¥ ë¡œ ì´ì–´ì§€ëŠ” ì»¤ë¸Œ íŒë‹¨
   abs_curvature = abs(desired_curvature)
 
-  # Kans: °î·ü¿¡ µû¸¥ smoothing »óÇÑ.
-  # ±âÁ¸ [0.15, 0.10, 0.08]Àº º¯È­ÆøÀÌ Ä¿¼­ Á¶ÇâÀÌ °¨°å´Ù Ç®·È´Ù ÇÒ ¼ö ÀÖÀ½.
+  # Kans: ê³¡ë¥ ì— ë”°ë¥¸ smoothing ìƒí•œ.
+  # ê¸°ì¡´ [0.15, 0.10, 0.08]ì€ ë³€í™”í­ì´ ì»¤ì„œ ì¡°í–¥ì´ ê°ê²¼ë‹¤ í’€ë ¸ë‹¤ í•  ìˆ˜ ìˆìŒ.
   curve_smooth_max = float(np.interp(abs_curvature,
     [0.0005, 0.0015, 0.0040],
     [0.13, 0.12, 0.11]))
 
-  # ¼Óµµ¿¡ µû¸¥ smoothing »óÇÑ°ª
+  # ì†ë„ì— ë”°ë¥¸ smoothing ìƒí•œê°’
   speed_smooth_max = float(np.interp(v_ego,
     [5.0, 15.0, 30.0],
     [0.08, 0.10, 0.18]))
 
-  # Kans: model uncertainty ±â¹İ dynamic smoothing
+  # Kans: model uncertainty ê¸°ë°˜ dynamic smoothing
   dynamic_lat_smooth_seconds, y_std_1s, extra_smooth_seconds = get_lat_smooth_seconds_dynamic(model_output, lat_smooth_seconds)
   base_lat_smooth_seconds = dynamic_lat_smooth_seconds
 
