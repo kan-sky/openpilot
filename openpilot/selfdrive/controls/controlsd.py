@@ -195,43 +195,9 @@ class Controls:
       new_desired_curvature = float(model_v2.action.desiredCurvature)  # raw 모델곡률 (if2 기본과 동일)
     else:
       model_curvature = float(model_v2.action.desiredCurvature)
-      curvature = model_curvature
 
-      psis = np.asarray(model_v2.orientation.z, dtype=float)
-      velocities = np.asarray(model_v2.velocity.x, dtype=float)
-      yaw_rates = np.asarray(model_v2.orientationRate.z, dtype=float)
-      distances = np.asarray(model_v2.position.x, dtype=float)
-
-      geometry_valid = (
-        len(psis) == CONTROL_N and
-        len(velocities) == CONTROL_N and
-        len(yaw_rates) == CONTROL_N and
-        len(distances) == CONTROL_N and
-        np.all(np.isfinite(psis)) and
-        np.all(np.isfinite(velocities)) and
-        np.all(np.isfinite(yaw_rates)) and
-        np.all(np.isfinite(distances))
-      )
-
-      if geometry_valid:
-        curvatures = yaw_rates / np.maximum(np.abs(velocities), 0.1)
-
-        if np.all(np.isfinite(curvatures)):
-          lag_adjusted_curvature = get_lag_adjusted_curvature(
-            self.CP,
-            CS.vEgo,
-            psis,
-            curvatures,
-            steer_actuator_delay + lat_smooth_seconds,
-            distances,
-          )
-
-          if np.isfinite(lag_adjusted_curvature):
-            curvature = float(lag_adjusted_curvature)
-
-      # Kans: modeld에서 이미 dynamic smoothing이 적용된 곡률이므로
-      # controlsd에서는 추가 smoothing하지 않는다.
-      new_desired_curvature = curvature
+      # modeld에서 이미 dynamic smoothing이 적용된 곡률을 그대로 사용한다.
+      new_desired_curvature = model_curvature
 
     # Kans: 모델 경로를 유지하면서 커브 안쪽 차선 마진을 MPC로 보정.
     lane_change_active = (model_v2.meta.laneChangeState != LaneChangeState.off)
