@@ -216,7 +216,8 @@ class Controls:
         if np.isfinite(lag_adjusted_curvature):
           curvature = lag_adjusted_curvature
 
-      new_desired_curvature = smooth_value(curvature, self.desired_curvature, lat_smooth_seconds)
+      # Kans: modeld에서 이미 dynamic smoothing이 적용된 곡률이므로 controlsd에서는 추가 smoothing하지 않는다.
+      new_desired_curvature = curvature
 
     # Kans: 모델 경로를 유지하면서 커브 안쪽 차선 마진을 MPC로 보정.
     lane_change_active = (model_v2.meta.laneChangeState != LaneChangeState.off)
@@ -248,7 +249,7 @@ class Controls:
         new_desired_curvature, min_inside_clearance, lane_guard_solve_time)
 
     self.desired_curvature, curvature_limited = clip_curvature(CS.vEgo, self.desired_curvature, new_desired_curvature, lp.roll)
-    lat_delay = self.sm["liveDelay"].lateralDelay + LAT_SMOOTH_SECONDS
+    lat_delay = self.sm["liveDelay"].lateralDelay
     actuators.curvature = float(self.desired_curvature)
 
     # VW MEB 폐루프 곡률 보정 = infiniteCable2 LatControlCurvature.update() 정확 복제.
