@@ -174,7 +174,7 @@ procs = [
   PythonProcess("hardwared", "openpilot.system.hardware.hardwared", always_run),
   PythonProcess("modem", "openpilot.common.hardware.tici.modem", always_run, enabled=TICI),
   PythonProcess("tombstoned", "openpilot.system.tombstoned", always_run, enabled=not PC),
-  PythonProcess("updated", "openpilot.system.updated.updated", only_offroad, enabled=not PC),
+  PythonProcess("updated", "openpilot.system.updated.updated", enable_updated, enabled=not PC),
   #PythonProcess("uploader", "openpilot.system.loggerd.uploader", always_run),
   PythonProcess("feedbackd", "openpilot.selfdrive.ui.feedback.feedbackd", only_onroad),
 

@@ -216,6 +216,7 @@ class Car:
     # Kans: use latch
     CS.activateCruise = self.v_cruise_helper.get_activate_cruise()  # _activate_cruise
     CS.latEnabled = self.v_cruise_helper._lat_enabled
+    CS.useLaneLineSpeed = self.v_cruise_helper.useLaneLineSpeedApply
     CS.carrotCruise = 1 if self.v_cruise_helper.carrot_cruise_active else 0
 
     self.CI.CS.softHoldActive = CS.softHoldActive

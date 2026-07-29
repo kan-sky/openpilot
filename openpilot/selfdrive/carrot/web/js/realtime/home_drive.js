@@ -295,6 +295,7 @@ window.HomeDrive = (() => {
       finiteNumber(liveCalibration?.height?.[0], 0).toFixed(2),
       Boolean(controlsState?.activeLaneLine) ? 1 : 0,
       Boolean(controlsState?.enabled) ? 1 : 0,
+      finiteNumber(carState?.useLaneLineSpeed, 0).toFixed(2),
       Boolean(carState?.brakeLights) ? 1 : 0,
       Boolean(overlayState?.carControl?.longActive) ? 1 : 0,
       longPlan?.xState ?? "-",
@@ -340,6 +341,7 @@ window.HomeDrive = (() => {
       longPlan?.tFollow ?? "-",
       longPlan?.desiredDistance ?? "-",
       overlayState?.roadCameraState?.frameId ?? "-",
+      selectedPath?.latDebugText || "",
       debugText || "",
       rtcPerfText,
       plotInputSignature(plotData),
@@ -3492,6 +3494,10 @@ window.HomeDrive = (() => {
     return Boolean(overlayState?.carControl?.longActive);
   }
 
+  function isLaneMode(hudState) {
+    return Boolean(hudState?.controlsState?.activeLaneLine) || finiteNumber(hudState?.carState?.useLaneLineSpeed, 0) > 0;
+  }
+
   function getPathStyle(overlayState, hudState) {
     // Mirror carrot.cc path mode/color selection so Carrot params drive web visuals too.
     const laneMode = isLaneMode(hudState);
@@ -3529,6 +3535,23 @@ window.HomeDrive = (() => {
     const laneMode = isLaneMode(hudState);
     const lanePath = lateralPlan?.position;
     const hasLanePath = Array.isArray(lanePath?.x) && lanePath.x.length > 2;
+    if (laneMode && hasLanePath) {
+      return {
+        model,
+        pathData: lanePath,
+        pathSource: "lateralPlan",
+        latDebugText: lateralPlan?.latDebugText || "",
+        laneMode,
+      };
+    }
+
+    return {
+      model,
+      pathData: model?.position || null,
+      pathSource: "modelV2",
+      latDebugText: lateralPlan?.latDebugText || "",
+      laneMode,
+    };
   }
 
   function buildPlotData(overlayState, hudState) {
@@ -3924,7 +3947,7 @@ window.HomeDrive = (() => {
       drawHudTopRightText(stageWidth, stageHeight, viewportRect, lastDebug, pathStyle.mode);
       syncRtcPerfHud();
       drawHudBottomLeftText(stageWidth, stageHeight, viewportRect, overlayInfoState.branchLabel, pathStyle.mode);
-      drawHudBottomText(stageWidth, stageHeight, viewportRect, hudState, pathStyle.mode);
+      drawHudBottomText(stageWidth, stageHeight, viewportRect, selectedPath.latDebugText, hudState, pathStyle.mode);
     }
 
     if (!model) {

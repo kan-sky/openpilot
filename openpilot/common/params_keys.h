@@ -310,6 +310,8 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"TrafficStopDistanceAdjust", {PERSISTENT, INT, "-80"}},
 
     {"HapticFeedbackWhenSpeedCamera", {PERSISTENT, INT, "0"}},
+    {"UseLaneLineSpeed", {PERSISTENT, INT, "1"}},
+    {"UseLaneLineCurveSpeed", {PERSISTENT, INT, "0"}},
 
     {"LaneChangeNeedTorque", {PERSISTENT, INT, "0"}},
     {"LaneChangeDelay", {PERSISTENT, INT, "0"}},
@@ -323,7 +325,9 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"LatMpcMotionCost", {PERSISTENT, INT, "7"}},
     {"LatMpcAccelCost", {PERSISTENT, INT, "120"}},
     {"LatMpcJerkCost", {PERSISTENT, INT, "4"}},
+    {"LatMpcSteeringRateCost", {PERSISTENT, INT, "7"}},
 
+    {"PathOffset", {PERSISTENT, INT, "0"}},
     {"CameraYawTrimDeg", {PERSISTENT, INT, "0"}},
 
     {"LateralTorqueCustom", {PERSISTENT, BOOL, "1"}},
@@ -370,6 +374,8 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"CruiseDelay", {PERSISTENT, INT, "12"}},
     {"ResumeDelay", {PERSISTENT, INT, "6"}},
     {"AccelForce", {PERSISTENT, INT, "950"}},
-    {"MaxLatAccelNoRollLowSpeed", {PERSISTENT, INT, "38"}},
+    {"PsiDampingStraight", {PERSISTENT, INT, "85"}},
+    {"PsiDampingSCurve", {PERSISTENT, INT, "65"}},
+    {"MaxLatAccelNoRollLowSpeed", {PERSISTENT, INT, "42"}},
     {"LatSmoothDebug", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION, STRING}},
 };

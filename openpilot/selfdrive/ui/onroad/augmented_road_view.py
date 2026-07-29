@@ -412,6 +412,10 @@ class AugmentedRoadView(CameraView):
       print("Error accessing live debug data for top right text")
       top_right = ""
 
+    if sm.alive["lateralPlan"]:
+      lat_plan = sm["lateralPlan"]
+      bottom = str(lat_plan.latDebugText)
+
     bottom_left = ui_state.params.get("GitBranch") or ""
 
     #bottom_right = ui_state.params_memory.get("NetworkAddress") or ""

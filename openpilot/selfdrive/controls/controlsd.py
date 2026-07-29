@@ -51,7 +51,7 @@ class Controls:
 
     self.sm = messaging.SubMaster(['liveDelay', 'liveParameters', 'liveTorqueParameters', 'modelV2', 'selfdriveState',
                                    'liveCalibration', 'livePose', 'longitudinalPlan', 'carState', 'carOutput',
-                                   'carrotMan', 'radarState',
+                                   'carrotMan', 'lateralPlan', 'radarState',
                                    'driverMonitoringState', 'onroadEvents', 'driverAssistance'], poll='selfdriveState')
     self.pm = messaging.PubMaster(['carControl', 'controlsState'])
 
@@ -167,10 +167,9 @@ class Controls:
     actuators.jerk = float(jerk)
 
     # Steering PID loop and lateral MPC
-    # Reset desired curvature to current to avoid violating the limits on engage
-
+    lat_plan = self.sm['lateralPlan']
     curve_speed_abs = abs(self.sm['carrotMan'].vTurnSpeed)
-
+    self.lanefull_mode_enabled = (lat_plan.useLaneLines and curve_speed_abs > self.params.get_int("UseLaneLineCurveSpeed"))
     lat_smooth_seconds = self.params.get_float("LatSmoothSec") * 0.01
     steer_actuator_delay = self.params.get_float("SteerActuatorDelay") * 0.01
     if steer_actuator_delay == 0.0:
@@ -182,57 +181,25 @@ class Controls:
 
     if not CC.latActive:
       new_desired_curvature = self.curvature
-    #elif self.sm.valid['lateralManeuverPlan']:
-    #  new_desired_curvature = self.sm['lateralManeuverPlan'].desiredCurvature if CC.latActive else self.curvature
     elif self.is_vw_meb:
       # VW MEB(ID.4/ID.5): 기본은 레인리스(raw 모델곡률 = infiniteCable2 동일).
-      new_desired_curvature = float(model_v2.action.desiredCurvature)  # raw 모델곡률 (if2 기본과 동일)
+      # carrot 횡플래너가 레인모드 활성(lat_plan.useLaneLines, UseLaneLineSpeed>0 & 차선감지)일 때만
+      # 차선기반 lateralPlan 경로를 쓴다(opt-in). 모델 경로 출렁임(차선넘나듦)을 차선 지오메트리로 보완.
+      if getattr(lat_plan, 'useLaneLines', False) and len(lat_plan.curvatures) > 0:
+        curvature = get_lag_adjusted_curvature(self.CP, CS.vEgo, lat_plan.psis, lat_plan.curvatures,
+                                               steer_actuator_delay + lat_smooth_seconds, lat_plan.distances)
+        new_desired_curvature = smooth_value(curvature, self.desired_curvature, lat_smooth_seconds)
+      else:
+        new_desired_curvature = float(model_v2.action.desiredCurvature)  # raw 모델곡률 (if2 기본과 동일)
+    elif self.lanefull_mode_enabled:
+      if len(lat_plan.curvatures) == 0:
+        new_desired_curvature = self.curvature
+      else:
+        curvature = get_lag_adjusted_curvature(self.CP, CS.vEgo, lat_plan.psis, lat_plan.curvatures, steer_actuator_delay, lat_plan.distances)
+        new_desired_curvature = smooth_value(curvature, self.desired_curvature, lat_smooth_seconds)
     else:
-      model_curvature = float(model_v2.action.desiredCurvature)
-      new_desired_curvature = model_curvature
-				   
-      # Kans: 모델 경로를 이용해 조향 액추에이터 지연을 보상한다.
-      psis = np.asarray(model_v2.orientation.z, dtype=float)
-      yaw_rates = np.asarray(model_v2.orientationRate.z, dtype=float)
-      velocities = np.asarray(model_v2.velocity.x, dtype=float)
-      distances = np.asarray(model_v2.position.x, dtype=float)
-
-      geometry_size = min(
-        len(psis),
-        len(yaw_rates),
-        len(velocities),
-        len(distances),
-      )
-
-      if geometry_size >= 2:
-        psis = psis[:geometry_size]
-        yaw_rates = yaw_rates[:geometry_size]
-        velocities = velocities[:geometry_size]
-        distances = distances[:geometry_size]
-
-        geometry_valid = (
-          np.all(np.isfinite(psis)) and
-          np.all(np.isfinite(yaw_rates)) and
-          np.all(np.isfinite(velocities)) and
-          np.all(np.isfinite(distances))
-        )
-
-        if geometry_valid:
-          safe_velocities = np.maximum(np.abs(velocities), 0.1)
-          curvatures = yaw_rates / safe_velocities
-
-          if np.all(np.isfinite(curvatures)):
-            lag_adjusted_curvature = get_lag_adjusted_curvature(
-              self.CP,
-              CS.vEgo,
-              psis,
-              curvatures,
-              steer_actuator_delay + lat_smooth_seconds,
-              distances,
-            )
-
-            if np.isfinite(lag_adjusted_curvature):
-              new_desired_curvature = float(lag_adjusted_curvature)
+      # 레인리스: modeld의 최종 action 곡률을 그대로 사용한다.
+      new_desired_curvature = float(model_v2.action.desiredCurvature)
 
     self.desired_curvature, curvature_limited = clip_curvature(CS.vEgo, self.desired_curvature, new_desired_curvature, lp.roll)
     lat_delay = self.sm["liveDelay"].lateralDelay
@@ -329,23 +296,33 @@ class Controls:
       if carrot_man.xSpdType >= 0 and carrot_man.xSpdType != 22 and carrot_man.xSpdLimit > 0:
         navi_speed_limit = int(carrot_man.xSpdLimit)
       hudControl.naviSpeedLimit = navi_speed_limit
-      # 커브(비전 커브속도) / 교차로 회전 / 분기·출구 (ATC 활성 상태에서만)
+      # 커브 / 교차로 / 분기·출구 / 로터리 / 병목 / 정체 (실차 스캔으로 확정된 이벤트 지도 기반)
       navi_event_type = 0
       navi_event_speed = 0
       v_ego_kph = CS.vEgo * CV.MS_TO_KPH
       vturn_kph = abs(carrot_man.vTurnSpeed)
       atc_type = carrot_man.atcType
+      if self.sm.frame % 100 == 0:  # 1Hz로만 파라미터 IO (100Hz 루프 보호)
+        self.atc_turn_speed = self.params.get_int("AutoTurnControlSpeedTurn")
       if 0 < vturn_kph < 120 and vturn_kph < v_ego_kph - 3:  # 커브 감속이 실제로 작동 중일 때만
         navi_event_type = 1
-        navi_event_speed = int(vturn_kph)
+        navi_event_speed = int(carrot_man.vTurnSpeed)  # 부호 유지 (양수=우커브, 음수=좌커브 - 실주행 검증)
       elif atc_type in ("turn left", "turn right", "atc left", "atc right"):  # 교차로 좌/우회전 (prepare 제외)
         navi_event_type = 2
-        if self.sm.frame % 100 == 0:  # 1Hz로만 파라미터 IO (100Hz 루프 보호)
-          self.atc_turn_speed = self.params.get_int("AutoTurnControlSpeedTurn")
         navi_event_speed = int(self.atc_turn_speed)
       elif atc_type in ("fork left", "fork right") and carrot_man.nRoadLimitSpeed > 0:  # 분기/고속도로 출구
         navi_event_type = 3
         navi_event_speed = int(carrot_man.nRoadLimitSpeed)
+      elif carrot_man.xTurnInfo == 5 and 0 < carrot_man.xDistToTurn < 500:  # 로터리 (TBT 131~142, 500m 이내)
+        navi_event_type = 4
+        navi_event_speed = int(self.atc_turn_speed)
+      elif carrot_man.szSdiDescr in ("병목지점", "Bottleneck point", "瓶颈路段"):  # 티맵 SDI 50 (경보 범위 내 수신)
+        navi_event_type = 5
+      elif carrot_man.desiredSource == "road" and 0 < carrot_man.desiredSpeed < 200:
+        navi_event_type = 8  # 도로제한속도 자동속도 제어 중 (제한값 변경 시 "인식됨" 배너 -> km/h 아이콘)
+        navi_event_speed = int(carrot_man.nRoadLimitSpeed)
+      # 앞차가 실제로 속도를 제한 중(MPC lead 모드)이면 계기판 앞차 하이라이트 우선 (km/h 아이콘 양보)
+      hudControl.leadLimiting = bool(hudControl.leadVisible and self.sm['longitudinalPlan'].xState == 0)  # XState.lead
       hudControl.naviEventType = navi_event_type
       hudControl.naviEventSpeed = navi_event_speed
 
@@ -449,6 +426,7 @@ class Controls:
     elif lat_tuning == 'torque':
       cs.lateralControlState.torqueState = lac_log
 
+    cs.activeLaneLine = self.lanefull_mode_enabled
     self.pm.send('controlsState', dat)
 
     # carControl

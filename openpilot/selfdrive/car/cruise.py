@@ -224,6 +224,9 @@ class VCruiseCarrot:
     self.AutoSpeedUptoRoadSpeedLimit = 0.0
     self.autoGasCancelSpeed = 30
 
+    self.useLaneLineSpeed = self.params.get_int("UseLaneLineSpeed")
+    self.useLaneLineSpeedApply = self.useLaneLineSpeed
+
     # Kans:Cruise ON 래치 관련
     self._activate_cruise_raw = 0  # self._activate_cruise 복사본
     self._activate_cruise_on_latch = 0  # ON이었던 적이 있다, 없다(1,0)
@@ -259,6 +262,11 @@ class VCruiseCarrot:
       self.applyModelSpeed = self.params.get_float("ApplyModelSpeed") * 0.01
       self.autoSpeedUptoRoadSpeedLimit = self.params.get_float("AutoSpeedUptoRoadSpeedLimit") * 0.01
       self.autoRoadSpeedAdjust = self.params.get_float("AutoRoadSpeedAdjust") * 0.01
+
+      useLaneLineSpeed = self.params.get_int("UseLaneLineSpeed") * unit_factor
+      if self.useLaneLineSpeed != useLaneLineSpeed:
+        self.useLaneLineSpeedApply = useLaneLineSpeed
+      self.useLaneLineSpeed = useLaneLineSpeed
 
       self.speed_from_pcm = self.params.get_int("SpeedFromPCM")
       self._cruise_speed_unit = self.params.get_int("CruiseSpeedUnit")
@@ -613,6 +621,9 @@ class VCruiseCarrot:
         self._v_cruise_kph_at_brake = 0
       elif button_type == ButtonType.gapAdjustCruise:
         self.params.put_int_nonblocking("MyDrivingMode", self.params.get_int("MyDrivingMode") % 4 + 1) # 1,2,3,4 (1:eco, 2:safe, 3:normal, 4:high speed)
+      elif button_type == ButtonType.lfaButton:
+        useLaneLineSpeed = max(1, self.useLaneLineSpeed)
+        self.useLaneLineSpeedApply = useLaneLineSpeed if self.useLaneLineSpeedApply == 0 else 0
 
       elif button_type == ButtonType.cancel:
         self._cruise_cancel_state = True
