@@ -6,13 +6,17 @@ from openpilot.common.pid import PIDController
 
 
 class LatControlPID(LatControl):
-  def __init__(self, CP, CI, dt):
-    super().__init__(CP, CI, dt)
+  def __init__(self, CP, CI):
+    super().__init__(CP, CI)
     self.pid = PIDController((CP.lateralTuning.pid.kpBP, CP.lateralTuning.pid.kpV),
                              (CP.lateralTuning.pid.kiBP, CP.lateralTuning.pid.kiV),
                              pos_limit=self.steer_max, neg_limit=-self.steer_max)
     self.ff_factor = CP.lateralTuning.pid.kf
     self.get_steer_feedforward = CI.get_steer_feedforward_function()
+
+  def reset(self):
+    super().reset()
+    self.pid.reset()
 
   def update(self, active, CS, VM, params, steer_limited_by_safety, desired_curvature, CC, curvature_limited, model_data=None, lat_delay=0.0):
     pid_log = log.ControlsState.LateralPIDState.new_message()
@@ -28,7 +32,7 @@ class LatControlPID(LatControl):
     if not active:
       output_torque = 0.0
       pid_log.active = False
-
+      self.pid.reset()
     else:
       # offset does not contribute to resistive torque
       ff = self.ff_factor * self.get_steer_feedforward(angle_steers_des_no_offset, CS.vEgo)

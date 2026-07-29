@@ -55,23 +55,11 @@ def get_lat_smooth_seconds_dynamic(model_output: dict[str, np.ndarray],
   extra_max = max(0.0, max_lat_smooth_seconds - base_lat_smooth_seconds)
   legacy_extra_max = max(0.0, legacy_max_lat_smooth_seconds - base_lat_smooth_seconds)
 
-  extra_smooth_seconds = float(np.interp(
-    y_std_1s,
-    [0.15, 0.30, 0.50],
-    [0.0, legacy_extra_max, extra_max],
-  ))
+  extra_smooth_seconds = float(np.interp(y_std_1s, [0.15, 0.30, 0.50], [0.0, legacy_extra_max, extra_max]))
 
-  extra_smooth_seconds = float(np.clip(
-    extra_smooth_seconds,
-    0.0,
-    extra_max,
-  ))
+  extra_smooth_seconds = float(np.clip(extra_smooth_seconds, 0.0, extra_max))
 
-  dynamic_lat_smooth_seconds = float(np.clip(
-    base_lat_smooth_seconds + extra_smooth_seconds,
-    0.0,
-    max_lat_smooth_seconds,
-  ))
+  dynamic_lat_smooth_seconds = float(np.clip(base_lat_smooth_seconds + extra_smooth_seconds, 0.0, max_lat_smooth_seconds))
 
   return dynamic_lat_smooth_seconds, y_std_1s, extra_smooth_seconds
 

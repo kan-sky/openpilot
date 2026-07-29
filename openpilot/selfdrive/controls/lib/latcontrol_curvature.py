@@ -9,8 +9,8 @@ CURVATURE_SATURATION_THRESHOLD = 1e-3  # 1/m
 
 
 class LatControlCurvature(LatControl):
-  def __init__(self, CP, CI, dt):
-    super().__init__(CP, CI, dt)
+  def __init__(self, CP, CI):
+    super().__init__(CP, CI)
     self.sat_check_min_speed = 5.
     if CP.lateralTuning.which() == 'pid':
       ct = CP.lateralTuning.pid

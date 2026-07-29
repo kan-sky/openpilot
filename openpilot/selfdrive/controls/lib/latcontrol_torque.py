@@ -72,8 +72,8 @@ def get_friction_torque(lateral_accel_error: float,
 
 
 class LatControlTorque(LatControl):
-  def __init__(self, CP, CI, dt):
-    super().__init__(CP, CI, dt)
+  def __init__(self, CP, CI):
+    super().__init__(CP, CI)
 
     self.params = Params()
     self.frame = 0
