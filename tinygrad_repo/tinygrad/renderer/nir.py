@@ -1,8 +1,8 @@
 from typing import Callable, Any
-from tinygrad.dtype import AddrSpace, DType, ImageDType, dtypes, truncate
-from tinygrad.helpers import DEBUG, OSX, unwrap, fromimport, Target
+from tinygrad.dtype import AddrSpace, DType, dtypes, truncate
+from tinygrad.helpers import DEBUG, OSX, unwrap, fromimport, Target, is_image_shape
 from tinygrad.renderer import Renderer
-from tinygrad.renderer.cstyle import CUDARenderer, OpenCLRenderer
+from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str
 from tinygrad.runtime.autogen import mesa, libc
 from tinygrad.runtime.support.c import POINTER
@@ -137,7 +137,7 @@ class NIRRenderer(Renderer):
     (UPat(Ops.CAST, (dtypes.uchar, dtypes.ushort), src=(UPat.var("x", dtypes.floats),), name="c"), lambda x,c: x.cast(dtypes.int32).cast(c.dtype)),
     # load/store use pointer arithmetic, and the cast does nothing. NOTE: this doesn't apply to image indexing cause it's 1-D
     (UPat((Ops.INDEX, Ops.SHRINK), src=(UPat.var("buf"), UPat.var("off")), allow_any_len=True, name="x"), lambda x,buf,off: x.replace(
-      src=(buf,off.cast(dtypes.long))+x.src[2:]) if buf.addrspace != AddrSpace.REG and not isinstance(buf.dtype, ImageDType) else None),
+      src=(buf,off.cast(dtypes.long))+x.src[2:]) if buf.addrspace != AddrSpace.REG and not is_image_shape(buf._shape) else None),
     # images need index to be int for nir
     (UPat.var("buf").index(UPat.var("idx_y"), UPat.var("idx_x")),
      lambda buf,idx_y,idx_x: buf.index(idx_y.cast(dtypes.int), idx_x.cast(dtypes.int))),
@@ -187,7 +187,8 @@ class NIRRenderer(Renderer):
     self.prerender(uops)
     for u in [u for u in uops if u.op is Ops.SPECIAL and u.arg[0] == "l"]: self.b.shader.contents.info.workgroup_size[int(u.arg[-1])] = u.src[0].arg
     self.r: dict[UOp, Any] = {}
-    self.param_idx, ranges = 0, []
+    self.param_idx = 0
+    ranges: list[mesa.nir_def|None] = []
 
     for u in uops:
       if u.op in {Ops.NOOP, Ops.GROUP} or (u.op is Ops.STACK and len(u.src) == 0): pass
@@ -203,18 +204,29 @@ class NIRRenderer(Renderer):
         self.r[u] = nimm(self.b, self.b.shader.contents.info.shared_size, dtypes.long)
         self.b.shader.contents.info.shared_size += u.max_numel()*u.dtype.itemsize
       elif u.op == Ops.RANGE:
-        ranges.append(i:=deref_var(self.b, mesa.nir_local_variable_create(self.b.impl, glsl_type(u.dtype), f"idx{range_str(u)}".encode()).contents))
-        nstore(self.b, AddrSpace.REG, i, nimm(self.b, 0, u.dtype))
-        mesa.nir_push_loop(self.b)
-        self.r[u] = nload(self.b, AddrSpace.REG, i, u)
-        nif(self.b, nalu(self.b, "ilt", self.r[u], self.r[u.src[0]]), lambda: None, lambda: njump(self.b, mesa.nir_jump_break))
+        if u.dtype == dtypes.void:
+          # a RANGE with no bound is a loop header: just open the loop, the END adds the conditional backedge
+          ranges.append(None)
+          mesa.nir_push_loop(self.b)
+        else:
+          ranges.append(i:=deref_var(self.b, mesa.nir_local_variable_create(self.b.impl, glsl_type(u.dtype), f"idx{range_str(u)}".encode()).contents))
+          nstore(self.b, AddrSpace.REG, i, nimm(self.b, 0, u.dtype))
+          mesa.nir_push_loop(self.b)
+          self.r[u] = nload(self.b, AddrSpace.REG, i, u)
+          nif(self.b, nalu(self.b, "ilt", self.r[u], self.r[u.src[0]]), lambda: None, lambda: njump(self.b, mesa.nir_jump_break))
       elif u.op == Ops.END:
         r = u.src[1]
-        next_i = nalu(self.b, "iadd", self.r[r], nimm(self.b, 1, r.dtype))
-        # TODO: this nif should be removable ... but TestMultiTensor.test_double_matmul_shard_W_0 segfaults with it gone
-        nif(self.b, nalu(self.b, "ilt", next_i, self.r[r.src[0]]), lambda: None, lambda: njump(self.b, mesa.nir_jump_break))
-        nstore(self.b, AddrSpace.REG, ranges.pop(), next_i),
-        mesa.nir_pop_loop(self.b, None)
+        if r.dtype == dtypes.void:
+          # loop again while the condition is true
+          nif(self.b, self.r[u.src[2]], lambda: None, lambda: njump(self.b, mesa.nir_jump_break))
+          ranges.pop()
+          mesa.nir_pop_loop(self.b, None)
+        else:
+          next_i = nalu(self.b, "iadd", self.r[r], nimm(self.b, 1, r.dtype))
+          # TODO: this nif should be removable ... but TestMultiTensor.test_double_matmul_shard_W_0 segfaults with it gone
+          nif(self.b, nalu(self.b, "ilt", next_i, self.r[r.src[0]]), lambda: None, lambda: njump(self.b, mesa.nir_jump_break))
+          nstore(self.b, AddrSpace.REG, ranges.pop(), next_i),
+          mesa.nir_pop_loop(self.b, None)
       else:
         d: mesa.nir_def|None = self.def_rewrite.rewrite(u, ctx=self)
         if d is None: raise RuntimeError(f"failed to render {u.op} srcs {[x.dtype for x in u.src]}")
@@ -270,9 +282,7 @@ _nload_img = nir_instr(intrins=lambda dtype:{'IMAGE_DIM':mesa.GLSL_SAMPLER_DIM_2
   srcs=lambda b,img,idx_y,idx_x:[nsrc(x) for x in [img, tovec(b, idx_y, idx_x), nundef(b, dtypes.int), nimm(b, 0, dtypes.int)]])(
       lambda b,img,idx_y,idx_x,dtype: mesa.nir_intrinsic_instr_create(b.shader, g("nir_intrinsic_image_load")))
 
-class IR3Renderer(NIRRenderer, OpenCLRenderer):
-  has_aux = True
-
+class IR3Renderer(NIRRenderer):
   def nload_img(ctx,img,idx_y,idx_x):
     ctx.texs.add(img)
     return _nload_img(ctx.b, ctx.r[img], ctx.r[idx_y], ctx.r[idx_x], img.dtype)
@@ -290,7 +300,7 @@ class IR3Renderer(NIRRenderer, OpenCLRenderer):
     self.img_idx += 1
     return nimm(self.b, self.img_idx - 1, dtypes.int)
 
-  def param(self, b, x, sz): return self._param_img(x) if isinstance(x.dtype, ImageDType) else self._param(b, x, sz)
+  def param(self, b, x, sz): return self._param_img(x) if is_image_shape(x._shape) else self._param(b, x, sz)
 
   def prerender(self, uops:list[UOp]):
     super().prerender(uops)
@@ -301,9 +311,10 @@ class IR3Renderer(NIRRenderer, OpenCLRenderer):
   def postrender(self, uops:list[UOp]):
     bufs = [u for u in uops if u.op is Ops.PARAM and u.addrspace is not AddrSpace.ALU]
     texs, imgs = itertools.count().__next__, itertools.count().__next__
-    for b in filter(lambda b: isinstance(b.dtype, ImageDType), bufs): nimm_set(self.r[b], texs() if b in self.texs else imgs(), dtypes.int)
+    for b in filter(lambda b: is_image_shape(b._shape), bufs):
+      nimm_set(self.r[b], texs() if b in self.texs else imgs(), dtypes.int)
 
-    self.b.shader.contents.info.num_ubos = len([u for u in bufs if not isinstance(u.dtype, ImageDType)])
+    self.b.shader.contents.info.num_ubos = len([u for u in bufs if not is_image_shape(u._shape)])
     self.b.shader.contents.info.num_images = texs() + imgs()
 
   def supported_dtypes(self): return {d for d in NIRRenderer.supported_dtypes(self) if d != dtypes.double}

@@ -18,13 +18,13 @@ from openpilot.common.transformations.camera import DEVICE_CAMERAS
 from openpilot.system.camerad.cameras.nv12_info import get_nv12_info
 from openpilot.common.transformations.model import get_warp_matrix
 from openpilot.selfdrive.controls.lib.desire_helper import DesireHelper
-from openpilot.selfdrive.controls.lib.drive_helpers import get_accel_from_plan, smooth_value, get_curvature_from_plan
+from openpilot.selfdrive.controls.lib.drive_helpers import get_accel_from_plan, should_stop, smooth_value, get_curvature_from_plan
 from openpilot.selfdrive.modeld.parse_model_outputs import Parser
 from openpilot.selfdrive.modeld.compile_modeld import make_input_queues, WARP_INPUTS, POLICY_INPUTS
 from openpilot.selfdrive.modeld.fill_model_msg import fill_model_msg, fill_driving_model_data, fill_pose_msg, PublishState
 from openpilot.common.file_chunker import open_file_chunked, get_manifest_path
 from openpilot.selfdrive.modeld.constants import ModelConstants, Plan
-from openpilot.selfdrive.modeld.helpers import usbgpu_present, modeld_pkl_path, get_tg_input_devices, load_oob
+from openpilot.selfdrive.modeld.helpers import usbgpu_present, usbgpu_compiled, modeld_pkl_path, get_tg_input_devices, load_oob
 
 PROCESS_NAME = "openpilot.selfdrive.modeld.modeld"
 SEND_RAW_PRED = os.getenv('SEND_RAW_PRED')
@@ -64,13 +64,12 @@ def get_lat_smooth_seconds_dynamic(model_output: dict[str, np.ndarray],
   return dynamic_lat_smooth_seconds, y_std_1s, extra_smooth_seconds
 
 def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.ModelDataV2.Action,
-                          lat_action_t: float, long_action_t: float, v_ego: float, lat_smooth_seconds: float, vEgoStopping: float) -> log.ModelDataV2.Action:
+                          lat_action_t: float, long_action_t: float, v_ego: float, lat_smooth_seconds: float) -> log.ModelDataV2.Action:
   plan = model_output['plan'][0]
-  desired_accel, should_stop, _, desired_velocity_now = get_accel_from_plan(plan[:,Plan.VELOCITY][:,0],
+  desired_accel, _, desired_velocity_now = get_accel_from_plan(plan[:,Plan.VELOCITY][:,0],
                                                    plan[:,Plan.ACCELERATION][:,0],
                                                    ModelConstants.T_IDXS,
-                                                   action_t=long_action_t,
-                                                   vEgoStopping=vEgoStopping)
+                                                   action_t=long_action_t)
   if 'action' not in model_output:
     #plan = model_output['plan'][0]
     #desired_accel, should_stop = get_accel_from_plan(plan[:,Plan.VELOCITY][:,0],
@@ -85,7 +84,8 @@ def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.
   else:
     desired_accel = model_output['action'][0,1]
     desired_curvature = model_output['action'][0,0] / (max(1.0, v_ego))**2
-    #should_stop = (v_ego < 0.3 and desired_accel < 0.1)
+
+  stop = should_stop(v_ego, desired_accel)
 
   # Kans: 깊은 커브에서 모델 곡률이 갑자기 줄어들 때 핸들 급풀림 방지
   raw_curv = float(desired_curvature)
@@ -153,7 +153,7 @@ def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.
   return (log.ModelDataV2.Action(
       desiredCurvature=float(desired_curvature),
       desiredAcceleration=float(desired_accel),
-      shouldStop=bool(should_stop),
+      shouldStop=bool(stop),
       desiredVelocity=float(desired_velocity_now)
     ),
     curve_smooth_max,
@@ -259,12 +259,10 @@ class ModelState:
 def main(demo=False):
   cloudlog.warning("modeld init")
 
-  _present = usbgpu_present()
-  _compiled = os.path.isfile(get_manifest_path(modeld_pkl_path(usbgpu=True)))
-  USBGPU = _present and _compiled
+  USBGPU = usbgpu_present() and usbgpu_compiled()
   params = Params()
-  params.put_bool("UsbGpuPresent", _present)
-  params.put_bool("UsbGpuCompiled", _compiled)
+  params.put_bool("UsbGpuLoading", USBGPU)
+  params.put_bool("UsbGpuActive", False)
 
   config_realtime_process(7, 54)
 
@@ -293,7 +291,27 @@ def main(demo=False):
 
   st = time.monotonic()
   cloudlog.warning("loading model")
-  model = ModelState(vipc_client_main.width, vipc_client_main.height, USBGPU)
+  model = None
+  if USBGPU:
+    big_model = None
+    def load_big():
+      nonlocal big_model
+      try:
+        m = ModelState(vipc_client_main.width, vipc_client_main.height, True)
+        m.warmup()
+        big_model = m
+      except Exception:
+        cloudlog.exception("big model load failed")
+    loader = threading.Thread(target=load_big, daemon=True)
+    loader.start()
+    loader.join(BIG_MODEL_TIMEOUT)
+    model = big_model
+    params.put_bool("UsbGpuActive", model is not None)
+
+  small_model = ModelState(vipc_client_main.width, vipc_client_main.height, False) if model is None or USBGPU else None
+  if model is None:
+    model = small_model
+  params.put_bool("UsbGpuLoading", False)
   cloudlog.warning(f"models loaded in {time.monotonic() - st:.1f}s, modeld starting")
 
   # messaging
@@ -333,8 +351,6 @@ def main(demo=False):
   frame = 0
   custom_lat_delay = 0.0
   lat_smooth_seconds = LAT_SMOOTH_SECONDS
-  vEgoStopping = params.get_float("VEgoStopping") * 0.01
-
   lat_delay_dynamic = lat_smooth_seconds
   while True:
     frame += 1
@@ -342,7 +358,6 @@ def main(demo=False):
       custom_lat_delay = params.get_float("SteerActuatorDelay") * 0.01
       lat_smooth_seconds = params.get_float("LatSmoothSec") * 0.01
       long_delay = params.get_float("LongActuatorDelay")*0.01
-      vEgoStopping = params.get_float("VEgoStopping") * 0.01
 
 
     # Keep receiving frames until we are at least 1 frame ahead of previous extra frame
@@ -424,7 +439,17 @@ def main(demo=False):
     }
 
     mt1 = time.perf_counter()
-    model_output = model.run(bufs, transforms, inputs, prepare_only)
+    try:
+      model_output = model.run(bufs, transforms, inputs)
+    except Exception:
+      if not params.get_bool("UsbGpuActive"):
+        raise
+      # fallback to small model
+      cloudlog.exception("big model failed, fall back to small")
+      params.put_bool("UsbGpuActive", False)
+      model = small_model
+      run_count = 0
+      model_output = None
     mt2 = time.perf_counter()
     model_execution_time = mt2 - mt1
 
@@ -441,7 +466,7 @@ def main(demo=False):
         lat_delay_dynamic = sm["liveDelay"].lateralDelay + lat_smooth_seconds_dynamic
 
       action, curve_smooth_max, applied_lat_smooth_seconds = get_action_from_model(model_output, prev_action, lat_delay_dynamic + frame_delay + action_delay,
-        long_delay + frame_delay + action_delay, v_ego, lat_smooth_seconds_dynamic, vEgoStopping)
+        long_delay + frame_delay + action_delay, v_ego, lat_smooth_seconds_dynamic)
 
       # Kans: LatSmoothDebug
       if frame % 100 == 0:

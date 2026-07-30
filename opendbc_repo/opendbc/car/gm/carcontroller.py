@@ -258,8 +258,9 @@ class CarController(CarControllerBase):
           )
 
           if self.CP.autoResumeSng:
-            resume = actuators.longControlState == LongCtrlState.starting or CC.cruiseControl.resume
-            at_full_stop = at_full_stop and not resume
+            # resume_frame != 0은 앞차 출발이 감지되어 오토리쥼 창이 열렸다는 뜻.
+            resume_requested = CC.cruiseControl.resume or (auto_resume_enabled and self.resume_frame != 0)
+            at_full_stop = at_full_stop and not resume_requested
 
           if CC.cruiseControl.resume and CS.pcm_acc_status == AccState.STANDSTILL:
             if self.CP.carFingerprint in EV_CAR:
@@ -270,12 +271,11 @@ class CarController(CarControllerBase):
             acc_engaged = CC.enabled
 
           # Kans: AutoResume 윈도우 중 2CB ACC state 보정
-          starting = (actuators.longControlState == LongCtrlState.starting)
           auto_resume_window = (auto_resume_enabled and self.resume_frame != 0 and
             CS.out.vEgo < 3.5 and
             not CS.out.brakePressed and
             not CS.out.gasPressed)
-          if auto_resume_window and (starting or CS.out.cruiseState.enabled):
+          if auto_resume_window and (CC.cruiseControl.resume or CS.out.cruiseState.enabled):
             acc_engaged = True
             at_full_stop = False
 
@@ -336,11 +336,11 @@ class CarController(CarControllerBase):
           creep_dt = (self.frame - self.resume_frame) * DT_CTRL if (self.resume_frame != 0) else 999.0
             
           if self.resume_fault_guard == -1:
-            # starting/enable이면 creep release 종료(윈도우는 유지)
-            if starting:
+            # ACC standstill이 해제되면 creep release 종료(윈도우는 유지)
+            if not CS.out.cruiseState.standstill:
               self.resume_fault_guard = 0
 
-            # vEgo가 이미 올라가면(크리핑 시작) 종료(윈도우 유지)
+            # vEgo가 이미 올라가면(크리핑 시작) 종료(윈도우는 유지)
             elif CS.out.vEgo > 0.4:
               self.resume_fault_guard = 0
 
@@ -379,12 +379,12 @@ class CarController(CarControllerBase):
                 self._pending_activateCruise = False
 
           # Kans: Auto Resume (RES only)
-          elif auto_resume_enabled and actuators.longControlState == LongCtrlState.starting and not manual_auto_hold:
-            if self.resume_frame == 0 or self.resume_activate:
+          elif auto_resume_enabled and self.resume_frame != 0 and not manual_auto_hold:
+            if self.resume_activate:
               self.resume_frame = self.frame
               self.resume_activate = False
               self.resume_fault_guard = 0
-              # starting 진입 즉시 1회 RES 가능하도록 버튼 타이머 당김
+              # 재시도 윈도우 진입 즉시 RES 1회 가능하도록 버튼 타이머 당김
               self.last_button_frame = self.frame - int(0.12 / DT_CTRL)
               self.activateCruise_after_brake = False
 
@@ -393,7 +393,7 @@ class CarController(CarControllerBase):
               self.apply_brake = max(self.apply_brake, int(self.params.NEAR_STOP_BRAKE_PHASE))
               self.activateCruise_after_brake = True
 
-            # starting이어도 standstill 확정 전에는 RES 버튼을 보내지 않음. SoftDisableAlert(Alert) 방지용.
+            # 오토리쥼 윈도우가 열려도 standstill 확정 전에는 RES 버튼을 보내지 않음.
             resume_ready_standstill = (CS.out.standstill or CS.out.cruiseState.standstill)
 
             if not resume_ready_standstill:
@@ -402,7 +402,7 @@ class CarController(CarControllerBase):
 
             # RES spam
             elif self.CP.carFingerprint in SDGM_CAR:
-              # SDGM: starting이 짧을 수 있으니, 창이 열리면 1회는 반드시 쏨
+              # SDGM: 리쥼 윈도우가 짧을 수 있으니, 창이 열리면 1회는 반드시 쏨
               if self.resume_fault_guard == 0:
                 self.send_btn(CS, can_sends, CruiseButtons.RES_ACCEL)
                 self.last_button_frame = self.frame
@@ -446,8 +446,15 @@ class CarController(CarControllerBase):
           no_lead_hill_ok = (not has_lead) and (self.resume_frame != 0) and (CS.out.vEgo < 0.5) and (resume_dt < 0.35)
           lead_ok = lead_follow_ok or no_lead_hill_ok
 
-          # resume_active는 "가스 펄스" 조건 -> starting/크루즈ON 게이트
-          resume_active = (self.resume_frame != 0) and auto_longcontrol and (CS.out.vEgo < 3.5) and lead_ok and (starting or CS.out.cruiseState.enabled) and (CS.out.standstill or CS.out.cruiseState.standstill)
+          # resume_active는 오토리쥼 가스 펄스 조건
+          resume_active = (
+            self.resume_frame != 0 and
+            auto_longcontrol and
+            CS.out.vEgo < 3.5 and
+            lead_ok and
+            (CC.cruiseControl.resume or CS.out.cruiseState.enabled) and
+            (CS.out.standstill or CS.out.cruiseState.standstill)
+          )
 
           # 2CB: 실제 가스 송신
           if resume_active:

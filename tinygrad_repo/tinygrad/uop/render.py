@@ -34,9 +34,9 @@ def strip_binary_parens(x:UOp, left:str, right:str, code_for_op) -> str:
 renderer = PatternMatcher([
   (UPat(Ops.PARAM, name="x"), lambda x: x.arg.name if x.arg.name is not None else f"p{x.arg.slot}"),
   (UPat((Ops.SPECIAL), name="x"), lambda x: x.arg),
+  (UPat(Ops.RANGE, dtypes.void, name="x"), lambda x: f"loop{x.arg[0]}"),
   (UPat(Ops.RANGE, name="x"), lambda x: f"r{range_str(x)}"),
   (UPat(Ops.CONST, name="x"), lambda x: str(x.arg)),
-  (UPat(Ops.UNROLL, name="x"), lambda ctx,x,u: f"UNROLL({ctx[x.src[0]]}, {u.arg})"),
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"({str(x.dtype)[7:]})({ctx[x.src[0]]})"),
   (UPat(Ops.BIND, name="x"), lambda ctx,x: ctx[x.src[0]]),
   (UPat(Ops.NEG, name="x"), lambda ctx,x: f"(-{ctx[x.src[0]]})"),
@@ -46,6 +46,7 @@ renderer = PatternMatcher([
   (UPat(Ops.WHERE, name="x"), lambda ctx,x: f"({ctx[x.src[1]]} if {ctx[x.src[0]]} else {ctx[x.src[2]]})"),
   (UPat(Ops.CDIV, name="x"), lambda ctx,x: f"cdiv({ctx[x.src[0]]}, {ctx[x.src[1]]})"),
   (UPat(Ops.CMOD, name="x"), lambda ctx,x: f"cmod({ctx[x.src[0]]}, {ctx[x.src[1]]})"),
+  (UPat(GroupOp.Movement, name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.{x.op.name.lower()}({render_marg(ctx, x)})"),
   (UPat(set(syms.keys()), name="x"), lambda ctx,x: strip_binary_parens(x, ctx[x.src[0]], ctx[x.src[1]], lambda a,b: f"({a}{syms[x.op]}{b})")),
   (UPat((Ops.INDEX, Ops.STAGE), name="x"), lambda x, ctx: ''.join([f"[{strip_parens(ctx[y])}]" for y in x.src[1:]])),
   (UPat(Ops.STACK, name="x"), lambda ctx,x: f"{{{','.join([ctx[y] for y in x.src])}}}"),
@@ -83,8 +84,8 @@ pm_pyrender_extra = PatternMatcher([
     f"UOp.new_buffer({repr(x.arg.device)}, {x.max_numel()}, {x.dtype}, {x.arg.slot})"
     if isinstance(x.arg, ParamArg) and x.addrspace is AddrSpace.GLOBAL else None),
   (UPat(Ops.COPY, src=(UPat(name="x"),), name="copy"), lambda ctx,x,copy: f"{ctx[x]}.copy_to_device({repr(copy.arg)})"),
-  (UPat(Ops.CUSTOM_FUNCTION, name="x"), lambda ctx,x: f"UOp(Ops.CUSTOM_FUNCTION, {x.dtype}, src={srcs(ctx, x.src)}, arg={x.arg!r})"),
-  (UPat(Ops.REDUCE, name="r"), lambda ctx,r: f"{ctx[r.src[0]]}._rop({r.arg[0]}, {r.arg[1]})" if len(r.arg[1]) else None),
+  (UPat(Ops.CUSTOM_FUNCTION, name="x"), lambda ctx,x: f"UOp(Ops.CUSTOM_FUNCTION, src={srcs(ctx, x.src)}, arg={x.arg!r})"),
+  (UPat(Ops.REDUCE, name="r"), lambda ctx,r: f"{ctx[r.src[0]]}._rop({r.arg[0]}, {tuple(range(r.arg[1]))})" if r.arg[1] else None),
   # NOTE: range has srcs sometimes after control flow
   (UPat(Ops.RANGE, src=(UPat(Ops.CONST, name="c"),), allow_any_len=True, name="x"), lambda ctx,x,c:
     "UOp.range("+', '.join([str(c.arg)] + [repr(y) for y in x.arg])+
@@ -92,7 +93,7 @@ pm_pyrender_extra = PatternMatcher([
   # TODO: index shouldn't mismatch dtype
   (UPat(Ops.INDEX, src=(UPat(), UPat()), allow_any_len=True, name="x"), lambda ctx,x:
    f"{ctx[x.src[0]]}.index({ctx[x.src[1]]}, "+''.join([f"{ctx[xx]}, " for xx in x.src[2:]])+
-    (f"dtype={x.dtype})" if x.src[0].dtype != x.dtype else "ptr=True)") if x.src[0].dtype.base != x.dtype else None),
+    f"dtype={x.dtype})" if x.src[0].dtype != x.dtype else None),
   # TODO: movement ops simplify stuff, this can break SPEC=2
   #(UPat(GroupOp.Movement, name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.{x.op.name.lower()}({render_marg(ctx,x)})"),
   # NOTE: CMPNE doesn't work cause there's no __rne__
@@ -143,7 +144,7 @@ def pyrender(ast:UOp) -> str:
       for s in u.src: to_render.add(s)
     if u.op is Ops.STORE: to_render.add(u.src[1])
     if u.op is Ops.REDUCE: to_render.add(u.src[0])
-    if u.op in {Ops.CALL, Ops.FUNCTION}: raise NotImplementedError("call can't be pyrendered")
+    if u.op is Ops.FUNCTION or (u.op is Ops.CALL and u.src[0].dtype is dtypes.void): raise NotImplementedError("call can't be pyrendered")
     if u.op in not_rendered: continue
     # checking the consumers is not enough, you have to make sure it's not used twice by the one consumer
     if len(cmap[u]) == 1 and len([x for x in list(cmap[u].keys())[0].src if x is u]) == 1 and u.op not in always_rendered: continue

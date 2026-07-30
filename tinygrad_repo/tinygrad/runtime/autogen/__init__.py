@@ -3,7 +3,8 @@ from tinygrad.helpers import fetch, flatten, system, getenv
 
 root = (here:=pathlib.Path(__file__).parent).parents[2]
 nv_src = {"nv_570": "https://github.com/NVIDIA/open-gpu-kernel-modules/archive/81fe4fb417c8ac3b9bdcc1d56827d116743892a5.tar.gz",
-          "nv_580": "https://github.com/NVIDIA/open-gpu-kernel-modules/archive/2af9f1f0f7de4988432d4ae875b5858ffdb09cc2.tar.gz"}
+          "nv_580": "https://github.com/NVIDIA/open-gpu-kernel-modules/archive/2af9f1f0f7de4988432d4ae875b5858ffdb09cc2.tar.gz",
+          "nv_610": "https://github.com/NVIDIA/open-gpu-kernel-modules/archive/refs/tags/610.43.03.tar.gz"}
 ffmpeg_src = "https://ffmpeg.org/releases/ffmpeg-8.0.1.tar.gz"
 rocr_src = "https://github.com/ROCm/rocm-systems/archive/refs/tags/rocm-7.1.1.tar.gz"
 linux_headers_deb = "https://snapshot.debian.org/archive/debian/20260207T145350Z/pool/main/l/linux/linux-libc-dev_6.18.9-1_all.deb"
@@ -52,7 +53,8 @@ def __getattr__(nm):
   match nm:
     case "libc":
       return load("libc", lambda: ([i for i in system("dpkg -L libc6-dev").split() if 'sys/mman.h' in i or 'bits/mman-shared.h' in i] +
-                                   ["/usr/include/string.h", "/usr/include/elf.h", "/usr/include/unistd.h", "/usr/include/stdio.h", "/usr/include/asm-generic/mman-common.h"]),
+                                   ["/usr/include/string.h", "/usr/include/elf.h", "/usr/include/unistd.h", "/usr/include/stdio.h", "/usr/include/semaphore.h",
+                                    "/usr/include/asm-generic/mman-common.h"]),
                   args=["-D__USE_GNU", "-D_GNU_SOURCE"], dll="'c'", errno=True, recsym=True, rules=[(r'([a-z]+) = \1', '')]) # removes stdin = stdin
     case "avcodec": return load("avcodec", ["{}/libavcodec/hevc/hevc.h", "{}/libavcodec/cbs_h265.h"], srcs=ffmpeg_src)
     case "opencl": return load("opencl", ["{}/CL/cl.h"], dll="'OpenCL'", args=["-I{}"], srcs=opencl_src)
@@ -60,7 +62,7 @@ def __getattr__(nm):
     case "nvrtc": return load("nvrtc", ["{}/include/nvrtc.h"], dll="'nvrtc'", paths=nv_lib_path, srcs=nvrtc_src, prolog=["import sysconfig"])
     case "nvjitlink": load("nvjitlink", [root/"extra/nvJitLink.h"], dll="'nvJitLink'", paths=nv_lib_path, prolog=["import sysconfig"])
     case "kfd": return load("kfd", [root/"extra/hip_gpu_driver/kfd_ioctl.h"])
-    case "nv_570" | "nv_580":
+    case "nv_570" | "nv_580" | "nv_610":
       return load(nm, [
         *[root/"extra/nv_gpu_driver"/s for s in ["clc9b0.h", "clc6c0qmd.h","clcec0qmd.h", "nvdec_drv.h"]], "{}/kernel-open/common/inc/nvmisc.h",
         *[f"{{}}/src/common/sdk/nvidia/inc/class/cl{s}.h" for s in ["0000", "0070", "0080", "2080", "2080_notification", "c56f", "c86f", "c96f", "c761",
