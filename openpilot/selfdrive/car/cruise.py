@@ -360,10 +360,8 @@ class VCruiseCarrot:
     else:
       self.v_cruise_kph = np.clip(v_cruise_kph, self._cruise_speed_min, self._cruise_speed_max) #max(20, self.v_ego_kph_set) #V_CRUISE_UNSET
       self.v_cruise_cluster_kph = self.v_cruise_kph #V_CRUISE_UNSET
-      # KIA_EV_SK3 전용: 크루즈 메인 ON->OFF 전환 순간 상시조향도 함께 종료
-      if self.cruise_state_available_last and self.CP.carFingerprint == "KIA_EV_SK3":
-        self._lat_enabled = False
-        self._add_log("Lateral disabled (main cruise off)")
+      #if self.cruise_state_available_last: # 최초 한번이라도 cruiseState.available이 True였다면
+      #  self._lat_enabled = False
 
     self.cruise_state_available_last = CS.cruiseState.available
     self.enabled_last = CC.enabled
@@ -529,6 +527,8 @@ class VCruiseCarrot:
         self._pause_auto_speed_up = False
         if self._soft_hold_active > 0:
           self._soft_hold_active = 0
+        elif self.carrot_cruise_active:
+          self._v_cruise_kph_at_brake = 0
         elif self._cruise_ready or not CC.enabled or CS.cruiseState.standstill:
           if self._v_cruise_kph_at_brake > 0:
             v_cruise_kph = max(v_cruise_kph, self._v_cruise_kph_at_brake)
@@ -542,18 +542,14 @@ class VCruiseCarrot:
             road_limit_kph = self.nRoadLimitSpeed * self.autoSpeedUptoRoadSpeedLimit
             if road_limit_kph > 1.0:
               v_cruise_kph = max(v_cruise_kph, road_limit_kph)
-        elif self._v_cruise_kph_at_brake > 0:
-          v_cruise_kph = max(v_cruise_kph, self._v_cruise_kph_at_brake)
-          self._v_cruise_kph_at_brake = 0
-          self._cruise_speed_initialized = True
-        elif not self._cruise_speed_initialized:
-          v_cruise_kph = self._current_speed_for_initial_resume()
-          self._cruise_speed_initialized = True
-          self._add_log(f"{v_cruise_kph} Cruise resume from current speed")
-        elif self._cruise_button_mode == 0:
-          v_cruise_kph = button_kph
         else:
-          v_cruise_kph = self._v_cruise_desired(CS, v_cruise_kph)
+          # Once cruise is already active, RES/+ is a speed adjustment. Stale resume or
+          # initialization state must not consume the first press without changing speed.
+          self._v_cruise_kph_at_brake = 0
+          if self._cruise_button_mode == 0:
+            v_cruise_kph = button_kph
+          else:
+            v_cruise_kph = self._v_cruise_desired(CS, v_cruise_kph)
         self._cruise_speed_initialized = True
         self.carrot_cruise_active = False
 

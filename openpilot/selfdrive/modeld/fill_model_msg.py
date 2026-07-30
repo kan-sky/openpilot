@@ -1,6 +1,7 @@
 import os
 import capnp
 import numpy as np
+import math
 from openpilot.cereal import log
 from openpilot.selfdrive.modeld.constants import ModelConstants, Plan, Meta
 
@@ -96,7 +97,45 @@ def fill_model_msg(msg: capnp._DynamicStructBuilder, net_output_data: dict[str, 
   modelV2.action = action
 
   # times at X_IDXS of edges and lines aren't used
-  LINE_T_IDXS: list[float] = []
+  # Carrot: 모델이 예측한 시간별 전진거리(plan_x)를 이용해, 각 고정거리 X_IDXS에 대응하는 도달시간 LINE_T_IDXS를 안전하게 보간해서 만드는 로직
+  # LINE_T_IDXS: list[float] = [] <- 이렇게 빈 곳을 시간대별로 예측되는 거리에 값을 저장하기 위한 
+  # times at X_IDXS according to model plan
+  plan_x = net_output_data['plan'][0, :, Plan.POSITION][:, 0]
+  Tmax = ModelConstants.T_IDXS[ModelConstants.IDX_N - 1]
+
+  LINE_T_IDXS = [0.0] * ModelConstants.IDX_N
+
+  tidx = 0
+  for xidx in range(1, ModelConstants.IDX_N):
+    x_target = ModelConstants.X_IDXS[xidx]
+
+    while tidx < ModelConstants.IDX_N - 1 and plan_x[tidx + 1] < x_target:
+      tidx += 1
+
+    if tidx >= ModelConstants.IDX_N - 1:
+      LINE_T_IDXS[xidx] = Tmax
+      continue
+
+    x0 = float(plan_x[tidx])
+    x1 = float(plan_x[tidx + 1])
+    t0 = ModelConstants.T_IDXS[tidx]
+    t1 = ModelConstants.T_IDXS[tidx + 1]
+
+    dx = x1 - x0
+    if dx <= 1e-9:
+      LINE_T_IDXS[xidx] = t0
+    else:
+      p = (x_target - x0) / dx
+      p = min(max(p, 0.0), 1.0)
+      LINE_T_IDXS[xidx] = t0 + p * (t1 - t0)
+
+  # Kans: 시간값이 뒤로 갈수록 단순 감소하지 않도록 보정
+  running = LINE_T_IDXS[0]
+  for i in range(1, len(LINE_T_IDXS)):
+    if LINE_T_IDXS[i] < running:
+      LINE_T_IDXS[i] = running
+    else:
+      running = LINE_T_IDXS[i]
 
   # lane lines
   modelV2.init('laneLines', 4)
