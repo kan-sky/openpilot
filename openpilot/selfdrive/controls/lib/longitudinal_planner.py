@@ -234,11 +234,13 @@ class LongitudinalPlanner:
     self.v_desired_filter.x = self.v_desired_filter.x + self.CP.radarTimeStep * (self.a_desired + a_prev) / 2.0
 
     longitudinalActuatorDelay = self.params.get_float("LongActuatorDelay")*0.01
-    vEgoStopping = self.params.get_float("VEgoStopping") * 0.01
+    v_ego_stopping = self.params.get_float("VEgoStopping") * 0.01
+    if v_ego_stopping <= 0.0:
+      v_ego_stopping = 0.3
     action_t =  longitudinalActuatorDelay + DT_MDL
 
     output_a_target_mpc, output_should_stop_mpc, output_v_target_mpc, _ = get_accel_from_plan(self.v_desired_trajectory, self.a_desired_trajectory, CONTROL_N_T_IDX,
-                                                                        action_t=action_t, vEgoStopping=vEgoStopping)
+                                                                        action_t=action_t, vEgoStopping=v_ego_stopping)
     output_a_target_e2e = sm['modelV2'].action.desiredAcceleration
     output_should_stop_e2e = sm['modelV2'].action.shouldStop
     output_v_target_now_e2e = sm['modelV2'].action.desiredVelocity

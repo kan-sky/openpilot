@@ -126,25 +126,30 @@ def clip_curvature(v_ego, prev_curvature, new_curvature, roll) -> tuple[float, b
 
 def get_accel_from_plan(speeds, accels, t_idxs, action_t=DT_MDL, vEgoStopping=0.3):
   if len(speeds) == len(t_idxs):
-    v_now = speeds[0]
-    a_now = accels[0]
+    v_target_now = speeds[0]
+    a_target_now = accels[0]
+
     if action_t < MIN_STABLE_DELAY:
-      v_target = v_now + (action_t / MIN_STABLE_DELAY) * (np.interp(MIN_STABLE_DELAY, t_idxs, speeds) - v_now)
+      v_target = v_target_now + (action_t / MIN_STABLE_DELAY) * (np.interp(MIN_STABLE_DELAY, t_idxs, speeds) - v_target_now)
     else:
       v_target = np.interp(action_t, t_idxs, speeds)
-    a_target = 2 * (v_target - v_now) / (action_t) - a_now
+
+    a_target = 2 * (v_target - v_target_now) / action_t - a_target_now
     v_target_1sec = np.interp(action_t + 1.0, t_idxs, speeds)
-    v_max = np.max(speeds)
+
+    should_stop = (
+      v_target < vEgoStopping and
+      v_target_1sec < vEgoStopping
+    )
+
   else:
-    v_now = 0.0
-    a_now = 0.0
+    v_target_now = 0.0
     v_target = 0.0
-    v_target_1sec = 0.0
     a_target = 0.0
-    v_max = 0.0
-  should_stop = (v_target < vEgoStopping and
-                 v_target_1sec < vEgoStopping)
-  return a_target, should_stop, v_now, v_max #v_target #v_now
+    should_stop = False
+
+  return a_target, should_stop, v_target_now, v_target
+
 
 def curv_from_psis(psi_target, psi_rate, vego, action_t):
   vego = np.clip(vego, MIN_SPEED, np.inf)
