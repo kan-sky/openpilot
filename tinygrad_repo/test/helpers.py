@@ -6,7 +6,7 @@ from tinygrad import Tensor, dtypes, Device
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.codegen import to_program
-from tinygrad.dtype import DType, truncate
+from tinygrad.dtype import DType
 from tinygrad.nn.state import get_parameters
 from tinygrad.helpers import T, Target, DEV
 from tinygrad.renderer import Renderer
@@ -15,7 +15,7 @@ from tinygrad.codegen.late.linearizer import linearize
 
 # decorator to skip slow tests by default, run with RUN_SLOW=1 to include them
 slow = unittest.skipUnless(os.getenv("RUN_SLOW"), "slow test, set RUN_SLOW=1 to run")
-from tinygrad.runtime.ops_python import PythonRenderer
+from tinygrad.runtime.ops_python import PythonProgram, PythonRenderer, PythonCompiler
 
 def full_rewrite(sink:UOp, ren:Renderer|None=None) -> UOp:
   if ren is None: ren = Renderer(Target())
@@ -38,10 +38,6 @@ def call_is_graph(call:UOp) -> bool:
   ast = call.src[0]
   return ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "graph"
 
-def call_is_hcq(call:UOp) -> bool:
-  ast = call.src[0]
-  return ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "hcq"
-
 def jit_cache_count(linear:UOp) -> int:
   n = 0
   for call in linear.src:
@@ -55,15 +51,12 @@ def assert_jit_cache_len(fxn, expected_len):
   if linear is None or not linear.src:
     assert expected_len == 0, expected_len
     return
-  if expected_len and all(call_is_hcq(call) for call in linear.src): expected_len = 3 # HCQ2: merged same-queue calls + finalizer + bumps
   if call_is_graph(linear.src[0]):
     assert len(linear.src) == 1, len(linear.src)
     inner = linear.src[0].src[0].src[0]  # LINEAR UOp inside CUSTOM_FUNCTION
     assert len(inner.src) == expected_len, f"expected {expected_len}, got {len(inner.src)}"
   else:
     assert len(linear.src) == expected_len, f"expected {expected_len}, got {len(linear.src)}"
-
-def min_normal(dt:DType) -> float: return 2.0 ** (2 - (1 << (dtypes.finfo(dt)[0] - 1)))
 
 def rand_for_dtype(dt:DType, size:int, allow_subnormal=True):
   if dtypes.is_unsigned(dt):
@@ -73,8 +66,9 @@ def rand_for_dtype(dt:DType, size:int, allow_subnormal=True):
   elif dt == dtypes.bool:
     return np.random.choice([True, False], size=size)
   ret = np.random.uniform(-10, 10, size=size).astype(_to_np_dtype(dt))
-  if dt == dtypes.bfloat16 or dt in dtypes.fp8s: ret = np.array([truncate[dt](x) for x in ret], dtype=ret.dtype)
-  if not allow_subnormal: ret = np.where(np.abs(ret) < min_normal(dt), 0, ret)
+  if not allow_subnormal:
+    min_normal = 2.0 ** (2 - (1 << (dtypes.finfo(dt)[0] - 1)))
+    ret = np.where(np.abs(ret) < min_normal, 0, ret)
   return ret
 
 def timeit(fxn:Callable[..., T], *args, **kwargs) -> tuple[T, float]:
@@ -83,15 +77,14 @@ def timeit(fxn:Callable[..., T], *args, **kwargs) -> tuple[T, float]:
   return ret, (time.perf_counter_ns()-st)*1e-6
 
 def eval_uop(uop:UOp, inputs:list[tuple[DType, list[Any]]]|None=None, vals:tuple[int, ...]=()):
-  dev = Device['PYTHON']
-  allocator = dev.allocator
+  allocator = Device['PYTHON'].allocator
   bufs = []
   for buf_dt, data in inputs or []:
     bufs.append(buf:=allocator.alloc(len(data) * buf_dt.itemsize))
     allocator._copyin(buf, memoryview(struct.pack(str(len(data)) + (buf_dt.fmt or ""), *data)))
-  g = UOp.param(0, uop.dtype, (1,))
-  prg = to_program(UOp.store(g.index(UOp.const(dtypes.int, 0)), uop).sink(arg=KernelInfo()), PythonRenderer(Target("PYTHON")))
-  prog = dev.runtime(prg.to_elf())
+  g = UOp.param(0, uop.dtype.ptr(1))
+  prg = to_program(UOp.store(g.index(UOp.const(dtypes.int, 0), ptr=True), uop).sink(arg=KernelInfo()), PythonRenderer(Target("PYTHON")))
+  prog = PythonProgram("run", PythonCompiler().compile(prg.src[2].arg))
   prog(out_buf:=allocator.alloc(uop.dtype.itemsize), *bufs, vals=vals)
   return out_buf.cast(uop.dtype.fmt or "").tolist()[0]
 

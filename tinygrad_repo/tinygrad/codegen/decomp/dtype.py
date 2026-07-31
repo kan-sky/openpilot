@@ -1,8 +1,7 @@
-from dataclasses import replace
 from tinygrad.dtype import dtypes, DType, truncate
-from tinygrad.helpers import flatten, DEBUG, EMULATED_DTYPES, Context, SPEC
+from tinygrad.helpers import flatten, DEBUG, EMULATED_DTYPES
 from tinygrad.uop import GroupOp
-from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, graph_rewrite, ParamArg
+from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, graph_rewrite
 from tinygrad.renderer import Renderer
 from tinygrad.codegen.decomp.transcendental import exponent_bias, shl, shr
 
@@ -24,10 +23,7 @@ def l2i(op: Ops, dt: DType, *uops:UOp):
   match op:
     case Ops.NEG: return l2i(Ops.SUB, dt, zero, zero, *uops)
     case Ops.CAST if dt in (dtypes.long, dtypes.ulong) and uops[0].dtype not in dtypes.floats:
-      # the high word is the sign extension; bool has no sign, test the already-cast low word instead (bool < 0 would promote to weakint)
-      x, lo = uops[0], uops[0].cast(l2i_dt[dt])
-      sign = lo if x.dtype is dtypes.bool else x
-      return lo, (sign < sign.const_like(0)).where(lo.const_like(-1), lo.const_like(0))
+      return uops[0].cast(l2i_dt[dt]), (uops[0] < 0).where(UOp.const(l2i_dt[dt], -1), UOp.const(l2i_dt[dt], 0))
     case Ops.CAST if dt in (dtypes.long, dtypes.ulong):
       return (lo:=uops[0].cast(l2i_dt[dt])), (uops[0] / 2**32).cast(l2i_dt[dt]) - ((uops[0] < 0) & lo.ne(0)).cast(l2i_dt[dt])
     case Ops.CAST if dt in dtypes.floats:
@@ -36,14 +32,11 @@ def l2i(op: Ops, dt: DType, *uops:UOp):
     case Ops.CAST: return a0.bitcast(dtypes.uint).cast(dt)
     case Ops.BITCAST: return a0.bitcast(dt), a1.bitcast(dt)
     case Ops.SHL:
-      a0u, a1u, n = a0.bitcast(dtypes.uint), a1.bitcast(dtypes.uint), (b0 & 31).cast(dtypes.uint)
-      lo, hi = (a0u << n).bitcast(dt), ((a1u << n) | ((a0u >> 1) >> (31 - n))).bitcast(dt)
+      lo, hi = shl(a0, b0_mod:=b0 & 31), shl(a1, b0_mod) | shr(shr(a0, 1), 31 - b0_mod)
       return (b0 >= 32).where(zero, lo), (b0 >= 32).where(lo, hi)
     case Ops.SHR:
-      a0u, a1u, n = a0.bitcast(dtypes.uint), a1.bitcast(dtypes.uint), (b0 & 31).cast(dtypes.uint)
-      lo, hi = ((a0u >> n) | ((a1u << 1) << (31 - n))).bitcast(dt), a1 >> (b0 & 31)
-      fill = a1 >> 31 if dt == dtypes.int else zero  # vacated high word: sign bits when signed, else 0
-      return (b0 >= 32).where(hi, lo), (b0 >= 32).where(fill, hi)
+      lo, hi = shr(a0, b0_mod:=b0 & 31) | shl(shl(a1, 1), 31 - b0_mod), shr(a1, b0_mod)
+      return (b0 >= 32).where(hi, lo), (b0 >= 32).where(zero, hi)
     case Ops.ADD: return (low:=a0+b0), (a1 + b1).replace(dtype=dt) + (low.bitcast(dtypes.uint) < a0.bitcast(dtypes.uint)).cast(dt)
     case Ops.SUB: return a0 - b0, a1 - b1 - (a0.bitcast(dtypes.uint) < b0.bitcast(dtypes.uint)).cast(dt)
     case Ops.MUL:
@@ -119,15 +112,15 @@ def f2f_clamp(val:UOp, dt:DType, sat=True) -> UOp:
 
 def f2f_load(x: UOp, fr:DType, to:DType) -> UOp:
   if (n:=x.max_numel()) == 1: return f2f(x.replace(dtype=f2f_dt[fr]), fr, to)
-  return UOp(Ops.STACK, src=tuple(f2f(x.replace(dtype=f2f_dt[fr], src=(reindex(x.src[0], i, 1),)), fr, to) for i in range(n)))
+  return UOp(Ops.STACK, to, tuple(f2f(x.replace(dtype=f2f_dt[fr], src=(reindex(x.src[0], i, 1),)), fr, to) for i in range(n)))
 
 def f2f_store(st, idx, val, fr:DType, to:DType):
   if (n:=val.max_numel()) == 1: return st.replace(src=(idx, f2f(val.bitcast(f2f_dt[to]), to, fr)))
-  return UOp.group(*(st.replace(src=(reindex(idx, i, 1), f2f(val.index(i).bitcast(f2f_dt[to]), to, fr))) for i in range(n)))
+  return UOp.group(*(st.replace(src=(reindex(idx, i, 1), f2f(val.gep(i).bitcast(f2f_dt[to]), to, fr))) for i in range(n)))
 
 pm_long_decomp = PatternMatcher([
   (UPat(GroupOp.Defines, src=(UPat.var("sz"),), name="x"), lambda x,sz:
-   x.replace(dtype=l2i_dt[x.dtype], arg=replace(x.arg, dtype=l2i_dt[x.dtype]), src=(sz*2,)) if x.dtype in l2i_dt else None),
+   x.replace(dtype=l2i_dt[x.dtype], src=(sz*2,)) if x.dtype in l2i_dt else None),
   (UPat(Ops.INDEX, tuple(l2i_dt.keys()), name='x'), lambda x: reindex(x, x.tag).replace(dtype=l2i_dt[x.dtype]) if x.tag is not None else None),
   (UPat(Ops.STORE, src=(UPat.var('idx'), UPat.var('val', tuple(l2i_dt.keys()))), name='st'), lambda st,idx,val:
    st.replace(src=(idx.rtag(0), val.rtag(0))).group(st.replace(src=(idx.rtag(1), val.rtag(1)))) if val.tag is None else None),
@@ -143,7 +136,7 @@ pm_long_decomp = PatternMatcher([
    l2i(x.op, l2i_dt[x.dtype], *flatten((a.rtag(0).cast(dt:=l2i_dt[x.src[-1].dtype]), a.rtag(1).cast(dt))
                                        if a.dtype in l2i_dt else (a,) for a in x.src))[x.tag] if x.tag is not None else None),
   (UPat(Ops.LOAD, tuple(l2i_dt.keys()), src=(UPat.var('idx'),), name='x'), lambda x,idx:
-   x.replace(dtype=l2i_dt[x.dtype], src=(reindex(idx, x.tag).replace(dtype=l2i_dt[x.dtype]),)) if x.tag is not None else None),
+   x.replace(dtype=l2i_dt[x.dtype], src=(reindex(idx, x.tag).replace(dtype=l2i_dt[x.dtype]),))),
   (UPat(Ops.CONST, tuple(l2i_dt.keys()), name='x'), lambda x:
    UOp.const(dt:=l2i_dt[x.dtype], truncate[dt]((x.arg >> 32) if x.tag == 1 else (x.arg & 0xFFFFFFFF))))
 ])
@@ -151,7 +144,7 @@ pm_long_decomp = PatternMatcher([
 # float decomposition patterns - ctx is (fr, to) tuple
 pm_float_decomp = PatternMatcher([
   (UPat((*GroupOp.Defines, Ops.INDEX, Ops.SHRINK), name="x"), lambda ctx,x:
-   x.replace(dtype=f2f_dt[ctx[0]], arg=replace(x.arg, dtype=f2f_dt[ctx[0]]) if isinstance(x.arg, ParamArg) else x.arg, tag=ctx[0])
+   x.replace(dtype=f2f_dt[ctx[0]], tag=ctx[0])
    if x.dtype == ctx[0] and (x.op is not Ops.INDEX or x.src[0].op not in {Ops.LOAD, Ops.STACK}) else None),
   (UPat(Ops.LOAD, dtypes.floats, name="x"), lambda ctx,x: f2f_load(x, *ctx) if x.dtype == ctx[0] else None),
   # bitcasted load should just replace load
@@ -176,13 +169,10 @@ pm_float_decomp = PatternMatcher([
 
 def do_dtype_decomps(sink:UOp, ctx:tuple[set[DType], Renderer]) -> UOp:
   def _should_emulate(dt): return dt in EMULATED_DTYPES.tolist(dtypes) or dt not in ctx[1].supported_dtypes()
-  # NOTE: dtype decomp creates intermediate UOps that don't follow the spec (e.g. half LOAD on ushort BUFFER)
-  with Context(SPEC=min(SPEC.value, 1)):
-    for fr in sorted(filter(_should_emulate, ctx[0])):
-      to = dtypes.int if fr == dtypes.long else dtypes.half if not _should_emulate(dtypes.half) and fr in dtypes.fp8s else dtypes.float
-      if DEBUG >= 2: print(f"emulating {fr} as {to}")
-      pm = pm_float_decomp if fr in dtypes.floats else pm_long_decomp
-      sink = graph_rewrite(sink, pm, name=f"decomp {fr} -> {to}", ctx=(fr, to), bottom_up=True)
+  for fr in sorted(filter(_should_emulate, ctx[0])):
+    to = dtypes.int if fr == dtypes.long else dtypes.half if not _should_emulate(dtypes.half) and fr in dtypes.fp8s else dtypes.float
+    if DEBUG >= 2: print(f"emulating {fr} as {to}")
+    sink = graph_rewrite(sink, pm_float_decomp if fr in dtypes.floats else pm_long_decomp, name=f"decomp {fr} -> {to}", ctx=(fr, to), bottom_up=True)
   ctx[0].clear()
   return sink
 

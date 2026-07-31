@@ -1,20 +1,6 @@
 #include "kittens.cuh"
 #include "utils.cpp"
 
-#if ATTN_D == 64
-#define DQ_L4 "2"
-#define DQ_L10 "5"
-#define DQ_L2 "1"
-#define DQ_L6 "3"
-#define DQ_L6_LOOP "3"
-#else
-#define DQ_L4 "4"
-#define DQ_L10 "10"
-#define DQ_L2 "2"
-#define DQ_L6 "6"
-#define DQ_L6_LOOP "6"
-#endif
-
 #ifndef ATTN_B
 constexpr int ATTN_B = 16; // batch size
 #endif
@@ -28,15 +14,12 @@ constexpr int ATTN_H_KV = 8; // number of key/value heads (for GQA)
 #endif
 
 constexpr int GROUP_SIZE = ATTN_H / ATTN_H_KV; // queries per KV head group
-constexpr int HEADS_PER_WG = (ATTN_D == 128 && GROUP_SIZE % 2 == 0) ? 2 : 1;
 
 #ifndef ATTN_N
 constexpr int ATTN_N = 1024; // sequence length
 #endif
 
-#ifndef ATTN_D
 constexpr int ATTN_D = 128; // dimension
-#endif
 constexpr int STEP_QO = 64; // block size for QO
 constexpr int BLOCK_SIZE_KV = 256; // block size for KV
 constexpr int SLICE_QO = 32;
@@ -54,7 +37,7 @@ using namespace kittens;
 using _gl_QdO  = gl<bf16, ATTN_B, ATTN_N, ATTN_H, ATTN_D>;
 using _gl_KV   = gl<bf16, ATTN_B, ATTN_N, ATTN_H_KV, ATTN_D>;
 using _gl_dQ   = gl<bf16, ATTN_B, ATTN_H, ATTN_N, ATTN_D>;
-using _gl_dKV  = gl<bf16, ATTN_B * (GROUP_SIZE / HEADS_PER_WG), ATTN_N, ATTN_H_KV, ATTN_D>;
+using _gl_dKV  = gl<bf16, ATTN_B * GROUP_SIZE, ATTN_N, ATTN_H_KV, ATTN_D>;
 using _gl_Lvec = gl<float, ATTN_B, ATTN_H, 1, ATTN_N>;
 
 template<int D> struct attn_bwd_combined_globals {
@@ -64,7 +47,7 @@ template<int D> struct attn_bwd_combined_globals {
   _gl_dQ dQg;
   _gl_dKV dKg, dVg;
   _gl_Lvec L_vec, delta_vec;
-  dim3 grid() { return dim3(ATTN_H / HEADS_PER_WG, (ATTN_N / BLOCK_SIZE_KV), ATTN_B); }
+  dim3 grid() { return dim3(ATTN_H, (ATTN_N / BLOCK_SIZE_KV), ATTN_B); }
   dim3 block() { return dim3(NUM_THREADS); }
   size_t dynamic_shared_memory() { return MAX_SHARED_MEMORY; }
 };
@@ -72,7 +55,7 @@ template<int D> struct attn_bwd_combined_globals {
 template<int D> __launch_bounds__(NUM_THREADS, 1)
 __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr, bf16 *dO_ptr, bf16 *Q_ptr, bf16 *K_ptr, bf16 *V_ptr, float *L_vec_ptr, float *delta_vec_ptr) {
 
-  const int q_head_idx_fixed = blockIdx.x * HEADS_PER_WG;  // First query head handled by this workgroup.
+  const int q_head_idx_fixed = blockIdx.x;  // This is the query head index [0, ATTN_H)
   const int kv_head_idx = q_head_idx_fixed / GROUP_SIZE;
   const int q_head_in_group = q_head_idx_fixed % GROUP_SIZE;
   const int seq_idx = blockIdx.y;
@@ -89,7 +72,7 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
   // first Q step that can overlap this K_span:
   const int first_step = max(0, k_start_min / STEP_QO);
   const int num_steps_per_head = total_steps_per_head - first_step;
-  const int num_steps = num_steps_per_head * HEADS_PER_WG;
+  const int num_steps = num_steps_per_head;
   const int k_pos = j * WARP_SIZE_KV;
 
   constexpr float L_SCALE_FACTOR = 1.44269504089f;
@@ -108,19 +91,11 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
   sv_fl<STEP_QO> (&delta_smem)[2] = al.allocate<sv_fl<STEP_QO>, 2>();
 
   // Register tiles
-#if ATTN_D == 64
-  using Q_ranges = ducks::art::split_many_t<ducks::art::type_list<ducks::art::range<368, 375>>, 4>;
-  using dO_ranges = ducks::art::split_many_t<ducks::art::type_list<ducks::art::range<78, 85>>, 4>;
-  using dO_col_ranges = ducks::art::split_many_t<ducks::art::type_list<ducks::art::range<94, 101>>, 4>;
-  using K_ranges = ducks::art::split_many_t<ducks::art::type_list<ducks::art::range<256, 263>, ducks::art::range<272, 279>, ducks::art::range<288, 295>, ducks::art::range<62, 69>>, 4>;
-  using V_ranges = ducks::art::split_many_t<ducks::art::type_list<ducks::art::range<304, 311>, ducks::art::range<316, 323>, ducks::art::range<328, 335>, ducks::art::range<340, 347>>, 4>;
-#else
   using Q_ranges = ducks::art::split_many_t<ducks::art::type_list<ducks::art::range<368, 383>>, 4>; // 16 registers - a[112:127]
   using dO_ranges = ducks::art::split_many_t<ducks::art::type_list<ducks::art::range<78, 93>>, 4>; // 16 registers - v[72:87]
   using dO_col_ranges = ducks::art::split_many_t<ducks::art::type_list<ducks::art::range<94, 109>>, 4>; // 16 registers - v[88:103]
   using K_ranges = ducks::art::split_many_t<ducks::art::type_list<ducks::art::range<256, 303>, ducks::art::range<62, 77>>, 4>; // 64 registers - a[0:47] & v[56:71]
   using V_ranges = ducks::art::split_many_t<ducks::art::type_list<ducks::art::range<304, 367>>, 4>; // 64 registers - a[48:111]
-#endif
   using P_ranges = ducks::art::split_many_t<ducks::art::type_list<ducks::art::range<46, 61>>, 4>; // 16 registers - v[40:55]
   using dP_ranges = ducks::art::split_many_t<ducks::art::type_list<ducks::art::range<62, 77>>, 4>; // 16 registers - v[56:71]
   using P_bf16_ranges = ducks::art::split_many_t<ducks::art::type_list<ducks::art::range<118, 125>>, 2>; // 8 registers - v[116:123]
@@ -128,11 +103,7 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
   using P_bf16_col_ranges = ducks::art::split_many_t<ducks::art::type_list<ducks::art::range<118, 125>>, 4>; // 8 registers
   using dP_bf16_col_ranges = ducks::art::split_many_t<ducks::art::type_list<ducks::art::range<62, 69>>, 4>; // 8 registers
   using dS_ranges = ducks::art::split_many_t<ducks::art::type_list<ducks::art::range<30, 61>>, 4>; // 32 registers - v[24:55]
-#if ATTN_D == 64
-  using dQ_ranges = ducks::art::split_many_t<ducks::art::type_list<ducks::art::range<110, 113>>, 4>;
-#else
   using dQ_ranges = ducks::art::split_many_t<ducks::art::type_list<ducks::art::range<110, 117>>, 4>; // 8 registers - v[108:115]
-#endif
   ducks::art::clobber<Q_ranges>();
   ducks::art::clobber<dO_ranges>();
   ducks::art::clobber<dO_col_ranges>();
@@ -146,20 +117,10 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
   ducks::art::clobber<dQ_ranges>();
 
 
-#if ATTN_D == 64
-  using dV_ranges = ducks::art::split_many_t<ducks::art::type_list<ducks::art::range<128, 191>>, 16>;
-  using dK_ranges = ducks::art::split_many_t<ducks::art::type_list<ducks::art::range<384, 447>>, 16>;
-  using Kcol_ranges = ducks::art::split_many_t<ducks::art::type_list<ducks::art::range<192, 223>>, 4>;
-#else
   using dV_ranges = ducks::art::split_many_t<ducks::art::type_list<ducks::art::range<128, 255>>, 16>; // 128 registers v[128:255]
   using dK_ranges = ducks::art::split_many_t<ducks::art::type_list<ducks::art::range<384, 511>>, 16>; // 128 registers a[128:255]
-  using Kcol_ranges = K_ranges;
-#endif
   ducks::art::clobber<dV_ranges>();
   ducks::art::clobber<dK_ranges>();
-#if ATTN_D == 64
-  ducks::art::clobber<Kcol_ranges>();
-#endif
 
   art<bf16, DOT_SLICE_QO, D, row_l, rt_16x32_s, Q_ranges> Q_i; // 16 registers
   art<bf16, DOT_SLICE_QO, D, row_l, rt_16x32_s, dO_ranges> dO_i; // 16 registers
@@ -183,16 +144,16 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
   art<bf16, DOT_SLICE_QO, WARP_SIZE_KV, col_l, rt_16x32_s, P_bf16_col_ranges> P_ij_bf16_col; // 8 registers
   art<bf16, DOT_SLICE_QO, WARP_SIZE_KV, col_l, rt_16x32_s, dP_bf16_col_ranges> dP_ij_bf16_col; // 8 registers
 
-  art<bf16, 256, ATTN_D/4, col_l, rt_32x16_4_s, Kcol_ranges> K_j_col;
+  art<bf16, 256, 32, col_l, rt_32x16_4_s, K_ranges> K_j_col; // 64 registers // for dq
   art<bf16, 256, 16, col_l, rt_32x16_4_s, dS_ranges> dP_ij_bf16_col_T; // 32 registers // for dq
 
   art<float, D, WARP_SIZE_KV, col_l, rt_32x32_s, dK_ranges> dK_j_T; // 128 registers
   art<float, D, WARP_SIZE_KV, col_l, rt_32x32_s, dV_ranges> dV_j_T; // 128 registers
-  art<float, ATTN_D/4, 16, col_l, rt_16x16_s, dQ_ranges> dQ_i_T;
-  art<float, 16, ATTN_D/4, row_l, rt_16x16_s, ducks::art::transpose_2d<dQ_ranges, ATTN_D/64, 1>> dQ_i;
+  art<float, 32, 16, col_l, rt_16x16_s, dQ_ranges> dQ_i_T; // 8 registers // for dq
+  art<float, 16, 32, row_l, rt_16x16_s, ducks::art::transpose_2d<dQ_ranges, 2, 1>> dQ_i; // 8 registers // for dq
 
   // This is used for both dK_j_T and dV_j_T
-  art<float, WARP_SIZE_KV, D, row_l, rt_32x32_s, ducks::art::transpose_2d<dV_ranges, ATTN_D/32, 2>> dV_j;
+  art<float, WARP_SIZE_KV, D, row_l, rt_32x32_s, ducks::art::transpose_2d<dV_ranges, 4, 2>> dV_j;
 
   // Construct gl objects with compile-time dims AFTER clobbers so compiler knows which VGPRs are taken
   _gl_dQ  dQg{dQ_ptr, nullptr, nullptr, nullptr, nullptr};
@@ -236,10 +197,10 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
   // Addresses
   const uint32_t K_j_addr = get_address(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}));
   // Compute K_j_col_addr
-  // uint32_t K_j_col_addr = get_address(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}));
+  // uint32_t K_j_col_addr = get_address(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}));
   const uint32_t K_j_col_addr = [&] {
     const int laneid = kittens::laneid();
-    const uint32_t src_ptr = reinterpret_cast<uintptr_t>(&subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}).data[0]);
+    const uint32_t src_ptr = reinterpret_cast<uintptr_t>(&subtile_inplace<256, 32>(K_j_smem, {0, warpid}).data[0]);
     const int row_offset = (laneid % 16) / 4 + (laneid / 16) * 4;
     const int col_offset = ((laneid % 4) * 4);
     const int lane_byte_offset = (row_offset * 16 + col_offset) * sizeof(bf16);
@@ -271,12 +232,12 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
   if (num_steps > 1) {
     // Prologue
     {
-      const int q_head_idx = first_q_head;
-      const int q_seq_idx = first_step;
+      const int q_head_idx = (0) / num_steps_per_head + first_q_head;
+      const int q_seq_idx = ((0) % num_steps_per_head) + first_step;
       const int q_pos = q_seq_idx * STEP_QO;
 
-      const int next_q_head_idx = first_q_head;
-      const int next_q_seq_idx = first_step + 1;
+      const int next_q_head_idx = (0 + 1) / num_steps_per_head + first_q_head;
+      const int next_q_seq_idx = ((0 + 1) % num_steps_per_head) + first_step;
 
       // dot slice 0
       {
@@ -288,20 +249,20 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         Q_i_addr = get_address(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}));
         load<0, 0>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
         load<0, 1>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
-        if constexpr (D == 128) load<0, 2>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
-        if constexpr (D == 128) load<0, 3>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
+        load<0, 2>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
+        load<0, 3>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
         load<L_i>(subvec_inplace<DOT_SLICE_QO>(L_smem[tic], 0));
         load<delta_i>(subvec_inplace<DOT_SLICE_QO>(delta_smem[tic], 0));
         // Load K_j from shared memory to registers
         // load(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}));
         load<0, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         load<0, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) load<0, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) load<0, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        load<0, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        load<0, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         load<1, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         load<1, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) load<1, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) load<1, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        load<1, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        load<1, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         asm volatile("s_waitcnt lgkmcnt(0)");
         __builtin_amdgcn_s_barrier();
 
@@ -315,18 +276,18 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         load<2, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         mma_ABt<0, 0, 1>(P_ij, Q_i, K_j, P_ij);
         mul<L_i, L_i>(L_SCALE_FACTOR);
-        if constexpr (D == 128) mma_ABt<0, 0, 2>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) load<2, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) load<2, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) mma_ABt<0, 0, 3>(P_ij, Q_i, K_j, P_ij);
+        mma_ABt<0, 0, 2>(P_ij, Q_i, K_j, P_ij);
+        load<2, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        load<2, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        mma_ABt<0, 0, 3>(P_ij, Q_i, K_j, P_ij);
         mma_ABt<0, 1, 0>(P_ij, Q_i, K_j);
         load<3, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         load<3, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         mma_ABt<0, 1, 1>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) mma_ABt<0, 1, 2>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) load<3, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) load<3, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) mma_ABt<0, 1, 3>(P_ij, Q_i, K_j, P_ij);
+        mma_ABt<0, 1, 2>(P_ij, Q_i, K_j, P_ij);
+        load<3, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        load<3, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        mma_ABt<0, 1, 3>(P_ij, Q_i, K_j, P_ij);
         mul<0, 0>(P_ij, P_ij, P_SCALE_FACTOR);
         asm volatile("s_waitcnt lgkmcnt(6)");
         mma_ABt<0, 2, 0>(P_ij, Q_i, K_j);
@@ -338,10 +299,10 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         mma_ABt<0, 2, 1>(P_ij, Q_i, K_j, P_ij);
         sub_row<0, 0, L_i>(P_ij, P_ij);
         asm volatile("s_waitcnt lgkmcnt(6)");
-        if constexpr (D == 128) mma_ABt<0, 2, 2>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) load<0, 2>(dO_i, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_addr);
-        if constexpr (D == 128) load<0, 3>(dO_i, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_addr);
-        if constexpr (D == 128) mma_ABt<0, 2, 3>(P_ij, Q_i, K_j, P_ij);
+        mma_ABt<0, 2, 2>(P_ij, Q_i, K_j, P_ij);
+        load<0, 2>(dO_i, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_addr);
+        load<0, 3>(dO_i, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_addr);
+        mma_ABt<0, 2, 3>(P_ij, Q_i, K_j, P_ij);
         mul<0, 1>(P_ij, P_ij, P_SCALE_FACTOR);
         asm volatile("s_waitcnt lgkmcnt(6)");
         mma_ABt<0, 3, 0>(P_ij, Q_i, K_j);
@@ -364,10 +325,10 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         mma_ABt<0, 3, 1>(P_ij, Q_i, K_j, P_ij);
         sub_row<0, 1, L_i>(P_ij, P_ij);
         asm volatile("s_waitcnt lgkmcnt(8)");
-        if constexpr (D == 128) mma_ABt<0, 3, 2>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) load<0, 2>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
-        if constexpr (D == 128) load<0, 3>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
-        if constexpr (D == 128) mma_ABt<0, 3, 3>(P_ij, Q_i, K_j, P_ij);
+        mma_ABt<0, 3, 2>(P_ij, Q_i, K_j, P_ij);
+        load<0, 2>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
+        load<0, 3>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
+        mma_ABt<0, 3, 3>(P_ij, Q_i, K_j, P_ij);
         // Dot slice 0
         kittens::macros::v_mov_b32_up2p<neg_inf_v>(0xff800000); if constexpr (causal) {
           // If the query position is less than the key position, set P_ij to -inf
@@ -389,7 +350,7 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         sub_row<0, 2, L_i>(P_ij, P_ij);
         mma_ABt<0, 0, 1>(dP_ij, dO_i, V_j, dP_ij);
         exp2<0, 0>(P_ij, P_ij);
-        if constexpr (D == 128) mma_ABt<0, 0, 2>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 0, 2>(dP_ij, dO_i, V_j, dP_ij);
         // Load Q_i_col from shared memory to registers
         // load(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}));
         // Compute Q_i_col_addr
@@ -405,53 +366,53 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
           return addr;
         }();
         load<0, 0>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
-        if constexpr (D == 128) mma_ABt<0, 0, 3>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 0, 3>(dP_ij, dO_i, V_j, dP_ij);
         exp2<0, 1>(P_ij, P_ij);
         mma_ABt<0, 1, 0>(dP_ij, dO_i, V_j);
         load<0, 1>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
         mma_ABt<0, 1, 1>(dP_ij, dO_i, V_j, dP_ij);
         mul<0, 3>(P_ij, P_ij, P_SCALE_FACTOR);
-        if constexpr (D == 128) mma_ABt<0, 1, 2>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 1, 2>(dP_ij, dO_i, V_j, dP_ij);
         sub_row<0, 3, L_i>(P_ij, P_ij);
-        if constexpr (D == 128) mma_ABt<0, 1, 3>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 1, 3>(dP_ij, dO_i, V_j, dP_ij);
         copy<0, 0>(P_ij_bf16, P_ij);
         mma_ABt<0, 2, 0>(dP_ij, dO_i, V_j);
         exp2<0, 2>(P_ij, P_ij);
         mma_ABt<0, 2, 1>(dP_ij, dO_i, V_j, dP_ij);
         copy<0, 1>(P_ij_bf16, P_ij);
-        if constexpr (D == 128) mma_ABt<0, 2, 2>(dP_ij, dO_i, V_j, dP_ij);
-        if constexpr (D == 128) load<0, 2>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
-        if constexpr (D == 128) mma_ABt<0, 2, 3>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 2, 2>(dP_ij, dO_i, V_j, dP_ij);
+        load<0, 2>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
+        mma_ABt<0, 2, 3>(dP_ij, dO_i, V_j, dP_ij);
         exp2<0, 3>(P_ij, P_ij);
         mma_ABt<0, 3, 0>(dP_ij, dO_i, V_j);
-        if constexpr (D == 128) load<0, 3>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
+        load<0, 3>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
         mma_ABt<0, 3, 1>(dP_ij, dO_i, V_j, dP_ij);
         copy<0, 2>(P_ij_bf16, P_ij);
         copy<0, 3>(P_ij_bf16, P_ij);
-        if constexpr (D == 128) mma_ABt<0, 3, 2>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 3, 2>(dP_ij, dO_i, V_j, dP_ij);
         swap_layout_inplace(P_ij_bf16_col, P_ij_bf16);
-        if constexpr (D == 128) mma_ABt<0, 3, 3>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 3, 3>(dP_ij, dO_i, V_j, dP_ij);
         asm volatile("s_waitcnt lgkmcnt(8)");
         // mma_AtB(dV_j_T, dO_i_col, P_ij_bf16_col);
         mma_AtB<0, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col);
         // Load K_j_col from shared memory to registers
-        // load(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}));
-        load<0, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) load<0, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+        // load(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}));
+        load<0, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<0, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
         mma_AtB<0, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col);
         sub_row<0, 0, delta_i>(dP_ij, dP_ij);
         sub_row<0, 1, delta_i>(dP_ij, dP_ij);
         mma_AtB<1, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col);
-        load<1, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) load<1, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<1, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<1, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
         mma_AtB<1, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col);
         mul<0, 0>(dP_ij, dP_ij, P_ij);
         mul<0, 1>(dP_ij, dP_ij, P_ij);
         copy<0, 0>(dP_ij_bf16, dP_ij);
         copy<0, 1>(dP_ij_bf16, dP_ij);
         sub_row<0, 2, delta_i>(dP_ij, dP_ij);
-        if constexpr (D == 128) mma_AtB<2, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col);
-        load<2, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+        mma_AtB<2, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col);
+        load<2, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
         // 12. dV_j += P_ij^T @ dO_i
         // 16. dK_j += dS_ij^T @ Q_i   (128x64)=(128x16)x(16x64)
 
@@ -459,13 +420,13 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         // store(attn_i_smem_subtile, dP_ij_bf16_accum_row);
         store<0, 0>(attn_i_smem_subtile, dP_ij_bf16_accum_row, dP_ij_bf16_accum_row_addr);
         store<1, 0>(attn_i_smem_subtile, dP_ij_bf16_accum_row, dP_ij_bf16_accum_row_addr);
-        if constexpr (D == 128) mma_AtB<2, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col);
+        mma_AtB<2, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col);
         sub_row<0, 3, delta_i>(dP_ij, dP_ij);
         mul<0, 2>(dP_ij, dP_ij, P_ij);
         mul<0, 3>(dP_ij, dP_ij, P_ij);
         copy<0, 2>(dP_ij_bf16, dP_ij);
         copy<0, 3>(dP_ij_bf16, dP_ij);
-        if constexpr (D == 128) mma_AtB<3, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col);
+        mma_AtB<3, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col);
 
         // dot slice 1
         load<L_i>(subvec_inplace<DOT_SLICE_QO>(L_smem[tic], 1));
@@ -473,18 +434,17 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         
         store<2, 0>(attn_i_smem_subtile, dP_ij_bf16_accum_row, dP_ij_bf16_accum_row_addr);
         store<3, 0>(attn_i_smem_subtile, dP_ij_bf16_accum_row, dP_ij_bf16_accum_row_addr);
-        if constexpr (D == 128) mma_AtB<3, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col);
+        mma_AtB<3, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col);
         swap_layout_inplace(dP_ij_bf16_col, dP_ij_bf16);
         asm volatile("s_waitcnt lgkmcnt(12)");
         // mma_AtB(dK_j_T, Q_i_col, dP_ij_bf16_col);
         mma_AtB<0, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col);
-        if constexpr (D == 128) load<2, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        load<3, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) load<3, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        load<4, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<2, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<3, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<3, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<4, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
         mma_AtB<0, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col);
         asm volatile("s_waitcnt lgkmcnt(8)");
-        if constexpr (D == 64) asm volatile("s_waitcnt lgkmcnt(0)");
         __builtin_amdgcn_s_barrier();
         mma_AtB<1, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col);
         // Load dP_ij_bf16_col_T from shared memory to registers
@@ -495,29 +455,29 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         load<3, 0>(dP_ij_bf16_col_T, attn_i_smem, dP_ij_bf16_col_T_addr);
         mma_AtB<1, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col);
         mul<L_i, L_i>(L_SCALE_FACTOR);
-        if constexpr (D == 128) mma_AtB<2, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col);
+        mma_AtB<2, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col);
         load<4, 0>(dP_ij_bf16_col_T, attn_i_smem, dP_ij_bf16_col_T_addr);
         load<5, 0>(dP_ij_bf16_col_T, attn_i_smem, dP_ij_bf16_col_T_addr);
-        if constexpr (D == 128) load<4, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        load<5, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) mma_AtB<2, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col);
-        if constexpr (D == 128) mma_AtB<3, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col);
+        load<4, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<5, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        mma_AtB<2, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col);
+        mma_AtB<3, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col);
         load<6, 0>(dP_ij_bf16_col_T, attn_i_smem, dP_ij_bf16_col_T_addr);
         load<7, 0>(dP_ij_bf16_col_T, attn_i_smem, dP_ij_bf16_col_T_addr);
-        if constexpr (D == 128) load<5, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) mma_AtB<3, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col);
-        asm volatile("s_waitcnt vmcnt(0) lgkmcnt(" DQ_L6 ")");
+        load<5, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        mma_AtB<3, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col);
+        asm volatile("s_waitcnt vmcnt(0) lgkmcnt(6)");
         __builtin_amdgcn_s_barrier();
         // 15. dQ_i += dS_ij @ K_j (32x16)=(32x256)x(256x16)
         // mma_AtB(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
         mma_AtB<0, 0, 0>(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
-        load<6, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) load<6, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<6, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<6, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
         mma_AtB<0, 0, 1>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         G::load<1, false>(dO_i_smem[toc][0], g.dOg, {batch_idx, next_q_seq_idx * 2, next_q_head_idx, 0}, swizzled_offsets_Q_dO);
         mma_AtB<0, 0, 2>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        load<7, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) load<7, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<7, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<7, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
         mma_AtB<0, 0, 3>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         load(delta_smem[toc], g.delta_vec, {batch_idx, next_q_head_idx, 0, next_q_seq_idx});
         mma_AtB<0, 0, 4>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
@@ -527,36 +487,36 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         load<0, 0>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
         load<0, 1>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
         mma_AtB<0, 0, 5>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        asm volatile("s_waitcnt lgkmcnt(" DQ_L4 ")");
+        asm volatile("s_waitcnt lgkmcnt(4)");
         __builtin_amdgcn_s_barrier();
         mma_AtB<0, 0, 6>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        if constexpr (D == 128) load<0, 2>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
-        if constexpr (D == 128) load<0, 3>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
+        load<0, 2>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
+        load<0, 3>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
         mma_AtB<0, 0, 7>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        if constexpr (D == 128) mma_AtB<1, 0, 0>(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
+        mma_AtB<1, 0, 0>(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
         // Load K_j from shared memory to registers
         // load(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}));
         load<0, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         load<0, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) mma_AtB<1, 0, 1>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        if constexpr (D == 128) mma_AtB<1, 0, 2>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        if constexpr (D == 128) load<0, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) load<0, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) mma_AtB<1, 0, 3>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        mma_AtB<1, 0, 1>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        mma_AtB<1, 0, 2>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        load<0, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        load<0, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        mma_AtB<1, 0, 3>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         mul<0, 0, 0>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
         mul<0, 0, 1>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-        if constexpr (D == 128) mma_AtB<1, 0, 4>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        mma_AtB<1, 0, 4>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         load<1, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         load<1, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) mma_AtB<1, 0, 5>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        mma_AtB<1, 0, 5>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         mul<0, 0, 2>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
         mul<0, 0, 3>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-        asm volatile("s_waitcnt lgkmcnt(" DQ_L10 ")");
-        if constexpr (D == 128) mma_AtB<1, 0, 6>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        if constexpr (D == 128) load<1, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) load<1, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) mma_AtB<1, 0, 7>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        asm volatile("s_waitcnt lgkmcnt(" DQ_L2 ")");
+        asm volatile("s_waitcnt lgkmcnt(10)");
+        mma_AtB<1, 0, 6>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        load<1, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        load<1, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        mma_AtB<1, 0, 7>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        asm volatile("s_waitcnt lgkmcnt(2)");
       }
 
       // dot slice 1
@@ -570,22 +530,22 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         load<2, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         load<2, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         mma_ABt<0, 0, 1>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) mma_ABt<0, 0, 2>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) load<2, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) load<2, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) mma_ABt<0, 0, 3>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) mul<1, 0, 0>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-        if constexpr (D == 128) mul<1, 0, 1>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
+        mma_ABt<0, 0, 2>(P_ij, Q_i, K_j, P_ij);
+        load<2, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        load<2, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        mma_ABt<0, 0, 3>(P_ij, Q_i, K_j, P_ij);
+        mul<1, 0, 0>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
+        mul<1, 0, 1>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
         mma_ABt<0, 1, 0>(P_ij, Q_i, K_j);
         load<3, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         load<3, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         mma_ABt<0, 1, 1>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) mul<1, 0, 2>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-        if constexpr (D == 128) mul<1, 0, 3>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-        if constexpr (D == 128) mma_ABt<0, 1, 2>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) load<3, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) load<3, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) mma_ABt<0, 1, 3>(P_ij, Q_i, K_j, P_ij);
+        mul<1, 0, 2>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
+        mul<1, 0, 3>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
+        mma_ABt<0, 1, 2>(P_ij, Q_i, K_j, P_ij);
+        load<3, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        load<3, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        mma_ABt<0, 1, 3>(P_ij, Q_i, K_j, P_ij);
         mul<0, 0>(P_ij, P_ij, P_SCALE_FACTOR);
         asm volatile("s_waitcnt lgkmcnt(6)");
         mma_ABt<0, 2, 0>(P_ij, Q_i, K_j);
@@ -597,10 +557,10 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         mma_ABt<0, 2, 1>(P_ij, Q_i, K_j, P_ij);
         sub_row<0, 0, L_i>(P_ij, P_ij);
         asm volatile("s_waitcnt lgkmcnt(6)");
-        if constexpr (D == 128) mma_ABt<0, 2, 2>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) load<0, 2>(dO_i, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_addr);
-        if constexpr (D == 128) load<0, 3>(dO_i, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_addr);
-        if constexpr (D == 128) mma_ABt<0, 2, 3>(P_ij, Q_i, K_j, P_ij);
+        mma_ABt<0, 2, 2>(P_ij, Q_i, K_j, P_ij);
+        load<0, 2>(dO_i, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_addr);
+        load<0, 3>(dO_i, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_addr);
+        mma_ABt<0, 2, 3>(P_ij, Q_i, K_j, P_ij);
         mul<0, 1>(P_ij, P_ij, P_SCALE_FACTOR);
         asm volatile("s_waitcnt lgkmcnt(6)");
         mma_ABt<0, 3, 0>(P_ij, Q_i, K_j);
@@ -623,10 +583,10 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         mma_ABt<0, 3, 1>(P_ij, Q_i, K_j, P_ij);
         sub_row<0, 1, L_i>(P_ij, P_ij);
         asm volatile("s_waitcnt lgkmcnt(8)");
-        if constexpr (D == 128) mma_ABt<0, 3, 2>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) load<0, 2>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
-        if constexpr (D == 128) load<0, 3>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
-        if constexpr (D == 128) mma_ABt<0, 3, 3>(P_ij, Q_i, K_j, P_ij);
+        mma_ABt<0, 3, 2>(P_ij, Q_i, K_j, P_ij);
+        load<0, 2>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
+        load<0, 3>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
+        mma_ABt<0, 3, 3>(P_ij, Q_i, K_j, P_ij);
         // Dot slice 1
         kittens::macros::v_mov_b32_up2p<neg_inf_v>(0xff800000); if constexpr (causal) {
           // If the query position is less than the key position, set P_ij to -inf
@@ -647,7 +607,7 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         sub_row<0, 2, L_i>(P_ij, P_ij);
         mma_ABt<0, 0, 1>(dP_ij, dO_i, V_j, dP_ij);
         exp2<0, 0>(P_ij, P_ij);
-        if constexpr (D == 128) mma_ABt<0, 0, 2>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 0, 2>(dP_ij, dO_i, V_j, dP_ij);
         // Load Q_i_col from shared memory to registers
         // load(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}));
         // Compute Q_i_col_addr
@@ -663,66 +623,66 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
           return addr;
         }();
         load<0, 0>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
-        if constexpr (D == 128) mma_ABt<0, 0, 3>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 0, 3>(dP_ij, dO_i, V_j, dP_ij);
         exp2<0, 1>(P_ij, P_ij);
         mma_ABt<0, 1, 0>(dP_ij, dO_i, V_j);
         load<0, 1>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
         mma_ABt<0, 1, 1>(dP_ij, dO_i, V_j, dP_ij);
         mul<0, 3>(P_ij, P_ij, P_SCALE_FACTOR);
-        if constexpr (D == 128) mma_ABt<0, 1, 2>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 1, 2>(dP_ij, dO_i, V_j, dP_ij);
         sub_row<0, 3, L_i>(P_ij, P_ij);
-        if constexpr (D == 128) mma_ABt<0, 1, 3>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 1, 3>(dP_ij, dO_i, V_j, dP_ij);
         copy<0, 0>(P_ij_bf16, P_ij);
         mma_ABt<0, 2, 0>(dP_ij, dO_i, V_j);
         exp2<0, 2>(P_ij, P_ij);
         mma_ABt<0, 2, 1>(dP_ij, dO_i, V_j, dP_ij);
         copy<0, 1>(P_ij_bf16, P_ij);
-        if constexpr (D == 128) mma_ABt<0, 2, 2>(dP_ij, dO_i, V_j, dP_ij);
-        if constexpr (D == 128) load<0, 2>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
-        if constexpr (D == 128) mma_ABt<0, 2, 3>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 2, 2>(dP_ij, dO_i, V_j, dP_ij);
+        load<0, 2>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
+        mma_ABt<0, 2, 3>(dP_ij, dO_i, V_j, dP_ij);
         exp2<0, 3>(P_ij, P_ij);
         mma_ABt<0, 3, 0>(dP_ij, dO_i, V_j);
-        if constexpr (D == 128) load<0, 3>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
+        load<0, 3>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
         mma_ABt<0, 3, 1>(dP_ij, dO_i, V_j, dP_ij);
         copy<0, 2>(P_ij_bf16, P_ij);
         copy<0, 3>(P_ij_bf16, P_ij);
-        if constexpr (D == 128) mma_ABt<0, 3, 2>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 3, 2>(dP_ij, dO_i, V_j, dP_ij);
         swap_layout_inplace(P_ij_bf16_col, P_ij_bf16);
-        if constexpr (D == 128) mma_ABt<0, 3, 3>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 3, 3>(dP_ij, dO_i, V_j, dP_ij);
         asm volatile("s_waitcnt lgkmcnt(8)");
         // mma_AtB(dV_j_T, dO_i_col, P_ij_bf16_col);
         mma_AtB<0, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
         // Load K_j_col from shared memory to registers
-        // load(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}));
-        load<0, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) load<0, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+        // load(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}));
+        load<0, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<0, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
         mma_AtB<0, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
         sub_row<0, 0, delta_i>(dP_ij, dP_ij);
         sub_row<0, 1, delta_i>(dP_ij, dP_ij);
         mma_AtB<1, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
-        load<1, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) load<1, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<1, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<1, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
         mma_AtB<1, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
         mul<0, 0>(dP_ij, dP_ij, P_ij);
         mul<0, 1>(dP_ij, dP_ij, P_ij);
         copy<0, 0>(dP_ij_bf16, dP_ij);
         copy<0, 1>(dP_ij_bf16, dP_ij);
         sub_row<0, 2, delta_i>(dP_ij, dP_ij);
-        if constexpr (D == 128) mma_AtB<2, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
-        load<2, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+        mma_AtB<2, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
+        load<2, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
         // 12. dV_j += P_ij^T @ dO_i
         // 16. dK_j += dS_ij^T @ Q_i   (128x64)=(128x16)x(16x64)
         // Store dP_ij_bf16_accum_row to shared memory
         // store(attn_i_smem_subtile, dP_ij_bf16_accum_row);
         store<0, 0>(attn_i_smem_subtile, dP_ij_bf16_accum_row, dP_ij_bf16_accum_row_addr);
         store<1, 0>(attn_i_smem_subtile, dP_ij_bf16_accum_row, dP_ij_bf16_accum_row_addr);
-        if constexpr (D == 128) mma_AtB<2, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
+        mma_AtB<2, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
         sub_row<0, 3, delta_i>(dP_ij, dP_ij);
         mul<0, 2>(dP_ij, dP_ij, P_ij);
         mul<0, 3>(dP_ij, dP_ij, P_ij);
         copy<0, 2>(dP_ij_bf16, dP_ij);
         copy<0, 3>(dP_ij_bf16, dP_ij);
-        if constexpr (D == 128) mma_AtB<3, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
+        mma_AtB<3, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
 
         // dot slice 2
         load<L_i>(subvec_inplace<DOT_SLICE_QO>(L_smem[tic], 2));
@@ -730,18 +690,17 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         
         store<2, 0>(attn_i_smem_subtile, dP_ij_bf16_accum_row, dP_ij_bf16_accum_row_addr);
         store<3, 0>(attn_i_smem_subtile, dP_ij_bf16_accum_row, dP_ij_bf16_accum_row_addr);
-        if constexpr (D == 128) mma_AtB<3, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
+        mma_AtB<3, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
         swap_layout_inplace(dP_ij_bf16_col, dP_ij_bf16);
         asm volatile("s_waitcnt lgkmcnt(12)");
         // mma_AtB(dK_j_T, Q_i_col, dP_ij_bf16_col);
         mma_AtB<0, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
-        if constexpr (D == 128) load<2, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        load<3, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) load<3, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        load<4, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<2, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<3, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<3, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<4, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
         mma_AtB<0, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
         asm volatile("s_waitcnt lgkmcnt(8)");
-        if constexpr (D == 64) asm volatile("s_waitcnt lgkmcnt(0)");
         __builtin_amdgcn_s_barrier();
         mma_AtB<1, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
         // Load dP_ij_bf16_col_T from shared memory to registers
@@ -753,30 +712,30 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         mma_AtB<1, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
         mul<L_i, L_i>(L_SCALE_FACTOR);
         atomic_pk_add_bf16_with_warpid<2, 0, 0>(g.dQg, dQ_i, {batch_idx, q_head_idx, q_seq_idx * 4, 0}, warpid);
-        if constexpr (D == 128) mma_AtB<2, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
+        mma_AtB<2, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
         load<4, 0>(dP_ij_bf16_col_T, attn_i_smem, dP_ij_bf16_col_T_addr);
         load<5, 0>(dP_ij_bf16_col_T, attn_i_smem, dP_ij_bf16_col_T_addr);
-        if constexpr (D == 128) load<4, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        load<5, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) mma_AtB<2, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
-        if constexpr (D == 128) atomic_pk_add_bf16_with_warpid<2, 0, 1>(g.dQg, dQ_i, {batch_idx, q_head_idx, q_seq_idx * 4, 0}, warpid);
-        if constexpr (D == 128) mma_AtB<3, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
+        load<4, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<5, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        mma_AtB<2, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
+        atomic_pk_add_bf16_with_warpid<2, 0, 1>(g.dQg, dQ_i, {batch_idx, q_head_idx, q_seq_idx * 4, 0}, warpid);
+        mma_AtB<3, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
         load<6, 0>(dP_ij_bf16_col_T, attn_i_smem, dP_ij_bf16_col_T_addr);
         load<7, 0>(dP_ij_bf16_col_T, attn_i_smem, dP_ij_bf16_col_T_addr);
-        if constexpr (D == 128) load<5, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) mma_AtB<3, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
-        asm volatile("s_waitcnt vmcnt(4) lgkmcnt(" DQ_L6_LOOP ")");
+        load<5, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        mma_AtB<3, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
+        asm volatile("s_waitcnt vmcnt(4) lgkmcnt(6)");
         __builtin_amdgcn_s_barrier();
         // 15. dQ_i += dS_ij @ K_j (32x16)=(32x256)x(256x16)
         // mma_AtB(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
         mma_AtB<0, 0, 0>(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
-        load<6, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) load<6, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<6, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<6, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
         mma_AtB<0, 0, 1>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         G::load<1, false>(Q_i_smem[toc][1], g.Q, {batch_idx, next_q_seq_idx * 2 + 1, next_q_head_idx, 0}, swizzled_offsets_Q_dO);
         mma_AtB<0, 0, 2>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        load<7, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) load<7, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<7, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<7, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
         mma_AtB<0, 0, 3>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         mma_AtB<0, 0, 4>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         // Load Q_i from shared memory to registers
@@ -785,36 +744,36 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         load<0, 0>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
         load<0, 1>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
         mma_AtB<0, 0, 5>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        asm volatile("s_waitcnt lgkmcnt(" DQ_L4 ")");
+        asm volatile("s_waitcnt lgkmcnt(4)");
         __builtin_amdgcn_s_barrier();
         mma_AtB<0, 0, 6>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        if constexpr (D == 128) load<0, 2>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
-        if constexpr (D == 128) load<0, 3>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
+        load<0, 2>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
+        load<0, 3>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
         mma_AtB<0, 0, 7>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        if constexpr (D == 128) mma_AtB<1, 0, 0>(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
+        mma_AtB<1, 0, 0>(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
         // Load K_j from shared memory to registers
         // load(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}));
         load<0, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         load<0, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) mma_AtB<1, 0, 1>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        if constexpr (D == 128) mma_AtB<1, 0, 2>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        if constexpr (D == 128) load<0, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) load<0, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) mma_AtB<1, 0, 3>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        mma_AtB<1, 0, 1>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        mma_AtB<1, 0, 2>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        load<0, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        load<0, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        mma_AtB<1, 0, 3>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         mul<0, 0, 0>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
         mul<0, 0, 1>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-        if constexpr (D == 128) mma_AtB<1, 0, 4>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        mma_AtB<1, 0, 4>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         load<1, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         load<1, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) mma_AtB<1, 0, 5>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        mma_AtB<1, 0, 5>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         mul<0, 0, 2>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
         mul<0, 0, 3>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-        asm volatile("s_waitcnt lgkmcnt(" DQ_L10 ")");
-        if constexpr (D == 128) mma_AtB<1, 0, 6>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        if constexpr (D == 128) load<1, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) load<1, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) mma_AtB<1, 0, 7>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        asm volatile("s_waitcnt lgkmcnt(" DQ_L2 ")");
+        asm volatile("s_waitcnt lgkmcnt(10)");
+        mma_AtB<1, 0, 6>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        load<1, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        load<1, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        mma_AtB<1, 0, 7>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        asm volatile("s_waitcnt lgkmcnt(2)");
       }
 
       // dot slice 2
@@ -828,22 +787,22 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         load<2, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         load<2, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         mma_ABt<0, 0, 1>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) mma_ABt<0, 0, 2>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) load<2, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) load<2, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) mma_ABt<0, 0, 3>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) mul<1, 0, 0>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-        if constexpr (D == 128) mul<1, 0, 1>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
+        mma_ABt<0, 0, 2>(P_ij, Q_i, K_j, P_ij);
+        load<2, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        load<2, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        mma_ABt<0, 0, 3>(P_ij, Q_i, K_j, P_ij);
+        mul<1, 0, 0>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
+        mul<1, 0, 1>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
         mma_ABt<0, 1, 0>(P_ij, Q_i, K_j);
         load<3, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         load<3, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         mma_ABt<0, 1, 1>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) mul<1, 0, 2>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-        if constexpr (D == 128) mul<1, 0, 3>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-        if constexpr (D == 128) mma_ABt<0, 1, 2>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) load<3, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) load<3, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) mma_ABt<0, 1, 3>(P_ij, Q_i, K_j, P_ij);
+        mul<1, 0, 2>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
+        mul<1, 0, 3>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
+        mma_ABt<0, 1, 2>(P_ij, Q_i, K_j, P_ij);
+        load<3, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        load<3, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        mma_ABt<0, 1, 3>(P_ij, Q_i, K_j, P_ij);
         mul<0, 0>(P_ij, P_ij, P_SCALE_FACTOR);
         asm volatile("s_waitcnt lgkmcnt(6)");
         mma_ABt<0, 2, 0>(P_ij, Q_i, K_j);
@@ -855,10 +814,10 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         mma_ABt<0, 2, 1>(P_ij, Q_i, K_j, P_ij);
         sub_row<0, 0, L_i>(P_ij, P_ij);
         asm volatile("s_waitcnt lgkmcnt(6)");
-        if constexpr (D == 128) mma_ABt<0, 2, 2>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) load<0, 2>(dO_i, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_addr);
-        if constexpr (D == 128) load<0, 3>(dO_i, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_addr);
-        if constexpr (D == 128) mma_ABt<0, 2, 3>(P_ij, Q_i, K_j, P_ij);
+        mma_ABt<0, 2, 2>(P_ij, Q_i, K_j, P_ij);
+        load<0, 2>(dO_i, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_addr);
+        load<0, 3>(dO_i, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_addr);
+        mma_ABt<0, 2, 3>(P_ij, Q_i, K_j, P_ij);
         mul<0, 1>(P_ij, P_ij, P_SCALE_FACTOR);
         asm volatile("s_waitcnt lgkmcnt(6)");
         mma_ABt<0, 3, 0>(P_ij, Q_i, K_j);
@@ -881,10 +840,10 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         mma_ABt<0, 3, 1>(P_ij, Q_i, K_j, P_ij);
         sub_row<0, 1, L_i>(P_ij, P_ij);
         asm volatile("s_waitcnt lgkmcnt(8)");
-        if constexpr (D == 128) mma_ABt<0, 3, 2>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) load<0, 2>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
-        if constexpr (D == 128) load<0, 3>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
-        if constexpr (D == 128) mma_ABt<0, 3, 3>(P_ij, Q_i, K_j, P_ij);
+        mma_ABt<0, 3, 2>(P_ij, Q_i, K_j, P_ij);
+        load<0, 2>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
+        load<0, 3>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
+        mma_ABt<0, 3, 3>(P_ij, Q_i, K_j, P_ij);
         // Dot slice 2
         kittens::macros::v_mov_b32_up2p<neg_inf_v>(0xff800000); if constexpr (causal) {
           // If the query position is less than the key position, set P_ij to -inf
@@ -904,7 +863,7 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         sub_row<0, 2, L_i>(P_ij, P_ij);
         mma_ABt<0, 0, 1>(dP_ij, dO_i, V_j, dP_ij);
         exp2<0, 0>(P_ij, P_ij);
-        if constexpr (D == 128) mma_ABt<0, 0, 2>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 0, 2>(dP_ij, dO_i, V_j, dP_ij);
         // Load Q_i_col from shared memory to registers
         // load(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}));
         // Compute Q_i_col_addr
@@ -920,66 +879,66 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
           return addr;
         }();
         load<0, 0>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
-        if constexpr (D == 128) mma_ABt<0, 0, 3>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 0, 3>(dP_ij, dO_i, V_j, dP_ij);
         exp2<0, 1>(P_ij, P_ij);
         mma_ABt<0, 1, 0>(dP_ij, dO_i, V_j);
         load<0, 1>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
         mma_ABt<0, 1, 1>(dP_ij, dO_i, V_j, dP_ij);
         mul<0, 3>(P_ij, P_ij, P_SCALE_FACTOR);
-        if constexpr (D == 128) mma_ABt<0, 1, 2>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 1, 2>(dP_ij, dO_i, V_j, dP_ij);
         sub_row<0, 3, L_i>(P_ij, P_ij);
-        if constexpr (D == 128) mma_ABt<0, 1, 3>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 1, 3>(dP_ij, dO_i, V_j, dP_ij);
         copy<0, 0>(P_ij_bf16, P_ij);
         mma_ABt<0, 2, 0>(dP_ij, dO_i, V_j);
         exp2<0, 2>(P_ij, P_ij);
         mma_ABt<0, 2, 1>(dP_ij, dO_i, V_j, dP_ij);
         copy<0, 1>(P_ij_bf16, P_ij);
-        if constexpr (D == 128) mma_ABt<0, 2, 2>(dP_ij, dO_i, V_j, dP_ij);
-        if constexpr (D == 128) load<0, 2>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
-        if constexpr (D == 128) mma_ABt<0, 2, 3>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 2, 2>(dP_ij, dO_i, V_j, dP_ij);
+        load<0, 2>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
+        mma_ABt<0, 2, 3>(dP_ij, dO_i, V_j, dP_ij);
         exp2<0, 3>(P_ij, P_ij);
         mma_ABt<0, 3, 0>(dP_ij, dO_i, V_j);
-        if constexpr (D == 128) load<0, 3>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
+        load<0, 3>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
         mma_ABt<0, 3, 1>(dP_ij, dO_i, V_j, dP_ij);
         copy<0, 2>(P_ij_bf16, P_ij);
         copy<0, 3>(P_ij_bf16, P_ij);
-        if constexpr (D == 128) mma_ABt<0, 3, 2>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 3, 2>(dP_ij, dO_i, V_j, dP_ij);
         swap_layout_inplace(P_ij_bf16_col, P_ij_bf16);
-        if constexpr (D == 128) mma_ABt<0, 3, 3>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 3, 3>(dP_ij, dO_i, V_j, dP_ij);
         asm volatile("s_waitcnt lgkmcnt(8)");
         // mma_AtB(dV_j_T, dO_i_col, P_ij_bf16_col);
         mma_AtB<0, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
         // Load K_j_col from shared memory to registers
-        // load(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}));
-        load<0, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) load<0, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+        // load(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}));
+        load<0, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<0, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
         mma_AtB<0, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
         sub_row<0, 0, delta_i>(dP_ij, dP_ij);
         sub_row<0, 1, delta_i>(dP_ij, dP_ij);
         mma_AtB<1, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
-        load<1, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) load<1, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<1, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<1, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
         mma_AtB<1, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
         mul<0, 0>(dP_ij, dP_ij, P_ij);
         mul<0, 1>(dP_ij, dP_ij, P_ij);
         copy<0, 0>(dP_ij_bf16, dP_ij);
         copy<0, 1>(dP_ij_bf16, dP_ij);
         sub_row<0, 2, delta_i>(dP_ij, dP_ij);
-        if constexpr (D == 128) mma_AtB<2, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
-        load<2, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+        mma_AtB<2, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
+        load<2, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
         // 12. dV_j += P_ij^T @ dO_i
         // 16. dK_j += dS_ij^T @ Q_i   (128x64)=(128x16)x(16x64)
         // Store dP_ij_bf16_accum_row to shared memory
         // store(attn_i_smem_subtile, dP_ij_bf16_accum_row);
         store<0, 0>(attn_i_smem_subtile, dP_ij_bf16_accum_row, dP_ij_bf16_accum_row_addr);
         store<1, 0>(attn_i_smem_subtile, dP_ij_bf16_accum_row, dP_ij_bf16_accum_row_addr);
-        if constexpr (D == 128) mma_AtB<2, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
+        mma_AtB<2, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
         sub_row<0, 3, delta_i>(dP_ij, dP_ij);
         mul<0, 2>(dP_ij, dP_ij, P_ij);
         mul<0, 3>(dP_ij, dP_ij, P_ij);
         copy<0, 2>(dP_ij_bf16, dP_ij);
         copy<0, 3>(dP_ij_bf16, dP_ij);
-        if constexpr (D == 128) mma_AtB<3, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
+        mma_AtB<3, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
 
         // dot slice 3
         load<L_i>(subvec_inplace<DOT_SLICE_QO>(L_smem[tic], 3));
@@ -987,18 +946,17 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         
         store<2, 0>(attn_i_smem_subtile, dP_ij_bf16_accum_row, dP_ij_bf16_accum_row_addr);
         store<3, 0>(attn_i_smem_subtile, dP_ij_bf16_accum_row, dP_ij_bf16_accum_row_addr);
-        if constexpr (D == 128) mma_AtB<3, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
+        mma_AtB<3, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
         swap_layout_inplace(dP_ij_bf16_col, dP_ij_bf16);
         asm volatile("s_waitcnt lgkmcnt(12)");
         // mma_AtB(dK_j_T, Q_i_col, dP_ij_bf16_col);
         mma_AtB<0, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
-        if constexpr (D == 128) load<2, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        load<3, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) load<3, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        load<4, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<2, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<3, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<3, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<4, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
         mma_AtB<0, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
         asm volatile("s_waitcnt lgkmcnt(8)");
-        if constexpr (D == 64) asm volatile("s_waitcnt lgkmcnt(0)");
         __builtin_amdgcn_s_barrier();
         mma_AtB<1, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
         // Load dP_ij_bf16_col_T from shared memory to registers
@@ -1010,30 +968,30 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         mma_AtB<1, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
         mul<L_i, L_i>(L_SCALE_FACTOR);
         atomic_pk_add_bf16_with_warpid<2, 0, 0>(g.dQg, dQ_i, {batch_idx, q_head_idx, q_seq_idx * 4 + 1, 0}, warpid);
-        if constexpr (D == 128) mma_AtB<2, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
+        mma_AtB<2, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
         load<4, 0>(dP_ij_bf16_col_T, attn_i_smem, dP_ij_bf16_col_T_addr);
         load<5, 0>(dP_ij_bf16_col_T, attn_i_smem, dP_ij_bf16_col_T_addr);
-        if constexpr (D == 128) load<4, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        load<5, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) mma_AtB<2, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
-        if constexpr (D == 128) atomic_pk_add_bf16_with_warpid<2, 0, 1>(g.dQg, dQ_i, {batch_idx, q_head_idx, q_seq_idx * 4 + 1, 0}, warpid);
-        if constexpr (D == 128) mma_AtB<3, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
+        load<4, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<5, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        mma_AtB<2, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
+        atomic_pk_add_bf16_with_warpid<2, 0, 1>(g.dQg, dQ_i, {batch_idx, q_head_idx, q_seq_idx * 4 + 1, 0}, warpid);
+        mma_AtB<3, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
         load<6, 0>(dP_ij_bf16_col_T, attn_i_smem, dP_ij_bf16_col_T_addr);
         load<7, 0>(dP_ij_bf16_col_T, attn_i_smem, dP_ij_bf16_col_T_addr);
-        if constexpr (D == 128) load<5, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) mma_AtB<3, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
-        asm volatile("s_waitcnt vmcnt(4) lgkmcnt(" DQ_L6_LOOP ")");
+        load<5, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        mma_AtB<3, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
+        asm volatile("s_waitcnt vmcnt(4) lgkmcnt(6)");
         __builtin_amdgcn_s_barrier();
         // 15. dQ_i += dS_ij @ K_j (32x16)=(32x256)x(256x16)
         // mma_AtB(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
         mma_AtB<0, 0, 0>(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
-        load<6, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) load<6, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<6, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<6, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
         mma_AtB<0, 0, 1>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         G::load<1, false>(dO_i_smem[toc][1], g.dOg, {batch_idx, next_q_seq_idx * 2 + 1, next_q_head_idx, 0}, swizzled_offsets_Q_dO);
         mma_AtB<0, 0, 2>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        load<7, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) load<7, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<7, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<7, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
         mma_AtB<0, 0, 3>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         mma_AtB<0, 0, 4>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         // Load Q_i from shared memory to registers
@@ -1042,36 +1000,36 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         load<0, 0>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
         load<0, 1>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
         mma_AtB<0, 0, 5>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        asm volatile("s_waitcnt lgkmcnt(" DQ_L4 ")");
+        asm volatile("s_waitcnt lgkmcnt(4)");
         __builtin_amdgcn_s_barrier();
         mma_AtB<0, 0, 6>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        if constexpr (D == 128) load<0, 2>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
-        if constexpr (D == 128) load<0, 3>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
+        load<0, 2>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
+        load<0, 3>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
         mma_AtB<0, 0, 7>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        if constexpr (D == 128) mma_AtB<1, 0, 0>(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
+        mma_AtB<1, 0, 0>(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
         // Load K_j from shared memory to registers
         // load(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}));
         load<0, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         load<0, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) mma_AtB<1, 0, 1>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        if constexpr (D == 128) mma_AtB<1, 0, 2>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        if constexpr (D == 128) load<0, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) load<0, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) mma_AtB<1, 0, 3>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        mma_AtB<1, 0, 1>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        mma_AtB<1, 0, 2>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        load<0, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        load<0, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        mma_AtB<1, 0, 3>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         mul<0, 0, 0>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
         mul<0, 0, 1>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-        if constexpr (D == 128) mma_AtB<1, 0, 4>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        mma_AtB<1, 0, 4>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         load<1, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         load<1, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) mma_AtB<1, 0, 5>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        mma_AtB<1, 0, 5>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         mul<0, 0, 2>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
         mul<0, 0, 3>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-        asm volatile("s_waitcnt lgkmcnt(" DQ_L10 ")");
-        if constexpr (D == 128) mma_AtB<1, 0, 6>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        if constexpr (D == 128) load<1, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) load<1, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) mma_AtB<1, 0, 7>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        asm volatile("s_waitcnt lgkmcnt(" DQ_L2 ")");
+        asm volatile("s_waitcnt lgkmcnt(10)");
+        mma_AtB<1, 0, 6>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        load<1, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        load<1, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        mma_AtB<1, 0, 7>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        asm volatile("s_waitcnt lgkmcnt(2)");
       }
 
       // dot slice 3
@@ -1085,22 +1043,22 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         load<2, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         load<2, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         mma_ABt<0, 0, 1>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) mma_ABt<0, 0, 2>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) load<2, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) load<2, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) mma_ABt<0, 0, 3>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) mul<1, 0, 0>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-        if constexpr (D == 128) mul<1, 0, 1>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
+        mma_ABt<0, 0, 2>(P_ij, Q_i, K_j, P_ij);
+        load<2, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        load<2, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        mma_ABt<0, 0, 3>(P_ij, Q_i, K_j, P_ij);
+        mul<1, 0, 0>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
+        mul<1, 0, 1>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
         mma_ABt<0, 1, 0>(P_ij, Q_i, K_j);
         load<3, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         load<3, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         mma_ABt<0, 1, 1>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) mul<1, 0, 2>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-        if constexpr (D == 128) mul<1, 0, 3>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-        if constexpr (D == 128) mma_ABt<0, 1, 2>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) load<3, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) load<3, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) mma_ABt<0, 1, 3>(P_ij, Q_i, K_j, P_ij);
+        mul<1, 0, 2>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
+        mul<1, 0, 3>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
+        mma_ABt<0, 1, 2>(P_ij, Q_i, K_j, P_ij);
+        load<3, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        load<3, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        mma_ABt<0, 1, 3>(P_ij, Q_i, K_j, P_ij);
         mul<0, 0>(P_ij, P_ij, P_SCALE_FACTOR);
         asm volatile("s_waitcnt lgkmcnt(6)");
         mma_ABt<0, 2, 0>(P_ij, Q_i, K_j);
@@ -1112,10 +1070,10 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         mma_ABt<0, 2, 1>(P_ij, Q_i, K_j, P_ij);
         sub_row<0, 0, L_i>(P_ij, P_ij);
         asm volatile("s_waitcnt lgkmcnt(6)");
-        if constexpr (D == 128) mma_ABt<0, 2, 2>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) load<0, 2>(dO_i, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_addr);
-        if constexpr (D == 128) load<0, 3>(dO_i, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_addr);
-        if constexpr (D == 128) mma_ABt<0, 2, 3>(P_ij, Q_i, K_j, P_ij);
+        mma_ABt<0, 2, 2>(P_ij, Q_i, K_j, P_ij);
+        load<0, 2>(dO_i, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_addr);
+        load<0, 3>(dO_i, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_addr);
+        mma_ABt<0, 2, 3>(P_ij, Q_i, K_j, P_ij);
         mul<0, 1>(P_ij, P_ij, P_SCALE_FACTOR);
         asm volatile("s_waitcnt lgkmcnt(6)");
         mma_ABt<0, 3, 0>(P_ij, Q_i, K_j);
@@ -1138,10 +1096,10 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         mma_ABt<0, 3, 1>(P_ij, Q_i, K_j, P_ij);
         sub_row<0, 1, L_i>(P_ij, P_ij);
         asm volatile("s_waitcnt lgkmcnt(8)");
-        if constexpr (D == 128) mma_ABt<0, 3, 2>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) load<0, 2>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
-        if constexpr (D == 128) load<0, 3>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
-        if constexpr (D == 128) mma_ABt<0, 3, 3>(P_ij, Q_i, K_j, P_ij);
+        mma_ABt<0, 3, 2>(P_ij, Q_i, K_j, P_ij);
+        load<0, 2>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
+        load<0, 3>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
+        mma_ABt<0, 3, 3>(P_ij, Q_i, K_j, P_ij);
         // Dot slice 3
         kittens::macros::v_mov_b32_up2p<neg_inf_v>(0xff800000); if constexpr (causal) {
           // If the query position is less than the key position, set P_ij to -inf
@@ -1160,7 +1118,7 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         sub_row<0, 2, L_i>(P_ij, P_ij);
         mma_ABt<0, 0, 1>(dP_ij, dO_i, V_j, dP_ij);
         exp2<0, 0>(P_ij, P_ij);
-        if constexpr (D == 128) mma_ABt<0, 0, 2>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 0, 2>(dP_ij, dO_i, V_j, dP_ij);
         // Load Q_i_col from shared memory to registers
         // load(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}));
         // Compute Q_i_col_addr
@@ -1176,66 +1134,66 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
           return addr;
         }();
         load<0, 0>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
-        if constexpr (D == 128) mma_ABt<0, 0, 3>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 0, 3>(dP_ij, dO_i, V_j, dP_ij);
         exp2<0, 1>(P_ij, P_ij);
         mma_ABt<0, 1, 0>(dP_ij, dO_i, V_j);
         load<0, 1>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
         mma_ABt<0, 1, 1>(dP_ij, dO_i, V_j, dP_ij);
         mul<0, 3>(P_ij, P_ij, P_SCALE_FACTOR);
-        if constexpr (D == 128) mma_ABt<0, 1, 2>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 1, 2>(dP_ij, dO_i, V_j, dP_ij);
         sub_row<0, 3, L_i>(P_ij, P_ij);
-        if constexpr (D == 128) mma_ABt<0, 1, 3>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 1, 3>(dP_ij, dO_i, V_j, dP_ij);
         copy<0, 0>(P_ij_bf16, P_ij);
         mma_ABt<0, 2, 0>(dP_ij, dO_i, V_j);
         exp2<0, 2>(P_ij, P_ij);
         mma_ABt<0, 2, 1>(dP_ij, dO_i, V_j, dP_ij);
         copy<0, 1>(P_ij_bf16, P_ij);
-        if constexpr (D == 128) mma_ABt<0, 2, 2>(dP_ij, dO_i, V_j, dP_ij);
-        if constexpr (D == 128) load<0, 2>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
-        if constexpr (D == 128) mma_ABt<0, 2, 3>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 2, 2>(dP_ij, dO_i, V_j, dP_ij);
+        load<0, 2>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
+        mma_ABt<0, 2, 3>(dP_ij, dO_i, V_j, dP_ij);
         exp2<0, 3>(P_ij, P_ij);
         mma_ABt<0, 3, 0>(dP_ij, dO_i, V_j);
-        if constexpr (D == 128) load<0, 3>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
+        load<0, 3>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
         mma_ABt<0, 3, 1>(dP_ij, dO_i, V_j, dP_ij);
         copy<0, 2>(P_ij_bf16, P_ij);
         copy<0, 3>(P_ij_bf16, P_ij);
-        if constexpr (D == 128) mma_ABt<0, 3, 2>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 3, 2>(dP_ij, dO_i, V_j, dP_ij);
         swap_layout_inplace(P_ij_bf16_col, P_ij_bf16);
-        if constexpr (D == 128) mma_ABt<0, 3, 3>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 3, 3>(dP_ij, dO_i, V_j, dP_ij);
         asm volatile("s_waitcnt lgkmcnt(8)");
         // mma_AtB(dV_j_T, dO_i_col, P_ij_bf16_col);
         mma_AtB<0, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
         // Load K_j_col from shared memory to registers
-        // load(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}));
-        load<0, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) load<0, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+        // load(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}));
+        load<0, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<0, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
         mma_AtB<0, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
         sub_row<0, 0, delta_i>(dP_ij, dP_ij);
         sub_row<0, 1, delta_i>(dP_ij, dP_ij);
         mma_AtB<1, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
-        load<1, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) load<1, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<1, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<1, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
         mma_AtB<1, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
         mul<0, 0>(dP_ij, dP_ij, P_ij);
         mul<0, 1>(dP_ij, dP_ij, P_ij);
         copy<0, 0>(dP_ij_bf16, dP_ij);
         copy<0, 1>(dP_ij_bf16, dP_ij);
         sub_row<0, 2, delta_i>(dP_ij, dP_ij);
-        if constexpr (D == 128) mma_AtB<2, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
-        load<2, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+        mma_AtB<2, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
+        load<2, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
         // 12. dV_j += P_ij^T @ dO_i
         // 16. dK_j += dS_ij^T @ Q_i   (128x64)=(128x16)x(16x64)
         // Store dP_ij_bf16_accum_row to shared memory
         // store(attn_i_smem_subtile, dP_ij_bf16_accum_row);
         store<0, 0>(attn_i_smem_subtile, dP_ij_bf16_accum_row, dP_ij_bf16_accum_row_addr);
         store<1, 0>(attn_i_smem_subtile, dP_ij_bf16_accum_row, dP_ij_bf16_accum_row_addr);
-        if constexpr (D == 128) mma_AtB<2, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
+        mma_AtB<2, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
         sub_row<0, 3, delta_i>(dP_ij, dP_ij);
         mul<0, 2>(dP_ij, dP_ij, P_ij);
         mul<0, 3>(dP_ij, dP_ij, P_ij);
         copy<0, 2>(dP_ij_bf16, dP_ij);
         copy<0, 3>(dP_ij_bf16, dP_ij);
-        if constexpr (D == 128) mma_AtB<3, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
+        mma_AtB<3, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
 
         // dot slice 0 - next iteration
         load<L_i>(subvec_inplace<DOT_SLICE_QO>(L_smem[toc], 0));
@@ -1243,18 +1201,17 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         
         store<2, 0>(attn_i_smem_subtile, dP_ij_bf16_accum_row, dP_ij_bf16_accum_row_addr);
         store<3, 0>(attn_i_smem_subtile, dP_ij_bf16_accum_row, dP_ij_bf16_accum_row_addr);
-        if constexpr (D == 128) mma_AtB<3, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
+        mma_AtB<3, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
         swap_layout_inplace(dP_ij_bf16_col, dP_ij_bf16);
         asm volatile("s_waitcnt lgkmcnt(12)");
         // mma_AtB(dK_j_T, Q_i_col, dP_ij_bf16_col);
         mma_AtB<0, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
-        if constexpr (D == 128) load<2, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        load<3, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) load<3, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        load<4, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<2, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<3, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<3, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<4, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
         mma_AtB<0, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
         asm volatile("s_waitcnt lgkmcnt(8)");
-        if constexpr (D == 64) asm volatile("s_waitcnt lgkmcnt(0)");
         __builtin_amdgcn_s_barrier();
         mma_AtB<1, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
         // Load dP_ij_bf16_col_T from shared memory to registers
@@ -1266,29 +1223,29 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         mma_AtB<1, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
         mul<L_i, L_i>(L_SCALE_FACTOR);
         atomic_pk_add_bf16_with_warpid<2, 0, 0>(g.dQg, dQ_i, {batch_idx, q_head_idx, q_seq_idx * 4 + 2, 0}, warpid);
-        if constexpr (D == 128) mma_AtB<2, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
+        mma_AtB<2, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
         load<4, 0>(dP_ij_bf16_col_T, attn_i_smem, dP_ij_bf16_col_T_addr);
         load<5, 0>(dP_ij_bf16_col_T, attn_i_smem, dP_ij_bf16_col_T_addr);
-        if constexpr (D == 128) load<4, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        load<5, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) mma_AtB<2, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
-        if constexpr (D == 128) atomic_pk_add_bf16_with_warpid<2, 0, 1>(g.dQg, dQ_i, {batch_idx, q_head_idx, q_seq_idx * 4 + 2, 0}, warpid);
-        if constexpr (D == 128) mma_AtB<3, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
+        load<4, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<5, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        mma_AtB<2, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
+        atomic_pk_add_bf16_with_warpid<2, 0, 1>(g.dQg, dQ_i, {batch_idx, q_head_idx, q_seq_idx * 4 + 2, 0}, warpid);
+        mma_AtB<3, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
         load<6, 0>(dP_ij_bf16_col_T, attn_i_smem, dP_ij_bf16_col_T_addr);
         load<7, 0>(dP_ij_bf16_col_T, attn_i_smem, dP_ij_bf16_col_T_addr);
-        if constexpr (D == 128) load<5, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) mma_AtB<3, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
-        asm volatile("s_waitcnt vmcnt(4) lgkmcnt(" DQ_L6_LOOP ")");
+        load<5, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        mma_AtB<3, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
+        asm volatile("s_waitcnt vmcnt(4) lgkmcnt(6)");
         __builtin_amdgcn_s_barrier();
         // 15. dQ_i += dS_ij @ K_j (32x16)=(32x256)x(256x16)
         // mma_AtB(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
         mma_AtB<0, 0, 0>(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
-        load<6, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) load<6, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<6, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<6, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
         mma_AtB<0, 0, 1>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         mma_AtB<0, 0, 2>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        load<7, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) load<7, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<7, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<7, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
         mma_AtB<0, 0, 3>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         mma_AtB<0, 0, 4>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         // Load Q_i from shared memory to registers
@@ -1297,54 +1254,51 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         load<0, 0>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[toc][0], {0, 0}), Q_i_addr);
         load<0, 1>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[toc][0], {0, 0}), Q_i_addr);
         mma_AtB<0, 0, 5>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        asm volatile("s_waitcnt lgkmcnt(" DQ_L4 ")");
+        asm volatile("s_waitcnt lgkmcnt(4)");
         __builtin_amdgcn_s_barrier();
         mma_AtB<0, 0, 6>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        if constexpr (D == 128) load<0, 2>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[toc][0], {0, 0}), Q_i_addr);
-        if constexpr (D == 128) load<0, 3>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[toc][0], {0, 0}), Q_i_addr);
+        load<0, 2>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[toc][0], {0, 0}), Q_i_addr);
+        load<0, 3>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[toc][0], {0, 0}), Q_i_addr);
         mma_AtB<0, 0, 7>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        if constexpr (D == 128) mma_AtB<1, 0, 0>(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
+        mma_AtB<1, 0, 0>(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
         // Load K_j from shared memory to registers
         // load(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}));
         load<0, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         load<0, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) mma_AtB<1, 0, 1>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        if constexpr (D == 128) mma_AtB<1, 0, 2>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        if constexpr (D == 128) load<0, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) load<0, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) mma_AtB<1, 0, 3>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        mma_AtB<1, 0, 1>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        mma_AtB<1, 0, 2>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        load<0, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        load<0, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        mma_AtB<1, 0, 3>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         mul<0, 0, 0>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
         mul<0, 0, 1>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-        if constexpr (D == 128) mma_AtB<1, 0, 4>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        mma_AtB<1, 0, 4>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         load<1, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         load<1, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) mma_AtB<1, 0, 5>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        mma_AtB<1, 0, 5>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         mul<0, 0, 2>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
         mul<0, 0, 3>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-        asm volatile("s_waitcnt lgkmcnt(" DQ_L10 ")");
-        if constexpr (D == 128) mma_AtB<1, 0, 6>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        if constexpr (D == 128) load<1, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) load<1, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) mma_AtB<1, 0, 7>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        asm volatile("s_waitcnt lgkmcnt(" DQ_L2 ")");
+        asm volatile("s_waitcnt lgkmcnt(10)");
+        mma_AtB<1, 0, 6>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        load<1, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        load<1, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        mma_AtB<1, 0, 7>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        asm volatile("s_waitcnt lgkmcnt(2)");
       }
       tic ^= 1; toc ^= 1;
     }
 
     // 9. for 1 <= i <= T_r (1024 / 32 = 32)  
     for (int i = 1; i < num_steps - 1; ++i, tic ^= 1, toc ^= 1) {
-      const int last_head_offset = (i - 1) >= num_steps_per_head;
-      const int last_q_head_idx = last_head_offset + first_q_head;
-      const int last_q_seq_idx = i - 1 - last_head_offset * num_steps_per_head + first_step;
+      const int last_q_head_idx = (i - 1) / num_steps_per_head + first_q_head;
+      const int last_q_seq_idx = ((i - 1) % num_steps_per_head) + first_step;
 
-      const int head_offset = i >= num_steps_per_head;
-      const int q_head_idx = head_offset + first_q_head;
-      const int q_seq_idx = i - head_offset * num_steps_per_head + first_step;
+      const int q_head_idx = i / num_steps_per_head + first_q_head;
+      const int q_seq_idx = (i % num_steps_per_head) + first_step;
       const int q_pos = q_seq_idx * STEP_QO;
 
-      const int next_head_offset = (i + 1) >= num_steps_per_head;
-      const int next_q_head_idx = next_head_offset + first_q_head;
-      const int next_q_seq_idx = i + 1 - next_head_offset * num_steps_per_head + first_step;
+      const int next_q_head_idx = (i + 1) / num_steps_per_head + first_q_head;
+      const int next_q_seq_idx = ((i + 1) % num_steps_per_head) + first_step;
 
       // dot slice 0
       {
@@ -1359,22 +1313,22 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         load<2, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         mma_ABt<0, 0, 1>(P_ij, Q_i, K_j, P_ij);
         load(L_smem[toc], g.L_vec, {batch_idx, next_q_head_idx, 0, next_q_seq_idx});
-        if constexpr (D == 128) mma_ABt<0, 0, 2>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) load<2, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) load<2, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) mma_ABt<0, 0, 3>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) mul<1, 0, 0>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-        if constexpr (D == 128) mul<1, 0, 1>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
+        mma_ABt<0, 0, 2>(P_ij, Q_i, K_j, P_ij);
+        load<2, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        load<2, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        mma_ABt<0, 0, 3>(P_ij, Q_i, K_j, P_ij);
+        mul<1, 0, 0>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
+        mul<1, 0, 1>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
         mma_ABt<0, 1, 0>(P_ij, Q_i, K_j);
         load<3, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         load<3, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         mma_ABt<0, 1, 1>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) mul<1, 0, 2>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-        if constexpr (D == 128) mul<1, 0, 3>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-        if constexpr (D == 128) mma_ABt<0, 1, 2>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) load<3, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) load<3, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) mma_ABt<0, 1, 3>(P_ij, Q_i, K_j, P_ij);
+        mul<1, 0, 2>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
+        mul<1, 0, 3>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
+        mma_ABt<0, 1, 2>(P_ij, Q_i, K_j, P_ij);
+        load<3, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        load<3, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        mma_ABt<0, 1, 3>(P_ij, Q_i, K_j, P_ij);
         mul<0, 0>(P_ij, P_ij, P_SCALE_FACTOR);
         asm volatile("s_waitcnt lgkmcnt(6)");
         mma_ABt<0, 2, 0>(P_ij, Q_i, K_j);
@@ -1386,10 +1340,10 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         mma_ABt<0, 2, 1>(P_ij, Q_i, K_j, P_ij);
         sub_row<0, 0, L_i>(P_ij, P_ij);
         asm volatile("s_waitcnt lgkmcnt(6)");
-        if constexpr (D == 128) mma_ABt<0, 2, 2>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) load<0, 2>(dO_i, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_addr);
-        if constexpr (D == 128) load<0, 3>(dO_i, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_addr);
-        if constexpr (D == 128) mma_ABt<0, 2, 3>(P_ij, Q_i, K_j, P_ij);
+        mma_ABt<0, 2, 2>(P_ij, Q_i, K_j, P_ij);
+        load<0, 2>(dO_i, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_addr);
+        load<0, 3>(dO_i, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_addr);
+        mma_ABt<0, 2, 3>(P_ij, Q_i, K_j, P_ij);
         mul<0, 1>(P_ij, P_ij, P_SCALE_FACTOR);
         asm volatile("s_waitcnt lgkmcnt(6)");
         mma_ABt<0, 3, 0>(P_ij, Q_i, K_j);
@@ -1412,10 +1366,10 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         mma_ABt<0, 3, 1>(P_ij, Q_i, K_j, P_ij);
         sub_row<0, 1, L_i>(P_ij, P_ij);
         asm volatile("s_waitcnt lgkmcnt(8)");
-        if constexpr (D == 128) mma_ABt<0, 3, 2>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) load<0, 2>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
-        if constexpr (D == 128) load<0, 3>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
-        if constexpr (D == 128) mma_ABt<0, 3, 3>(P_ij, Q_i, K_j, P_ij);
+        mma_ABt<0, 3, 2>(P_ij, Q_i, K_j, P_ij);
+        load<0, 2>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
+        load<0, 3>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
+        mma_ABt<0, 3, 3>(P_ij, Q_i, K_j, P_ij);
         // Dot slice 0
         kittens::macros::v_mov_b32_up2p<neg_inf_v>(0xff800000); if constexpr (causal) {
           // If the query position is less than the key position, set P_ij to -inf
@@ -1437,7 +1391,7 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         sub_row<0, 2, L_i>(P_ij, P_ij);
         mma_ABt<0, 0, 1>(dP_ij, dO_i, V_j, dP_ij);
         exp2<0, 0>(P_ij, P_ij);
-        if constexpr (D == 128) mma_ABt<0, 0, 2>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 0, 2>(dP_ij, dO_i, V_j, dP_ij);
         // Load Q_i_col from shared memory to registers
         // load(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}));
         // Compute Q_i_col_addr
@@ -1453,66 +1407,66 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
           return addr;
         }();
         load<0, 0>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
-        if constexpr (D == 128) mma_ABt<0, 0, 3>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 0, 3>(dP_ij, dO_i, V_j, dP_ij);
         exp2<0, 1>(P_ij, P_ij);
         mma_ABt<0, 1, 0>(dP_ij, dO_i, V_j);
         load<0, 1>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
         mma_ABt<0, 1, 1>(dP_ij, dO_i, V_j, dP_ij);
         mul<0, 3>(P_ij, P_ij, P_SCALE_FACTOR);
-        if constexpr (D == 128) mma_ABt<0, 1, 2>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 1, 2>(dP_ij, dO_i, V_j, dP_ij);
         sub_row<0, 3, L_i>(P_ij, P_ij);
-        if constexpr (D == 128) mma_ABt<0, 1, 3>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 1, 3>(dP_ij, dO_i, V_j, dP_ij);
         copy<0, 0>(P_ij_bf16, P_ij);
         mma_ABt<0, 2, 0>(dP_ij, dO_i, V_j);
         exp2<0, 2>(P_ij, P_ij);
         mma_ABt<0, 2, 1>(dP_ij, dO_i, V_j, dP_ij);
         copy<0, 1>(P_ij_bf16, P_ij);
-        if constexpr (D == 128) mma_ABt<0, 2, 2>(dP_ij, dO_i, V_j, dP_ij);
-        if constexpr (D == 128) load<0, 2>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
-        if constexpr (D == 128) mma_ABt<0, 2, 3>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 2, 2>(dP_ij, dO_i, V_j, dP_ij);
+        load<0, 2>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
+        mma_ABt<0, 2, 3>(dP_ij, dO_i, V_j, dP_ij);
         exp2<0, 3>(P_ij, P_ij);
         mma_ABt<0, 3, 0>(dP_ij, dO_i, V_j);
-        if constexpr (D == 128) load<0, 3>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
+        load<0, 3>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
         mma_ABt<0, 3, 1>(dP_ij, dO_i, V_j, dP_ij);
         copy<0, 2>(P_ij_bf16, P_ij);
         copy<0, 3>(P_ij_bf16, P_ij);
-        if constexpr (D == 128) mma_ABt<0, 3, 2>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 3, 2>(dP_ij, dO_i, V_j, dP_ij);
         swap_layout_inplace(P_ij_bf16_col, P_ij_bf16);
-        if constexpr (D == 128) mma_ABt<0, 3, 3>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 3, 3>(dP_ij, dO_i, V_j, dP_ij);
         asm volatile("s_waitcnt lgkmcnt(8)");
         // mma_AtB(dV_j_T, dO_i_col, P_ij_bf16_col);
         mma_AtB<0, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
         // Load K_j_col from shared memory to registers
-        // load(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}));
-        load<0, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) load<0, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+        // load(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}));
+        load<0, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<0, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
         mma_AtB<0, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
         sub_row<0, 0, delta_i>(dP_ij, dP_ij);
         sub_row<0, 1, delta_i>(dP_ij, dP_ij);
         mma_AtB<1, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
-        load<1, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) load<1, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<1, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<1, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
         mma_AtB<1, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
         mul<0, 0>(dP_ij, dP_ij, P_ij);
         mul<0, 1>(dP_ij, dP_ij, P_ij);
         copy<0, 0>(dP_ij_bf16, dP_ij);
         copy<0, 1>(dP_ij_bf16, dP_ij);
         sub_row<0, 2, delta_i>(dP_ij, dP_ij);
-        if constexpr (D == 128) mma_AtB<2, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
-        load<2, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+        mma_AtB<2, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
+        load<2, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
         // 12. dV_j += P_ij^T @ dO_i
         // 16. dK_j += dS_ij^T @ Q_i   (128x64)=(128x16)x(16x64)
         // Store dP_ij_bf16_accum_row to shared memory
         // store(attn_i_smem_subtile, dP_ij_bf16_accum_row);
         store<0, 0>(attn_i_smem_subtile, dP_ij_bf16_accum_row, dP_ij_bf16_accum_row_addr);
         store<1, 0>(attn_i_smem_subtile, dP_ij_bf16_accum_row, dP_ij_bf16_accum_row_addr);
-        if constexpr (D == 128) mma_AtB<2, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
+        mma_AtB<2, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
         sub_row<0, 3, delta_i>(dP_ij, dP_ij);
         mul<0, 2>(dP_ij, dP_ij, P_ij);
         mul<0, 3>(dP_ij, dP_ij, P_ij);
         copy<0, 2>(dP_ij_bf16, dP_ij);
         copy<0, 3>(dP_ij_bf16, dP_ij);
-        if constexpr (D == 128) mma_AtB<3, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
+        mma_AtB<3, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
 
         // dot slice 1
         load<L_i>(subvec_inplace<DOT_SLICE_QO>(L_smem[tic], 1));
@@ -1520,18 +1474,17 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         
         store<2, 0>(attn_i_smem_subtile, dP_ij_bf16_accum_row, dP_ij_bf16_accum_row_addr);
         store<3, 0>(attn_i_smem_subtile, dP_ij_bf16_accum_row, dP_ij_bf16_accum_row_addr);
-        if constexpr (D == 128) mma_AtB<3, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
+        mma_AtB<3, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
         swap_layout_inplace(dP_ij_bf16_col, dP_ij_bf16);
         asm volatile("s_waitcnt lgkmcnt(12)");
         // mma_AtB(dK_j_T, Q_i_col, dP_ij_bf16_col);
         mma_AtB<0, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
-        if constexpr (D == 128) load<2, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        load<3, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) load<3, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        load<4, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<2, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<3, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<3, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<4, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
         mma_AtB<0, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
         asm volatile("s_waitcnt lgkmcnt(8)");
-        if constexpr (D == 64) asm volatile("s_waitcnt lgkmcnt(0)");
         __builtin_amdgcn_s_barrier();
         mma_AtB<1, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
         // Load dP_ij_bf16_col_T from shared memory to registers
@@ -1543,30 +1496,30 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         mma_AtB<1, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
         mul<L_i, L_i>(L_SCALE_FACTOR);
         atomic_pk_add_bf16_with_warpid<2, 0, 0>(g.dQg, dQ_i, {batch_idx, last_q_head_idx, last_q_seq_idx * 4 + 3, 0}, warpid);
-        if constexpr (D == 128) mma_AtB<2, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
+        mma_AtB<2, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
         load<4, 0>(dP_ij_bf16_col_T, attn_i_smem, dP_ij_bf16_col_T_addr);
         load<5, 0>(dP_ij_bf16_col_T, attn_i_smem, dP_ij_bf16_col_T_addr);
-        if constexpr (D == 128) load<4, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        load<5, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) mma_AtB<2, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
-        if constexpr (D == 128) atomic_pk_add_bf16_with_warpid<2, 0, 1>(g.dQg, dQ_i, {batch_idx, last_q_head_idx, last_q_seq_idx * 4 + 3, 0}, warpid);
-        if constexpr (D == 128) mma_AtB<3, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
+        load<4, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<5, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        mma_AtB<2, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
+        atomic_pk_add_bf16_with_warpid<2, 0, 1>(g.dQg, dQ_i, {batch_idx, last_q_head_idx, last_q_seq_idx * 4 + 3, 0}, warpid);
+        mma_AtB<3, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
         load<6, 0>(dP_ij_bf16_col_T, attn_i_smem, dP_ij_bf16_col_T_addr);
         load<7, 0>(dP_ij_bf16_col_T, attn_i_smem, dP_ij_bf16_col_T_addr);
-        if constexpr (D == 128) load<5, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) mma_AtB<3, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
-        asm volatile("s_waitcnt vmcnt(4) lgkmcnt(" DQ_L6_LOOP ")");
+        load<5, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        mma_AtB<3, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
+        asm volatile("s_waitcnt vmcnt(4) lgkmcnt(6)");
         __builtin_amdgcn_s_barrier();
         // 15. dQ_i += dS_ij @ K_j (32x16)=(32x256)x(256x16)
         // mma_AtB(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
         mma_AtB<0, 0, 0>(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
-        load<6, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) load<6, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<6, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<6, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
         mma_AtB<0, 0, 1>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         G::load<1, false>(dO_i_smem[toc][0], g.dOg, {batch_idx, next_q_seq_idx * 2, next_q_head_idx, 0}, swizzled_offsets_Q_dO);
         mma_AtB<0, 0, 2>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        load<7, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) load<7, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<7, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<7, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
         mma_AtB<0, 0, 3>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         load(delta_smem[toc], g.delta_vec, {batch_idx, next_q_head_idx, 0, next_q_seq_idx});
         mma_AtB<0, 0, 4>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
@@ -1576,37 +1529,37 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         load<0, 0>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
         load<0, 1>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
         mma_AtB<0, 0, 5>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        asm volatile("s_waitcnt lgkmcnt(" DQ_L4 ")");
+        asm volatile("s_waitcnt lgkmcnt(4)");
         __builtin_amdgcn_s_barrier();
         mma_AtB<0, 0, 6>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        if constexpr (D == 128) load<0, 2>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
-        if constexpr (D == 128) load<0, 3>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
+        load<0, 2>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
+        load<0, 3>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
         mma_AtB<0, 0, 7>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        if constexpr (D == 128) mma_AtB<1, 0, 0>(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
+        mma_AtB<1, 0, 0>(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
         // Load K_j from shared memory to registers
         // load(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}));
         load<0, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         load<0, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) mma_AtB<1, 0, 1>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        if constexpr (D == 128) mma_AtB<1, 0, 2>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        if constexpr (D == 128) load<0, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) load<0, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) mma_AtB<1, 0, 3>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        mma_AtB<1, 0, 1>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        mma_AtB<1, 0, 2>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        load<0, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        load<0, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        mma_AtB<1, 0, 3>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         mul<0, 0, 0>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
         mul<0, 0, 1>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-        if constexpr (D == 128) mma_AtB<1, 0, 4>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        mma_AtB<1, 0, 4>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         load<1, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         load<1, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) mma_AtB<1, 0, 5>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        mma_AtB<1, 0, 5>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         mul<0, 0, 2>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
         mul<0, 0, 3>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-        asm volatile("s_waitcnt lgkmcnt(" DQ_L10 ")");
-        if constexpr (D == 128) mma_AtB<1, 0, 6>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        if constexpr (D == 128) load<1, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) load<1, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) mma_AtB<1, 0, 7>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        asm volatile("s_waitcnt lgkmcnt(10)");
+        mma_AtB<1, 0, 6>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        load<1, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        load<1, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        mma_AtB<1, 0, 7>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
 
-        asm volatile("s_waitcnt lgkmcnt(" DQ_L2 ")");
+        asm volatile("s_waitcnt lgkmcnt(2)");
       }
 
       // dot slice 1
@@ -1620,23 +1573,23 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         load<2, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         load<2, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         mma_ABt<0, 0, 1>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) mma_ABt<0, 0, 2>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) load<2, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) load<2, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) mma_ABt<0, 0, 3>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) mul<1, 0, 0>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-        if constexpr (D == 128) mul<1, 0, 1>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
+        mma_ABt<0, 0, 2>(P_ij, Q_i, K_j, P_ij);
+        load<2, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        load<2, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        mma_ABt<0, 0, 3>(P_ij, Q_i, K_j, P_ij);
+        mul<1, 0, 0>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
+        mul<1, 0, 1>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
         mma_ABt<0, 1, 0>(P_ij, Q_i, K_j);
         load<3, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         load<3, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         mma_ABt<0, 1, 1>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) mul<1, 0, 2>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-        if constexpr (D == 128) mul<1, 0, 3>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
+        mul<1, 0, 2>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
+        mul<1, 0, 3>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
         asm volatile("s_waitcnt lgkmcnt(6)");
-        if constexpr (D == 128) mma_ABt<0, 1, 2>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) load<3, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) load<3, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) mma_ABt<0, 1, 3>(P_ij, Q_i, K_j, P_ij);
+        mma_ABt<0, 1, 2>(P_ij, Q_i, K_j, P_ij);
+        load<3, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        load<3, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        mma_ABt<0, 1, 3>(P_ij, Q_i, K_j, P_ij);
         mul<0, 0>(P_ij, P_ij, P_SCALE_FACTOR);
         asm volatile("s_waitcnt lgkmcnt(6)");
         mma_ABt<0, 2, 0>(P_ij, Q_i, K_j);
@@ -1648,10 +1601,10 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         mma_ABt<0, 2, 1>(P_ij, Q_i, K_j, P_ij);
         sub_row<0, 0, L_i>(P_ij, P_ij);
         asm volatile("s_waitcnt lgkmcnt(6)");
-        if constexpr (D == 128) mma_ABt<0, 2, 2>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) load<0, 2>(dO_i, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_addr);
-        if constexpr (D == 128) load<0, 3>(dO_i, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_addr);
-        if constexpr (D == 128) mma_ABt<0, 2, 3>(P_ij, Q_i, K_j, P_ij);
+        mma_ABt<0, 2, 2>(P_ij, Q_i, K_j, P_ij);
+        load<0, 2>(dO_i, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_addr);
+        load<0, 3>(dO_i, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_addr);
+        mma_ABt<0, 2, 3>(P_ij, Q_i, K_j, P_ij);
         mul<0, 1>(P_ij, P_ij, P_SCALE_FACTOR);
         asm volatile("s_waitcnt lgkmcnt(6)");
         mma_ABt<0, 3, 0>(P_ij, Q_i, K_j);
@@ -1674,10 +1627,10 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         mma_ABt<0, 3, 1>(P_ij, Q_i, K_j, P_ij);
         sub_row<0, 1, L_i>(P_ij, P_ij);
         asm volatile("s_waitcnt lgkmcnt(8)");
-        if constexpr (D == 128) mma_ABt<0, 3, 2>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) load<0, 2>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
-        if constexpr (D == 128) load<0, 3>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
-        if constexpr (D == 128) mma_ABt<0, 3, 3>(P_ij, Q_i, K_j, P_ij);
+        mma_ABt<0, 3, 2>(P_ij, Q_i, K_j, P_ij);
+        load<0, 2>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
+        load<0, 3>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
+        mma_ABt<0, 3, 3>(P_ij, Q_i, K_j, P_ij);
         // Dot slice 1
         kittens::macros::v_mov_b32_up2p<neg_inf_v>(0xff800000); if constexpr (causal) {
           // If the query position is less than the key position, set P_ij to -inf
@@ -1698,7 +1651,7 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         sub_row<0, 2, L_i>(P_ij, P_ij);
         mma_ABt<0, 0, 1>(dP_ij, dO_i, V_j, dP_ij);
         exp2<0, 0>(P_ij, P_ij);
-        if constexpr (D == 128) mma_ABt<0, 0, 2>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 0, 2>(dP_ij, dO_i, V_j, dP_ij);
         // Load Q_i_col from shared memory to registers
         // load(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}));
         // Compute Q_i_col_addr
@@ -1714,66 +1667,66 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
           return addr;
         }();
         load<0, 0>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
-        if constexpr (D == 128) mma_ABt<0, 0, 3>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 0, 3>(dP_ij, dO_i, V_j, dP_ij);
         exp2<0, 1>(P_ij, P_ij);
         mma_ABt<0, 1, 0>(dP_ij, dO_i, V_j);
         load<0, 1>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
         mma_ABt<0, 1, 1>(dP_ij, dO_i, V_j, dP_ij);
         mul<0, 3>(P_ij, P_ij, P_SCALE_FACTOR);
-        if constexpr (D == 128) mma_ABt<0, 1, 2>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 1, 2>(dP_ij, dO_i, V_j, dP_ij);
         sub_row<0, 3, L_i>(P_ij, P_ij);
-        if constexpr (D == 128) mma_ABt<0, 1, 3>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 1, 3>(dP_ij, dO_i, V_j, dP_ij);
         copy<0, 0>(P_ij_bf16, P_ij);
         mma_ABt<0, 2, 0>(dP_ij, dO_i, V_j);
         exp2<0, 2>(P_ij, P_ij);
         mma_ABt<0, 2, 1>(dP_ij, dO_i, V_j, dP_ij);
         copy<0, 1>(P_ij_bf16, P_ij);
-        if constexpr (D == 128) mma_ABt<0, 2, 2>(dP_ij, dO_i, V_j, dP_ij);
-        if constexpr (D == 128) load<0, 2>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
-        if constexpr (D == 128) mma_ABt<0, 2, 3>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 2, 2>(dP_ij, dO_i, V_j, dP_ij);
+        load<0, 2>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
+        mma_ABt<0, 2, 3>(dP_ij, dO_i, V_j, dP_ij);
         exp2<0, 3>(P_ij, P_ij);
         mma_ABt<0, 3, 0>(dP_ij, dO_i, V_j);
-        if constexpr (D == 128) load<0, 3>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
+        load<0, 3>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
         mma_ABt<0, 3, 1>(dP_ij, dO_i, V_j, dP_ij);
         copy<0, 2>(P_ij_bf16, P_ij);
         copy<0, 3>(P_ij_bf16, P_ij);
-        if constexpr (D == 128) mma_ABt<0, 3, 2>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 3, 2>(dP_ij, dO_i, V_j, dP_ij);
         swap_layout_inplace(P_ij_bf16_col, P_ij_bf16);
-        if constexpr (D == 128) mma_ABt<0, 3, 3>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 3, 3>(dP_ij, dO_i, V_j, dP_ij);
         asm volatile("s_waitcnt lgkmcnt(8)");
         // mma_AtB(dV_j_T, dO_i_col, P_ij_bf16_col);
         mma_AtB<0, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
         // Load K_j_col from shared memory to registers
-        // load(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}));
-        load<0, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) load<0, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+        // load(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}));
+        load<0, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<0, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
         mma_AtB<0, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
         sub_row<0, 0, delta_i>(dP_ij, dP_ij);
         sub_row<0, 1, delta_i>(dP_ij, dP_ij);
         mma_AtB<1, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
-        load<1, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) load<1, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<1, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<1, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
         mma_AtB<1, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
         mul<0, 0>(dP_ij, dP_ij, P_ij);
         mul<0, 1>(dP_ij, dP_ij, P_ij);
         copy<0, 0>(dP_ij_bf16, dP_ij);
         copy<0, 1>(dP_ij_bf16, dP_ij);
         sub_row<0, 2, delta_i>(dP_ij, dP_ij);
-        if constexpr (D == 128) mma_AtB<2, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
-        load<2, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+        mma_AtB<2, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
+        load<2, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
         // 12. dV_j += P_ij^T @ dO_i
         // 16. dK_j += dS_ij^T @ Q_i   (128x64)=(128x16)x(16x64)
         // Store dP_ij_bf16_accum_row to shared memory
         // store(attn_i_smem_subtile, dP_ij_bf16_accum_row);
         store<0, 0>(attn_i_smem_subtile, dP_ij_bf16_accum_row, dP_ij_bf16_accum_row_addr);
         store<1, 0>(attn_i_smem_subtile, dP_ij_bf16_accum_row, dP_ij_bf16_accum_row_addr);
-        if constexpr (D == 128) mma_AtB<2, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
+        mma_AtB<2, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
         sub_row<0, 3, delta_i>(dP_ij, dP_ij);
         mul<0, 2>(dP_ij, dP_ij, P_ij);
         mul<0, 3>(dP_ij, dP_ij, P_ij);
         copy<0, 2>(dP_ij_bf16, dP_ij);
         copy<0, 3>(dP_ij_bf16, dP_ij);
-        if constexpr (D == 128) mma_AtB<3, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
+        mma_AtB<3, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
 
         // dot slice 2
         load<L_i>(subvec_inplace<DOT_SLICE_QO>(L_smem[tic], 2));
@@ -1781,18 +1734,17 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         
         store<2, 0>(attn_i_smem_subtile, dP_ij_bf16_accum_row, dP_ij_bf16_accum_row_addr);
         store<3, 0>(attn_i_smem_subtile, dP_ij_bf16_accum_row, dP_ij_bf16_accum_row_addr);
-        if constexpr (D == 128) mma_AtB<3, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
+        mma_AtB<3, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
         swap_layout_inplace(dP_ij_bf16_col, dP_ij_bf16);
         asm volatile("s_waitcnt lgkmcnt(12)");
         // mma_AtB(dK_j_T, Q_i_col, dP_ij_bf16_col);
         mma_AtB<0, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
-        if constexpr (D == 128) load<2, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        load<3, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) load<3, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        load<4, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<2, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<3, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<3, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<4, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
         mma_AtB<0, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
         asm volatile("s_waitcnt lgkmcnt(8)");
-        if constexpr (D == 64) asm volatile("s_waitcnt lgkmcnt(0)");
         __builtin_amdgcn_s_barrier();
         mma_AtB<1, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
         // Load dP_ij_bf16_col_T from shared memory to registers
@@ -1804,30 +1756,30 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         mma_AtB<1, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
         mul<L_i, L_i>(L_SCALE_FACTOR);
         atomic_pk_add_bf16_with_warpid<2, 0, 0>(g.dQg, dQ_i, {batch_idx, q_head_idx, q_seq_idx * 4 + 0, 0}, warpid);
-        if constexpr (D == 128) mma_AtB<2, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
+        mma_AtB<2, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
         load<4, 0>(dP_ij_bf16_col_T, attn_i_smem, dP_ij_bf16_col_T_addr);
         load<5, 0>(dP_ij_bf16_col_T, attn_i_smem, dP_ij_bf16_col_T_addr);
-        if constexpr (D == 128) load<4, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        load<5, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) mma_AtB<2, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
-        if constexpr (D == 128) atomic_pk_add_bf16_with_warpid<2, 0, 1>(g.dQg, dQ_i, {batch_idx, q_head_idx, q_seq_idx * 4 + 0, 0}, warpid);
-        if constexpr (D == 128) mma_AtB<3, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
+        load<4, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<5, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        mma_AtB<2, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
+        atomic_pk_add_bf16_with_warpid<2, 0, 1>(g.dQg, dQ_i, {batch_idx, q_head_idx, q_seq_idx * 4 + 0, 0}, warpid);
+        mma_AtB<3, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
         load<6, 0>(dP_ij_bf16_col_T, attn_i_smem, dP_ij_bf16_col_T_addr);
         load<7, 0>(dP_ij_bf16_col_T, attn_i_smem, dP_ij_bf16_col_T_addr);
-        if constexpr (D == 128) load<5, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) mma_AtB<3, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
-        asm volatile("s_waitcnt vmcnt(4) lgkmcnt(" DQ_L6_LOOP ")");
+        load<5, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        mma_AtB<3, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
+        asm volatile("s_waitcnt vmcnt(4) lgkmcnt(6)");
         __builtin_amdgcn_s_barrier();
         // 15. dQ_i += dS_ij @ K_j (32x16)=(32x256)x(256x16)
         // mma_AtB(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
         mma_AtB<0, 0, 0>(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
-        load<6, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) load<6, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<6, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<6, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
         mma_AtB<0, 0, 1>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         G::load<1, false>(Q_i_smem[toc][1], g.Q, {batch_idx, next_q_seq_idx * 2 + 1, next_q_head_idx, 0}, swizzled_offsets_Q_dO);
         mma_AtB<0, 0, 2>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        load<7, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) load<7, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<7, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<7, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
         mma_AtB<0, 0, 3>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         mma_AtB<0, 0, 4>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         // Load Q_i from shared memory to registers
@@ -1836,36 +1788,36 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         load<0, 0>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
         load<0, 1>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
         mma_AtB<0, 0, 5>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        asm volatile("s_waitcnt lgkmcnt(" DQ_L4 ")");
+        asm volatile("s_waitcnt lgkmcnt(4)");
         __builtin_amdgcn_s_barrier();
         mma_AtB<0, 0, 6>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        if constexpr (D == 128) load<0, 2>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
-        if constexpr (D == 128) load<0, 3>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
+        load<0, 2>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
+        load<0, 3>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
         mma_AtB<0, 0, 7>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        if constexpr (D == 128) mma_AtB<1, 0, 0>(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
+        mma_AtB<1, 0, 0>(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
         // Load K_j from shared memory to registers
         // load(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}));
         load<0, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         load<0, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) mma_AtB<1, 0, 1>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        if constexpr (D == 128) mma_AtB<1, 0, 2>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        if constexpr (D == 128) load<0, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) load<0, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) mma_AtB<1, 0, 3>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        mma_AtB<1, 0, 1>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        mma_AtB<1, 0, 2>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        load<0, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        load<0, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        mma_AtB<1, 0, 3>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         mul<0, 0, 0>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
         mul<0, 0, 1>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-        if constexpr (D == 128) mma_AtB<1, 0, 4>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        mma_AtB<1, 0, 4>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         load<1, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         load<1, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) mma_AtB<1, 0, 5>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        mma_AtB<1, 0, 5>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         mul<0, 0, 2>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
         mul<0, 0, 3>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-        asm volatile("s_waitcnt lgkmcnt(" DQ_L10 ")");
-        if constexpr (D == 128) mma_AtB<1, 0, 6>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        if constexpr (D == 128) load<1, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) load<1, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) mma_AtB<1, 0, 7>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        asm volatile("s_waitcnt lgkmcnt(" DQ_L2 ")");
+        asm volatile("s_waitcnt lgkmcnt(10)");
+        mma_AtB<1, 0, 6>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        load<1, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        load<1, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        mma_AtB<1, 0, 7>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        asm volatile("s_waitcnt lgkmcnt(2)");
       }
 
       // dot slice 2
@@ -1879,22 +1831,22 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         load<2, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         load<2, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         mma_ABt<0, 0, 1>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) mma_ABt<0, 0, 2>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) load<2, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) load<2, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) mma_ABt<0, 0, 3>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) mul<1, 0, 0>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-        if constexpr (D == 128) mul<1, 0, 1>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
+        mma_ABt<0, 0, 2>(P_ij, Q_i, K_j, P_ij);
+        load<2, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        load<2, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        mma_ABt<0, 0, 3>(P_ij, Q_i, K_j, P_ij);
+        mul<1, 0, 0>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
+        mul<1, 0, 1>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
         mma_ABt<0, 1, 0>(P_ij, Q_i, K_j);
         load<3, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         load<3, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         mma_ABt<0, 1, 1>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) mul<1, 0, 2>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-        if constexpr (D == 128) mul<1, 0, 3>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-        if constexpr (D == 128) mma_ABt<0, 1, 2>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) load<3, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) load<3, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) mma_ABt<0, 1, 3>(P_ij, Q_i, K_j, P_ij);
+        mul<1, 0, 2>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
+        mul<1, 0, 3>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
+        mma_ABt<0, 1, 2>(P_ij, Q_i, K_j, P_ij);
+        load<3, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        load<3, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        mma_ABt<0, 1, 3>(P_ij, Q_i, K_j, P_ij);
         mul<0, 0>(P_ij, P_ij, P_SCALE_FACTOR);
         asm volatile("s_waitcnt lgkmcnt(6)");
         mma_ABt<0, 2, 0>(P_ij, Q_i, K_j);
@@ -1906,10 +1858,10 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         mma_ABt<0, 2, 1>(P_ij, Q_i, K_j, P_ij);
         sub_row<0, 0, L_i>(P_ij, P_ij);
         asm volatile("s_waitcnt lgkmcnt(6)");
-        if constexpr (D == 128) mma_ABt<0, 2, 2>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) load<0, 2>(dO_i, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_addr);
-        if constexpr (D == 128) load<0, 3>(dO_i, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_addr);
-        if constexpr (D == 128) mma_ABt<0, 2, 3>(P_ij, Q_i, K_j, P_ij);
+        mma_ABt<0, 2, 2>(P_ij, Q_i, K_j, P_ij);
+        load<0, 2>(dO_i, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_addr);
+        load<0, 3>(dO_i, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_addr);
+        mma_ABt<0, 2, 3>(P_ij, Q_i, K_j, P_ij);
         mul<0, 1>(P_ij, P_ij, P_SCALE_FACTOR);
         asm volatile("s_waitcnt lgkmcnt(6)");
         mma_ABt<0, 3, 0>(P_ij, Q_i, K_j);
@@ -1932,10 +1884,10 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         mma_ABt<0, 3, 1>(P_ij, Q_i, K_j, P_ij);
         sub_row<0, 1, L_i>(P_ij, P_ij);
         asm volatile("s_waitcnt lgkmcnt(8)");
-        if constexpr (D == 128) mma_ABt<0, 3, 2>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) load<0, 2>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
-        if constexpr (D == 128) load<0, 3>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
-        if constexpr (D == 128) mma_ABt<0, 3, 3>(P_ij, Q_i, K_j, P_ij);
+        mma_ABt<0, 3, 2>(P_ij, Q_i, K_j, P_ij);
+        load<0, 2>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
+        load<0, 3>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
+        mma_ABt<0, 3, 3>(P_ij, Q_i, K_j, P_ij);
         // Dot slice 2
         kittens::macros::v_mov_b32_up2p<neg_inf_v>(0xff800000); if constexpr (causal) {
           // If the query position is less than the key position, set P_ij to -inf
@@ -1955,7 +1907,7 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         sub_row<0, 2, L_i>(P_ij, P_ij);
         mma_ABt<0, 0, 1>(dP_ij, dO_i, V_j, dP_ij);
         exp2<0, 0>(P_ij, P_ij);
-        if constexpr (D == 128) mma_ABt<0, 0, 2>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 0, 2>(dP_ij, dO_i, V_j, dP_ij);
         // Load Q_i_col from shared memory to registers
         // load(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}));
         // Compute Q_i_col_addr
@@ -1971,66 +1923,66 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
           return addr;
         }();
         load<0, 0>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
-        if constexpr (D == 128) mma_ABt<0, 0, 3>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 0, 3>(dP_ij, dO_i, V_j, dP_ij);
         exp2<0, 1>(P_ij, P_ij);
         mma_ABt<0, 1, 0>(dP_ij, dO_i, V_j);
         load<0, 1>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
         mma_ABt<0, 1, 1>(dP_ij, dO_i, V_j, dP_ij);
         mul<0, 3>(P_ij, P_ij, P_SCALE_FACTOR);
-        if constexpr (D == 128) mma_ABt<0, 1, 2>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 1, 2>(dP_ij, dO_i, V_j, dP_ij);
         sub_row<0, 3, L_i>(P_ij, P_ij);
-        if constexpr (D == 128) mma_ABt<0, 1, 3>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 1, 3>(dP_ij, dO_i, V_j, dP_ij);
         copy<0, 0>(P_ij_bf16, P_ij);
         mma_ABt<0, 2, 0>(dP_ij, dO_i, V_j);
         exp2<0, 2>(P_ij, P_ij);
         mma_ABt<0, 2, 1>(dP_ij, dO_i, V_j, dP_ij);
         copy<0, 1>(P_ij_bf16, P_ij);
-        if constexpr (D == 128) mma_ABt<0, 2, 2>(dP_ij, dO_i, V_j, dP_ij);
-        if constexpr (D == 128) load<0, 2>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
-        if constexpr (D == 128) mma_ABt<0, 2, 3>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 2, 2>(dP_ij, dO_i, V_j, dP_ij);
+        load<0, 2>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
+        mma_ABt<0, 2, 3>(dP_ij, dO_i, V_j, dP_ij);
         exp2<0, 3>(P_ij, P_ij);
         mma_ABt<0, 3, 0>(dP_ij, dO_i, V_j);
-        if constexpr (D == 128) load<0, 3>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
+        load<0, 3>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
         mma_ABt<0, 3, 1>(dP_ij, dO_i, V_j, dP_ij);
         copy<0, 2>(P_ij_bf16, P_ij);
         copy<0, 3>(P_ij_bf16, P_ij);
-        if constexpr (D == 128) mma_ABt<0, 3, 2>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 3, 2>(dP_ij, dO_i, V_j, dP_ij);
         swap_layout_inplace(P_ij_bf16_col, P_ij_bf16);
-        if constexpr (D == 128) mma_ABt<0, 3, 3>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 3, 3>(dP_ij, dO_i, V_j, dP_ij);
         asm volatile("s_waitcnt lgkmcnt(8)");
         // mma_AtB(dV_j_T, dO_i_col, P_ij_bf16_col);
         mma_AtB<0, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
         // Load K_j_col from shared memory to registers
-        // load(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}));
-        load<0, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) load<0, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+        // load(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}));
+        load<0, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<0, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
         mma_AtB<0, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
         sub_row<0, 0, delta_i>(dP_ij, dP_ij);
         sub_row<0, 1, delta_i>(dP_ij, dP_ij);
         mma_AtB<1, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
-        load<1, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) load<1, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<1, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<1, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
         mma_AtB<1, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
         mul<0, 0>(dP_ij, dP_ij, P_ij);
         mul<0, 1>(dP_ij, dP_ij, P_ij);
         copy<0, 0>(dP_ij_bf16, dP_ij);
         copy<0, 1>(dP_ij_bf16, dP_ij);
         sub_row<0, 2, delta_i>(dP_ij, dP_ij);
-        if constexpr (D == 128) mma_AtB<2, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
-        load<2, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+        mma_AtB<2, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
+        load<2, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
         // 12. dV_j += P_ij^T @ dO_i
         // 16. dK_j += dS_ij^T @ Q_i   (128x64)=(128x16)x(16x64)
         // Store dP_ij_bf16_accum_row to shared memory
         // store(attn_i_smem_subtile, dP_ij_bf16_accum_row);
         store<0, 0>(attn_i_smem_subtile, dP_ij_bf16_accum_row, dP_ij_bf16_accum_row_addr);
         store<1, 0>(attn_i_smem_subtile, dP_ij_bf16_accum_row, dP_ij_bf16_accum_row_addr);
-        if constexpr (D == 128) mma_AtB<2, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
+        mma_AtB<2, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
         sub_row<0, 3, delta_i>(dP_ij, dP_ij);
         mul<0, 2>(dP_ij, dP_ij, P_ij);
         mul<0, 3>(dP_ij, dP_ij, P_ij);
         copy<0, 2>(dP_ij_bf16, dP_ij);
         copy<0, 3>(dP_ij_bf16, dP_ij);
-        if constexpr (D == 128) mma_AtB<3, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
+        mma_AtB<3, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
 
         // dot slice 3
         load<L_i>(subvec_inplace<DOT_SLICE_QO>(L_smem[tic], 3));
@@ -2038,18 +1990,17 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         
         store<2, 0>(attn_i_smem_subtile, dP_ij_bf16_accum_row, dP_ij_bf16_accum_row_addr);
         store<3, 0>(attn_i_smem_subtile, dP_ij_bf16_accum_row, dP_ij_bf16_accum_row_addr);
-        if constexpr (D == 128) mma_AtB<3, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
+        mma_AtB<3, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
         swap_layout_inplace(dP_ij_bf16_col, dP_ij_bf16);
         asm volatile("s_waitcnt lgkmcnt(12)");
         // mma_AtB(dK_j_T, Q_i_col, dP_ij_bf16_col);
         mma_AtB<0, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
-        if constexpr (D == 128) load<2, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        load<3, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) load<3, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        load<4, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<2, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<3, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<3, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<4, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
         mma_AtB<0, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
         asm volatile("s_waitcnt lgkmcnt(8)");
-        if constexpr (D == 64) asm volatile("s_waitcnt lgkmcnt(0)");
         __builtin_amdgcn_s_barrier();
         mma_AtB<1, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
         // Load dP_ij_bf16_col_T from shared memory to registers
@@ -2061,30 +2012,30 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         mma_AtB<1, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
         mul<L_i, L_i>(L_SCALE_FACTOR);
         atomic_pk_add_bf16_with_warpid<2, 0, 0>(g.dQg, dQ_i, {batch_idx, q_head_idx, q_seq_idx * 4 + 1, 0}, warpid);
-        if constexpr (D == 128) mma_AtB<2, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
+        mma_AtB<2, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
         load<4, 0>(dP_ij_bf16_col_T, attn_i_smem, dP_ij_bf16_col_T_addr);
         load<5, 0>(dP_ij_bf16_col_T, attn_i_smem, dP_ij_bf16_col_T_addr);
-        if constexpr (D == 128) load<4, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        load<5, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) mma_AtB<2, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
-        if constexpr (D == 128) atomic_pk_add_bf16_with_warpid<2, 0, 1>(g.dQg, dQ_i, {batch_idx, q_head_idx, q_seq_idx * 4 + 1, 0}, warpid);
-        if constexpr (D == 128) mma_AtB<3, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
+        load<4, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<5, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        mma_AtB<2, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
+        atomic_pk_add_bf16_with_warpid<2, 0, 1>(g.dQg, dQ_i, {batch_idx, q_head_idx, q_seq_idx * 4 + 1, 0}, warpid);
+        mma_AtB<3, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
         load<6, 0>(dP_ij_bf16_col_T, attn_i_smem, dP_ij_bf16_col_T_addr);
         load<7, 0>(dP_ij_bf16_col_T, attn_i_smem, dP_ij_bf16_col_T_addr);
-        if constexpr (D == 128) load<5, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) mma_AtB<3, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
-        asm volatile("s_waitcnt vmcnt(4) lgkmcnt(" DQ_L6_LOOP ")");
+        load<5, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        mma_AtB<3, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
+        asm volatile("s_waitcnt vmcnt(4) lgkmcnt(6)");
         __builtin_amdgcn_s_barrier();
         // 15. dQ_i += dS_ij @ K_j (32x16)=(32x256)x(256x16)
         // mma_AtB(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
         mma_AtB<0, 0, 0>(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
-        load<6, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) load<6, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<6, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<6, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
         mma_AtB<0, 0, 1>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         G::load<1, false>(dO_i_smem[toc][1], g.dOg, {batch_idx, next_q_seq_idx * 2 + 1, next_q_head_idx, 0}, swizzled_offsets_Q_dO);
         mma_AtB<0, 0, 2>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        load<7, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) load<7, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<7, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<7, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
         mma_AtB<0, 0, 3>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         mma_AtB<0, 0, 4>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         // Load Q_i from shared memory to registers
@@ -2093,36 +2044,36 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         load<0, 0>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
         load<0, 1>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
         mma_AtB<0, 0, 5>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        asm volatile("s_waitcnt lgkmcnt(" DQ_L4 ")");
+        asm volatile("s_waitcnt lgkmcnt(4)");
         __builtin_amdgcn_s_barrier();
         mma_AtB<0, 0, 6>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        if constexpr (D == 128) load<0, 2>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
-        if constexpr (D == 128) load<0, 3>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
+        load<0, 2>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
+        load<0, 3>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
         mma_AtB<0, 0, 7>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        if constexpr (D == 128) mma_AtB<1, 0, 0>(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
+        mma_AtB<1, 0, 0>(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
         // Load K_j from shared memory to registers
         // load(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}));
         load<0, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         load<0, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) mma_AtB<1, 0, 1>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        if constexpr (D == 128) mma_AtB<1, 0, 2>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        if constexpr (D == 128) load<0, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) load<0, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) mma_AtB<1, 0, 3>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        mma_AtB<1, 0, 1>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        mma_AtB<1, 0, 2>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        load<0, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        load<0, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        mma_AtB<1, 0, 3>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         mul<0, 0, 0>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
         mul<0, 0, 1>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-        if constexpr (D == 128) mma_AtB<1, 0, 4>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        mma_AtB<1, 0, 4>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         load<1, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         load<1, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) mma_AtB<1, 0, 5>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        mma_AtB<1, 0, 5>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         mul<0, 0, 2>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
         mul<0, 0, 3>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-        asm volatile("s_waitcnt lgkmcnt(" DQ_L10 ")");
-        if constexpr (D == 128) mma_AtB<1, 0, 6>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        if constexpr (D == 128) load<1, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) load<1, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) mma_AtB<1, 0, 7>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        asm volatile("s_waitcnt lgkmcnt(" DQ_L2 ")");
+        asm volatile("s_waitcnt lgkmcnt(10)");
+        mma_AtB<1, 0, 6>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        load<1, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        load<1, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        mma_AtB<1, 0, 7>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        asm volatile("s_waitcnt lgkmcnt(2)");
       }
 
       // dot slice 3
@@ -2136,22 +2087,22 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         load<2, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         load<2, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         mma_ABt<0, 0, 1>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) mma_ABt<0, 0, 2>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) load<2, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) load<2, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) mma_ABt<0, 0, 3>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) mul<1, 0, 0>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-        if constexpr (D == 128) mul<1, 0, 1>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
+        mma_ABt<0, 0, 2>(P_ij, Q_i, K_j, P_ij);
+        load<2, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        load<2, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        mma_ABt<0, 0, 3>(P_ij, Q_i, K_j, P_ij);
+        mul<1, 0, 0>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
+        mul<1, 0, 1>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
         mma_ABt<0, 1, 0>(P_ij, Q_i, K_j);
         load<3, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         load<3, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         mma_ABt<0, 1, 1>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) mul<1, 0, 2>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-        if constexpr (D == 128) mul<1, 0, 3>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-        if constexpr (D == 128) mma_ABt<0, 1, 2>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) load<3, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) load<3, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) mma_ABt<0, 1, 3>(P_ij, Q_i, K_j, P_ij);
+        mul<1, 0, 2>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
+        mul<1, 0, 3>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
+        mma_ABt<0, 1, 2>(P_ij, Q_i, K_j, P_ij);
+        load<3, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        load<3, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        mma_ABt<0, 1, 3>(P_ij, Q_i, K_j, P_ij);
         mul<0, 0>(P_ij, P_ij, P_SCALE_FACTOR);
         asm volatile("s_waitcnt lgkmcnt(6)");
         mma_ABt<0, 2, 0>(P_ij, Q_i, K_j);
@@ -2163,10 +2114,10 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         mma_ABt<0, 2, 1>(P_ij, Q_i, K_j, P_ij);
         sub_row<0, 0, L_i>(P_ij, P_ij);
         asm volatile("s_waitcnt lgkmcnt(6)");
-        if constexpr (D == 128) mma_ABt<0, 2, 2>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) load<0, 2>(dO_i, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_addr);
-        if constexpr (D == 128) load<0, 3>(dO_i, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_addr);
-        if constexpr (D == 128) mma_ABt<0, 2, 3>(P_ij, Q_i, K_j, P_ij);
+        mma_ABt<0, 2, 2>(P_ij, Q_i, K_j, P_ij);
+        load<0, 2>(dO_i, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_addr);
+        load<0, 3>(dO_i, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_addr);
+        mma_ABt<0, 2, 3>(P_ij, Q_i, K_j, P_ij);
         mul<0, 1>(P_ij, P_ij, P_SCALE_FACTOR);
         asm volatile("s_waitcnt lgkmcnt(6)");
         mma_ABt<0, 3, 0>(P_ij, Q_i, K_j);
@@ -2189,10 +2140,10 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         mma_ABt<0, 3, 1>(P_ij, Q_i, K_j, P_ij);
         sub_row<0, 1, L_i>(P_ij, P_ij);
         asm volatile("s_waitcnt lgkmcnt(8)");
-        if constexpr (D == 128) mma_ABt<0, 3, 2>(P_ij, Q_i, K_j, P_ij);
-        if constexpr (D == 128) load<0, 2>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
-        if constexpr (D == 128) load<0, 3>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
-        if constexpr (D == 128) mma_ABt<0, 3, 3>(P_ij, Q_i, K_j, P_ij);
+        mma_ABt<0, 3, 2>(P_ij, Q_i, K_j, P_ij);
+        load<0, 2>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
+        load<0, 3>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
+        mma_ABt<0, 3, 3>(P_ij, Q_i, K_j, P_ij);
         // Dot slice 3
         kittens::macros::v_mov_b32_up2p<neg_inf_v>(0xff800000); if constexpr (causal) {
           // If the query position is less than the key position, set P_ij to -inf
@@ -2211,7 +2162,7 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         sub_row<0, 2, L_i>(P_ij, P_ij);
         mma_ABt<0, 0, 1>(dP_ij, dO_i, V_j, dP_ij);
         exp2<0, 0>(P_ij, P_ij);
-        if constexpr (D == 128) mma_ABt<0, 0, 2>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 0, 2>(dP_ij, dO_i, V_j, dP_ij);
         // Load Q_i_col from shared memory to registers
         // load(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}));
         // Compute Q_i_col_addr
@@ -2227,66 +2178,66 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
           return addr;
         }();
         load<0, 0>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
-        if constexpr (D == 128) mma_ABt<0, 0, 3>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 0, 3>(dP_ij, dO_i, V_j, dP_ij);
         exp2<0, 1>(P_ij, P_ij);
         mma_ABt<0, 1, 0>(dP_ij, dO_i, V_j);
         load<0, 1>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
         mma_ABt<0, 1, 1>(dP_ij, dO_i, V_j, dP_ij);
         mul<0, 3>(P_ij, P_ij, P_SCALE_FACTOR);
-        if constexpr (D == 128) mma_ABt<0, 1, 2>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 1, 2>(dP_ij, dO_i, V_j, dP_ij);
         sub_row<0, 3, L_i>(P_ij, P_ij);
-        if constexpr (D == 128) mma_ABt<0, 1, 3>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 1, 3>(dP_ij, dO_i, V_j, dP_ij);
         copy<0, 0>(P_ij_bf16, P_ij);
         mma_ABt<0, 2, 0>(dP_ij, dO_i, V_j);
         exp2<0, 2>(P_ij, P_ij);
         mma_ABt<0, 2, 1>(dP_ij, dO_i, V_j, dP_ij);
         copy<0, 1>(P_ij_bf16, P_ij);
-        if constexpr (D == 128) mma_ABt<0, 2, 2>(dP_ij, dO_i, V_j, dP_ij);
-        if constexpr (D == 128) load<0, 2>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
-        if constexpr (D == 128) mma_ABt<0, 2, 3>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 2, 2>(dP_ij, dO_i, V_j, dP_ij);
+        load<0, 2>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
+        mma_ABt<0, 2, 3>(dP_ij, dO_i, V_j, dP_ij);
         exp2<0, 3>(P_ij, P_ij);
         mma_ABt<0, 3, 0>(dP_ij, dO_i, V_j);
-        if constexpr (D == 128) load<0, 3>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
+        load<0, 3>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
         mma_ABt<0, 3, 1>(dP_ij, dO_i, V_j, dP_ij);
         copy<0, 2>(P_ij_bf16, P_ij);
         copy<0, 3>(P_ij_bf16, P_ij);
-        if constexpr (D == 128) mma_ABt<0, 3, 2>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 3, 2>(dP_ij, dO_i, V_j, dP_ij);
         swap_layout_inplace(P_ij_bf16_col, P_ij_bf16);
-        if constexpr (D == 128) mma_ABt<0, 3, 3>(dP_ij, dO_i, V_j, dP_ij);
+        mma_ABt<0, 3, 3>(dP_ij, dO_i, V_j, dP_ij);
         asm volatile("s_waitcnt lgkmcnt(8)");
         // mma_AtB(dV_j_T, dO_i_col, P_ij_bf16_col);
         mma_AtB<0, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
         // Load K_j_col from shared memory to registers
-        // load(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}));
-        load<0, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) load<0, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+        // load(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}));
+        load<0, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<0, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
         mma_AtB<0, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
         sub_row<0, 0, delta_i>(dP_ij, dP_ij);
         sub_row<0, 1, delta_i>(dP_ij, dP_ij);
         mma_AtB<1, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
-        load<1, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) load<1, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<1, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<1, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
         mma_AtB<1, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
         mul<0, 0>(dP_ij, dP_ij, P_ij);
         mul<0, 1>(dP_ij, dP_ij, P_ij);
         copy<0, 0>(dP_ij_bf16, dP_ij);
         copy<0, 1>(dP_ij_bf16, dP_ij);
         sub_row<0, 2, delta_i>(dP_ij, dP_ij);
-        if constexpr (D == 128) mma_AtB<2, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
-        load<2, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+        mma_AtB<2, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
+        load<2, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
         // 12. dV_j += P_ij^T @ dO_i
         // 16. dK_j += dS_ij^T @ Q_i   (128x64)=(128x16)x(16x64)
         // Store dP_ij_bf16_accum_row to shared memory
         // store(attn_i_smem_subtile, dP_ij_bf16_accum_row);
         store<0, 0>(attn_i_smem_subtile, dP_ij_bf16_accum_row, dP_ij_bf16_accum_row_addr);
         store<1, 0>(attn_i_smem_subtile, dP_ij_bf16_accum_row, dP_ij_bf16_accum_row_addr);
-        if constexpr (D == 128) mma_AtB<2, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
+        mma_AtB<2, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
         sub_row<0, 3, delta_i>(dP_ij, dP_ij);
         mul<0, 2>(dP_ij, dP_ij, P_ij);
         mul<0, 3>(dP_ij, dP_ij, P_ij);
         copy<0, 2>(dP_ij_bf16, dP_ij);
         copy<0, 3>(dP_ij_bf16, dP_ij);
-        if constexpr (D == 128) mma_AtB<3, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
+        mma_AtB<3, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
 
         // dot slice 0 - next iteration
         load<L_i>(subvec_inplace<DOT_SLICE_QO>(L_smem[toc], 0));
@@ -2294,18 +2245,17 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         
         store<2, 0>(attn_i_smem_subtile, dP_ij_bf16_accum_row, dP_ij_bf16_accum_row_addr);
         store<3, 0>(attn_i_smem_subtile, dP_ij_bf16_accum_row, dP_ij_bf16_accum_row_addr);
-        if constexpr (D == 128) mma_AtB<3, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
+        mma_AtB<3, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
         swap_layout_inplace(dP_ij_bf16_col, dP_ij_bf16);
         asm volatile("s_waitcnt lgkmcnt(12)");
         // mma_AtB(dK_j_T, Q_i_col, dP_ij_bf16_col);
         mma_AtB<0, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
-        if constexpr (D == 128) load<2, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        load<3, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) load<3, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        load<4, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<2, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<3, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<3, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<4, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
         mma_AtB<0, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
         asm volatile("s_waitcnt lgkmcnt(8)");
-        if constexpr (D == 64) asm volatile("s_waitcnt lgkmcnt(0)");
         __builtin_amdgcn_s_barrier();
         mma_AtB<1, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
         // Load dP_ij_bf16_col_T from shared memory to registers
@@ -2317,29 +2267,29 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         mma_AtB<1, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
         mul<L_i, L_i>(L_SCALE_FACTOR);
         atomic_pk_add_bf16_with_warpid<2, 0, 0>(g.dQg, dQ_i, {batch_idx, q_head_idx, q_seq_idx * 4 + 2, 0}, warpid);
-        if constexpr (D == 128) mma_AtB<2, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
+        mma_AtB<2, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
         load<4, 0>(dP_ij_bf16_col_T, attn_i_smem, dP_ij_bf16_col_T_addr);
         load<5, 0>(dP_ij_bf16_col_T, attn_i_smem, dP_ij_bf16_col_T_addr);
-        if constexpr (D == 128) load<4, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        load<5, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) mma_AtB<2, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
-        if constexpr (D == 128) atomic_pk_add_bf16_with_warpid<2, 0, 1>(g.dQg, dQ_i, {batch_idx, q_head_idx, q_seq_idx * 4 + 2, 0}, warpid);
-        if constexpr (D == 128) mma_AtB<3, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
+        load<4, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<5, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        mma_AtB<2, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
+        atomic_pk_add_bf16_with_warpid<2, 0, 1>(g.dQg, dQ_i, {batch_idx, q_head_idx, q_seq_idx * 4 + 2, 0}, warpid);
+        mma_AtB<3, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
         load<6, 0>(dP_ij_bf16_col_T, attn_i_smem, dP_ij_bf16_col_T_addr);
         load<7, 0>(dP_ij_bf16_col_T, attn_i_smem, dP_ij_bf16_col_T_addr);
-        if constexpr (D == 128) load<5, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) mma_AtB<3, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
-        asm volatile("s_waitcnt vmcnt(4) lgkmcnt(" DQ_L6_LOOP ")");
+        load<5, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        mma_AtB<3, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
+        asm volatile("s_waitcnt vmcnt(4) lgkmcnt(6)");
         __builtin_amdgcn_s_barrier();
         // 15. dQ_i += dS_ij @ K_j (32x16)=(32x256)x(256x16)
         // mma_AtB(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
         mma_AtB<0, 0, 0>(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
-        load<6, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) load<6, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<6, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<6, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
         mma_AtB<0, 0, 1>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         mma_AtB<0, 0, 2>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        load<7, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-        if constexpr (D == 128) load<7, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<7, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+        load<7, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
         mma_AtB<0, 0, 3>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         mma_AtB<0, 0, 4>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         // Load Q_i from shared memory to registers
@@ -2348,45 +2298,45 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         load<0, 0>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[toc][0], {0, 0}), Q_i_addr);
         load<0, 1>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[toc][0], {0, 0}), Q_i_addr);
         mma_AtB<0, 0, 5>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        asm volatile("s_waitcnt lgkmcnt(" DQ_L4 ")");
+        asm volatile("s_waitcnt lgkmcnt(4)");
         __builtin_amdgcn_s_barrier();
         mma_AtB<0, 0, 6>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        if constexpr (D == 128) load<0, 2>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[toc][0], {0, 0}), Q_i_addr);
-        if constexpr (D == 128) load<0, 3>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[toc][0], {0, 0}), Q_i_addr);
+        load<0, 2>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[toc][0], {0, 0}), Q_i_addr);
+        load<0, 3>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[toc][0], {0, 0}), Q_i_addr);
         mma_AtB<0, 0, 7>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        if constexpr (D == 128) mma_AtB<1, 0, 0>(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
+        mma_AtB<1, 0, 0>(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
         // Load K_j from shared memory to registers
         // load(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}));
         load<0, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         load<0, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) mma_AtB<1, 0, 1>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        if constexpr (D == 128) mma_AtB<1, 0, 2>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        if constexpr (D == 128) load<0, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) load<0, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) mma_AtB<1, 0, 3>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        mma_AtB<1, 0, 1>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        mma_AtB<1, 0, 2>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        load<0, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        load<0, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        mma_AtB<1, 0, 3>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         mul<0, 0, 0>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
         mul<0, 0, 1>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-        if constexpr (D == 128) mma_AtB<1, 0, 4>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        mma_AtB<1, 0, 4>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         load<1, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         load<1, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) mma_AtB<1, 0, 5>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        mma_AtB<1, 0, 5>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         mul<0, 0, 2>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
         mul<0, 0, 3>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-        asm volatile("s_waitcnt lgkmcnt(" DQ_L10 ")");
-        if constexpr (D == 128) mma_AtB<1, 0, 6>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        if constexpr (D == 128) load<1, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) load<1, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-        if constexpr (D == 128) mma_AtB<1, 0, 7>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        asm volatile("s_waitcnt lgkmcnt(" DQ_L2 ")");
+        asm volatile("s_waitcnt lgkmcnt(10)");
+        mma_AtB<1, 0, 6>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        load<1, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        load<1, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+        mma_AtB<1, 0, 7>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        asm volatile("s_waitcnt lgkmcnt(2)");
       }
     }
   }
 
-  const int last_q_head_idx = first_q_head + HEADS_PER_WG - 1;
-  const int last_q_seq_idx = first_step + num_steps_per_head - 2;
+  const int last_q_head_idx = (num_steps - 2) / num_steps_per_head + first_q_head;
+  const int last_q_seq_idx = ((num_steps - 2) % num_steps_per_head) + first_step;
 
-  const int q_head_idx = first_q_head + HEADS_PER_WG - 1;
-  const int q_seq_idx = first_step + num_steps_per_head - 1;
+  const int q_head_idx = (num_steps - 1) / num_steps_per_head + first_q_head;
+  const int q_seq_idx = ((num_steps - 1) % num_steps_per_head) + first_step;
   const int q_pos = q_seq_idx * STEP_QO;
   // Epilogue
   {
@@ -2402,22 +2352,22 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
       load<2, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
       load<2, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
       mma_ABt<0, 0, 1>(P_ij, Q_i, K_j, P_ij);
-      if constexpr (D == 128) mma_ABt<0, 0, 2>(P_ij, Q_i, K_j, P_ij);
-      if constexpr (D == 128) load<2, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-      if constexpr (D == 128) load<2, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-      if constexpr (D == 128) mma_ABt<0, 0, 3>(P_ij, Q_i, K_j, P_ij);
-      if constexpr (D == 128) mul<1, 0, 0>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-      if constexpr (D == 128) mul<1, 0, 1>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
+      mma_ABt<0, 0, 2>(P_ij, Q_i, K_j, P_ij);
+      load<2, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+      load<2, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+      mma_ABt<0, 0, 3>(P_ij, Q_i, K_j, P_ij);
+      mul<1, 0, 0>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
+      mul<1, 0, 1>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
       mma_ABt<0, 1, 0>(P_ij, Q_i, K_j);
       load<3, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
       load<3, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
       mma_ABt<0, 1, 1>(P_ij, Q_i, K_j, P_ij);
-      if constexpr (D == 128) mul<1, 0, 2>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-      if constexpr (D == 128) mul<1, 0, 3>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-      if constexpr (D == 128) mma_ABt<0, 1, 2>(P_ij, Q_i, K_j, P_ij);
-      if constexpr (D == 128) load<3, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-      if constexpr (D == 128) load<3, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-      if constexpr (D == 128) mma_ABt<0, 1, 3>(P_ij, Q_i, K_j, P_ij);
+      mul<1, 0, 2>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
+      mul<1, 0, 3>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
+      mma_ABt<0, 1, 2>(P_ij, Q_i, K_j, P_ij);
+      load<3, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+      load<3, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+      mma_ABt<0, 1, 3>(P_ij, Q_i, K_j, P_ij);
       mul<0, 0>(P_ij, P_ij, P_SCALE_FACTOR);
       asm volatile("s_waitcnt lgkmcnt(6)");
       mma_ABt<0, 2, 0>(P_ij, Q_i, K_j);
@@ -2429,10 +2379,10 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
       mma_ABt<0, 2, 1>(P_ij, Q_i, K_j, P_ij);
       sub_row<0, 0, L_i>(P_ij, P_ij);
       asm volatile("s_waitcnt lgkmcnt(6)");
-      if constexpr (D == 128) mma_ABt<0, 2, 2>(P_ij, Q_i, K_j, P_ij);
-      if constexpr (D == 128) load<0, 2>(dO_i, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_addr);
-      if constexpr (D == 128) load<0, 3>(dO_i, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_addr);
-      if constexpr (D == 128) mma_ABt<0, 2, 3>(P_ij, Q_i, K_j, P_ij);
+      mma_ABt<0, 2, 2>(P_ij, Q_i, K_j, P_ij);
+      load<0, 2>(dO_i, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_addr);
+      load<0, 3>(dO_i, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_addr);
+      mma_ABt<0, 2, 3>(P_ij, Q_i, K_j, P_ij);
       mul<0, 1>(P_ij, P_ij, P_SCALE_FACTOR);
       asm volatile("s_waitcnt lgkmcnt(6)");
       mma_ABt<0, 3, 0>(P_ij, Q_i, K_j);
@@ -2455,10 +2405,10 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
       mma_ABt<0, 3, 1>(P_ij, Q_i, K_j, P_ij);
       sub_row<0, 1, L_i>(P_ij, P_ij);
       asm volatile("s_waitcnt lgkmcnt(8)");
-      if constexpr (D == 128) mma_ABt<0, 3, 2>(P_ij, Q_i, K_j, P_ij);
-      if constexpr (D == 128) load<0, 2>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
-      if constexpr (D == 128) load<0, 3>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
-      if constexpr (D == 128) mma_ABt<0, 3, 3>(P_ij, Q_i, K_j, P_ij);
+      mma_ABt<0, 3, 2>(P_ij, Q_i, K_j, P_ij);
+      load<0, 2>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
+      load<0, 3>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
+      mma_ABt<0, 3, 3>(P_ij, Q_i, K_j, P_ij);
       // Dot slice 0
       kittens::macros::v_mov_b32_up2p<neg_inf_v>(0xff800000); if constexpr (causal) {
         // If the query position is less than the key position, set P_ij to -inf
@@ -2480,7 +2430,7 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
       sub_row<0, 2, L_i>(P_ij, P_ij);
       mma_ABt<0, 0, 1>(dP_ij, dO_i, V_j, dP_ij);
       exp2<0, 0>(P_ij, P_ij);
-      if constexpr (D == 128) mma_ABt<0, 0, 2>(dP_ij, dO_i, V_j, dP_ij);
+      mma_ABt<0, 0, 2>(dP_ij, dO_i, V_j, dP_ij);
       // Load Q_i_col from shared memory to registers
       // load(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}));
       // Compute Q_i_col_addr
@@ -2496,66 +2446,66 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         return addr;
       }();
       load<0, 0>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
-      if constexpr (D == 128) mma_ABt<0, 0, 3>(dP_ij, dO_i, V_j, dP_ij);
+      mma_ABt<0, 0, 3>(dP_ij, dO_i, V_j, dP_ij);
       exp2<0, 1>(P_ij, P_ij);
       mma_ABt<0, 1, 0>(dP_ij, dO_i, V_j);
       load<0, 1>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
       mma_ABt<0, 1, 1>(dP_ij, dO_i, V_j, dP_ij);
       mul<0, 3>(P_ij, P_ij, P_SCALE_FACTOR);
-      if constexpr (D == 128) mma_ABt<0, 1, 2>(dP_ij, dO_i, V_j, dP_ij);
+      mma_ABt<0, 1, 2>(dP_ij, dO_i, V_j, dP_ij);
       sub_row<0, 3, L_i>(P_ij, P_ij);
-      if constexpr (D == 128) mma_ABt<0, 1, 3>(dP_ij, dO_i, V_j, dP_ij);
+      mma_ABt<0, 1, 3>(dP_ij, dO_i, V_j, dP_ij);
       copy<0, 0>(P_ij_bf16, P_ij);
       mma_ABt<0, 2, 0>(dP_ij, dO_i, V_j);
       exp2<0, 2>(P_ij, P_ij);
       mma_ABt<0, 2, 1>(dP_ij, dO_i, V_j, dP_ij);
       copy<0, 1>(P_ij_bf16, P_ij);
-      if constexpr (D == 128) mma_ABt<0, 2, 2>(dP_ij, dO_i, V_j, dP_ij);
-      if constexpr (D == 128) load<0, 2>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
-      if constexpr (D == 128) mma_ABt<0, 2, 3>(dP_ij, dO_i, V_j, dP_ij);
+      mma_ABt<0, 2, 2>(dP_ij, dO_i, V_j, dP_ij);
+      load<0, 2>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
+      mma_ABt<0, 2, 3>(dP_ij, dO_i, V_j, dP_ij);
       exp2<0, 3>(P_ij, P_ij);
       mma_ABt<0, 3, 0>(dP_ij, dO_i, V_j);
-      if constexpr (D == 128) load<0, 3>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
+      load<0, 3>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
       mma_ABt<0, 3, 1>(dP_ij, dO_i, V_j, dP_ij);
       copy<0, 2>(P_ij_bf16, P_ij);
       copy<0, 3>(P_ij_bf16, P_ij);
-      if constexpr (D == 128) mma_ABt<0, 3, 2>(dP_ij, dO_i, V_j, dP_ij);
+      mma_ABt<0, 3, 2>(dP_ij, dO_i, V_j, dP_ij);
       swap_layout_inplace(P_ij_bf16_col, P_ij_bf16);
-      if constexpr (D == 128) mma_ABt<0, 3, 3>(dP_ij, dO_i, V_j, dP_ij);
+      mma_ABt<0, 3, 3>(dP_ij, dO_i, V_j, dP_ij);
       asm volatile("s_waitcnt lgkmcnt(8)");
       // mma_AtB(dV_j_T, dO_i_col, P_ij_bf16_col);
       mma_AtB<0, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
       // Load K_j_col from shared memory to registers
-      // load(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}));
-      load<0, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-      if constexpr (D == 128) load<0, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+      // load(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}));
+      load<0, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+      load<0, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
       mma_AtB<0, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
       sub_row<0, 0, delta_i>(dP_ij, dP_ij);
       sub_row<0, 1, delta_i>(dP_ij, dP_ij);
       mma_AtB<1, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
-      load<1, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-      if constexpr (D == 128) load<1, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+      load<1, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+      load<1, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
       mma_AtB<1, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
       mul<0, 0>(dP_ij, dP_ij, P_ij);
       mul<0, 1>(dP_ij, dP_ij, P_ij);
       copy<0, 0>(dP_ij_bf16, dP_ij);
       copy<0, 1>(dP_ij_bf16, dP_ij);
       sub_row<0, 2, delta_i>(dP_ij, dP_ij);
-      if constexpr (D == 128) mma_AtB<2, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
-      load<2, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+      mma_AtB<2, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
+      load<2, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
       // 12. dV_j += P_ij^T @ dO_i
       // 16. dK_j += dS_ij^T @ Q_i   (128x64)=(128x16)x(16x64)
       // Store dP_ij_bf16_accum_row to shared memory
       // store(attn_i_smem_subtile, dP_ij_bf16_accum_row);
       store<0, 0>(attn_i_smem_subtile, dP_ij_bf16_accum_row, dP_ij_bf16_accum_row_addr);
       store<1, 0>(attn_i_smem_subtile, dP_ij_bf16_accum_row, dP_ij_bf16_accum_row_addr);
-      if constexpr (D == 128) mma_AtB<2, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
+      mma_AtB<2, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
       sub_row<0, 3, delta_i>(dP_ij, dP_ij);
       mul<0, 2>(dP_ij, dP_ij, P_ij);
       mul<0, 3>(dP_ij, dP_ij, P_ij);
       copy<0, 2>(dP_ij_bf16, dP_ij);
       copy<0, 3>(dP_ij_bf16, dP_ij);
-      if constexpr (D == 128) mma_AtB<3, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
+      mma_AtB<3, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
 
       // dot slice 1
       load<L_i>(subvec_inplace<DOT_SLICE_QO>(L_smem[tic], 1));
@@ -2563,18 +2513,17 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
       
       store<2, 0>(attn_i_smem_subtile, dP_ij_bf16_accum_row, dP_ij_bf16_accum_row_addr);
       store<3, 0>(attn_i_smem_subtile, dP_ij_bf16_accum_row, dP_ij_bf16_accum_row_addr);
-      if constexpr (D == 128) mma_AtB<3, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
+      mma_AtB<3, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
       swap_layout_inplace(dP_ij_bf16_col, dP_ij_bf16);
       asm volatile("s_waitcnt lgkmcnt(12)");
       // mma_AtB(dK_j_T, Q_i_col, dP_ij_bf16_col);
       mma_AtB<0, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
-      if constexpr (D == 128) load<2, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-      load<3, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-      if constexpr (D == 128) load<3, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-      load<4, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+      load<2, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+      load<3, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+      load<3, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+      load<4, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
       mma_AtB<0, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
       asm volatile("s_waitcnt lgkmcnt(8)");
-      if constexpr (D == 64) asm volatile("s_waitcnt lgkmcnt(0)");
       __builtin_amdgcn_s_barrier();
       mma_AtB<1, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
       // Load dP_ij_bf16_col_T from shared memory to registers
@@ -2588,31 +2537,31 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
       if (num_steps > 1) {
         atomic_pk_add_bf16_with_warpid<2, 0, 0>(g.dQg, dQ_i, {batch_idx, last_q_head_idx, last_q_seq_idx * 4 + 3, 0}, warpid);
       }
-      if constexpr (D == 128) mma_AtB<2, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
+      mma_AtB<2, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
       load<4, 0>(dP_ij_bf16_col_T, attn_i_smem, dP_ij_bf16_col_T_addr);
       load<5, 0>(dP_ij_bf16_col_T, attn_i_smem, dP_ij_bf16_col_T_addr);
-      if constexpr (D == 128) load<4, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-      load<5, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-      if constexpr (D == 128) mma_AtB<2, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
+      load<4, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+      load<5, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+      mma_AtB<2, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
       if (num_steps > 1) {
-        if constexpr (D == 128) atomic_pk_add_bf16_with_warpid<2, 0, 1>(g.dQg, dQ_i, {batch_idx, last_q_head_idx, last_q_seq_idx * 4 + 3, 0}, warpid);
+        atomic_pk_add_bf16_with_warpid<2, 0, 1>(g.dQg, dQ_i, {batch_idx, last_q_head_idx, last_q_seq_idx * 4 + 3, 0}, warpid);
       }
-      if constexpr (D == 128) mma_AtB<3, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
+      mma_AtB<3, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
       load<6, 0>(dP_ij_bf16_col_T, attn_i_smem, dP_ij_bf16_col_T_addr);
       load<7, 0>(dP_ij_bf16_col_T, attn_i_smem, dP_ij_bf16_col_T_addr);
-      if constexpr (D == 128) load<5, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-      if constexpr (D == 128) mma_AtB<3, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
-      asm volatile("s_waitcnt lgkmcnt(" DQ_L6 ")");
+      load<5, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+      mma_AtB<3, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
+      asm volatile("s_waitcnt lgkmcnt(6)");
       __builtin_amdgcn_s_barrier();
       // 15. dQ_i += dS_ij @ K_j (32x16)=(32x256)x(256x16)
       // mma_AtB(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
       mma_AtB<0, 0, 0>(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
-      load<6, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-      if constexpr (D == 128) load<6, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+      load<6, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+      load<6, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
       mma_AtB<0, 0, 1>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
       mma_AtB<0, 0, 2>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-      load<7, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-      if constexpr (D == 128) load<7, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+      load<7, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+      load<7, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
       mma_AtB<0, 0, 3>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
       mma_AtB<0, 0, 4>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
       // Load Q_i from shared memory to registers
@@ -2621,36 +2570,36 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
       load<0, 0>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
       load<0, 1>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
       mma_AtB<0, 0, 5>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-      asm volatile("s_waitcnt lgkmcnt(" DQ_L4 ")");
+      asm volatile("s_waitcnt lgkmcnt(4)");
       __builtin_amdgcn_s_barrier();
       mma_AtB<0, 0, 6>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-      if constexpr (D == 128) load<0, 2>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
-      if constexpr (D == 128) load<0, 3>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
+      load<0, 2>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
+      load<0, 3>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
       mma_AtB<0, 0, 7>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-      if constexpr (D == 128) mma_AtB<1, 0, 0>(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
+      mma_AtB<1, 0, 0>(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
       // Load K_j from shared memory to registers
       // load(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}));
       load<0, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
       load<0, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-      if constexpr (D == 128) mma_AtB<1, 0, 1>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-      if constexpr (D == 128) mma_AtB<1, 0, 2>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-      if constexpr (D == 128) load<0, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-      if constexpr (D == 128) load<0, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-      if constexpr (D == 128) mma_AtB<1, 0, 3>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+      mma_AtB<1, 0, 1>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+      mma_AtB<1, 0, 2>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+      load<0, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+      load<0, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+      mma_AtB<1, 0, 3>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
       mul<0, 0, 0>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
       mul<0, 0, 1>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-      if constexpr (D == 128) mma_AtB<1, 0, 4>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+      mma_AtB<1, 0, 4>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
       load<1, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
       load<1, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-      if constexpr (D == 128) mma_AtB<1, 0, 5>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+      mma_AtB<1, 0, 5>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
       mul<0, 0, 2>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
       mul<0, 0, 3>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-      asm volatile("s_waitcnt lgkmcnt(" DQ_L10 ")");
-      if constexpr (D == 128) mma_AtB<1, 0, 6>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-      if constexpr (D == 128) load<1, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-      if constexpr (D == 128) load<1, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-      if constexpr (D == 128) mma_AtB<1, 0, 7>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-      asm volatile("s_waitcnt lgkmcnt(" DQ_L2 ")");
+      asm volatile("s_waitcnt lgkmcnt(10)");
+      mma_AtB<1, 0, 6>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+      load<1, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+      load<1, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+      mma_AtB<1, 0, 7>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+      asm volatile("s_waitcnt lgkmcnt(2)");
     }
 
     // dot slice 1
@@ -2664,22 +2613,22 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
       load<2, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
       load<2, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
       mma_ABt<0, 0, 1>(P_ij, Q_i, K_j, P_ij);
-      if constexpr (D == 128) mma_ABt<0, 0, 2>(P_ij, Q_i, K_j, P_ij);
-      if constexpr (D == 128) load<2, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-      if constexpr (D == 128) load<2, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-      if constexpr (D == 128) mma_ABt<0, 0, 3>(P_ij, Q_i, K_j, P_ij);
-      if constexpr (D == 128) mul<1, 0, 0>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-      if constexpr (D == 128) mul<1, 0, 1>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
+      mma_ABt<0, 0, 2>(P_ij, Q_i, K_j, P_ij);
+      load<2, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+      load<2, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+      mma_ABt<0, 0, 3>(P_ij, Q_i, K_j, P_ij);
+      mul<1, 0, 0>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
+      mul<1, 0, 1>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
       mma_ABt<0, 1, 0>(P_ij, Q_i, K_j);
       load<3, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
       load<3, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
       mma_ABt<0, 1, 1>(P_ij, Q_i, K_j, P_ij);
-      if constexpr (D == 128) mul<1, 0, 2>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-      if constexpr (D == 128) mul<1, 0, 3>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-      if constexpr (D == 128) mma_ABt<0, 1, 2>(P_ij, Q_i, K_j, P_ij);
-      if constexpr (D == 128) load<3, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-      if constexpr (D == 128) load<3, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-      if constexpr (D == 128) mma_ABt<0, 1, 3>(P_ij, Q_i, K_j, P_ij);
+      mul<1, 0, 2>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
+      mul<1, 0, 3>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
+      mma_ABt<0, 1, 2>(P_ij, Q_i, K_j, P_ij);
+      load<3, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+      load<3, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+      mma_ABt<0, 1, 3>(P_ij, Q_i, K_j, P_ij);
       mul<0, 0>(P_ij, P_ij, P_SCALE_FACTOR);
       asm volatile("s_waitcnt lgkmcnt(6)");
       mma_ABt<0, 2, 0>(P_ij, Q_i, K_j);
@@ -2691,10 +2640,10 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
       mma_ABt<0, 2, 1>(P_ij, Q_i, K_j, P_ij);
       sub_row<0, 0, L_i>(P_ij, P_ij);
       asm volatile("s_waitcnt lgkmcnt(6)");
-      if constexpr (D == 128) mma_ABt<0, 2, 2>(P_ij, Q_i, K_j, P_ij);
-      if constexpr (D == 128) load<0, 2>(dO_i, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_addr);
-      if constexpr (D == 128) load<0, 3>(dO_i, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_addr);
-      if constexpr (D == 128) mma_ABt<0, 2, 3>(P_ij, Q_i, K_j, P_ij);
+      mma_ABt<0, 2, 2>(P_ij, Q_i, K_j, P_ij);
+      load<0, 2>(dO_i, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_addr);
+      load<0, 3>(dO_i, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_addr);
+      mma_ABt<0, 2, 3>(P_ij, Q_i, K_j, P_ij);
       mul<0, 1>(P_ij, P_ij, P_SCALE_FACTOR);
       asm volatile("s_waitcnt lgkmcnt(6)");
       mma_ABt<0, 3, 0>(P_ij, Q_i, K_j);
@@ -2717,10 +2666,10 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
       mma_ABt<0, 3, 1>(P_ij, Q_i, K_j, P_ij);
       sub_row<0, 1, L_i>(P_ij, P_ij);
       asm volatile("s_waitcnt lgkmcnt(8)");
-      if constexpr (D == 128) mma_ABt<0, 3, 2>(P_ij, Q_i, K_j, P_ij);
-      if constexpr (D == 128) load<0, 2>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
-      if constexpr (D == 128) load<0, 3>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
-      if constexpr (D == 128) mma_ABt<0, 3, 3>(P_ij, Q_i, K_j, P_ij);
+      mma_ABt<0, 3, 2>(P_ij, Q_i, K_j, P_ij);
+      load<0, 2>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
+      load<0, 3>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
+      mma_ABt<0, 3, 3>(P_ij, Q_i, K_j, P_ij);
       // Dot slice 1
       kittens::macros::v_mov_b32_up2p<neg_inf_v>(0xff800000); if constexpr (causal) {
         // If the query position is less than the key position, set P_ij to -inf
@@ -2741,7 +2690,7 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
       sub_row<0, 2, L_i>(P_ij, P_ij);
       mma_ABt<0, 0, 1>(dP_ij, dO_i, V_j, dP_ij);
       exp2<0, 0>(P_ij, P_ij);
-      if constexpr (D == 128) mma_ABt<0, 0, 2>(dP_ij, dO_i, V_j, dP_ij);
+      mma_ABt<0, 0, 2>(dP_ij, dO_i, V_j, dP_ij);
       // Load Q_i_col from shared memory to registers
       // load(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}));
       // Compute Q_i_col_addr
@@ -2757,66 +2706,66 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         return addr;
       }();
       load<0, 0>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
-      if constexpr (D == 128) mma_ABt<0, 0, 3>(dP_ij, dO_i, V_j, dP_ij);
+      mma_ABt<0, 0, 3>(dP_ij, dO_i, V_j, dP_ij);
       exp2<0, 1>(P_ij, P_ij);
       mma_ABt<0, 1, 0>(dP_ij, dO_i, V_j);
       load<0, 1>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
       mma_ABt<0, 1, 1>(dP_ij, dO_i, V_j, dP_ij);
       mul<0, 3>(P_ij, P_ij, P_SCALE_FACTOR);
-      if constexpr (D == 128) mma_ABt<0, 1, 2>(dP_ij, dO_i, V_j, dP_ij);
+      mma_ABt<0, 1, 2>(dP_ij, dO_i, V_j, dP_ij);
       sub_row<0, 3, L_i>(P_ij, P_ij);
-      if constexpr (D == 128) mma_ABt<0, 1, 3>(dP_ij, dO_i, V_j, dP_ij);
+      mma_ABt<0, 1, 3>(dP_ij, dO_i, V_j, dP_ij);
       copy<0, 0>(P_ij_bf16, P_ij);
       mma_ABt<0, 2, 0>(dP_ij, dO_i, V_j);
       exp2<0, 2>(P_ij, P_ij);
       mma_ABt<0, 2, 1>(dP_ij, dO_i, V_j, dP_ij);
       copy<0, 1>(P_ij_bf16, P_ij);
-      if constexpr (D == 128) mma_ABt<0, 2, 2>(dP_ij, dO_i, V_j, dP_ij);
-      if constexpr (D == 128) load<0, 2>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
-      if constexpr (D == 128) mma_ABt<0, 2, 3>(dP_ij, dO_i, V_j, dP_ij);
+      mma_ABt<0, 2, 2>(dP_ij, dO_i, V_j, dP_ij);
+      load<0, 2>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
+      mma_ABt<0, 2, 3>(dP_ij, dO_i, V_j, dP_ij);
       exp2<0, 3>(P_ij, P_ij);
       mma_ABt<0, 3, 0>(dP_ij, dO_i, V_j);
-      if constexpr (D == 128) load<0, 3>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
+      load<0, 3>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
       mma_ABt<0, 3, 1>(dP_ij, dO_i, V_j, dP_ij);
       copy<0, 2>(P_ij_bf16, P_ij);
       copy<0, 3>(P_ij_bf16, P_ij);
-      if constexpr (D == 128) mma_ABt<0, 3, 2>(dP_ij, dO_i, V_j, dP_ij);
+      mma_ABt<0, 3, 2>(dP_ij, dO_i, V_j, dP_ij);
       swap_layout_inplace(P_ij_bf16_col, P_ij_bf16);
-      if constexpr (D == 128) mma_ABt<0, 3, 3>(dP_ij, dO_i, V_j, dP_ij);
+      mma_ABt<0, 3, 3>(dP_ij, dO_i, V_j, dP_ij);
       asm volatile("s_waitcnt lgkmcnt(8)");
       // mma_AtB(dV_j_T, dO_i_col, P_ij_bf16_col);
       mma_AtB<0, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
       // Load K_j_col from shared memory to registers
-      // load(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}));
-      load<0, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-      if constexpr (D == 128) load<0, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+      // load(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}));
+      load<0, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+      load<0, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
       mma_AtB<0, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
       sub_row<0, 0, delta_i>(dP_ij, dP_ij);
       sub_row<0, 1, delta_i>(dP_ij, dP_ij);
       mma_AtB<1, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
-      load<1, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-      if constexpr (D == 128) load<1, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+      load<1, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+      load<1, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
       mma_AtB<1, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
       mul<0, 0>(dP_ij, dP_ij, P_ij);
       mul<0, 1>(dP_ij, dP_ij, P_ij);
       copy<0, 0>(dP_ij_bf16, dP_ij);
       copy<0, 1>(dP_ij_bf16, dP_ij);
       sub_row<0, 2, delta_i>(dP_ij, dP_ij);
-      if constexpr (D == 128) mma_AtB<2, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
-      load<2, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+      mma_AtB<2, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
+      load<2, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
       // 12. dV_j += P_ij^T @ dO_i
       // 16. dK_j += dS_ij^T @ Q_i   (128x64)=(128x16)x(16x64)
       // Store dP_ij_bf16_accum_row to shared memory
       // store(attn_i_smem_subtile, dP_ij_bf16_accum_row);
       store<0, 0>(attn_i_smem_subtile, dP_ij_bf16_accum_row, dP_ij_bf16_accum_row_addr);
       store<1, 0>(attn_i_smem_subtile, dP_ij_bf16_accum_row, dP_ij_bf16_accum_row_addr);
-      if constexpr (D == 128) mma_AtB<2, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
+      mma_AtB<2, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
       sub_row<0, 3, delta_i>(dP_ij, dP_ij);
       mul<0, 2>(dP_ij, dP_ij, P_ij);
       mul<0, 3>(dP_ij, dP_ij, P_ij);
       copy<0, 2>(dP_ij_bf16, dP_ij);
       copy<0, 3>(dP_ij_bf16, dP_ij);
-      if constexpr (D == 128) mma_AtB<3, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
+      mma_AtB<3, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
 
       // dot slice 2
       load<L_i>(subvec_inplace<DOT_SLICE_QO>(L_smem[tic], 2));
@@ -2824,18 +2773,17 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
       
       store<2, 0>(attn_i_smem_subtile, dP_ij_bf16_accum_row, dP_ij_bf16_accum_row_addr);
       store<3, 0>(attn_i_smem_subtile, dP_ij_bf16_accum_row, dP_ij_bf16_accum_row_addr);
-      if constexpr (D == 128) mma_AtB<3, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
+      mma_AtB<3, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
       swap_layout_inplace(dP_ij_bf16_col, dP_ij_bf16);
       asm volatile("s_waitcnt lgkmcnt(12)");
       // mma_AtB(dK_j_T, Q_i_col, dP_ij_bf16_col);
       mma_AtB<0, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
-      if constexpr (D == 128) load<2, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-      load<3, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-      if constexpr (D == 128) load<3, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-      load<4, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+      load<2, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+      load<3, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+      load<3, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+      load<4, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
       mma_AtB<0, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
       asm volatile("s_waitcnt lgkmcnt(8)");
-      if constexpr (D == 64) asm volatile("s_waitcnt lgkmcnt(0)");
       __builtin_amdgcn_s_barrier();
       mma_AtB<1, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
       // Load dP_ij_bf16_col_T from shared memory to registers
@@ -2847,29 +2795,29 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
       mma_AtB<1, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
       mul<L_i, L_i>(L_SCALE_FACTOR);
       atomic_pk_add_bf16_with_warpid<2, 0, 0>(g.dQg, dQ_i, {batch_idx, q_head_idx, q_seq_idx * 4, 0}, warpid);
-      if constexpr (D == 128) mma_AtB<2, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
+      mma_AtB<2, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
       load<4, 0>(dP_ij_bf16_col_T, attn_i_smem, dP_ij_bf16_col_T_addr);
       load<5, 0>(dP_ij_bf16_col_T, attn_i_smem, dP_ij_bf16_col_T_addr);
-      if constexpr (D == 128) load<4, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-      load<5, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-      if constexpr (D == 128) mma_AtB<2, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
-      if constexpr (D == 128) atomic_pk_add_bf16_with_warpid<2, 0, 1>(g.dQg, dQ_i, {batch_idx, q_head_idx, q_seq_idx * 4, 0}, warpid);
-      if constexpr (D == 128) mma_AtB<3, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
+      load<4, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+      load<5, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+      mma_AtB<2, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
+      atomic_pk_add_bf16_with_warpid<2, 0, 1>(g.dQg, dQ_i, {batch_idx, q_head_idx, q_seq_idx * 4, 0}, warpid);
+      mma_AtB<3, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
       load<6, 0>(dP_ij_bf16_col_T, attn_i_smem, dP_ij_bf16_col_T_addr);
       load<7, 0>(dP_ij_bf16_col_T, attn_i_smem, dP_ij_bf16_col_T_addr);
-      if constexpr (D == 128) load<5, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-      if constexpr (D == 128) mma_AtB<3, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
-      asm volatile("s_waitcnt lgkmcnt(" DQ_L6 ")");
+      load<5, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+      mma_AtB<3, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
+      asm volatile("s_waitcnt lgkmcnt(6)");
       __builtin_amdgcn_s_barrier();
       // 15. dQ_i += dS_ij @ K_j (32x16)=(32x256)x(256x16)
       // mma_AtB(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
       mma_AtB<0, 0, 0>(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
-      load<6, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-      if constexpr (D == 128) load<6, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+      load<6, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+      load<6, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
       mma_AtB<0, 0, 1>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
       mma_AtB<0, 0, 2>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-      load<7, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-      if constexpr (D == 128) load<7, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+      load<7, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+      load<7, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
       mma_AtB<0, 0, 3>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
       mma_AtB<0, 0, 4>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
       // Load Q_i from shared memory to registers
@@ -2878,36 +2826,36 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
       load<0, 0>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
       load<0, 1>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
       mma_AtB<0, 0, 5>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-      asm volatile("s_waitcnt lgkmcnt(" DQ_L4 ")");
+      asm volatile("s_waitcnt lgkmcnt(4)");
       __builtin_amdgcn_s_barrier();
       mma_AtB<0, 0, 6>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-      if constexpr (D == 128) load<0, 2>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
-      if constexpr (D == 128) load<0, 3>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
+      load<0, 2>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
+      load<0, 3>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
       mma_AtB<0, 0, 7>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-      if constexpr (D == 128) mma_AtB<1, 0, 0>(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
+      mma_AtB<1, 0, 0>(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
       // Load K_j from shared memory to registers
       // load(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}));
       load<0, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
       load<0, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-      if constexpr (D == 128) mma_AtB<1, 0, 1>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-      if constexpr (D == 128) mma_AtB<1, 0, 2>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-      if constexpr (D == 128) load<0, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-      if constexpr (D == 128) load<0, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-      if constexpr (D == 128) mma_AtB<1, 0, 3>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+      mma_AtB<1, 0, 1>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+      mma_AtB<1, 0, 2>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+      load<0, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+      load<0, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+      mma_AtB<1, 0, 3>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
       mul<0, 0, 0>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
       mul<0, 0, 1>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-      if constexpr (D == 128) mma_AtB<1, 0, 4>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+      mma_AtB<1, 0, 4>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
       load<1, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
       load<1, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-      if constexpr (D == 128) mma_AtB<1, 0, 5>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+      mma_AtB<1, 0, 5>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
       mul<0, 0, 2>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
       mul<0, 0, 3>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-      asm volatile("s_waitcnt lgkmcnt(" DQ_L10 ")");
-      if constexpr (D == 128) mma_AtB<1, 0, 6>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-      if constexpr (D == 128) load<1, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-      if constexpr (D == 128) load<1, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-      if constexpr (D == 128) mma_AtB<1, 0, 7>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-      asm volatile("s_waitcnt lgkmcnt(" DQ_L2 ")");
+      asm volatile("s_waitcnt lgkmcnt(10)");
+      mma_AtB<1, 0, 6>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+      load<1, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+      load<1, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+      mma_AtB<1, 0, 7>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+      asm volatile("s_waitcnt lgkmcnt(2)");
     }
 
     // dot slice 2
@@ -2921,22 +2869,22 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
       load<2, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
       load<2, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
       mma_ABt<0, 0, 1>(P_ij, Q_i, K_j, P_ij);
-      if constexpr (D == 128) mma_ABt<0, 0, 2>(P_ij, Q_i, K_j, P_ij);
-      if constexpr (D == 128) load<2, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-      if constexpr (D == 128) load<2, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-      if constexpr (D == 128) mma_ABt<0, 0, 3>(P_ij, Q_i, K_j, P_ij);
-      if constexpr (D == 128) mul<1, 0, 0>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-      if constexpr (D == 128) mul<1, 0, 1>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
+      mma_ABt<0, 0, 2>(P_ij, Q_i, K_j, P_ij);
+      load<2, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+      load<2, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+      mma_ABt<0, 0, 3>(P_ij, Q_i, K_j, P_ij);
+      mul<1, 0, 0>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
+      mul<1, 0, 1>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
       mma_ABt<0, 1, 0>(P_ij, Q_i, K_j);
       load<3, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
       load<3, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
       mma_ABt<0, 1, 1>(P_ij, Q_i, K_j, P_ij);
-      if constexpr (D == 128) mul<1, 0, 2>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-      if constexpr (D == 128) mul<1, 0, 3>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-      if constexpr (D == 128) mma_ABt<0, 1, 2>(P_ij, Q_i, K_j, P_ij);
-      if constexpr (D == 128) load<3, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-      if constexpr (D == 128) load<3, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-      if constexpr (D == 128) mma_ABt<0, 1, 3>(P_ij, Q_i, K_j, P_ij);
+      mul<1, 0, 2>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
+      mul<1, 0, 3>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
+      mma_ABt<0, 1, 2>(P_ij, Q_i, K_j, P_ij);
+      load<3, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+      load<3, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+      mma_ABt<0, 1, 3>(P_ij, Q_i, K_j, P_ij);
       mul<0, 0>(P_ij, P_ij, P_SCALE_FACTOR);
       asm volatile("s_waitcnt lgkmcnt(6)");
       mma_ABt<0, 2, 0>(P_ij, Q_i, K_j);
@@ -2948,10 +2896,10 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
       mma_ABt<0, 2, 1>(P_ij, Q_i, K_j, P_ij);
       sub_row<0, 0, L_i>(P_ij, P_ij);
       asm volatile("s_waitcnt lgkmcnt(6)");
-      if constexpr (D == 128) mma_ABt<0, 2, 2>(P_ij, Q_i, K_j, P_ij);
-      if constexpr (D == 128) load<0, 2>(dO_i, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_addr);
-      if constexpr (D == 128) load<0, 3>(dO_i, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_addr);
-      if constexpr (D == 128) mma_ABt<0, 2, 3>(P_ij, Q_i, K_j, P_ij);
+      mma_ABt<0, 2, 2>(P_ij, Q_i, K_j, P_ij);
+      load<0, 2>(dO_i, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_addr);
+      load<0, 3>(dO_i, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_addr);
+      mma_ABt<0, 2, 3>(P_ij, Q_i, K_j, P_ij);
       mul<0, 1>(P_ij, P_ij, P_SCALE_FACTOR);
       asm volatile("s_waitcnt lgkmcnt(6)");
       mma_ABt<0, 3, 0>(P_ij, Q_i, K_j);
@@ -2974,10 +2922,10 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
       mma_ABt<0, 3, 1>(P_ij, Q_i, K_j, P_ij);
       sub_row<0, 1, L_i>(P_ij, P_ij);
       asm volatile("s_waitcnt lgkmcnt(8)");
-      if constexpr (D == 128) mma_ABt<0, 3, 2>(P_ij, Q_i, K_j, P_ij);
-      if constexpr (D == 128) load<0, 2>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
-      if constexpr (D == 128) load<0, 3>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
-      if constexpr (D == 128) mma_ABt<0, 3, 3>(P_ij, Q_i, K_j, P_ij);
+      mma_ABt<0, 3, 2>(P_ij, Q_i, K_j, P_ij);
+      load<0, 2>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
+      load<0, 3>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
+      mma_ABt<0, 3, 3>(P_ij, Q_i, K_j, P_ij);
       // Dot slice 2
       kittens::macros::v_mov_b32_up2p<neg_inf_v>(0xff800000); if constexpr (causal) {
         // If the query position is less than the key position, set P_ij to -inf
@@ -2997,7 +2945,7 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
       sub_row<0, 2, L_i>(P_ij, P_ij);
       mma_ABt<0, 0, 1>(dP_ij, dO_i, V_j, dP_ij);
       exp2<0, 0>(P_ij, P_ij);
-      if constexpr (D == 128) mma_ABt<0, 0, 2>(dP_ij, dO_i, V_j, dP_ij);
+      mma_ABt<0, 0, 2>(dP_ij, dO_i, V_j, dP_ij);
       // Load Q_i_col from shared memory to registers
       // load(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}));
       // Compute Q_i_col_addr
@@ -3013,66 +2961,66 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         return addr;
       }();
       load<0, 0>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
-      if constexpr (D == 128) mma_ABt<0, 0, 3>(dP_ij, dO_i, V_j, dP_ij);
+      mma_ABt<0, 0, 3>(dP_ij, dO_i, V_j, dP_ij);
       exp2<0, 1>(P_ij, P_ij);
       mma_ABt<0, 1, 0>(dP_ij, dO_i, V_j);
       load<0, 1>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
       mma_ABt<0, 1, 1>(dP_ij, dO_i, V_j, dP_ij);
       mul<0, 3>(P_ij, P_ij, P_SCALE_FACTOR);
-      if constexpr (D == 128) mma_ABt<0, 1, 2>(dP_ij, dO_i, V_j, dP_ij);
+      mma_ABt<0, 1, 2>(dP_ij, dO_i, V_j, dP_ij);
       sub_row<0, 3, L_i>(P_ij, P_ij);
-      if constexpr (D == 128) mma_ABt<0, 1, 3>(dP_ij, dO_i, V_j, dP_ij);
+      mma_ABt<0, 1, 3>(dP_ij, dO_i, V_j, dP_ij);
       copy<0, 0>(P_ij_bf16, P_ij);
       mma_ABt<0, 2, 0>(dP_ij, dO_i, V_j);
       exp2<0, 2>(P_ij, P_ij);
       mma_ABt<0, 2, 1>(dP_ij, dO_i, V_j, dP_ij);
       copy<0, 1>(P_ij_bf16, P_ij);
-      if constexpr (D == 128) mma_ABt<0, 2, 2>(dP_ij, dO_i, V_j, dP_ij);
-      if constexpr (D == 128) load<0, 2>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
-      if constexpr (D == 128) mma_ABt<0, 2, 3>(dP_ij, dO_i, V_j, dP_ij);
+      mma_ABt<0, 2, 2>(dP_ij, dO_i, V_j, dP_ij);
+      load<0, 2>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
+      mma_ABt<0, 2, 3>(dP_ij, dO_i, V_j, dP_ij);
       exp2<0, 3>(P_ij, P_ij);
       mma_ABt<0, 3, 0>(dP_ij, dO_i, V_j);
-      if constexpr (D == 128) load<0, 3>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
+      load<0, 3>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
       mma_ABt<0, 3, 1>(dP_ij, dO_i, V_j, dP_ij);
       copy<0, 2>(P_ij_bf16, P_ij);
       copy<0, 3>(P_ij_bf16, P_ij);
-      if constexpr (D == 128) mma_ABt<0, 3, 2>(dP_ij, dO_i, V_j, dP_ij);
+      mma_ABt<0, 3, 2>(dP_ij, dO_i, V_j, dP_ij);
       swap_layout_inplace(P_ij_bf16_col, P_ij_bf16);
-      if constexpr (D == 128) mma_ABt<0, 3, 3>(dP_ij, dO_i, V_j, dP_ij);
+      mma_ABt<0, 3, 3>(dP_ij, dO_i, V_j, dP_ij);
       asm volatile("s_waitcnt lgkmcnt(8)");
       // mma_AtB(dV_j_T, dO_i_col, P_ij_bf16_col);
       mma_AtB<0, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
       // Load K_j_col from shared memory to registers
-      // load(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}));
-      load<0, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-      if constexpr (D == 128) load<0, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+      // load(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}));
+      load<0, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+      load<0, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
       mma_AtB<0, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
       sub_row<0, 0, delta_i>(dP_ij, dP_ij);
       sub_row<0, 1, delta_i>(dP_ij, dP_ij);
       mma_AtB<1, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
-      load<1, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-      if constexpr (D == 128) load<1, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+      load<1, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+      load<1, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
       mma_AtB<1, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
       mul<0, 0>(dP_ij, dP_ij, P_ij);
       mul<0, 1>(dP_ij, dP_ij, P_ij);
       copy<0, 0>(dP_ij_bf16, dP_ij);
       copy<0, 1>(dP_ij_bf16, dP_ij);
       sub_row<0, 2, delta_i>(dP_ij, dP_ij);
-      if constexpr (D == 128) mma_AtB<2, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
-      load<2, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+      mma_AtB<2, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
+      load<2, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
       // 12. dV_j += P_ij^T @ dO_i
       // 16. dK_j += dS_ij^T @ Q_i   (128x64)=(128x16)x(16x64)
       // Store dP_ij_bf16_accum_row to shared memory
       // store(attn_i_smem_subtile, dP_ij_bf16_accum_row);
       store<0, 0>(attn_i_smem_subtile, dP_ij_bf16_accum_row, dP_ij_bf16_accum_row_addr);
       store<1, 0>(attn_i_smem_subtile, dP_ij_bf16_accum_row, dP_ij_bf16_accum_row_addr);
-      if constexpr (D == 128) mma_AtB<2, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
+      mma_AtB<2, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
       sub_row<0, 3, delta_i>(dP_ij, dP_ij);
       mul<0, 2>(dP_ij, dP_ij, P_ij);
       mul<0, 3>(dP_ij, dP_ij, P_ij);
       copy<0, 2>(dP_ij_bf16, dP_ij);
       copy<0, 3>(dP_ij_bf16, dP_ij);
-      if constexpr (D == 128) mma_AtB<3, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
+      mma_AtB<3, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
 
       // dot slice 3
       load<L_i>(subvec_inplace<DOT_SLICE_QO>(L_smem[tic], 3));
@@ -3080,18 +3028,17 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
       
       store<2, 0>(attn_i_smem_subtile, dP_ij_bf16_accum_row, dP_ij_bf16_accum_row_addr);
       store<3, 0>(attn_i_smem_subtile, dP_ij_bf16_accum_row, dP_ij_bf16_accum_row_addr);
-      if constexpr (D == 128) mma_AtB<3, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
+      mma_AtB<3, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
       swap_layout_inplace(dP_ij_bf16_col, dP_ij_bf16);
       asm volatile("s_waitcnt lgkmcnt(12)");
       // mma_AtB(dK_j_T, Q_i_col, dP_ij_bf16_col);
       mma_AtB<0, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
-      if constexpr (D == 128) load<2, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-      load<3, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-      if constexpr (D == 128) load<3, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-      load<4, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+      load<2, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+      load<3, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+      load<3, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+      load<4, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
       mma_AtB<0, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
       asm volatile("s_waitcnt lgkmcnt(8)");
-      if constexpr (D == 64) asm volatile("s_waitcnt lgkmcnt(0)");
       __builtin_amdgcn_s_barrier();
       mma_AtB<1, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
       // Load dP_ij_bf16_col_T from shared memory to registers
@@ -3103,30 +3050,30 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
       mma_AtB<1, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
       mul<L_i, L_i>(L_SCALE_FACTOR);
       atomic_pk_add_bf16_with_warpid<2, 0, 0>(g.dQg, dQ_i, {batch_idx, q_head_idx, q_seq_idx * 4 + 1, 0}, warpid);
-      if constexpr (D == 128) mma_AtB<2, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
+      mma_AtB<2, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
       load<4, 0>(dP_ij_bf16_col_T, attn_i_smem, dP_ij_bf16_col_T_addr);
       load<5, 0>(dP_ij_bf16_col_T, attn_i_smem, dP_ij_bf16_col_T_addr);
-      if constexpr (D == 128) load<4, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-      load<5, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-      if constexpr (D == 128) mma_AtB<2, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
-      if constexpr (D == 128) atomic_pk_add_bf16_with_warpid<2, 0, 1>(g.dQg, dQ_i, {batch_idx, q_head_idx, q_seq_idx * 4 + 1, 0}, warpid);
-      if constexpr (D == 128) mma_AtB<3, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
+      load<4, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+      load<5, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+      mma_AtB<2, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
+      atomic_pk_add_bf16_with_warpid<2, 0, 1>(g.dQg, dQ_i, {batch_idx, q_head_idx, q_seq_idx * 4 + 1, 0}, warpid);
+      mma_AtB<3, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
       load<6, 0>(dP_ij_bf16_col_T, attn_i_smem, dP_ij_bf16_col_T_addr);
       load<7, 0>(dP_ij_bf16_col_T, attn_i_smem, dP_ij_bf16_col_T_addr);
-      if constexpr (D == 128) load<5, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-      if constexpr (D == 128) mma_AtB<3, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
-      asm volatile("s_waitcnt lgkmcnt(" DQ_L6 ")");
+      load<5, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+      mma_AtB<3, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
+      asm volatile("s_waitcnt lgkmcnt(6)");
       __builtin_amdgcn_s_barrier();
       // 15. dQ_i += dS_ij @ K_j (32x16)=(32x256)x(256x16)
       // mma_AtB(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
       mma_AtB<0, 0, 0>(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
-      load<6, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-      if constexpr (D == 128) load<6, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+      load<6, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+      load<6, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
       mma_AtB<0, 0, 1>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
 
       mma_AtB<0, 0, 2>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-      load<7, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-      if constexpr (D == 128) load<7, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+      load<7, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+      load<7, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
       mma_AtB<0, 0, 3>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
       mma_AtB<0, 0, 4>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
       // Load Q_i from shared memory to registers
@@ -3135,36 +3082,36 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
       load<0, 0>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
       load<0, 1>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
       mma_AtB<0, 0, 5>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-      asm volatile("s_waitcnt lgkmcnt(" DQ_L4 ")");
+      asm volatile("s_waitcnt lgkmcnt(4)");
       __builtin_amdgcn_s_barrier();
       mma_AtB<0, 0, 6>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-      if constexpr (D == 128) load<0, 2>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
-      if constexpr (D == 128) load<0, 3>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
+      load<0, 2>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
+      load<0, 3>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
       mma_AtB<0, 0, 7>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-      if constexpr (D == 128) mma_AtB<1, 0, 0>(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
+      mma_AtB<1, 0, 0>(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
       // Load K_j from shared memory to registers
       // load(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}));
       load<0, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
       load<0, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-      if constexpr (D == 128) mma_AtB<1, 0, 1>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-      if constexpr (D == 128) mma_AtB<1, 0, 2>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-      if constexpr (D == 128) load<0, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-      if constexpr (D == 128) load<0, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-      if constexpr (D == 128) mma_AtB<1, 0, 3>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+      mma_AtB<1, 0, 1>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+      mma_AtB<1, 0, 2>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+      load<0, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+      load<0, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+      mma_AtB<1, 0, 3>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
       mul<0, 0, 0>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
       mul<0, 0, 1>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-      if constexpr (D == 128) mma_AtB<1, 0, 4>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+      mma_AtB<1, 0, 4>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
       load<1, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
       load<1, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-      if constexpr (D == 128) mma_AtB<1, 0, 5>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+      mma_AtB<1, 0, 5>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
       mul<0, 0, 2>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
       mul<0, 0, 3>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-      asm volatile("s_waitcnt lgkmcnt(" DQ_L10 ")");
-      if constexpr (D == 128) mma_AtB<1, 0, 6>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-      if constexpr (D == 128) load<1, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-      if constexpr (D == 128) load<1, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-      if constexpr (D == 128) mma_AtB<1, 0, 7>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-      asm volatile("s_waitcnt lgkmcnt(" DQ_L2 ")");
+      asm volatile("s_waitcnt lgkmcnt(10)");
+      mma_AtB<1, 0, 6>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+      load<1, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+      load<1, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+      mma_AtB<1, 0, 7>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+      asm volatile("s_waitcnt lgkmcnt(2)");
     }
 
     // dot slice 3
@@ -3178,22 +3125,22 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
       load<2, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
       load<2, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
       mma_ABt<0, 0, 1>(P_ij, Q_i, K_j, P_ij);
-      if constexpr (D == 128) mma_ABt<0, 0, 2>(P_ij, Q_i, K_j, P_ij);
-      if constexpr (D == 128) load<2, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-      if constexpr (D == 128) load<2, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-      if constexpr (D == 128) mma_ABt<0, 0, 3>(P_ij, Q_i, K_j, P_ij);
-      if constexpr (D == 128) mul<1, 0, 0>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-      if constexpr (D == 128) mul<1, 0, 1>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
+      mma_ABt<0, 0, 2>(P_ij, Q_i, K_j, P_ij);
+      load<2, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+      load<2, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+      mma_ABt<0, 0, 3>(P_ij, Q_i, K_j, P_ij);
+      mul<1, 0, 0>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
+      mul<1, 0, 1>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
       mma_ABt<0, 1, 0>(P_ij, Q_i, K_j);
       load<3, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
       load<3, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
       mma_ABt<0, 1, 1>(P_ij, Q_i, K_j, P_ij);
-      if constexpr (D == 128) mul<1, 0, 2>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-      if constexpr (D == 128) mul<1, 0, 3>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
-      if constexpr (D == 128) mma_ABt<0, 1, 2>(P_ij, Q_i, K_j, P_ij);
-      if constexpr (D == 128) load<3, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-      if constexpr (D == 128) load<3, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
-      if constexpr (D == 128) mma_ABt<0, 1, 3>(P_ij, Q_i, K_j, P_ij);
+      mul<1, 0, 2>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
+      mul<1, 0, 3>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
+      mma_ABt<0, 1, 2>(P_ij, Q_i, K_j, P_ij);
+      load<3, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+      load<3, 3>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+      mma_ABt<0, 1, 3>(P_ij, Q_i, K_j, P_ij);
       mul<0, 0>(P_ij, P_ij, P_SCALE_FACTOR);
       asm volatile("s_waitcnt lgkmcnt(6)");
       mma_ABt<0, 2, 0>(P_ij, Q_i, K_j);
@@ -3205,10 +3152,10 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
       mma_ABt<0, 2, 1>(P_ij, Q_i, K_j, P_ij);
       sub_row<0, 0, L_i>(P_ij, P_ij);
       asm volatile("s_waitcnt lgkmcnt(6)");
-      if constexpr (D == 128) mma_ABt<0, 2, 2>(P_ij, Q_i, K_j, P_ij);
-      if constexpr (D == 128) load<0, 2>(dO_i, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_addr);
-      if constexpr (D == 128) load<0, 3>(dO_i, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_addr);
-      if constexpr (D == 128) mma_ABt<0, 2, 3>(P_ij, Q_i, K_j, P_ij);
+      mma_ABt<0, 2, 2>(P_ij, Q_i, K_j, P_ij);
+      load<0, 2>(dO_i, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_addr);
+      load<0, 3>(dO_i, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_addr);
+      mma_ABt<0, 2, 3>(P_ij, Q_i, K_j, P_ij);
       mul<0, 1>(P_ij, P_ij, P_SCALE_FACTOR);
       asm volatile("s_waitcnt lgkmcnt(6)");
       mma_ABt<0, 3, 0>(P_ij, Q_i, K_j);
@@ -3231,10 +3178,10 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
       mma_ABt<0, 3, 1>(P_ij, Q_i, K_j, P_ij);
       sub_row<0, 1, L_i>(P_ij, P_ij);
       asm volatile("s_waitcnt lgkmcnt(8)");
-      if constexpr (D == 128) mma_ABt<0, 3, 2>(P_ij, Q_i, K_j, P_ij);
-      if constexpr (D == 128) load<0, 2>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
-      if constexpr (D == 128) load<0, 3>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
-      if constexpr (D == 128) mma_ABt<0, 3, 3>(P_ij, Q_i, K_j, P_ij);
+      mma_ABt<0, 3, 2>(P_ij, Q_i, K_j, P_ij);
+      load<0, 2>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
+      load<0, 3>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
+      mma_ABt<0, 3, 3>(P_ij, Q_i, K_j, P_ij);
       // Dot slice 3
       kittens::macros::v_mov_b32_up2p<neg_inf_v>(0xff800000); if constexpr (causal) {
         // If the query position is less than the key position, set P_ij to -inf
@@ -3253,7 +3200,7 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
       sub_row<0, 2, L_i>(P_ij, P_ij);
       mma_ABt<0, 0, 1>(dP_ij, dO_i, V_j, dP_ij);
       exp2<0, 0>(P_ij, P_ij);
-      if constexpr (D == 128) mma_ABt<0, 0, 2>(dP_ij, dO_i, V_j, dP_ij);
+      mma_ABt<0, 0, 2>(dP_ij, dO_i, V_j, dP_ij);
       // Load Q_i_col from shared memory to registers
       // load(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}));
       // Compute Q_i_col_addr
@@ -3269,83 +3216,82 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         return addr;
       }();
       load<0, 0>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
-      if constexpr (D == 128) mma_ABt<0, 0, 3>(dP_ij, dO_i, V_j, dP_ij);
+      mma_ABt<0, 0, 3>(dP_ij, dO_i, V_j, dP_ij);
       exp2<0, 1>(P_ij, P_ij);
       mma_ABt<0, 1, 0>(dP_ij, dO_i, V_j);
       load<0, 1>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
       mma_ABt<0, 1, 1>(dP_ij, dO_i, V_j, dP_ij);
       mul<0, 3>(P_ij, P_ij, P_SCALE_FACTOR);
-      if constexpr (D == 128) mma_ABt<0, 1, 2>(dP_ij, dO_i, V_j, dP_ij);
+      mma_ABt<0, 1, 2>(dP_ij, dO_i, V_j, dP_ij);
       sub_row<0, 3, L_i>(P_ij, P_ij);
-      if constexpr (D == 128) mma_ABt<0, 1, 3>(dP_ij, dO_i, V_j, dP_ij);
+      mma_ABt<0, 1, 3>(dP_ij, dO_i, V_j, dP_ij);
       copy<0, 0>(P_ij_bf16, P_ij);
       mma_ABt<0, 2, 0>(dP_ij, dO_i, V_j);
       exp2<0, 2>(P_ij, P_ij);
       mma_ABt<0, 2, 1>(dP_ij, dO_i, V_j, dP_ij);
       copy<0, 1>(P_ij_bf16, P_ij);
-      if constexpr (D == 128) mma_ABt<0, 2, 2>(dP_ij, dO_i, V_j, dP_ij);
-      if constexpr (D == 128) load<0, 2>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
-      if constexpr (D == 128) mma_ABt<0, 2, 3>(dP_ij, dO_i, V_j, dP_ij);
+      mma_ABt<0, 2, 2>(dP_ij, dO_i, V_j, dP_ij);
+      load<0, 2>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
+      mma_ABt<0, 2, 3>(dP_ij, dO_i, V_j, dP_ij);
       exp2<0, 3>(P_ij, P_ij);
       mma_ABt<0, 3, 0>(dP_ij, dO_i, V_j);
-      if constexpr (D == 128) load<0, 3>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
+      load<0, 3>(Q_i_col, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_col_addr);
       mma_ABt<0, 3, 1>(dP_ij, dO_i, V_j, dP_ij);
       copy<0, 2>(P_ij_bf16, P_ij);
       copy<0, 3>(P_ij_bf16, P_ij);
-      if constexpr (D == 128) mma_ABt<0, 3, 2>(dP_ij, dO_i, V_j, dP_ij);
+      mma_ABt<0, 3, 2>(dP_ij, dO_i, V_j, dP_ij);
       swap_layout_inplace(P_ij_bf16_col, P_ij_bf16);
-      if constexpr (D == 128) mma_ABt<0, 3, 3>(dP_ij, dO_i, V_j, dP_ij);
+      mma_ABt<0, 3, 3>(dP_ij, dO_i, V_j, dP_ij);
       asm volatile("s_waitcnt lgkmcnt(8)");
       // mma_AtB(dV_j_T, dO_i_col, P_ij_bf16_col);
       mma_AtB<0, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
       // Load K_j_col from shared memory to registers
-      // load(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}));
-      load<0, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-      if constexpr (D == 128) load<0, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+      // load(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}));
+      load<0, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+      load<0, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
       mma_AtB<0, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
       sub_row<0, 0, delta_i>(dP_ij, dP_ij);
       sub_row<0, 1, delta_i>(dP_ij, dP_ij);
       mma_AtB<1, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
-      load<1, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-      if constexpr (D == 128) load<1, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+      load<1, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+      load<1, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
       mma_AtB<1, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
       mul<0, 0>(dP_ij, dP_ij, P_ij);
       mul<0, 1>(dP_ij, dP_ij, P_ij);
       copy<0, 0>(dP_ij_bf16, dP_ij);
       copy<0, 1>(dP_ij_bf16, dP_ij);
       sub_row<0, 2, delta_i>(dP_ij, dP_ij);
-      if constexpr (D == 128) mma_AtB<2, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
-      load<2, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+      mma_AtB<2, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
+      load<2, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
       // 12. dV_j += P_ij^T @ dO_i
       // 16. dK_j += dS_ij^T @ Q_i   (128x64)=(128x16)x(16x64)
       // Store dP_ij_bf16_accum_row to shared memory
       // store(attn_i_smem_subtile, dP_ij_bf16_accum_row);
       store<0, 0>(attn_i_smem_subtile, dP_ij_bf16_accum_row, dP_ij_bf16_accum_row_addr);
       store<1, 0>(attn_i_smem_subtile, dP_ij_bf16_accum_row, dP_ij_bf16_accum_row_addr);
-      if constexpr (D == 128) mma_AtB<2, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
+      mma_AtB<2, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
       sub_row<0, 3, delta_i>(dP_ij, dP_ij);
       mul<0, 2>(dP_ij, dP_ij, P_ij);
       mul<0, 3>(dP_ij, dP_ij, P_ij);
       copy<0, 2>(dP_ij_bf16, dP_ij);
       copy<0, 3>(dP_ij_bf16, dP_ij);
-      if constexpr (D == 128) mma_AtB<3, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
+      mma_AtB<3, 0, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
 
       // dot slice 0 - next iteration
       
       store<2, 0>(attn_i_smem_subtile, dP_ij_bf16_accum_row, dP_ij_bf16_accum_row_addr);
       store<3, 0>(attn_i_smem_subtile, dP_ij_bf16_accum_row, dP_ij_bf16_accum_row_addr);
-      if constexpr (D == 128) mma_AtB<3, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
+      mma_AtB<3, 1, 0>(dV_j_T, dO_i_col, P_ij_bf16_col, dV_j_T);
       swap_layout_inplace(dP_ij_bf16_col, dP_ij_bf16);
       asm volatile("s_waitcnt lgkmcnt(12)");
       // mma_AtB(dK_j_T, Q_i_col, dP_ij_bf16_col);
       mma_AtB<0, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
-      if constexpr (D == 128) load<2, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-      load<3, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-      if constexpr (D == 128) load<3, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-      load<4, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+      load<2, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+      load<3, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+      load<3, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+      load<4, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
       mma_AtB<0, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
       asm volatile("s_waitcnt lgkmcnt(8)");
-      if constexpr (D == 64) asm volatile("s_waitcnt lgkmcnt(0)");
       __builtin_amdgcn_s_barrier();
       mma_AtB<1, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
       // Load dP_ij_bf16_col_T from shared memory to registers
@@ -3356,69 +3302,69 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
       load<3, 0>(dP_ij_bf16_col_T, attn_i_smem, dP_ij_bf16_col_T_addr);
       mma_AtB<1, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
       atomic_pk_add_bf16_with_warpid<2, 0, 0>(g.dQg, dQ_i, {batch_idx, q_head_idx, q_seq_idx * 4 + 2, 0}, warpid);
-      if constexpr (D == 128) mma_AtB<2, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
+      mma_AtB<2, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
       load<4, 0>(dP_ij_bf16_col_T, attn_i_smem, dP_ij_bf16_col_T_addr);
       load<5, 0>(dP_ij_bf16_col_T, attn_i_smem, dP_ij_bf16_col_T_addr);
-      if constexpr (D == 128) load<4, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-      load<5, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-      if constexpr (D == 128) mma_AtB<2, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
-      if constexpr (D == 128) atomic_pk_add_bf16_with_warpid<2, 0, 1>(g.dQg, dQ_i, {batch_idx, q_head_idx, q_seq_idx * 4 + 2, 0}, warpid);
-      if constexpr (D == 128) mma_AtB<3, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
+      load<4, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+      load<5, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+      mma_AtB<2, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
+      atomic_pk_add_bf16_with_warpid<2, 0, 1>(g.dQg, dQ_i, {batch_idx, q_head_idx, q_seq_idx * 4 + 2, 0}, warpid);
+      mma_AtB<3, 0, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
       load<6, 0>(dP_ij_bf16_col_T, attn_i_smem, dP_ij_bf16_col_T_addr);
       load<7, 0>(dP_ij_bf16_col_T, attn_i_smem, dP_ij_bf16_col_T_addr);
-      if constexpr (D == 128) load<5, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-      if constexpr (D == 128) mma_AtB<3, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
-      asm volatile("s_waitcnt lgkmcnt(" DQ_L6 ")");
+      load<5, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+      mma_AtB<3, 1, 0>(dK_j_T, Q_i_col, dP_ij_bf16_col, dK_j_T);
+      asm volatile("s_waitcnt lgkmcnt(6)");
       __builtin_amdgcn_s_barrier();
       // 15. dQ_i += dS_ij @ K_j (32x16)=(32x256)x(256x16)
       // mma_AtB(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
       mma_AtB<0, 0, 0>(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
-      load<6, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-      if constexpr (D == 128) load<6, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+      load<6, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+      load<6, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
       mma_AtB<0, 0, 1>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
       mma_AtB<0, 0, 2>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-      load<7, 0>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
-      if constexpr (D == 128) load<7, 1>(K_j_col, subtile_inplace<256, ATTN_D/4>(K_j_smem, {0, warpid}), K_j_col_addr);
+      load<7, 0>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
+      load<7, 1>(K_j_col, subtile_inplace<256, 32>(K_j_smem, {0, warpid}), K_j_col_addr);
       mma_AtB<0, 0, 3>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
       mma_AtB<0, 0, 4>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
       // ds_read_b128 a[112:115]
       // ds_read_b128 a[116:119]
       mma_AtB<0, 0, 5>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-      asm volatile("s_waitcnt lgkmcnt(" DQ_L4 ")");
+      asm volatile("s_waitcnt lgkmcnt(4)");
       __builtin_amdgcn_s_barrier();
       mma_AtB<0, 0, 6>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
       // ds_read_b128 a[120:123]
       // ds_read_b128 a[124:127]
       mma_AtB<0, 0, 7>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-      if constexpr (D == 128) mma_AtB<1, 0, 0>(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
+      mma_AtB<1, 0, 0>(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
       // ds_read_b128 a[0:3]
       // ds_read_b128 a[4:7]
-      if constexpr (D == 128) mma_AtB<1, 0, 1>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-      if constexpr (D == 128) mma_AtB<1, 0, 2>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+      mma_AtB<1, 0, 1>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+      mma_AtB<1, 0, 2>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
       // ds_read_b128 a[8:11]
       // ds_read_b128 a[12:15]
-      if constexpr (D == 128) mma_AtB<1, 0, 3>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-      if constexpr (D == 128) mma_AtB<1, 0, 4>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+      mma_AtB<1, 0, 3>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+      mma_AtB<1, 0, 4>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
       // ds_read_b128 a[16:19]
       // ds_read_b128 a[20:23]
-      if constexpr (D == 128) mma_AtB<1, 0, 5>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-      asm volatile("s_waitcnt lgkmcnt(" DQ_L10 ")");
-      if constexpr (D == 128) mma_AtB<1, 0, 6>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+      mma_AtB<1, 0, 5>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+      asm volatile("s_waitcnt lgkmcnt(10)");
+      mma_AtB<1, 0, 6>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
       // ds_read_b128 a[24:27]
       // ds_read_b128 a[28:31]
-      if constexpr (D == 128) mma_AtB<1, 0, 7>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-      asm volatile("s_waitcnt lgkmcnt(" DQ_L2 ")");
+      mma_AtB<1, 0, 7>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+      asm volatile("s_waitcnt lgkmcnt(2)");
     }
   }
 
-  store<1>(g.dVg, dV_j, {batch_idx * (GROUP_SIZE / HEADS_PER_WG) + q_head_in_group / HEADS_PER_WG, 0, kv_head_idx, 0}, {0, j, 0, 0});
+  store<1>(g.dVg, dV_j, {batch_idx * GROUP_SIZE + q_head_in_group, 0, kv_head_idx, 0}, {0, j, 0, 0});
   __builtin_amdgcn_s_waitcnt(0);
   __builtin_amdgcn_s_barrier();
 
   // We first copy dV_j_T from accumulator GPRs to vector GPRs and then perform the store
   accvgpr_read(dV_j_T, dK_j_T);
   mul(dV_j_T, dV_j_T, dP_SCALE_FACTOR);
-  store<1>(g.dKg, dV_j, {batch_idx * (GROUP_SIZE / HEADS_PER_WG) + q_head_in_group / HEADS_PER_WG, 0, kv_head_idx, 0}, {0, j, 0, 0});
+  store<1>(g.dKg, dV_j, {batch_idx * GROUP_SIZE + q_head_in_group, 0, kv_head_idx, 0}, {0, j, 0, 0});
 
   // Write out final dQ_i slice
   mul(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);

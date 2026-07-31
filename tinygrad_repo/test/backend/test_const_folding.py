@@ -2,7 +2,6 @@ import unittest, math
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.dtype import DTYPES_DICT
 from tinygrad.uop.ops import Ops, UOp
-from tinygrad.codegen.decomp.op import threefry2x32
 import numpy as np
 from test.helpers import not_support_multi_device
 
@@ -168,8 +167,7 @@ class TestMultiConstFolding(unittest.TestCase):
 
 class TestThreefryConstFolding(unittest.TestCase):
   def test_threefry(self):
-    # THREEFRY(const,const) folds to a const once decomposed
-    x = threefry2x32(UOp.const(dtypes.uint64, 5), UOp.const(dtypes.uint64, 10))
+    x = UOp.const(dtypes.uint64, 5).threefry(UOp.const(dtypes.uint64, 10))
     self.assertIs(x.simplify().op, Ops.CONST)
 
 class TestTautologicalCompare(unittest.TestCase):

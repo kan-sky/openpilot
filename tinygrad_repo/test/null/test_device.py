@@ -69,13 +69,11 @@ class TestDevice(unittest.TestCase):
   @unittest.skipIf(WIN, "skipping windows test") # TODO: subprocess causes memory violation?
   def test_env_overwrite_default_compiler(self):
     if Device.DEFAULT == "CPU":
-      from tinygrad.runtime.support.compiler_cpu import ClangCompiler
-      from tinygrad.runtime.support.compiler_llvm import CPULLVMCompiler
+      from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler, ClangCompiler
       try: _, _ = CPULLVMCompiler(), ClangCompiler()
       except Exception as e: self.skipTest(f"skipping compiler test: not all compilers: {e}")
 
-      imports = ("from tinygrad import Device; from tinygrad.runtime.support.compiler_cpu import ClangCompiler; "
-                 "from tinygrad.runtime.support.compiler_llvm import CPULLVMCompiler")
+      imports = "from tinygrad import Device; from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler, ClangCompiler"
       subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, CPULLVMCompiler)"'],
                         shell=True, check=True, env={**os.environ, "DEV": "CPU:LLVM"})
       subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, ClangCompiler)"'],
@@ -83,13 +81,11 @@ class TestDevice(unittest.TestCase):
       subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, ClangCompiler)"'],
                         shell=True, check=True, env={**os.environ, "DEV": "CPU:CLANG"})
     elif Device.DEFAULT == "AMD":
-      from tinygrad.runtime.support.compiler_amd import HIPCompiler
-      from tinygrad.runtime.support.compiler_llvm import AMDLLVMCompiler
+      from tinygrad.runtime.support.compiler_amd import HIPCompiler, AMDLLVMCompiler
       try: _, _ = HIPCompiler(Device[Device.DEFAULT].arch), AMDLLVMCompiler(Device[Device.DEFAULT].arch)
       except Exception as e: self.skipTest(f"skipping compiler test: not all compilers: {e}")
 
-      imports = ("from tinygrad import Device; from tinygrad.runtime.support.compiler_amd import HIPCompiler; "
-                 "from tinygrad.runtime.support.compiler_amd import AMDLLVMCompiler")
+      imports = "from tinygrad import Device; from tinygrad.runtime.support.compiler_amd import HIPCompiler, AMDLLVMCompiler"
       subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, AMDLLVMCompiler)"'],
                         shell=True, check=True, env={**os.environ, "DEV": "AMD:LLVM"})
       subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, HIPCompiler)"'],
@@ -100,8 +96,7 @@ class TestDevice(unittest.TestCase):
 
   @unittest.skipIf(WIN, "skipping windows test")
   def test_env_online(self):
-    from tinygrad.runtime.support.compiler_cpu import ClangCompiler
-    from tinygrad.runtime.support.compiler_llvm import CPULLVMCompiler
+    from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler, ClangCompiler
     try: _, _ = CPULLVMCompiler(), ClangCompiler()
     except Exception as e: self.skipTest(f"skipping compiler test: not all compilers: {e}")
 
@@ -116,7 +111,7 @@ class TestDevice(unittest.TestCase):
 
   @unittest.skipIf(Device.DEFAULT != "CPU", "only run on CPU")
   def test_compiler_autodetect_fallback(self):
-    from tinygrad.runtime.support.compiler_llvm import CPULLVMCompiler
+    from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler
 
     try: CPULLVMCompiler()
     except Exception as e: self.skipTest(f"skipping: LLVM not available: {e}")

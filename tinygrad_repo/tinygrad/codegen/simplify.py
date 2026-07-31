@@ -9,9 +9,8 @@ def flatten_range(r:UOp) -> UOp|None:
   off = range_start[r.op]
   rngs = r.src[off:]
   if not len(rngs): return None
-  # ranges in the cond should not be ended
-  backedge = tuple(x for x in rngs if x.dtype in (dtypes.void, dtypes.bool))
-  return r.replace(src=r.src[:off]+tuple(UOp.sink(*[x for x in rngs if x not in backedge]).ranges)+backedge)
+  new_rngs = [x for x in UOp.sink(*rngs).toposort() if x.op is Ops.RANGE]
+  return r.replace(src=r.src[:off]+tuple(new_rngs))
 
 pm_flatten_range = PatternMatcher([
   # real ranges only
@@ -21,7 +20,6 @@ pm_flatten_range = PatternMatcher([
 # index/range arithmetic uses FLOORDIV/FLOORMOD prior to late rewrite
 def count_divmod(x:UOp) -> int: return sum(u.op in {Ops.FLOORDIV, Ops.FLOORMOD} for u in x.backward_slice)
 def simplify_merge_adjacent(u:UOp) -> UOp|None:
-  if not all(r.op is Ops.RANGE for r in u.ended_ranges): return None
   reduce_ranges = [x.ranges for x in u.backward_slice_with_self if x.op is Ops.REDUCE]
   # on END we only want to merge adjacent ranges, on REDUCE we want to try all combinations
   for r0, r1 in (zip(u.ended_ranges, u.ended_ranges[1:]) if u.op is Ops.END else itertools.permutations(u.ended_ranges, 2)):
@@ -41,7 +39,7 @@ def simplify_merge_adjacent(u:UOp) -> UOp|None:
   return u
 
 def mark_gated(ctx, idx):
-  if len(idx.src) > 1 and idx.src[1].op is Ops.WHERE:
+  if idx.src[1].op is Ops.WHERE:
     x, cond = idx.src[1].get_idx(), idx.src[1].get_valid()
     # get all ranges r with guards "r < c" for some const c
     guards = {r:c for v in cond.split_uop(Ops.AND) if v.op is Ops.CMPLT and (r:=v.src[0]).op is Ops.RANGE and (c:=v.src[1]).op is Ops.CONST}
@@ -84,9 +82,9 @@ def reduce_unparented(red:UOp) -> UOp|None:
   if len(reduce_unparented) == 0: return None
   ret = red.replace(src=(red.src[0],)+tuple(reduce_parented)) if len(reduce_parented) or red.dtype != red.src[0].dtype else red.src[0]
   if red.arg[0] is Ops.ADD:
-    for r in reduce_unparented: ret = ret * r.src[0].cast(ret.dtype)
+    for r in reduce_unparented: ret = ret * r.src[0].cast(ret.dtype.scalar()).broadcast(ret.dtype.count)
   if red.arg[0] is Ops.MUL:
-    for r in reduce_unparented: ret = ret ** r.src[0].cast(ret.dtype)
+    for r in reduce_unparented: ret = ret ** r.src[0].cast(ret.dtype.scalar()).broadcast(ret.dtype.count)
   return ret
 
 pm_reduce_unparented = PatternMatcher([
@@ -145,12 +143,12 @@ def reduce_load_collapse(red:UOp, u:UOp) -> UOp|None: return reduce_collapse(red
 
 # remove REDUCE without loads (generic arange opt / indexing).
 pm_reduce_simplify = pm_reduce_unparented + PatternMatcher([
-  (UPat(Ops.REDUCE, src=(UPat.var("u"),), allow_any_len=True, arg=(Ops.ADD, 0), name="red"), reduce_collapse),
+  (UPat(Ops.REDUCE, src=(UPat.var("u"),), allow_any_len=True, arg=(Ops.ADD, ()), name="red"), reduce_collapse),
 ])
 # remove REDUCE on load, comes from indexing a tensor with another tensor
 def no_load(u:UOp) -> bool: return not any(x.op is Ops.INDEX for x in u.backward_slice_with_self)
 pm_load_collapse = PatternMatcher([
-  (UPat(Ops.REDUCE, arg=(Ops.ADD, 0), src=(UPat.var("u"), UPat()), name="red"), reduce_load_collapse),
+  (UPat(Ops.REDUCE, arg=(Ops.ADD, ()), src=(UPat.var("u"), UPat()), name="red"), reduce_load_collapse),
   # we want to make sure we dont do math on a loaded index since that can cause overflow, this undoes the rule in pm_reduce_load_collapse
   ((UPat.var("x", dtypes.weakint)+UPat.var("y"))<UPat.var("c"), lambda x,y,c: x < c-y if no_load(y) and no_load(c) and not no_load(x) else None),
 ])

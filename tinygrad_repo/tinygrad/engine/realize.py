@@ -2,9 +2,10 @@ from __future__ import annotations
 from typing import cast, Iterator, Any, Sequence
 import time, random, itertools, math, contextlib, weakref, array
 from dataclasses import dataclass, replace, field
-from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansilen, all_int, prod, flatten, Context, getenv, to_tuple
+from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansilen, all_int, TRACEMETA, prod, flatten, Context, getenv, to_tuple
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events
-from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, buffers, graph_rewrite
+from tinygrad.dtype import dtypes
+from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, buffers, graph_rewrite, ProgramInfo
 from tinygrad.device import Device, Buffer, MultiBuffer
 from tinygrad.renderer import Estimates
 from tinygrad.codegen import to_program
@@ -53,7 +54,7 @@ first_run_cache:set[bytes] = set()
 def track_stats(ctx:ExecContext, call:UOp, device:str, bufs:list[Buffer], var_vals:dict[str, int]):
   if PROFILE:
     outputs, inputs = get_call_outs_ins(call)
-    cpu_events.append(ProfilePointEvent(device, "exec", len(cpu_events), {"var_vals": var_vals,
+    cpu_events.append(ProfilePointEvent(device, "exec", len(cpu_events), {"metadata": call.arg.metadata, "var_vals": var_vals,
       "bufs": [b.trace_num for b in bufs], "name": get_call_name(call, bufs, var_vals), "outputs": outputs, "inputs": inputs}))
   et: list[float|None] = [None]
   if DEBUG >= 2: st = time.perf_counter()
@@ -80,7 +81,8 @@ def track_stats(ctx:ExecContext, call:UOp, device:str, bufs:list[Buffer], var_va
       colored(f"{membw*1e-12:4.0f}|{ldsbw*1e-12:<6.0f} TB/s", 'green')
     print(f"{colored(f'*** {device[:7]:7s} {GlobalCounters.kernel_count:4d}', header_color)}"+
       f" {display_name+' '*(46-ansilen(display_name))} arg {len(bufs):2d} mem {GlobalCounters.mem_used/1e9:6.2f} GB"+
-      ("" if et[0] is None else f" tm {ptm}/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({flops_str} {mem_str})"))
+      ("" if et[0] is None else f" tm {ptm}/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({flops_str} {mem_str})")+
+      f" {[repr(m) if TRACEMETA >= 2 else str(m) for m in call.arg.metadata] if call.arg.metadata else ''}")
     first_run_cache.add(call.src[0].key)
 
 local_size_cache: dict[bytes, tuple[int, ...]] = {}
@@ -89,13 +91,11 @@ def optimize_local_size(call:UOp, prg:UOp) -> UOp|None:
   if prg.arg.local_size is not None or not Device[device].renderer.has_local or not all_int(prg.arg.global_size): return None
 
   if (local_size:=local_size_cache.get(prg.key)) is None:
-    # reuse one loaded runtime across candidates, only launch dims vary
-    bufs, runtime = [b.allocate() for b in bufs_from_ast(prg.src[0], device)], get_runtime(device, prg, cache=False)
+    bufs = [UOp.from_buffer(b.allocate()) for b in bufs_from_ast(prg.src[0], device)]
     def try_exec(local_size):
       try:
         new_gs = tuple(g//l if g%l == 0 else g/l for g,l in zip(prg.arg.global_size, local_size))
-        return runtime(*[bufs[i].get_buf(device) for i in prg.arg.globals], global_size=new_gs, local_size=(*local_size,),
-                       vals=prg.arg.vals({}), wait=True)
+        return time_call(prg.replace(arg=replace(prg.arg, global_size=new_gs, local_size=tuple(local_size))).call(*bufs))
       except Exception: return float('inf')
 
     MAX_WORKGROUP = 1024
@@ -112,8 +112,9 @@ def optimize_local_size(call:UOp, prg:UOp) -> UOp|None:
 
 runtime_cache: dict[tuple[bytes, str], Any] = {}
 def get_runtime(device:str, ast:UOp, cache=True):
+  assert ast.op is Ops.PROGRAM and isinstance(ast.arg, ProgramInfo), "get_runtime should only be called with a PROGRAM ast"
   if (runtime:=runtime_cache.get(key:=(ast.key, device))) is None:
-    runtime = Device[device].runtime(ast.to_elf())
+    runtime = Device[device].runtime(ast.arg.function_name, ast.src[3].arg, *ast.arg.aux, runtimevars=ast.arg.runtimevars, prg=ast)
     if cache: runtime_cache[key] = runtime
   return runtime
 
@@ -167,8 +168,9 @@ def exec_copy(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
       elif src.device.startswith("DISK") and getattr(src.allocator.dev, 'fd', None) is not None \
            and hasattr(dest.allocator, 'copy_from_disk') and src.nbytes >= 4096 and dest.allocator.supports_copy_from_disk:
         dest.allocator.copy_from_disk(dest._buf, src._buf, src.nbytes)
-      elif hasattr(dest.allocator, '_as_buffer'): src.allocator._copyout(dest.as_memoryview(force_zero_copy=True), src._buf)
-      else: dest.allocator._copyin(dest._buf, src.as_memoryview(allow_zero_copy=True))
+      elif src.device.startswith(("DISK", "TINYFS")) and hasattr(dest.allocator, '_as_buffer'):
+        src.allocator._copyout(dest.allocator._as_buffer(dest._buf), src._buf)
+      else: dest.copyin(src.as_memoryview(allow_zero_copy=True))
   return None
 
 def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
@@ -207,21 +209,19 @@ def exec_graph(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
   return t[0]
 
 def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
-  if (inputs:=call.arg.aux.inputs) is not None:
+  if call.arg.aux.inputs is not None:
     bufs = [_resolve(ctx.input_uops[i], ctx.input_uops).buffer for i in call.arg.aux.input_idxs]
-    table = call.src[1+inputs].buffer
     for j,dev in enumerate(call.arg.aux.device):
-      addrs = array.array('Q', [(b.bufs[j] if isinstance(b, MultiBuffer) else b).get_buf(dev).va_addr for b in bufs])
-      buf = table.bufs[j] if isinstance(table, MultiBuffer) else table
-      buf.ensure_allocated()._buf.cpu_view().view(fmt='Q')[:len(addrs)] = addrs
+      addrs = [(b.bufs[j] if isinstance(b, MultiBuffer) else b).get_buf(dev).va_addr for b in bufs]
+      buf = b.bufs[j] if isinstance(b:=call.src[1+call.arg.aux.inputs].buffer, MultiBuffer) else b
+      buf.ensure_allocated()._buf.cpu_view().view(fmt='Q')[:len(addrs)] = array.array('Q', addrs)
 
-  exec_kernel(replace(ctx, update_stats=False), call, ast)
+  pm_exec.rewrite(call.replace(src=(ast,) + call.src[1:]), replace(ctx, update_stats=False, wait=True))
 
-  st = time.perf_counter()
   for d in call.arg.aux.device:
     with track_stats(ctx, call, d, [], ctx.var_vals):
       if ctx.wait: Device[d].synchronize()
-  return time.perf_counter() - st
+  return None
 
 # flatten LINEAR-in-LINEAR: any nested LINEAR child gets inlined into its parent's src
 pm_flatten_linear = PatternMatcher([
@@ -231,9 +231,9 @@ pm_flatten_linear = PatternMatcher([
 
 def _validate(call:UOp, sink:UOp) -> UOp:
   params = get_call_arg_uops(call)
-  shadows = tuple(UOp.new_buffer(("CPU",)*len(p.device) if isinstance(p.device, tuple) else "CPU", prod(p.max_shape), p.dtype) for p in params)
+  shadows = tuple(UOp.new_buffer(("CPU",)*len(p.device) if isinstance(p.device, tuple) else "CPU", prod(p.max_shape), p.dtype.base) for p in params)
   copies = tuple(p.copy_to_device(s.device).call(s, p) for s, p in zip(shadows, params))
-  return UOp(Ops.LINEAR, src=copies + (call, UOp(Ops.CUSTOM_FUNCTION, src=(sink,), arg="validate").call(*shadows, *params)))
+  return UOp(Ops.LINEAR, src=copies + (call, UOp(Ops.CUSTOM_FUNCTION, dtypes.void, src=(sink,), arg="validate").call(*shadows, *params)))
 pm_validate = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK, name="sink"),), name="call", allow_any_len=True), _validate)]) + pm_flatten_linear
 
 # ctx is beam value
@@ -261,20 +261,24 @@ pm_exec = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="validate", name="ast"),), name="call", allow_any_len=True), exec_validate),
 ])
 
-if getenv("HCQ2"): from tinygrad.runtime.support.hcq2 import hcq_compile, hcq_link # noqa: E402 # down here, hcq2 imports the helpers above
-
-def compile_linear(linear:UOp, beam:int|None=None, validate=False, input_uops:list[UOp]|None=None, jit=False) -> UOp:
+def compile_linear(linear:UOp, beam:int|None=None, validate=False, input_uops:list[UOp]|None=None) -> UOp:
   if validate: linear = graph_rewrite(linear, pm_validate, name="validate", walk=True)
   if (beam_val:=BEAM.value if beam is None else beam) >= 1: linear = graph_rewrite(linear, pm_beam, ctx=beam_val, walk=True)
   linear = graph_rewrite(linear, pm_compile, name="precompile kernels", walk=True)
-  if getenv("HCQ2"): linear = hcq_compile(linear, input_uops, jit=jit)
+  if getenv("HCQ2"):
+    from extra.hcq2.hcq2 import hcq_compile
+    linear = hcq_compile(linear, input_uops)
   return graph_rewrite(linear, pm_optimize_local_size, name="optimize local size", walk=True)
 
-def link_linear(linear:UOp, jit=False, cache=True) -> UOp: return hcq_link(linear, jit=jit, cache=cache) if getenv("HCQ2") else linear
+def link_linear(linear:UOp) -> UOp:
+  if getenv("HCQ2"):
+    from extra.hcq2.hcq2 import hcq_link
+    linear = hcq_link(linear)
+  return linear
 
 def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, input_uops:Sequence[UOp]=(), update_stats=True, jit=False, wait=False):
   inputs = list(input_uops)
-  if not jit: linear = link_linear(compile_linear(linear, validate=VALIDATE_WITH_CPU, input_uops=inputs, jit=False))
+  if not jit: linear = link_linear(compile_linear(linear, validate=VALIDATE_WITH_CPU, input_uops=inputs))
   ctx = ExecContext(var_vals or {}, tuple(inputs), update_stats, jit, wait or DEBUG>=2)
   for call in linear.src: pm_exec.rewrite(call, ctx)
 
@@ -284,5 +288,5 @@ def time_call(call:UOp, var_vals:dict[str, int]|None=None, timeout:int|None=None
     else:
       from tinygrad.tensor import Tensor
       with Context(DEBUG=0, BEAM=0, CAPTURING=0, TRACK_MATCH_STATS=0): Tensor.ones(1024, 1024).contiguous().realize(do_update_stats=False)
-  ctx = ExecContext(var_vals or {}, update_stats=False, wait=True, timeout=timeout, cache=False)
-  return pm_exec.rewrite(link_linear(compile_linear(UOp(Ops.LINEAR, src=(call,)), beam=0), cache=ctx.cache).src[0], ctx)
+  call = link_linear(compile_linear(UOp(Ops.LINEAR, src=(call,)), beam=0)).src[0]
+  return pm_exec.rewrite(call, ExecContext(var_vals or {}, update_stats=False, wait=True, timeout=timeout, cache=False))

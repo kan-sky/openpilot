@@ -56,8 +56,7 @@ const layoutUOp = (g, { graph, change }, opts) => {
     }
     const callNode = label.startsWith("CALL\n") || label.startsWith("FUNCTION\n");
     if (callNode) callCount++;
-    g.setNode(k, {...rectDims(width, height), label, labelX:0, ref, id:k, color, tag, callNode, exclude, addrspace,
-      className:label.startsWith("REWRITE_ERROR") ? "err" : null});
+    g.setNode(k, {...rectDims(width, height), label, labelX:0, ref, id:k, color, tag, callNode, exclude, addrspace});
     // add edges
     const edgeCounts = {};
     for (const [_, s] of src) edgeCounts[s] = (edgeCounts[s] || 0)+1;

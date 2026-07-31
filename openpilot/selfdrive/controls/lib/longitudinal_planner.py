@@ -12,7 +12,7 @@ from openpilot.selfdrive.controls.lib.longcontrol import LongCtrlState
 from opendbc.car.structs import car
 from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import LongitudinalMpc, N
 from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import T_IDXS as T_IDXS_MPC
-from openpilot.selfdrive.controls.lib.drive_helpers import CONTROL_N, get_accel_from_plan, should_stop, is_volkswagen_meb
+from openpilot.selfdrive.controls.lib.drive_helpers import CONTROL_N, get_accel_from_plan, is_volkswagen_meb
 from openpilot.selfdrive.car.cruise import V_CRUISE_MAX, V_CRUISE_UNSET
 from openpilot.common.swaglog import cloudlog
 from openpilot.common.params import Params
@@ -237,19 +237,19 @@ class LongitudinalPlanner:
     vEgoStopping = self.params.get_float("VEgoStopping") * 0.01
     action_t =  longitudinalActuatorDelay + DT_MDL
 
-    output_a_target_mpc, output_v_now_mpc, _ = get_accel_from_plan(self.v_desired_trajectory, self.a_desired_trajectory, CONTROL_N_T_IDX, action_t=action_t)
-    output_should_stop_mpc = should_stop(v_ego, output_a_target_mpc)
+    output_a_target_mpc, output_should_stop_mpc, output_v_target_mpc, _ = get_accel_from_plan(self.v_desired_trajectory, self.a_desired_trajectory, CONTROL_N_T_IDX,
+                                                                        action_t=action_t, vEgoStopping=vEgoStopping)
     output_a_target_e2e = sm['modelV2'].action.desiredAcceleration
     output_should_stop_e2e = sm['modelV2'].action.shouldStop
     output_v_target_now_e2e = sm['modelV2'].action.desiredVelocity
 
     if self.mpc.mode == 'acc':
       output_a_target = output_a_target_mpc
-      output_v_target_now = output_v_now_mpc
+      output_v_target_now = output_v_target_mpc
       self.output_should_stop = output_should_stop_mpc
     else:
       output_a_target = min(output_a_target_mpc, output_a_target_e2e)
-      output_v_target_now = min(output_v_now_mpc, output_v_target_now_e2e)
+      output_v_target_now = min(output_v_target_mpc, output_v_target_now_e2e)
       self.output_should_stop = output_should_stop_e2e or output_should_stop_mpc
 
     #for idx in range(2):
