@@ -256,7 +256,7 @@ class LateralPlanner:
 
     self.x_sol = self.lat_mpc.x_sol
 
-    # Kans: model 1초 후 yStd debug
+    # Kans: model 1초 후 yStd(modeld.py의 get_lat_smooth_seconds_dynamic) debug
     y_std_1s = 0.0
     if sm.valid['modelV2']:
       try:
@@ -282,12 +282,6 @@ class LateralPlanner:
     )
 
     lateralPlan.latDebugText = debugText
-    #lateralPlan.latDebugText = self.latDebugText
-    #lateralPlan.laneWidthLeft = float(self.DH.lane_width_left)
-    #lateralPlan.laneWidthRight = float(self.DH.lane_width_right)
-    #lateralPlan.distanceToRoadEdgeLeft = float(self.DH.distance_to_road_edge_left)
-    #lateralPlan.distanceToRoadEdgeRight = float(self.DH.distance_to_road_edge_right)
-
     pm.send('lateralPlan', plan_send)
 
 

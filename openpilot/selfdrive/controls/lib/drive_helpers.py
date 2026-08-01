@@ -137,10 +137,7 @@ def get_accel_from_plan(speeds, accels, t_idxs, action_t=DT_MDL, vEgoStopping=0.
     a_target = 2 * (v_target - v_target_now) / action_t - a_target_now
     v_target_1sec = np.interp(action_t + 1.0, t_idxs, speeds)
 
-    should_stop = (
-      v_target < vEgoStopping and
-      v_target_1sec < vEgoStopping
-    )
+    should_stop = (v_target < vEgoStopping and v_target_1sec < vEgoStopping)
 
   else:
     v_target_now = 0.0
