@@ -150,10 +150,11 @@
                 "LatMpcAccelCost",
                 "LatMpcJerkCost",
                 "LatMpcSteeringRateCost",
-                "LatMpcInputOffset",
                 "UseLaneLineSpeed",
                 "UseLaneLineCurveSpeed",
-                "AdjustLaneOffset"
+                "PsiDampingStraight",
+                "PsiDampingSCurve",
+                "MaxLatAccelNoRollLowSpeed"
               ]
             },
             {
@@ -294,7 +295,8 @@
                     "CruiseMaxVals3",
                     "CruiseMaxVals4",
                     "CruiseMaxVals5",
-                    "CruiseMaxVals6"
+                    "CruiseMaxVals6",
+                    "AccelForce"
                   ]
                 }
               ]
@@ -308,7 +310,9 @@
                 "StopDistanceCarrot",
                 "StoppingAccel",
                 "VEgoStopping",
-                "AChangeCostStarting"
+                "AChangeCostStarting",
+                "CruiseDelay",
+                "ResumeDelay"
               ]
             },
             {
@@ -839,22 +843,6 @@
       "unit": 100
     },
     {
-      "group": "레인모드",
-      "name": "LatMpcInputOffset",
-      "title": "*LATMPC.InputOffset(4)",
-      "descr": "(레인모드) Mpc입력보상 \n 값이 크면 일찍커브에 진입함",
-      "egroup": "LANE",
-      "etitle": "*LATMPC.InputOffset(4)",
-      "edescr": "(LaneMode) MPC Input Compensation — Higher values enter curves earlier",
-      "cgroup": "转向",
-      "ctitle": "横向MPC输入偏移(4)",
-      "cdescr": "(车道模式) MPC 输入补偿 — 值越高进入弯道越早",
-      "min": 0,
-      "max": 20,
-      "default": 4,
-      "unit": 1
-    },
-    {
       "group": "조향토크",
       "name": "CustomSteerMax",
       "title": "_CustomSteerMax(0)",
@@ -1192,6 +1180,19 @@
       "max": 250,
       "default": 60,
       "unit": 5
+    },
+    {
+      "group": "가속설정",
+      "name": "AccelForce",
+      "title": "리쥼 가속도: 950",
+      "descr": "리쥼 가속도 \n\n CAMERA_CAR: 200",
+      "egroup": "ACCEL",
+      "etitle": "Accel for Resume: 950",
+      "edescr": "Acceleration for Resume",
+      "min": 0,
+      "max": 1018,
+      "default": 950,
+      "unit": 10
     },
     {
       "group": "주행튜닝",
@@ -2305,25 +2306,46 @@
       "min": 0,
       "max": 200,
       "default": 0,
-      "unit": 10,
-      "display_unit": "speedKph"
+      "unit": 10
     },
     {
       "group": "레인모드",
-      "name": "AdjustLaneOffset",
-      "title": "레인모드: 차선조절옵셋 (0)cm",
-      "descr": "도로경계쪽/커브안쪽으로 보정합니다.",
+      "name": "PsiDampingStraight",
+      "title": "레인모드: 커브탈출 Psi댐핑팩터(0.85)",
+      "descr": "값이 작으면 커브탈출시 조향 요구가 빠르게 줄어들어 핸들이 더 빨리 풀립니다.",
       "egroup": "LANE",
-      "etitle": "LaneLine: AdjustLaneOffset (0)cm",
-      "edescr": "Corrects toward the road edge/inside of the curve",
-      "cgroup": "转向",
-      "ctitle": "车道线: 车道偏移调整 (0)cm",
-      "cdescr": "向路缘/弯道内侧修正",
+      "etitle": "Curve->Straight Psi damping Factor",
+      "edescr": "Lower values reduce psi (target heading change)",
       "min": 0,
-      "max": 500,
-      "default": 0,
-      "unit": 10,
-      "display_unit": "distanceCm"
+      "max": 100,
+      "default": 85,
+      "unit": 5
+    },
+    {
+      "group": "레인모드",
+      "name": "PsiDampingSCurve",
+      "title": "레인모드: S커브 Psi댐핑팩터(0.65)",
+      "descr": "값이 작으면, 방향 전환시 조향 요구가 빠르게 줄어들어 핸들이 더 빨리 풀립니다.",
+      "egroup": "LANE",
+      "etitle": "S Cruve Psi damping Factor",
+      "edescr": "Lower values reduce psi(desired_curvature).",
+      "min": 0,
+      "max": 100,
+      "default": 65,
+      "unit": 5
+    },
+    {
+      "group": "레인모드",
+      "name": "MaxLatAccelNoRollLowSpeed",
+      "title": "레인모드: 저속 최대 횡가속(3.3 m/s²)",
+      "descr": "100Km/h이하 허용하는 최대횡가속값.\n 크면 오버스티어(=커브마진 효과 약화), 낮으면 언더스티어.",
+      "egroup": "LANE",
+      "etitle": "Max Lateral Acceleration (Low Speed)",
+      "edescr": "Maximum allowed lateral acceleration below 100 km/h.",
+      "min": 0,
+      "max": 50,
+      "default": 42,
+      "unit": 1
     },
     {
       "group": "조향일반",
@@ -2839,6 +2861,32 @@
       "max": 0,
       "default": -50,
       "unit": 10
+    },
+    {
+      "group": "주행튜닝",
+      "name": "CruiseDelay",
+      "title": "오토크루즈 재진입 지연시간 x0.01초(12권장)",
+      "descr": "진입실패율 높으면 낮추고 \n 폴트가 잦으면 높인다",
+      "egroup": "LONG",
+      "etitle": "CruiseDelay.x0.01s(12)",
+      "edescr": "",
+      "min": 0,
+      "max": 40,
+      "default": 12,
+      "unit": 1
+    },
+    {
+      "group": "주행튜닝",
+      "name": "ResumeDelay",
+      "title": "리쥼재진입 지연시간.x0.01초(6권장)",
+      "descr": "리쥼이 느리면 낮추고 \n 폴트가 잦으면 높인다.",
+      "egroup": "LONG",
+      "etitle": "ResumeDelay.x0.01s(6)",
+      "edescr": "",
+      "min": 0,
+      "max": 40,
+      "default": 6,
+      "unit": 1
     },
     {
       "group": "가속설정",

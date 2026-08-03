@@ -10,7 +10,10 @@ def is_volkswagen_meb(CP) -> bool:
   # VW MEB(ID.4/ID.5) 판별 단일 소스. 플랫폼 플래그 기반이라 향후 다른 VW angle 제어
   # 차종이 추가되어도 MEB 전용 경로(곡률 폐루프, 리드선택, FCW 게이트)가 오활성되지 않음.
   return CP.brand == "volkswagen" and bool(CP.flags & VolkswagenFlags.MEB)
-import numpy as np
+
+# Kans
+from openpilot.common.params import Params
+params = Params()
 
 MIN_SPEED = 1.0
 CONTROL_N = 17
@@ -18,12 +21,15 @@ CAR_ROTATION_RADIUS = 0.0
 # This is a turn radius smaller than most cars can achieve
 MAX_CURVATURE = 0.2
 MAX_VEL_ERR = 5.0  # m/s
+MIN_STABLE_DELAY = 0.3
 
 # EU guidelines
 MAX_LATERAL_JERK = 5.0  # m/s^3
 MAX_LATERAL_ACCEL_NO_ROLL = 3.0  # m/s^2
+# Kans
 MAX_LATERAL_ACCEL_NO_ROLL_LOW_SPEED = 4.5  # m/s^2
 
+# Kans:
 def apply_deadzone(error, deadzone):
   if error > deadzone:
     error -= deadzone
@@ -35,43 +41,51 @@ def apply_deadzone(error, deadzone):
 
 def get_lag_adjusted_curvature(CP, v_ego, psis, curvatures, steer_actuator_delay, distances):
   if len(psis) != CONTROL_N:
-    psis = [0.0]*CONTROL_N
-    curvatures = [0.0]*CONTROL_N
+    psis = [0.0] * CONTROL_N
+    curvatures = [0.0] * CONTROL_N
     distances = [0.0] * CONTROL_N
+
   v_ego = max(MIN_SPEED, v_ego)
 
-  # TODO this needs more thought, use .2s extra for now to estimate other delays
   delay = max(0.01, steer_actuator_delay)
 
-  # MPC can plan to turn the wheel and turn back before t_delay. This means
-  # in high delay cases some corrections never even get commanded. So just use
-  # psi to calculate a simple linearization of desired curvature
   current_curvature_desired = curvatures[0]
   delayed_curvature_desired = np.interp(delay, ModelConstants.T_IDXS[:CONTROL_N], curvatures)
   future_curvature_desired = np.interp(1.2, ModelConstants.T_IDXS[:CONTROL_N], curvatures)
 
   psi = np.interp(delay, ModelConstants.T_IDXS[:CONTROL_N], psis)
-
   distance = max(np.interp(delay, ModelConstants.T_IDXS[:CONTROL_N], distances), 0.001)
-  #average_curvature_desired = psi / (v_ego * delay)
 
-  # curve -> straight or reverse curve
-  if v_ego > 5 and abs(current_curvature_desired) > 0.002 and \
-     (abs(future_curvature_desired) < 0.001 or np.sign(current_curvature_desired) != np.sign(future_curvature_desired)):
-    psis_damping = 0.2
-  else:
-    psis_damping = 1.0
-  #psi *= psis_damping
+  psi_damping_straight = params.get_int("PsiDampingStraight") * 0.01
+  psi_damping_s_curve = params.get_int("PsiDampingSCurve") * 0.01
 
+  # 기본값 보정
+  if psi_damping_straight <= 0.0:
+    psi_damping_straight = 0.7  # 곡선 탈출시 heading변화량(psi)의 30% 정도만 풀어주고 70% 유지.
+  if psi_damping_s_curve <= 0.0:
+    psi_damping_s_curve = 0.5  # 반대방향 곡선 전환시 heading변화량(psi)의 50%만 반영해서 좀더 빨리 풀어줌.
+
+  # 전환구간 출렁임 방지용
+  psis_damping = 1.0  # 기본은 미래 heading 변화량을 그대로 반영 
+  if v_ego > 5.0 and abs(current_curvature_desired) > 0.0001:
+    # 커브 -> 직선
+    if abs(future_curvature_desired) < 0.0004:
+      psis_damping = psi_damping_straight
+    # S자 곡선
+    elif np.sign(current_curvature_desired) != np.sign(future_curvature_desired):
+      psis_damping = psi_damping_s_curve
+
+  psi *= psis_damping
 
   average_curvature_desired = psi / distance
-  desired_curvature = 2 * average_curvature_desired - current_curvature_desired
+  desired_curvature = 2.0 * average_curvature_desired - current_curvature_desired
 
-  # This is the "desired rate of the setpoint" not an actual desired rate
-  max_curvature_rate = MAX_LATERAL_JERK / (v_ego**2) # inexact calculation, check https://github.com/commaai/openpilot/pull/24755
+  max_curvature_rate = MAX_LATERAL_JERK / (v_ego ** 2)
+
   safe_desired_curvature = np.clip(desired_curvature,
-                                current_curvature_desired - max_curvature_rate * DT_MDL,
-                                current_curvature_desired + max_curvature_rate * DT_MDL)
+    current_curvature_desired - max_curvature_rate * DT_MDL,
+    current_curvature_desired + max_curvature_rate * DT_MDL)
+
   return safe_desired_curvature
 
 def clamp(val, min_val, max_val):
@@ -90,14 +104,18 @@ def clip_curvature(v_ego, prev_curvature, new_curvature, roll):
                           prev_curvature - max_curvature_rate * DT_CTRL,
                           prev_curvature + max_curvature_rate * DT_CTRL)
 
+  # Kans: 저속에서는 튜닝값 기반으로 횡가속 제한 완화, 고속일수록 기본값 3.0까지 부드럽게 전환.
+  # 값이 높으면 조향 권한 증가, 낮으면 조향 권한 감소.
+  max_lat_accel_low_speed = params.get_int("MaxLatAccelNoRollLowSpeed") * 0.1
+  if max_lat_accel_low_speed <= 0.0:
+    max_lat_accel_low_speed = MAX_LATERAL_ACCEL_NO_ROLL_LOW_SPEED
+  max_lat_accel_low_speed = float(np.clip(max_lat_accel_low_speed, 3.5, 4.5))
+
   roll_compensation = roll * ACCELERATION_DUE_TO_GRAVITY
-  # Avoid an abrupt authority drop at 100 km/h. Gradually transition from
-  # the low-speed allowance to the high-speed EU-guideline limit.
-  max_lateral_accel_no_roll = float(np.interp(
-    v_ego,
+  max_lateral_accel_no_roll = float(np.interp(v_ego,
     [80 / 3.6, 120 / 3.6],
-    [MAX_LATERAL_ACCEL_NO_ROLL_LOW_SPEED, MAX_LATERAL_ACCEL_NO_ROLL],
-  ))
+    [max_lat_accel_low_speed, MAX_LATERAL_ACCEL_NO_ROLL]))
+
   max_lat_accel = max_lateral_accel_no_roll + roll_compensation
   min_lat_accel = -max_lateral_accel_no_roll + roll_compensation
   new_curvature, limited_accel = clamp(new_curvature, min_lat_accel / v_ego ** 2, max_lat_accel / v_ego ** 2)
@@ -106,11 +124,14 @@ def clip_curvature(v_ego, prev_curvature, new_curvature, roll):
   return float(new_curvature), limited_accel or limited_max_curv
 
 
-def get_accel_from_plan(speeds, accels, t_idxs, action_t=DT_MDL, vEgoStopping=0.05):
+def get_accel_from_plan(speeds, accels, t_idxs, action_t=DT_MDL, vEgoStopping=0.3):
   if len(speeds) == len(t_idxs):
     v_now = speeds[0]
     a_now = accels[0]
-    v_target = np.interp(action_t, t_idxs, speeds)
+    if action_t < MIN_STABLE_DELAY:
+      v_target = v_now + (action_t / MIN_STABLE_DELAY) * (np.interp(MIN_STABLE_DELAY, t_idxs, speeds) - v_now)
+    else:
+      v_target = np.interp(action_t, t_idxs, speeds)
     a_target = 2 * (v_target - v_now) / (action_t) - a_now
     v_target_1sec = np.interp(action_t + 1.0, t_idxs, speeds)
     v_max = np.max(speeds)

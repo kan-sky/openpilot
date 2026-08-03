@@ -57,6 +57,7 @@ class AngleSteeringLimits:
   ANGLE_RATE_LIMIT_DOWN: tuple[list[float], list[float]]
   MAX_LATERAL_ACCEL: float = ISO_LATERAL_ACCEL * .7  # ~2.1m/s^2, 70% ISO limits as default, but ideally this is set manually for comfortable limits?
   MAX_LATERAL_JERK: float = ISO_LATERAL_JERK * .5  # ~2.5m/s^3, 50% of ISO limits as default, but ideally this is set manually for comfortable limits?
+  MAX_ANGLE_RATE: float = math.inf
 
 
 def apply_driver_steer_torque_limits(apply_torque: int, apply_torque_last: int, driver_torque: float, LIMITS, steer_max: int | None = None):
@@ -157,13 +158,15 @@ def apply_center_deadzone(error, deadzone):
 
 
 def get_friction(lateral_accel_error: float, lateral_accel_deadzone: float, friction_threshold: float,
-                 torque_params: structs.CarParams.LateralTorqueTuning) -> float:
+                 torque_params: structs.CarParams.LateralTorqueTuning, friction_compensation: bool) -> float:
   friction_interp = np.interp(
     apply_center_deadzone(lateral_accel_error, lateral_accel_deadzone),
     [-friction_threshold, friction_threshold],
     [-torque_params.friction, torque_params.friction]
   )
-  return float(friction_interp)
+  friction = float(friction_interp) if friction_compensation else 0.0
+  return friction
+
 
 
 def get_max_angle_delta_vm(v_ego_raw: float, steer_step: int, VM: VehicleModel, max_lateral_jerk: float):

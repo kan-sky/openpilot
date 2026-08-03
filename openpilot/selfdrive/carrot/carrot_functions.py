@@ -347,13 +347,17 @@ class CarrotPlanner:
     v_ego_kph = v_ego * CV.MS_TO_KPH
     model_v = self.vFilter.process(v[-1])
     startSign = model_v > 5.0 or model_v > (v[0] + 2)
-
+    # 정지(빨간불) 후보
     if v_ego_kph < 1.0:
-      stopSign = model_x < 20.0 and model_v < 10.0
+      # 거의 정지 상태: 교차로 부근에서 신호가 30m 안에 있고
+      # 모델이 좌우 +-5미터내에서 속도가 조금 있어도 적신호로 본다.
+      stopSign = model_x < 30.0 and model_v < 10.0 and (abs(y[-1]) < 5.0)
+
     elif v_ego_kph < 82.0:
-      stopSign = (model_x < d_rel - 3.0 and
-                  model_x < np.interp(v[0] * 3.6, [60, 80], [120.0, 150]) and
-                  ((model_v < 3.0) or (model_v < v[0] * 0.7)) and
+      # 속도에 따른 정지선탐지 거리(120~160m)
+      stopSign = (model_x < d_rel - 2.5 and
+                  model_x < np.interp(v[0] * 3.6, [30, 60, 80], [90, 120.0, 140]) and
+                  ((model_v < 2.2) or (model_v < v[0] * 0.6)) and
                   abs(y[-1]) < 5.0)
       # 정상 주행 중 감속하는 경우(카메라 감속 등)에는 오감지가 많음.
       # 회생 감속으로 v_cruise가 0인 경우에는 신호를 감지하도록 함.
@@ -554,13 +558,15 @@ class CarrotPlanner:
           self.add_event(EventName.trafficSignGreen)
           self.xState = XState.e2eCruise
         else:
-          self.comfort_brake = self.comfortBrake * 0.9
+          self.comfort_brake = self.comfortBrake
           #self.comfort_brake = COMFORT_BRAKE
           self.trafficStopAdjustRatio = np.interp(v_ego_kph, [0, 100], [1.0, 0.7])
           # 속도가 높을수록 먼 정지거리 추정값을 줄여 보정함.
           stop_dist = stop_model_x_rl * np.interp(stop_model_x_rl, [0, 50], [1.0, self.trafficStopAdjustRatio])
-          if stop_dist > 10.0:  # 10m 이상일 때만 실제 정지거리를 갱신함.
-            self.actual_stop_distance = stop_dist
+          # Kans: 신호정지선을 기준으로 정지 위치를 앞/뒤로 보정
+          stop_dist = max(0.0, stop_dist - self.trafficStopDistanceAdjust)
+          # Kans: 신호정지 목표거리 항상 갱신
+          self.actual_stop_distance = stop_dist
           stop_model_x = 0
           self.fakeCruiseDistance = 0 if self.actual_stop_distance > 10.0 else 10.0
           if v_ego < 0.3:
@@ -574,8 +580,9 @@ class CarrotPlanner:
           self.xState = XState.e2eCruise
       elif v_ego_kph < 5.0 and self.trafficState != TrafficState.green:
         self.xState = XState.e2eStop
-        self.actual_stop_distance = 5.0 #2.0
-      elif v_ego_kph > 5.0: # and stop_model_x > 30.0:
+        # Kans: 실제 신호정지거리
+        self.actual_stop_distance = max(0.0, 5.0 - self.trafficStopDistanceAdjust) # 5.0
+      elif v_ego_kph > 5.0:
         self.xState = XState.e2eCruise
     else: #XState.lead, XState.cruise, XState.e2eCruise
       self.traffic_starting_count = max(0, self.traffic_starting_count - 1)
@@ -584,7 +591,8 @@ class CarrotPlanner:
       elif self.trafficState == TrafficState.red and abs(carstate.steeringAngleDeg) < 30 and self.traffic_starting_count == 0:
         self.add_event(EventName.trafficStopping)
         self.xState = XState.e2eStop
-        self.actual_stop_distance = stop_model_x_rl
+        # Kans: 실제 빨간불 정지거리에서 신호정지거리만큼 빼서 미리 정지하게 함.
+        self.actual_stop_distance = max(0.0, stop_model_x_rl - self.trafficStopDistanceAdjust)
       else:
         self.xState = XState.e2eCruise
 

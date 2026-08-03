@@ -259,6 +259,8 @@ class SelfdriveD:
       if CS.latEnabled != self.CS_prev.latEnabled:
         self.events.add(EventName.audioPrompt)
 
+      if CS.autoHoldActivated:
+        self.events.add(EventName.autoHold)
     # Create events for temperature, disk space, and memory
     if self.sm['deviceState'].thermalStatus >= ThermalStatus.red:
       self.events.add(EventName.overheat)
@@ -374,12 +376,12 @@ class SelfdriveD:
           self.events.add(EventName.cameraFrameRate)
     if not REPLAY and self.rk.lagging:
       self.events.add(EventName.selfdrivedLagging)
-    if not self.sm.valid['radarState']:
+    if not self.CP.radarUnavailable:
       if self.sm['radarState'].radarErrors.canError:
         self.events.add(EventName.canError)
       elif self.sm['radarState'].radarErrors.radarUnavailableTemporary:
         self.events.add(EventName.radarTempUnavailable)
-      else:
+      elif any(self.sm['radarState'].radarErrors.to_dict().values()):
         self.events.add(EventName.radarFault)
     if not self.sm.valid['pandaStates']:
       self.events.add(EventName.usbError)
@@ -391,18 +393,32 @@ class SelfdriveD:
     # generic catch-all. ideally, a more specific event should be added above instead
     has_disable_events = self.events.contains(ET.NO_ENTRY) and (self.events.contains(ET.SOFT_DISABLE) or self.events.contains(ET.IMMEDIATE_DISABLE))
     no_system_errors = (not has_disable_events) or (len(self.events) == num_events)
-    if not self.sm.all_checks() and no_system_errors:
-      if not self.sm.all_alive():
+
+    if not self.sm.all_checks() and no_system_errors:          
+      # Kans: restore snapshot valid/alive/freq state before commIssue evaluation
+      invalid = [s for s in self.sm.data.keys() if not self.sm.valid[s]]
+      not_alive = [s for s in self.sm.data.keys() if not self.sm.alive[s]]
+      not_freq_ok = [s for s in self.sm.data.keys() if not self.sm.freq_ok[s]]
+
+      cloudlog.warning(
+        f"KANS_COMMISSUE vEgo={CS.vEgo:.2f} "
+        f"standstill={CS.standstill} "
+        f"invalid={invalid} "
+        f"not_alive={not_alive} "
+        f"not_freq_ok={not_freq_ok}"
+      )
+
+      if len(not_alive) > 0:
         self.events.add(EventName.commIssue)
-      elif not self.sm.all_freq_ok():
+      elif len(not_freq_ok) > 0:
         self.events.add(EventName.commIssueAvgFreq)
       else:
         self.events.add(EventName.commIssue)
 
       logs = {
-        'invalid': [s for s, valid in self.sm.valid.items() if not valid],
-        'not_alive': [s for s, alive in self.sm.alive.items() if not alive],
-        'not_freq_ok': [s for s, freq_ok in self.sm.freq_ok.items() if not freq_ok],
+        'invalid': invalid,
+        'not_alive': not_alive,
+        'not_freq_ok': not_freq_ok,
       }
       if logs != self.logged_comm_issue:
         cloudlog.event("commIssue", error=True, **logs)
