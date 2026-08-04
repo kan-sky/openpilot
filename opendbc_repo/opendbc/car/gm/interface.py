@@ -286,19 +286,11 @@ class CarInterface(CarInterfaceBase):
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
 
     elif candidate == CAR.CHEVROLET_TRAILBLAZER:
-      ret.stopAccel = -0.5
-      ret.startingState = True
-      ret.startAccel = 1.0
-      CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
-
-    elif candidate == CAR.CADILLAC_XT6:
       ret.steerActuatorDelay = 0.2
-      ret.minSteerSpeed = 7 * CV.MPH_TO_MS
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
 
     elif candidate == CAR.CADILLAC_XT4:
       ret.steerActuatorDelay = 0.2
-      ret.minEnableSpeed = -1.  # engage speed is decided by pcm
       ret.minSteerSpeed = 30 * CV.MPH_TO_MS
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
     elif candidate == CAR.CADILLAC_CT6_2019:

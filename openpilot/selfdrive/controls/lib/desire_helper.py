@@ -361,7 +361,8 @@ class DesireHelper:
 
             # 맨 끝 차선이 아니면, ATC 자동 차선변경 비활성
             # (원본 유지: 차선 존재하거나 geom 가능하면 auto off, 아니면 on)
-            self.auto_lane_change_enable = self._is_last_lane(side)
+            # Kans: 운전자 깜빡이 또는 순수 ATC 요청이면 차선변경 허용
+            self.auto_lane_change_enable = driver_enabled or atc_lane_change_only  #self._is_last_lane(side)
             self.next_lane_change = False
 
         elif self.lane_change_state == LaneChangeState.preLaneChange:
@@ -415,7 +416,7 @@ class DesireHelper:
                 elif bsd_active:
                   if torque_applied and (not block_lanechange_bsd):
                     self.lane_change_state = LaneChangeState.laneChangeStarting
-                elif self.laneChangeNeedTorque > 0 or self.next_lane_change:
+                elif self.laneChangeNeedTorque > 0 and driver_enabled:  #Kans: or self.next_lane_change:
                   if torque_applied:
                     self.lane_change_state = LaneChangeState.laneChangeStarting
                 elif driver_enabled:

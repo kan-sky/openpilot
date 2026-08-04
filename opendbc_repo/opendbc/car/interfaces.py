@@ -57,13 +57,6 @@ GEAR_SHIFTER_MAP: dict[str, structs.CarState.GearShifter] = {
   'B': GearShifter.brake, 'BRAKE': GearShifter.brake,
 }
 
-class LatControlInputs(NamedTuple):
-  lateral_acceleration: float
-  roll_compensation: float
-  vego: float
-  aego: float
-
-
 TorqueFromLateralAccelCallbackType = Callable[[float, structs.CarParams.LateralTorqueTuning], float]
 LateralAccelFromTorqueCallbackType = Callable[[float, structs.CarParams.LateralTorqueTuning], float]
 

@@ -160,7 +160,7 @@ class Controls:
     # accel PID loop
     pid_accel_limits = self.CI.get_pid_accel_limits(self.CP, CS.vEgo, CS.vCruise * CV.KPH_TO_MS)
     t_since_plan = (self.sm.frame - self.sm.recv_frame['longitudinalPlan']) * DT_CTRL
-    accel, aTarget, jerk = self.LoC.update(CC.longActive, CS, long_plan, pid_accel_limits, t_since_plan, self.sm['radarState'])
+    accel, aTarget, jerk = self.LoC.update(CC.longActive, CS, long_plan, pid_accel_limits, t_since_plan)
     actuators.accel = float(accel)
     actuators.aTarget = float(aTarget)
     actuators.jerk = float(jerk)
@@ -194,13 +194,14 @@ class Controls:
       if len(lat_plan.curvatures) == 0:
         new_desired_curvature = self.curvature
       else:
-        curvature = get_lag_adjusted_curvature(self.CP, CS.vEgo, lat_plan.psis, lat_plan.curvatures, steer_actuator_delay + lat_smooth_seconds, lat_plan.distances)
+        curvature = get_lag_adjusted_curvature(self.CP, CS.vEgo, lat_plan.psis, lat_plan.curvatures, steer_actuator_delay, lat_plan.distances)
         new_desired_curvature = smooth_value(curvature, self.desired_curvature, lat_smooth_seconds)
-    else:      
-      new_desired_curvature = smooth_value(model_v2.action.desiredCurvature, self.desired_curvature, 0.1)
+    else:
+      # 레인리스: modeld의 최종 action 곡률을 그대로 사용한다.
+      new_desired_curvature = float(model_v2.action.desiredCurvature)
 
     self.desired_curvature, curvature_limited = clip_curvature(CS.vEgo, self.desired_curvature, new_desired_curvature, lp.roll)
-
+    lat_delay = self.sm["liveDelay"].lateralDelay
     actuators.curvature = float(self.desired_curvature)
 
     # VW MEB 폐루프 곡률 보정 = infiniteCable2 LatControlCurvature.update() 정확 복제.
@@ -237,7 +238,7 @@ class Controls:
     steer, steeringAngleDeg, lac_log = self.LaC.update(CC.latActive, CS, self.VM, lp,
                                                        self.steer_limited_by_safety, self.desired_curvature,
                                                        CC, curvature_limited,
-                                                       model_data=self.sm['modelV2'])
+                                                       model_data=self.sm['modelV2'], lat_delay=lat_delay)
     actuators.torque = float(steer)
     actuators.steeringAngleDeg = float(steeringAngleDeg)
     # Ensure no NaNs/Infs
