@@ -8,7 +8,9 @@ from opendbc.can import CANDefine, CANParser
 from opendbc.car import Bus, create_button_events, structs, DT_CTRL
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.hyundai.hyundaicanfd import CanBus
-from opendbc.car.hyundai.values import HyundaiFlags, CAR, DBC, Buttons, CarControllerParams, CAMERA_SCC_CAR, HyundaiExtFlags
+from opendbc.car.hyundai.values import HyundaiFlags, CAR, DBC, Buttons, CarControllerParams, CAMERA_SCC_CAR, HyundaiExtFlags, \
+                                       EV_MODE_ACTIVE_VALUES, EV_MODE_STATUS_ADDR, EV_MODE_STATUS_DLC, EV_MODE_STATUS_MSG, \
+                                       EV_MODE_STATUS_SIGNAL
 from opendbc.car.interfaces import CarStateBase
 
 from openpilot.common.params import Params
@@ -30,6 +32,33 @@ GearShifter = structs.CarState.GearShifter
 
 READY_COUNT_OK = 200
 TRAILER_DISCONNECT_GRACE_FRAMES = int(5.0 / DT_CTRL)
+EV_MODE_STATUS_TIMEOUT_NS = 500_000_000
+LEGACY_LFA_BUTTON_ADDR = 0x391
+LEGACY_CRUISE_BUTTON_ALT_ADDR = 0x3EF
+LEGACY_LFA_BUTTON_ALT_ADDR = 0x416
+
+
+def _get_legacy_button_capabilities(fingerprint: dict[int, int]) -> tuple[bool, bool, bool]:
+  return (
+    LEGACY_LFA_BUTTON_ADDR in fingerprint,
+    LEGACY_CRUISE_BUTTON_ALT_ADDR in fingerprint,
+    LEGACY_LFA_BUTTON_ALT_ADDR in fingerprint,
+  )
+
+
+def _get_ev_mode_state(cp: CANParser) -> tuple[bool, bool]:
+  timestamps = cp.ts_nanos.get(EV_MODE_STATUS_MSG)
+  if timestamps is None:
+    return False, False
+
+  timestamp = timestamps.get(EV_MODE_STATUS_SIGNAL, 0)
+  dat = cp.dat.get(EV_MODE_STATUS_ADDR, b"")
+  # The update timestamp advances even when the whole ECAN bus is silent.
+  # last_nonempty_nanos would leave the final decoded state valid forever.
+  age = cp._last_update_nanos - timestamp
+  valid = timestamp > 0 and len(dat) == EV_MODE_STATUS_DLC and not cp.bus_timeout and 0 <= age <= EV_MODE_STATUS_TIMEOUT_NS
+  active = valid and int(cp.vl[EV_MODE_STATUS_MSG][EV_MODE_STATUS_SIGNAL]) in EV_MODE_ACTIVE_VALUES
+  return active, valid
 
 
 NUMERIC_TO_TZ = {
@@ -128,7 +157,6 @@ class CarState(CarStateBase):
     self.speedLimitDistance = 0
     self.pcmCruiseGap = 0
 
-    self.cruise_buttons_alt =  True if self.CP.carFingerprint in (CAR.HYUNDAI_CASPER, CAR.HYUNDAI_CASPER_EV) else False
     self.MainMode_ACC = False
     self.ACCMode = 0
     self.LFA_ICON = 0
@@ -149,8 +177,9 @@ class CarState(CarStateBase):
       ecu_disabled = True
 
 
-    self.HAS_LFA_BUTTON = True if 913 in fingerprints[0] else False
-    self.CRUISE_BUTTON_ALT = True if 1007 in fingerprints[0] else False
+    self.HAS_LFA_BUTTON, self.CRUISE_BUTTON_ALT, self.CRUISE_BUTTON_LFA = (
+      _get_legacy_button_capabilities(fingerprints[0])
+    )
 
     cam_bus = CanBus(CP).CAM
     pt_bus = CanBus(CP).ECAN
@@ -173,6 +202,20 @@ class CarState(CarStateBase):
     self.trailer_timeout_cnt = 0
     self.trailer_connected_prev = False
     self.trailer_status = None
+
+  def _get_legacy_cruise_buttons(self, cp):
+    if self.CRUISE_BUTTON_LFA and cp.vl["CRUISE_BUTTON_LFA"]["CruiseSwLfa"] > 0:
+      return [Buttons.LFA_BUTTON]
+    if self.HAS_LFA_BUTTON and cp.vl["BCM_PO_11"]["LFA_Pressed"] == 1:
+      return [Buttons.LFA_BUTTON]
+    if self.CRUISE_BUTTON_ALT:
+      return [cp.vl["CRUISE_BUTTON_ALT"]["CruiseSwState"]]
+    return cp.vl_all["CLU11"]["CF_Clu_CruiseSwState"]
+
+  def _get_legacy_main_buttons(self, cp):
+    if self.CRUISE_BUTTON_ALT:
+      return cp.vl_all["CRUISE_BUTTON_ALT"]["CruiseSwMain"]
+    return cp.vl_all["CLU11"]["CF_Clu_CruiseSwMain"]
 
   def monitor_fingerprint(self, can_parsers, canfd):
     if self.controls_ready_count <= READY_COUNT_OK:
@@ -371,6 +414,8 @@ class CarState(CarStateBase):
     if self.CP.flags & (HyundaiFlags.HYBRID | HyundaiFlags.EV):
       gear = cp.vl["ELECT_GEAR"]["Elect_Gear_Shifter"]
       ret.gearStep = cp.vl["ELECT_GEAR"]["Elect_Gear_Step"]
+      if self.CP.carFingerprint == CAR.HYUNDAI_CASPER_EV:
+        ret.gearStep = 0
     elif self.CP.flags & HyundaiFlags.FCEV:
       gear = cp.vl["EMS20"]["HYDROGEN_GEAR_SHIFTER"]
     elif self.CP.flags & HyundaiFlags.CLUSTER_GEARS:
@@ -425,27 +470,9 @@ class CarState(CarStateBase):
 
     self.steer_state = cp.vl["MDPS12"]["CF_Mdps_ToiActive"]  # 0 NOT ACTIVE, 1 ACTIVE
     prev_cruise_buttons = self.cruise_buttons[-1]
-    #self.cruise_buttons.extend(cp.vl_all["CLU11"]["CF_Clu_CruiseSwState"])
-    #carrot {{
-    #if self.CRUISE_BUTTON_ALT and cp.vl["CRUISE_BUTTON_ALT"]["SET_ME_1"] == 1:
-    #  self.cruise_buttons_alt = True
-
-    cruise_button = [Buttons.NONE]
-    if self.cruise_buttons_alt:
-      lfa_button = cp.vl["CRUISE_BUTTON_LFA"]["CruiseSwLfa"]
-      cruise_button = [Buttons.LFA_BUTTON] if lfa_button > 0 else [cp.vl["CRUISE_BUTTON_ALT"]["CruiseSwState"]]
-    elif self.HAS_LFA_BUTTON and cp.vl["BCM_PO_11"]["LFA_Pressed"] == 1:  # for K5
-      cruise_button = [Buttons.LFA_BUTTON]
-    else:
-      cruise_button = cp.vl_all["CLU11"]["CF_Clu_CruiseSwState"]
-    self.cruise_buttons.extend(cruise_button)
-    # }} carrot
+    self.cruise_buttons.extend(self._get_legacy_cruise_buttons(cp))
     prev_main_buttons = self.main_buttons[-1]
-    #self.cruise_buttons.extend(cp.vl_all["CLU11"]["CF_Clu_CruiseSwState"])
-    if self.cruise_buttons_alt:
-      self.main_buttons.extend(cp.vl_all["CRUISE_BUTTON_ALT"]["CruiseSwMain"])
-    else:
-      self.main_buttons.extend(cp.vl_all["CLU11"]["CF_Clu_CruiseSwMain"])
+    self.main_buttons.extend(self._get_legacy_main_buttons(cp))
     self.mdps12 = copy.copy(cp.vl["MDPS12"])
 
     ret.buttonEvents = [*create_button_events(self.cruise_buttons[-1], prev_cruise_buttons, BUTTONS_DICT),
@@ -501,6 +528,9 @@ class CarState(CarStateBase):
     cp_alt = can_parsers[Bus.alt] if Bus.alt in can_parsers else None
 
     ret = structs.CarState()
+
+    if self.CP.extFlags & HyundaiExtFlags.EV_MODE_STATUS_230:
+      ret.evModeActive, ret.evModeValid = _get_ev_mode_state(cp)
 
     self.is_metric = cp.vl["CRUISE_BUTTONS_ALT"]["DISTANCE_UNIT"] != 1
     speed_factor = CV.KPH_TO_MS if self.is_metric else CV.MPH_TO_MS
@@ -787,10 +817,17 @@ class CarState(CarStateBase):
         ("CRUISE_BUTTONS", 50)
       ]
 
+    CAN = CanBus(CP)
+    pt_parser = CANParser(DBC[CP.carFingerprint][Bus.pt], msgs, CAN.ECAN)
+    if CP.extFlags & HyundaiExtFlags.EV_MODE_STATUS_230:
+      # Display-only while the signal is fleet-validated: checksum and freshness
+      # gate the value without making a counter/alive fault disable controls.
+      pt_parser._add_message(EV_MODE_STATUS_MSG, math.nan, ignore_counter=True)
+
     return {
-      Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], msgs, CanBus(CP).ECAN),
-      Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], [], CanBus(CP).CAM),
-      Bus.alt: CANParser(DBC[CP.carFingerprint][Bus.pt], [], CanBus(CP).ACAN),
+      Bus.pt: pt_parser,
+      Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], [], CAN.CAM),
+      Bus.alt: CANParser(DBC[CP.carFingerprint][Bus.pt], [], CAN.ACAN),
     }
 
   def get_can_parsers(self, CP):

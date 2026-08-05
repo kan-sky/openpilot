@@ -6,7 +6,68 @@ var CARROT_VISION_STATE = window.CarrotVisionState;
 var setCarrotVisionPhase = window.CarrotVisionSetPhase;
 var setCarrotVisionState = window.CarrotVisionSetState;
 
-const RTC_STATS_POLL_MS = 1000;
+const RTC_STATS_POLL_MS = 5000;
+const RTC_STREAM_BUSY_CODE = "carrot_vision_busy";
+const RTC_DEVICE_ID = String(window.CarrotStreamIdentity?.deviceId
+  || window.CarrotStreamIdentity?.clientId
+  || `carrot-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`);
+const RTC_TAB_ID = String(window.CarrotStreamIdentity?.tabId || "");
+const RTC_CLIENT_ID = RTC_DEVICE_ID;
+const RTC_CONNECTION_TRANSACTION_API = window.DriveVisionConnectionTransactions;
+if (!RTC_CONNECTION_TRANSACTION_API?.create) {
+  throw new Error("Carrot Vision connection transaction manager is unavailable");
+}
+const RTC_CONNECTION_TRANSACTIONS = RTC_CONNECTION_TRANSACTION_API.create();
+
+function rtcCreateAttemptId() {
+  try {
+    const generated = window.CarrotStreamIdentity?.createAttemptId?.();
+    if (generated) return String(generated).slice(0, 128);
+  } catch (_) {}
+  return `carrot-attempt-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`.slice(0, 128);
+}
+
+function rtcIsConnectionAbort(error) {
+  return error?.name === "AbortError"
+    || error?.code === RTC_CONNECTION_TRANSACTION_API.abortCode;
+}
+
+function rtcAssertCurrentTransaction(transaction, pc = null, boundary = "") {
+  RTC_CONNECTION_TRANSACTIONS.assertCurrent(
+    transaction,
+    boundary ? `Carrot Vision connection superseded after ${boundary}` : "",
+  );
+  if (pc && (
+    pc.__carrotRtcGeneration !== transaction.generation
+    || pc.__carrotAttemptId !== transaction.attemptId
+    || (RTC_PENDING_PC !== pc && RTC_PC !== pc)
+  )) {
+    throw new RTC_CONNECTION_TRANSACTION_API.AbortError(
+      boundary ? `Carrot Vision peer superseded after ${boundary}` : "Carrot Vision peer is stale",
+    );
+  }
+  return transaction;
+}
+
+function rtcPeerTransactionIsCurrent(pc) {
+  const transaction = pc?.__carrotTransaction || null;
+  return Boolean(
+    transaction
+    && RTC_CONNECTION_TRANSACTIONS.matches(transaction, {
+      generation: pc.__carrotRtcGeneration,
+      attemptId: pc.__carrotAttemptId,
+    })
+    && (RTC_PENDING_PC === pc || RTC_PC === pc)
+  );
+}
+
+class CarrotVisionStreamBusyError extends Error {
+  constructor(message = "Carrot Vision is active on another device.") {
+    super(message);
+    this.name = "CarrotVisionStreamBusyError";
+    this.code = RTC_STREAM_BUSY_CODE;
+  }
+}
 const RTC_RAW_STATS_HISTORY_MAX = 60;
 const RTC_RAW_STATS_KEEP_TYPES = new Set([
   "candidate-pair",
@@ -23,33 +84,22 @@ const RTC_RAW_STATS_KEEP_TYPES = new Set([
 // the track has not ended is almost always TRANSIENT (a brief source-side
 // encoder/CPU hiccup on the comma device, or a momentary viewer main-thread
 // jank) and self-heals the instant frames resume — no reconnect needed.
-// A full reconnect re-runs ICE + /stream + spawns a fresh webrtcd session,
-// and webrtcd keeps the old session alive up to ~4s during handover, doubling
-// the encode/RTP load on the device and STARVING the very pipeline that
-// stalled. That turns one transient hiccup into a self-sustaining
-// stall->reconnect->handover->stall loop ("once it starts it keeps dropping",
-// even on a healthy network).
+// A full reconnect re-runs ICE + /stream, so actual compositor frame progress
+// is the single stall signal and reconnect remains the last resort.
 // So these stall windows are deliberately generous: hold the last frame and
 // wait for the source to resume; only fall back to a full reconnect as a
 // last resort. Genuine permanent failures (ICE/connection failed|closed,
 // remote track ended) still reconnect immediately via their own handlers.
-const RTC_FREEZE_MAX_STALL_SAMPLES = 8;           // source/network progress also stopped: wait a little longer
-const RTC_DECODE_STALL_MAX_SAMPLES = 4;           // RTP still arrives but decode/render is stuck: recreate quickly
-const RTC_INITIAL_FRAME_MAX_STALL_SAMPLES = 6;    // ~6s for first frame before reconnect
-const RTC_FREEZE_CURRENT_TIME_EPSILON = 0.05;
+const RTC_FRAME_STALL_NUDGE_MS = 8000;
+const RTC_FRAME_STALL_RECONNECT_MS = 20000;
 const RTC_FREEZE_RECOVERY_COOLDOWN_MS = 4000;
-const RTC_RESUME_PROGRESS_CHECK_MS = 900;
-// These speed up a reconnect that is ALREADY happening (genuine failure), so
-// the recovered video comes back sooner. They do NOT shorten stall *detection*
-// (that's the FREEZE/FRAME thresholds above, kept patient to avoid the hotspot
-// reconnect loop). Safe to keep snappy because the retry backoff still grows on
-// persistent failure.
+// Reconnects that are already necessary stay quick, while persistent failures
+// still receive exponential retry backoff.
 const RTC_RETRY_BASE_MS = 350;                    // first retry delay after a failed/closed peer (was 700)
 const RTC_ICE_GATHER_TIMEOUT_MS = 700;            // host-only candidates gather near-instantly; tighter cap (was 1200)
 const RTC_INITIAL_TRACK_TIMEOUT_MS = 3000;        // track should arrive quickly on host-only WebRTC
 const RTC_INITIAL_FRAME_TIMEOUT_MS = 6000;        // ICE/track connected but no first frame -> recreate /stream session
-const RTC_STREAM_FETCH_TIMEOUT_MS = 5000;
-const RTC_PENDING_STALE_MS = 7000;
+const RTC_STREAM_FETCH_TIMEOUT_MS = 10000;
 const CARROT_VISION_HEALTH_POLL_MS = 2000;
 const RTC_PERF_STATE = {
   active: false,
@@ -72,12 +122,9 @@ const RTC_RATE_STATE = {
   lastCollectedAtMs: 0,
 };
 const RTC_FREEZE_STATE = {
-  stallSamples: 0,
-  lastFramesDecoded: null,
-  lastFramesReceived: null,
-  lastTotalVideoFrames: null,
-  lastCurrentTime: null,
+  lastPresentedFrameMs: 0,
   lastRecoveredAtMs: 0,
+  lastPlaybackNudgeAtMs: 0,
   consecutiveRecoveries: 0,
   everDecodedFrame: false,
 };
@@ -85,7 +132,6 @@ const RTC_RAW_STATS_HISTORY = [];
 let RTC_RECOVERY_T = null;
 let RTC_VIDEO_EVENTS_BOUND = false;
 let RTC_WAIT_TRACK_PC = null;
-let RTC_RESUME_CHECK_T = null;
 const RTC_VISIBILITY_STATE = {
   hiddenAtMs: 0,
   currentTimeAtHide: null,
@@ -272,6 +318,10 @@ async function rtcDiagnosticSnapshot() {
     firstFrameTimeoutArmed: Boolean(RTC_WAIT_FIRST_FRAME_T),
     pendingPc: RTC_PENDING_PC ? rtcPcLabel(RTC_PENDING_PC) : null,
     activePc: RTC_PC ? rtcPcLabel(RTC_PC) : null,
+    transaction: RTC_CONNECTION_TRANSACTIONS.snapshot(),
+    compactState: {
+      active: Boolean(window.CarrotVisionRaw?.hasCompactState?.()),
+    },
     trace: rtcBuildTraceSnapshot(pc),
     freezeState: { ...RTC_FREEZE_STATE },
     perfState: window.CarrotRtcPerf || null,
@@ -387,20 +437,12 @@ function resetRtcPerfState() {
 }
 
 function rtcResetFreezeWatchdog() {
-  RTC_FREEZE_STATE.stallSamples = 0;
-  RTC_FREEZE_STATE.lastFramesDecoded = null;
-  RTC_FREEZE_STATE.lastFramesReceived = null;
-  RTC_FREEZE_STATE.lastTotalVideoFrames = null;
-  RTC_FREEZE_STATE.lastCurrentTime = null;
+  RTC_FREEZE_STATE.lastPresentedFrameMs = 0;
+  RTC_FREEZE_STATE.lastPlaybackNudgeAtMs = 0;
   RTC_FREEZE_STATE.everDecodedFrame = false;
 }
 
-function rtcCancelResumeCheck() {
-  if (RTC_RESUME_CHECK_T) {
-    clearTimeout(RTC_RESUME_CHECK_T);
-    RTC_RESUME_CHECK_T = null;
-  }
-}
+function rtcCancelResumeCheck() {}
 
 function rtcCancelRecovery() {
   if (RTC_RECOVERY_T) {
@@ -589,11 +631,12 @@ function buildRtcNetworkStats(inboundStats, videoStats, statsMap, collectedAtMs)
 
 async function collectRtcPerfStats() {
   const pc = RTC_PC;
-  if (!pc) return;
+  if (!pc || !rtcPeerTransactionIsCurrent(pc)) return;
 
   try {
     const collectedAtMs = Date.now();
     const stats = await pc.getStats(null);
+    if (RTC_PC !== pc || !rtcPeerTransactionIsCurrent(pc)) return;
     let inboundVideoReport = null;
     stats.forEach((report) => {
       if (inboundVideoReport) return;
@@ -616,10 +659,10 @@ async function collectRtcPerfStats() {
     RTC_PERF_STATE.error = "";
     window.CarrotRtcPerf = RTC_PERF_STATE;
     rtcPushRawStatsHistory(pc, stats, "poll");
-    rtcUpdateFreezeWatchdog(pc, video);
     _hudMarkDirty();
     emitCarrotRenderRequest({ force: false, overlayDirty: false, hudDirty: true });
   } catch (error) {
+    if (RTC_PC !== pc || !rtcPeerTransactionIsCurrent(pc)) return;
     RTC_PERF_STATE.active = shouldRunCarrotVisionRealtime();
     RTC_PERF_STATE.collectedAtMs = Date.now();
     RTC_PERF_STATE.connectionState = pc.connectionState || "unknown";
@@ -627,7 +670,6 @@ async function collectRtcPerfStats() {
     RTC_PERF_STATE.network = null;
     RTC_PERF_STATE.error = error?.message || String(error);
     window.CarrotRtcPerf = RTC_PERF_STATE;
-    rtcResetFreezeWatchdog();
     _hudMarkDirty();
     emitCarrotRenderRequest({ force: false, overlayDirty: false, hudDirty: true });
   }
@@ -657,11 +699,71 @@ let RTC_WAIT_TRACK_T = null;
 let RTC_WAIT_FIRST_FRAME_T = null;
 let RTC_WAIT_FIRST_FRAME_PC = null;
 let RTC_FAIL_COUNT = 0;
+
+function rtcOwnershipBlocked() {
+  return Boolean(CARROT_VISION_STATE?.ownership?.blocked);
+}
+
+function rtcSetOwnershipBlocked(blocked, code = "", reason = "vision ownership") {
+  setCarrotVisionState({
+    ownership: {
+      blocked: Boolean(blocked),
+      code: blocked ? String(code || RTC_STREAM_BUSY_CODE) : "",
+    },
+  }, { reason, silent: true });
+}
+
+function rtcPrepareOwnershipRetry(reason = "passive ownership retry") {
+  if (!rtcOwnershipBlocked()) return false;
+  rtcSetOwnershipBlocked(false, "", reason);
+  rtcCancelRetry();
+  rtcCancelRecovery();
+  return true;
+}
+
+async function rtcTakeOwnership(reason = "user takeover action") {
+  rtcPrepareOwnershipRetry(reason);
+  rtcCancelRetry();
+  rtcCancelRecovery();
+  if (!shouldRunCarrotVisionRealtime()) return false;
+  await rtcDisconnect({ keepVideo: true });
+  startCarrotVisionHealthWatch();
+  await rtcConnectOnce({ force: true, takeover: true });
+  return !rtcOwnershipBlocked();
+}
+
+function rtcMarkOwnershipBusy(message = "") {
+  const transaction = RTC_CONNECTION_TRANSACTIONS.current();
+  RTC_CONNECTION_TRANSACTIONS.cancel("vision stream busy", transaction);
+  if (RTC_CONNECTING_TRANSACTION === transaction) RTC_CONNECTING_TRANSACTION = null;
+  _rtcConnecting = false;
+  rtcSetOwnershipBlocked(true, RTC_STREAM_BUSY_CODE, "vision stream busy");
+  rtcCancelRetry();
+  rtcCancelRecovery();
+  rtcDisarmTrackTimeout();
+  rtcDisarmFirstFrameTimeout();
+  const pendingPc = RTC_PENDING_PC;
+  if (pendingPc) rtcClosePeer(pendingPc);
+  stopCarrotVisionHealthWatch();
+  stopRtcPerfPolling();
+  setCarrotVisionPhase(CARROT_VISION_PHASE.BUSY, {
+    reason: "vision stream busy",
+    statusText: getUIText("vision_stream_busy", "Carrot Vision is active on another device."),
+    detailText: "",
+    rtc: { state: "busy", pending: false, liveTrack: false, pcLabel: "none", trackSeen: false },
+    updateRtcStatus: true,
+  });
+  rtcTrace("ownership_busy", { message: String(message || "") });
+}
+
 function rtcHasLiveTrack() {
   const video = getRtcVideoElement();
   const stream = video?.srcObject;
   if (!stream) return false;
-  if (stream.active === false) return false;
+  // MediaStream.active can remain false while ICE/DTLS is still completing and
+  // the newly delivered remote track is muted. Treat the attached, non-ended
+  // track as present so the first-frame timeout owns this handshake window;
+  // otherwise the health poll tears the peer down every two seconds.
   if (typeof stream.getVideoTracks !== "function") return true;
   const tracks = stream.getVideoTracks();
   if (!tracks.length) return true;
@@ -695,9 +797,6 @@ function rtcReportCameraRenderable(renderable) {
     if (!RTC_PC || _rtcConnecting || RTC_PENDING_PC || !rtcConnectionLooksLive(RTC_PC) || !rtcHasLiveTrack()) {
       return;
     }
-    // NOTE: do not reset stallSamples here — a frozen frame is still
-    // "renderable", so resetting on every render would defeat the freeze
-    // watchdog. Progress detection (framesDecoded/currentTime) owns that reset.
     RTC_FREEZE_STATE.everDecodedFrame = true;
     rtcDisarmFirstFrameTimeout(RTC_PC);
     setCarrotVisionPhase(CARROT_VISION_PHASE.READY, {
@@ -717,8 +816,18 @@ function rtcReportCameraRenderable(renderable) {
   }
 }
 
+function rtcReportCameraPresentedFrame() {
+  if (!shouldRunCarrotVisionRealtime() || !RTC_PC || !rtcConnectionLooksLive(RTC_PC)) return;
+  RTC_FREEZE_STATE.lastPresentedFrameMs = Date.now();
+  RTC_FREEZE_STATE.consecutiveRecoveries = 0;
+  RTC_FREEZE_STATE.everDecodedFrame = true;
+  rtcDisarmFirstFrameTimeout(RTC_PC);
+}
+
 function rtcClosePeer(pc) {
   if (!pc) return;
+  try { pc.__carrotFrameSyncChannel.onmessage = null; } catch {}
+  try { pc.__carrotFrameSyncChannel.close(); } catch {}
   try { pc.ontrack = null; } catch {}
   try { pc.onconnectionstatechange = null; } catch {}
   try { pc.oniceconnectionstatechange = null; } catch {}
@@ -740,8 +849,42 @@ function rtcCancelRetry() {
   }
 }
 
+function rtcApplyFrameSyncPacket(data) {
+  const buffer = data instanceof ArrayBuffer
+    ? data
+    : (ArrayBuffer.isView(data) ? data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) : null);
+  if (!buffer || buffer.byteLength !== 12) return;
+  const view = new DataView(buffer);
+  if (view.getUint8(0) !== 0x43 || view.getUint8(1) !== 0x56
+      || view.getUint8(2) !== 0x46 || view.getUint8(3) !== 0x31) return;
+  const frameId = view.getUint32(4, false);
+  const rtpTimestamp = view.getUint32(8, false);
+  window.CarrotVisionFrameSync?.noteRtpFrameMapping?.(rtpTimestamp, frameId);
+}
+
+function rtcHandleFrameSyncMessage(event, pc = null) {
+  const applyPacket = (data) => {
+    if (pc && !rtcPeerTransactionIsCurrent(pc)) return;
+    rtcApplyFrameSyncPacket(data);
+  };
+  if (event?.data instanceof Blob) {
+    event.data.arrayBuffer().then(applyPacket).catch(() => {});
+    return;
+  }
+  applyPacket(event?.data);
+}
+
 async function rtcDisconnect(options = {}) {
   const keepVideo = Boolean(options.keepVideo);
+  const preserveTransaction = options.preserveTransaction || null;
+  if (preserveTransaction && !RTC_CONNECTION_TRANSACTIONS.isCurrent(preserveTransaction)) {
+    return false;
+  }
+  if (!preserveTransaction) {
+    RTC_CONNECTION_TRANSACTIONS.cancel(options.reason || "rtc disconnect");
+    RTC_CONNECTING_TRANSACTION = null;
+    _rtcConnecting = false;
+  }
   rtcCancelRetry();
   rtcDisarmTrackTimeout();
   rtcDisarmFirstFrameTimeout();
@@ -752,6 +895,7 @@ async function rtcDisconnect(options = {}) {
   const pendingPc = RTC_PENDING_PC;
   RTC_PC = null;
   RTC_PENDING_PC = null;
+  window.CarrotVisionFrameSync?.reset?.();
   rtcClosePeer(pendingPc);
   rtcClosePeer(activePc);
   resetRtcPerfState();
@@ -768,6 +912,7 @@ async function rtcDisconnect(options = {}) {
       legacyVideo.srcObject = null;
     }
   }
+  return true;
 }
 
 function rtcConnectionLooksLive(pc = RTC_PC) {
@@ -778,6 +923,7 @@ function rtcConnectionLooksLive(pc = RTC_PC) {
 function rtcCanResumeWithoutReconnect() {
   return Boolean(
     shouldRunCarrotVisionRealtime() &&
+    !rtcOwnershipBlocked() &&
     RTC_PC &&
     !RTC_PENDING_PC &&
     !_rtcConnecting &&
@@ -787,18 +933,22 @@ function rtcCanResumeWithoutReconnect() {
   );
 }
 
-function rtcIsWaitingForInitialTrack(pc = RTC_PC) {
-  return Boolean(RTC_WAIT_TRACK_T && RTC_WAIT_TRACK_PC && RTC_WAIT_TRACK_PC === pc);
-}
-
-function rtcUpdateFreezeSnapshot(snapshot) {
-  RTC_FREEZE_STATE.lastFramesDecoded = snapshot.framesDecoded;
-  RTC_FREEZE_STATE.lastFramesReceived = snapshot.framesReceived;
-  RTC_FREEZE_STATE.lastTotalVideoFrames = snapshot.totalVideoFrames;
-  RTC_FREEZE_STATE.lastCurrentTime = snapshot.currentTime;
+function rtcNudgePlayback(pc, video, reason = "decode stalled while RTP advances") {
+  if (!video?.srcObject || !rtcConnectionLooksLive(pc) || !rtcHasLiveTrack()) return;
+  const now = Date.now();
+  if (now - RTC_FREEZE_STATE.lastPlaybackNudgeAtMs < 2500) return;
+  RTC_FREEZE_STATE.lastPlaybackNudgeAtMs = now;
+  try {
+    video.muted = true;
+    video.playsInline = true;
+    video.play().catch(() => {});
+  } catch {}
+  rtcTrace("playback_nudge", { reason }, pc);
+  requestCarrotVisionRender();
 }
 
 function requestCarrotVisionRecovery(reason, options = {}) {
+  if (rtcOwnershipBlocked()) return false;
   const force = Boolean(options.force);
   const allowConnecting = Boolean(options.allowConnecting);
   const allowPending = Boolean(options.allowPending);
@@ -808,10 +958,10 @@ function requestCarrotVisionRecovery(reason, options = {}) {
 
   RTC_FREEZE_STATE.consecutiveRecoveries++;
   RTC_FREEZE_STATE.lastRecoveredAtMs = now;
-  RTC_FREEZE_STATE.stallSamples = 0;
   const action = options.action || "force-connect";
   const retryMs = Number.isFinite(Number(options.retryMs)) ? Number(options.retryMs) : RTC_RETRY_BASE_MS;
   const targetPc = options.pc || RTC_PENDING_PC || RTC_PC;
+  const targetTransaction = targetPc?.__carrotTransaction || RTC_CONNECTION_TRANSACTIONS.current();
   rtcDisarmFirstFrameTimeout(targetPc);
   const statusText = options.statusText || reason;
   rtcStatusSet(statusText);
@@ -845,10 +995,14 @@ function requestCarrotVisionRecovery(reason, options = {}) {
   RTC_RECOVERY_T = setTimeout(async () => {
     RTC_RECOVERY_T = null;
     if (!shouldRunCarrotVisionRealtime()) return;
+    if (targetTransaction && !RTC_CONNECTION_TRANSACTIONS.isCurrent(targetTransaction)) return;
+    if (targetPc && !rtcPeerTransactionIsCurrent(targetPc)) return;
     if (options.capture !== false) rtcCaptureVideoHoldFrame();
 
     if (action === "retry-pending") {
       if (targetPc && RTC_PENDING_PC === targetPc) rtcClosePeer(targetPc);
+      RTC_CONNECTION_TRANSACTIONS.cancel("retry pending connection", targetTransaction);
+      if (RTC_CONNECTING_TRANSACTION === targetTransaction) RTC_CONNECTING_TRANSACTION = null;
       _rtcConnecting = false;
       rtcScheduleRetry(retryMs);
       return;
@@ -924,100 +1078,6 @@ function rtcRecover(kind, reason, extra = {}) {
   }
 }
 
-function rtcUpdateFreezeWatchdog(pc, video) {
-  if (!shouldRunCarrotVisionRealtime() || !video) {
-    rtcResetFreezeWatchdog();
-    return;
-  }
-
-  if (rtcIsWaitingForInitialTrack(pc)) {
-    rtcResetFreezeWatchdog();
-    return;
-  }
-
-  // PC connected but track dead/muted/inactive → force reconnect
-  if (rtcConnectionLooksLive(pc) && !rtcHasLiveTrack() && video.srcObject) {
-    rtcResetFreezeWatchdog();
-    rtcRecover("track-lost", getUIText("video_track_lost_reconnecting", "Video track lost, reconnecting..."), { pc });
-    return;
-  }
-
-  if (!rtcConnectionLooksLive(pc) || !rtcHasLiveTrack()) {
-    rtcResetFreezeWatchdog();
-    return;
-  }
-
-  const snapshot = {
-    framesDecoded: Number.isFinite(Number(RTC_PERF_STATE.inbound?.framesDecoded)) ? Number(RTC_PERF_STATE.inbound.framesDecoded) : null,
-    framesReceived: Number.isFinite(Number(RTC_PERF_STATE.inbound?.framesReceived)) ? Number(RTC_PERF_STATE.inbound.framesReceived) : null,
-    totalVideoFrames: Number.isFinite(Number(RTC_PERF_STATE.video?.totalVideoFrames)) ? Number(RTC_PERF_STATE.video.totalVideoFrames) : null,
-    currentTime: Number.isFinite(Number(RTC_PERF_STATE.video?.currentTime)) ? Number(RTC_PERF_STATE.video.currentTime) : null,
-  };
-  const readyState = Number.isFinite(Number(RTC_PERF_STATE.video?.readyState)) ? Number(RTC_PERF_STATE.video.readyState) : Number(video.readyState || 0);
-  if (rtcVideoHasRenderableFrame(video)) {
-    rtcDisarmFirstFrameTimeout(pc);
-  }
-
-  if (readyState < 2 || (snapshot.framesDecoded == null && snapshot.totalVideoFrames == null && snapshot.currentTime == null)) {
-    rtcResetFreezeWatchdog();
-    rtcUpdateFreezeSnapshot(snapshot);
-    return;
-  }
-
-  if (RTC_FREEZE_STATE.lastFramesDecoded == null && RTC_FREEZE_STATE.lastTotalVideoFrames == null && RTC_FREEZE_STATE.lastCurrentTime == null) {
-    rtcUpdateFreezeSnapshot(snapshot);
-    RTC_FREEZE_STATE.stallSamples = 0;
-    return;
-  }
-
-  const hasProgress =
-    (snapshot.framesDecoded != null && RTC_FREEZE_STATE.lastFramesDecoded != null && snapshot.framesDecoded > RTC_FREEZE_STATE.lastFramesDecoded) ||
-    (snapshot.totalVideoFrames != null && RTC_FREEZE_STATE.lastTotalVideoFrames != null && snapshot.totalVideoFrames > RTC_FREEZE_STATE.lastTotalVideoFrames) ||
-    (snapshot.currentTime != null && RTC_FREEZE_STATE.lastCurrentTime != null && snapshot.currentTime > RTC_FREEZE_STATE.lastCurrentTime + RTC_FREEZE_CURRENT_TIME_EPSILON);
-  const receivedProgress =
-    snapshot.framesReceived != null &&
-    RTC_FREEZE_STATE.lastFramesReceived != null &&
-    snapshot.framesReceived > RTC_FREEZE_STATE.lastFramesReceived;
-
-  if (hasProgress) {
-    RTC_FREEZE_STATE.stallSamples = 0;
-    RTC_FREEZE_STATE.consecutiveRecoveries = 0;
-    if (!RTC_FREEZE_STATE.everDecodedFrame) {
-      RTC_FREEZE_STATE.everDecodedFrame = true;
-    }
-  } else {
-    RTC_FREEZE_STATE.stallSamples++;
-    rtcTrace("decode_stall_sample", {
-      stallSamples: RTC_FREEZE_STATE.stallSamples,
-      receivedProgress,
-      previous: {
-        framesReceived: RTC_FREEZE_STATE.lastFramesReceived,
-        framesDecoded: RTC_FREEZE_STATE.lastFramesDecoded,
-        totalVideoFrames: RTC_FREEZE_STATE.lastTotalVideoFrames,
-        currentTime: RTC_FREEZE_STATE.lastCurrentTime,
-      },
-      current: snapshot,
-      inbound: RTC_PERF_STATE.inbound,
-      video: RTC_PERF_STATE.video,
-      network: RTC_PERF_STATE.network,
-    }, pc);
-  }
-  rtcUpdateFreezeSnapshot(snapshot);
-
-  const stallLimit = RTC_FREEZE_STATE.everDecodedFrame
-    ? (receivedProgress ? RTC_DECODE_STALL_MAX_SAMPLES : RTC_FREEZE_MAX_STALL_SAMPLES)
-    : RTC_INITIAL_FRAME_MAX_STALL_SAMPLES;
-  if (RTC_FREEZE_STATE.stallSamples >= stallLimit) {
-    rtcRecover(
-      "stall",
-      RTC_FREEZE_STATE.everDecodedFrame
-        ? getUIText("video_stalled_reconnecting", "Video stalled, reconnecting...")
-        : getUIText("no_initial_frame_reconnecting", "No initial frame, reconnecting..."),
-      { pc },
-    );
-  }
-}
-
 function rtcBindVideoEvents() {
   if (RTC_VIDEO_EVENTS_BOUND) return;
   const video = getRtcVideoElement();
@@ -1039,7 +1099,6 @@ function rtcBindVideoEvents() {
   };
 
   video.addEventListener("playing", () => {
-    RTC_FREEZE_STATE.stallSamples = 0;
     RTC_FREEZE_STATE.everDecodedFrame = true;
     rtcDisarmFirstFrameTimeout(RTC_PC);
     rtcClearVideoHold();
@@ -1061,7 +1120,7 @@ function rtcBindVideoEvents() {
 }
 
 function rtcScheduleRetry(ms = RTC_RETRY_BASE_MS) {
-  if (!shouldRunCarrotVisionRealtime()) return;
+  if (!shouldRunCarrotVisionRealtime() || rtcOwnershipBlocked()) return;
   rtcCancelRetry();
   const backoff = Math.min(ms * Math.pow(1.5, RTC_FAIL_COUNT), 30000);
   RTC_FAIL_COUNT = Math.min(RTC_FAIL_COUNT + 1, 20);
@@ -1073,6 +1132,7 @@ function rtcScheduleRetry(ms = RTC_RETRY_BASE_MS) {
 }
 
 function rtcArmTrackTimeout(ms = 5000, expectedPc = RTC_PC) {
+  if (!rtcPeerTransactionIsCurrent(expectedPc)) return;
   if (rtcPcSawTrack(expectedPc)) {
     rtcTrace("track_timeout_arm_skipped", { timeoutMs: ms, reason: "track already seen" }, expectedPc);
     return;
@@ -1081,7 +1141,11 @@ function rtcArmTrackTimeout(ms = 5000, expectedPc = RTC_PC) {
   RTC_WAIT_TRACK_PC = expectedPc;
   RTC_WAIT_TRACK_T = setTimeout(async () => {
     RTC_WAIT_TRACK_T = null;
-    if (RTC_WAIT_TRACK_PC !== expectedPc || (RTC_PC !== expectedPc && RTC_PENDING_PC !== expectedPc)) return;
+    if (
+      RTC_WAIT_TRACK_PC !== expectedPc
+      || !rtcPeerTransactionIsCurrent(expectedPc)
+      || (RTC_PC !== expectedPc && RTC_PENDING_PC !== expectedPc)
+    ) return;
     if (rtcPcSawTrack(expectedPc)) {
       RTC_WAIT_TRACK_PC = null;
       rtcTrace("track_timeout_ignored", { timeoutMs: ms, reason: "track arrived before timeout fired" }, expectedPc);
@@ -1107,12 +1171,17 @@ function rtcDisarmTrackTimeout(expectedPc = null) {
 }
 
 function rtcArmFirstFrameTimeout(ms = RTC_INITIAL_FRAME_TIMEOUT_MS, expectedPc = RTC_PC) {
-  if (!expectedPc) return;
+  if (!expectedPc || !rtcPeerTransactionIsCurrent(expectedPc)) return;
   if (RTC_WAIT_FIRST_FRAME_T) clearTimeout(RTC_WAIT_FIRST_FRAME_T);
   const timeoutMs = Number.isFinite(Number(ms)) ? Number(ms) : RTC_INITIAL_FRAME_TIMEOUT_MS;
   RTC_WAIT_FIRST_FRAME_PC = expectedPc;
   const timer = setTimeout(() => {
-    if (RTC_WAIT_FIRST_FRAME_T !== timer || RTC_WAIT_FIRST_FRAME_PC !== expectedPc || RTC_PC !== expectedPc) return;
+    if (
+      RTC_WAIT_FIRST_FRAME_T !== timer
+      || RTC_WAIT_FIRST_FRAME_PC !== expectedPc
+      || RTC_PC !== expectedPc
+      || !rtcPeerTransactionIsCurrent(expectedPc)
+    ) return;
     RTC_WAIT_FIRST_FRAME_T = null;
     RTC_WAIT_FIRST_FRAME_PC = null;
     if (!shouldRunCarrotVisionRealtime() || _rtcConnecting || RTC_PENDING_PC) return;
@@ -1136,60 +1205,117 @@ function rtcDisarmFirstFrameTimeout(expectedPc = null) {
 }
 
 function rtcScheduleResumeHealthCheck(reason = "returned visible") {
-  rtcCancelResumeCheck();
-  RTC_RESUME_CHECK_T = setTimeout(async () => {
-    RTC_RESUME_CHECK_T = null;
-    if (!shouldRunCarrotVisionRealtime() || _rtcConnecting || RTC_PENDING_PC || !RTC_PC) return;
-    if (!rtcConnectionLooksLive(RTC_PC) || !rtcHasLiveTrack()) {
-      rtcRecover("dead", `${reason}, reconnecting...`, {
-        statusText: getUIText("reconnecting", "Reconnecting..."),
-        rtcState: "resume-health-failed",
-      });
-    }
-  }, RTC_RESUME_PROGRESS_CHECK_MS);
+  if (
+    !shouldRunCarrotVisionRealtime()
+    || _rtcConnecting
+    || RTC_PENDING_PC
+    || !RTC_PC
+    || !rtcPeerTransactionIsCurrent(RTC_PC)
+  ) return;
+  if (!rtcConnectionLooksLive(RTC_PC) || !rtcHasLiveTrack()) {
+    rtcRecover("dead", `${reason}, reconnecting...`, {
+      statusText: getUIText("reconnecting", "Reconnecting..."),
+      rtcState: "resume-health-failed",
+    });
+    return;
+  }
+  const video = getRtcVideoElement();
+  try { video?.play?.().catch(() => {}); } catch {}
+  requestCarrotVisionRender();
 }
 
-async function waitIceComplete(pc, timeoutMs = RTC_ICE_GATHER_TIMEOUT_MS) {
+async function waitIceComplete(pc, timeoutMs = RTC_ICE_GATHER_TIMEOUT_MS, signal = null) {
+  if (signal?.aborted) {
+    throw new RTC_CONNECTION_TRANSACTION_API.AbortError("Carrot Vision ICE gathering was cancelled");
+  }
   if (pc.iceGatheringState === "complete") return;
-  await new Promise((resolve) => {
-    const t = setTimeout(() => {
+  await new Promise((resolve, reject) => {
+    let settled = false;
+    const cleanup = () => {
       pc.removeEventListener("icegatheringstatechange", onchg);
-      resolve();
-    }, timeoutMs);
+      signal?.removeEventListener?.("abort", onabort);
+      clearTimeout(t);
+    };
+    const finish = (callback) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      callback();
+    };
+    const t = setTimeout(() => finish(resolve), timeoutMs);
     function onchg() {
       if (pc.iceGatheringState === "complete") {
-        pc.removeEventListener("icegatheringstatechange", onchg);
-        clearTimeout(t);
-        resolve();
+        finish(resolve);
       }
     }
+    function onabort() {
+      finish(() => reject(new RTC_CONNECTION_TRANSACTION_API.AbortError(
+        "Carrot Vision ICE gathering was cancelled",
+      )));
+    }
     pc.addEventListener("icegatheringstatechange", onchg);
+    signal?.addEventListener?.("abort", onabort, { once: true });
   });
 }
 
-async function fetchWithTimeout(url, options = {}, timeoutMs = RTC_STREAM_FETCH_TIMEOUT_MS) {
+async function fetchWithTimeout(url, options = {}, timeoutMs = RTC_STREAM_FETCH_TIMEOUT_MS, externalSignal = null) {
+  const upstreamSignal = externalSignal || options.signal || null;
+  if (upstreamSignal?.aborted) {
+    throw new RTC_CONNECTION_TRANSACTION_API.AbortError("Carrot Vision stream request was cancelled");
+  }
   if (typeof AbortController === "undefined") {
     return fetch(url, options);
   }
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let timedOut = false;
+  const abortFromUpstream = () => {
+    try { controller.abort(upstreamSignal?.reason); } catch (_) { controller.abort(); }
+  };
+  upstreamSignal?.addEventListener?.("abort", abortFromUpstream, { once: true });
+  const timer = setTimeout(() => {
+    timedOut = true;
+    try { controller.abort(); } catch (_) {}
+  }, timeoutMs);
   try {
     return await fetch(url, { ...options, signal: controller.signal });
+  } catch (error) {
+    if (upstreamSignal?.aborted) {
+      throw new RTC_CONNECTION_TRANSACTION_API.AbortError("Carrot Vision stream request was cancelled");
+    }
+    if (timedOut) {
+      const timeoutError = new Error(`Carrot Vision stream request timed out after ${timeoutMs}ms`);
+      timeoutError.name = "TimeoutError";
+      throw timeoutError;
+    }
+    throw error;
   } finally {
     clearTimeout(timer);
+    upstreamSignal?.removeEventListener?.("abort", abortFromUpstream);
   }
 }
 
 let _rtcConnecting = false;
+let RTC_CONNECTING_TRANSACTION = null;
 
 async function rtcConnectOnce(options = {}) {
   const force = Boolean(options.force);
+  const takeover = options.takeover === true;
   if (!shouldRunCarrotVisionRealtime()) return;
-  if (_rtcConnecting || RTC_PENDING_PC) return;
+  if (rtcOwnershipBlocked() && !takeover) return;
+  if ((_rtcConnecting || RTC_PENDING_PC) && !force) return;
   if (!force && RTC_PC && (RTC_PC.connectionState === "connected" || RTC_PC.connectionState === "connecting") && rtcHasLiveTrack()) return;
 
+  if (takeover) rtcSetOwnershipBlocked(false, "", "vision takeover requested");
+
+  const attemptId = rtcCreateAttemptId();
+  const transaction = RTC_CONNECTION_TRANSACTIONS.begin({
+    attemptId,
+    supersedeReason: force ? "forced connection replacement" : "new connection attempt",
+  });
+  RTC_CONNECTING_TRANSACTION = transaction;
   _rtcConnecting = true;
   let previousPc = RTC_PC;
+  let pc = null;
   try {
     rtcCancelRetry();
     rtcDisarmTrackTimeout();
@@ -1197,18 +1323,24 @@ async function rtcConnectOnce(options = {}) {
     rtcCancelRecovery();
     rtcTrace("connect_start", {
       force,
+      takeover,
+      deviceId: RTC_DEVICE_ID,
+      tabId: RTC_TAB_ID,
+      attemptId,
       hasPreviousPc: Boolean(previousPc),
       hasLiveTrack: rtcHasLiveTrack(),
     }, previousPc || RTC_PC);
 
-    // No standby PC. If a working stream exists, freeze its last frame on the
-    // hold canvas so the view doesn't go black, then tear the old peer down.
-    // webrtcd already runs its own old-session handover (retires the previous
-    // session ~4s after the new one connects), so a client-side standby peer
-    // was redundant double-handover.
+    // No standby PC. Freeze the last frame on the hold canvas, then tear the old
+    // peer down before creating its replacement so recovery never doubles RTP.
     const hadLiveStream = Boolean(previousPc && rtcHasLiveTrack());
     if (hadLiveStream) rtcCaptureVideoHoldFrame();
-    await rtcDisconnect({ keepVideo: true });
+    await rtcDisconnect({
+      keepVideo: true,
+      preserveTransaction: transaction,
+      reason: "replace peer for current connection attempt",
+    });
+    rtcAssertCurrentTransaction(transaction, null, "previous peer disconnect");
     previousPc = null;
     if (hadLiveStream) {
       rtcStatusSet(getUIText("reconnecting", "Reconnecting..."));
@@ -1226,7 +1358,7 @@ async function rtcConnectOnce(options = {}) {
       });
     }
 
-    const pc = new RTCPeerConnection({
+    pc = new RTCPeerConnection({
       iceServers: [],
       sdpSemantics: "unified-plan",
       iceCandidatePoolSize: 1,
@@ -1234,6 +1366,9 @@ async function rtcConnectOnce(options = {}) {
     rtcPcLabel(pc);
     pc.__carrotTrackSeen = false;
     pc.__carrotCreatedAtMs = Date.now();
+    pc.__carrotAttemptId = attemptId;
+    pc.__carrotRtcGeneration = transaction.generation;
+    pc.__carrotTransaction = transaction;
     RTC_PENDING_PC = pc;
     setCarrotVisionPhase(CARROT_VISION_PHASE.RTC_CONNECTING, {
       reason: "rtc peer created",
@@ -1251,10 +1386,21 @@ async function rtcConnectOnce(options = {}) {
       video.playsInline = true;
     }
 
+    // teleoprtc uses the "data" label for the offer-side channel. Carrot Vision
+    // carries only a 12-byte RTP timestamp/source-frame mapping on it; state
+    // remains on the single Compact WebSocket.
+    const frameSyncChannel = pc.createDataChannel("data", {
+      ordered: false,
+      maxRetransmits: 0,
+    });
+    frameSyncChannel.binaryType = "arraybuffer";
+    frameSyncChannel.onmessage = (event) => rtcHandleFrameSyncMessage(event, pc);
+    pc.__carrotFrameSyncChannel = frameSyncChannel;
+
     pc.addTransceiver("video", { direction: "recvonly" });
 
     pc.ontrack = async (ev) => {
-      if (RTC_PENDING_PC !== pc) return;
+      if (RTC_PENDING_PC !== pc || !rtcPeerTransactionIsCurrent(pc)) return;
       const videoEl = getRtcVideoElement();
       if (!videoEl) return;
       rtcTrace("track_received", {
@@ -1276,6 +1422,7 @@ async function rtcConnectOnce(options = {}) {
       videoEl.srcObject = stream;
       RTC_PENDING_PC = null;
       RTC_PC = pc;
+      RTC_CONNECTION_TRANSACTIONS.markActive(transaction);
       rtcStatusSet("track: " + ev.track.kind);
       rtcDisarmTrackTimeout(pc);
       rtcArmFirstFrameTimeout(RTC_INITIAL_FRAME_TIMEOUT_MS, pc);
@@ -1288,6 +1435,7 @@ async function rtcConnectOnce(options = {}) {
       videoEl.play().catch((e) => console.log("[RTC] play() failed", e));
 
       ev.track.addEventListener("unmute", () => {
+        if (RTC_PC !== pc || !rtcPeerTransactionIsCurrent(pc)) return;
         videoEl.play().catch(() => {});
         collectRtcPerfStats().catch(() => {});
         rtcArmFirstFrameTimeout(RTC_INITIAL_FRAME_TIMEOUT_MS, pc);
@@ -1301,6 +1449,7 @@ async function rtcConnectOnce(options = {}) {
 
       // Detect server-side track close → immediate recovery (guarded by PC identity)
       ev.track.addEventListener("ended", () => {
+        if (!rtcPeerTransactionIsCurrent(pc)) return;
         rtcTrace("track_ended", {
           kind: ev.track?.kind || null,
           trackReadyState: ev.track?.readyState || null,
@@ -1313,6 +1462,7 @@ async function rtcConnectOnce(options = {}) {
     };
 
     pc.onconnectionstatechange = () => {
+      if (!rtcPeerTransactionIsCurrent(pc)) return;
       const isPending = RTC_PENDING_PC === pc;
       const isActive = RTC_PC === pc;
       if (!isPending && !isActive) return;
@@ -1333,11 +1483,13 @@ async function rtcConnectOnce(options = {}) {
         collectRtcPerfStats().catch(() => {});
       }
       if (state === "failed" || state === "closed") {
+        window.CarrotVisionNetworkRecovery?.reportTransportFailure?.(`rtc connection ${state}`);
         rtcRecover("dead", `rtc connection ${state}`, { pc, rtcState: state });
       }
     };
 
     pc.oniceconnectionstatechange = () => {
+      if (!rtcPeerTransactionIsCurrent(pc)) return;
       const isPending = RTC_PENDING_PC === pc;
       const isActive = RTC_PC === pc;
       if (!isPending && !isActive) return;
@@ -1352,13 +1504,17 @@ async function rtcConnectOnce(options = {}) {
         collectRtcPerfStats().catch(() => {});
       }
       if (state === "failed" || state === "closed") {
+        window.CarrotVisionNetworkRecovery?.reportTransportFailure?.(`rtc ice ${state}`);
         rtcRecover("dead", `rtc ice ${state}`, { pc, rtcState: `ice-${state}` });
       }
     };
 
     const offer = await pc.createOffer();
+    rtcAssertCurrentTransaction(transaction, pc, "offer creation");
     await pc.setLocalDescription(offer);
-    await waitIceComplete(pc, RTC_ICE_GATHER_TIMEOUT_MS);
+    rtcAssertCurrentTransaction(transaction, pc, "local description");
+    await waitIceComplete(pc, RTC_ICE_GATHER_TIMEOUT_MS, transaction.signal);
+    rtcAssertCurrentTransaction(transaction, pc, "ICE gathering");
     rtcTrace("offer_ready", {
       localSdpBytes: pc.localDescription?.sdp?.length || 0,
     }, pc);
@@ -1368,48 +1524,93 @@ async function rtcConnectOnce(options = {}) {
       cameras: ["road"],
       bridge_services_in: [],
       bridge_services_out: [],
+      client_id: RTC_CLIENT_ID,
+      device_id: RTC_DEVICE_ID,
+      tab_id: RTC_TAB_ID,
+      attempt_id: attemptId,
+      takeover,
+      carrot_state: true,
     };
 
     const response = await fetchWithTimeout("/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
-    }, RTC_STREAM_FETCH_TIMEOUT_MS);
+    }, RTC_STREAM_FETCH_TIMEOUT_MS, transaction.signal);
+    rtcAssertCurrentTransaction(transaction, pc, "stream response");
 
+    const responseText = await response.text().catch(() => "");
+    rtcAssertCurrentTransaction(transaction, pc, "stream response body");
+    let responsePayload = null;
+    try {
+      responsePayload = responseText ? JSON.parse(responseText) : null;
+    } catch (_) {}
     if (!response.ok) {
-      const text = await response.text().catch(() => "");
-      throw new Error("stream http " + response.status + " " + text);
+      if (response.status === 409 && responsePayload?.code === RTC_STREAM_BUSY_CODE) {
+        throw new CarrotVisionStreamBusyError(responsePayload?.error || responseText);
+      }
+      throw new Error("stream http " + response.status + " " + responseText);
     }
 
-    const answer = await response.json();
+    rtcSetOwnershipBlocked(false, "", "vision stream accepted");
+    const answer = responsePayload;
     if (!answer || !answer.sdp) throw new Error("bad answer");
+    if (answer.attempt_id && String(answer.attempt_id) !== transaction.attemptId) {
+      const mismatchError = new Error("Carrot Vision stream answer belongs to an older attempt");
+      mismatchError.code = "vision-answer-attempt-mismatch";
+      throw mismatchError;
+    }
     rtcTrace("answer_received", {
       remoteSdpBytes: answer.sdp?.length || 0,
       answerType: answer.type || "answer",
     }, pc);
 
     await pc.setRemoteDescription({ type: answer.type || "answer", sdp: answer.sdp });
+    rtcAssertCurrentTransaction(transaction, pc, "remote description");
     rtcTrace("answer_applied", {}, pc);
-    rtcStatusSet(getUIText("connected_waiting_track", "Connected, waiting track..."));
-    setCarrotVisionPhase(CARROT_VISION_PHASE.TRACK_WAITING, {
-      reason: "rtc answer applied",
-      rtc: { state: "track-waiting", pending: true, pcLabel: rtcPcLabel(pc), trackSeen: false, liveTrack: false },
-      updateRtcStatus: false,
-    });
-    rtcArmTrackTimeout(RTC_INITIAL_TRACK_TIMEOUT_MS, pc);
+    if (!rtcPcSawTrack(pc)) {
+      rtcStatusSet(getUIText("connected_waiting_track", "Connected, waiting track..."));
+      setCarrotVisionPhase(CARROT_VISION_PHASE.TRACK_WAITING, {
+        reason: "rtc answer applied",
+        rtc: { state: "track-waiting", pending: true, pcLabel: rtcPcLabel(pc), trackSeen: false, liveTrack: false },
+        updateRtcStatus: false,
+      });
+      rtcArmTrackTimeout(RTC_INITIAL_TRACK_TIMEOUT_MS, pc);
+    }
   } catch (e) {
+    if (!RTC_CONNECTION_TRANSACTIONS.isCurrent(transaction) || rtcIsConnectionAbort(e)) {
+      RTC_CONNECTION_TRANSACTIONS.cancel("connection attempt aborted", transaction);
+      rtcTrace("connect_aborted", {
+        message: e?.message || String(e),
+        generation: transaction.generation,
+        attemptId: transaction.attemptId,
+      }, pc || previousPc);
+      rtcClosePeer(pc);
+      return;
+    }
+    if (e instanceof CarrotVisionStreamBusyError || e?.code === RTC_STREAM_BUSY_CODE) {
+      rtcMarkOwnershipBusy(e?.message || "");
+      return;
+    }
     rtcTrace("connect_error", {
       message: e?.message || String(e),
-    }, RTC_PENDING_PC || previousPc || RTC_PC);
+    }, pc || RTC_PENDING_PC || previousPc || RTC_PC);
+    window.CarrotVisionNetworkRecovery?.reportTransportFailure?.(
+      e?.message || "rtc connection error",
+    );
     rtcStatusSet("error: " + e.message);
-    rtcRecover("dead", e?.message || "rtc connect error", { pc: RTC_PENDING_PC || RTC_PC, rtcState: "error" });
+    rtcRecover("dead", e?.message || "rtc connect error", { pc: pc || RTC_PENDING_PC || RTC_PC, rtcState: "error" });
   } finally {
-    _rtcConnecting = false;
+    if (RTC_CONNECTING_TRANSACTION === transaction) {
+      RTC_CONNECTING_TRANSACTION = null;
+      _rtcConnecting = false;
+    }
+    if (!RTC_CONNECTION_TRANSACTIONS.isCurrent(transaction)) rtcClosePeer(pc);
   }
 }
 
 function startCarrotVisionHealthWatch() {
-  if (CARROT_VISION_HEALTH_T) return;
+  if (CARROT_VISION_HEALTH_T || rtcOwnershipBlocked()) return;
   CARROT_VISION_HEALTH_T = setInterval(checkCarrotVisionHealth, CARROT_VISION_HEALTH_POLL_MS);
 }
 
@@ -1420,19 +1621,9 @@ function stopCarrotVisionHealthWatch() {
 }
 
 function checkCarrotVisionHealth() {
-  if (!shouldRunCarrotVisionRealtime()) {
+  if (!shouldRunCarrotVisionRealtime() || rtcOwnershipBlocked()) {
     stopCarrotVisionHealthWatch();
     return;
-  }
-
-  const pendingPc = RTC_PENDING_PC;
-  if (pendingPc) {
-    const createdAt = Number(pendingPc.__carrotCreatedAtMs || 0);
-    if (createdAt > 0 && Date.now() - createdAt > RTC_PENDING_STALE_MS) {
-      console.warn("[RTC] pending peer stale, forcing retry", rtcBuildTraceSnapshot(pendingPc));
-      rtcRecover("establishing", "rtc pending stale", { pc: pendingPc, rtcState: "pending-stale", retryMs: 0 });
-      return;
-    }
   }
 
   if (_rtcConnecting || RTC_PENDING_PC) return;
@@ -1443,11 +1634,22 @@ function checkCarrotVisionHealth() {
     });
     return;
   }
+  const lastFrameAt = Number(RTC_FREEZE_STATE.lastPresentedFrameMs || 0);
+  if (lastFrameAt <= 0) return;
+  const frameAgeMs = Date.now() - lastFrameAt;
+  if (frameAgeMs >= RTC_FRAME_STALL_RECONNECT_MS) {
+    rtcRecover("stall", getUIText("video_stalled_reconnecting", "Video stalled, reconnecting..."), { pc: RTC_PC });
+  } else if (frameAgeMs >= RTC_FRAME_STALL_NUDGE_MS) {
+    rtcNudgePlayback(RTC_PC, getRtcVideoElement(), "no presented frame");
+  }
 }
 
 
 function rtcShouldConnect() {
-  return shouldRunCarrotVisionRealtime() && !_rtcConnecting && (!RTC_PC || !rtcHasLiveTrack());
+  return shouldRunCarrotVisionRealtime()
+    && !rtcOwnershipBlocked()
+    && !_rtcConnecting
+    && (!RTC_PC || !rtcHasLiveTrack());
 }
 
 function rtcResetFailCount() {
@@ -1489,9 +1691,14 @@ window.CarrotVisionRtc = {
   disarmFirstFrameTimeout: rtcDisarmFirstFrameTimeout,
   exitPictureInPicture: rtcExitPictureInPicture,
   getVideoElement: getRtcVideoElement,
+  hasCompactState: () => Boolean(window.CarrotVisionRaw?.hasCompactState?.()),
   hasLiveTrack: rtcHasLiveTrack,
   handleVisibilityChange: rtcHandleVisibilityChange,
   reportCameraRenderable: rtcReportCameraRenderable,
+  reportPresentedFrame: rtcReportCameraPresentedFrame,
+  prepareOwnershipRetry: rtcPrepareOwnershipRetry,
+  takeOwnership: rtcTakeOwnership,
+  ownershipBlocked: rtcOwnershipBlocked,
   rawStatsHistory: () => RTC_RAW_STATS_HISTORY.slice(-RTC_RAW_STATS_HISTORY_MAX),
   resetFailCount: rtcResetFailCount,
   scheduleResumeIfConnected: rtcScheduleResumeIfConnected,
@@ -1521,7 +1728,10 @@ Object.assign(window, {
   rtcExitPictureInPicture,
   rtcHandleVisibilityChange,
   rtcHasLiveTrack,
+  rtcOwnershipBlocked,
   rtcRawStatsHistory: () => RTC_RAW_STATS_HISTORY.slice(-RTC_RAW_STATS_HISTORY_MAX),
+  rtcPrepareOwnershipRetry,
+  rtcTakeOwnership,
   rtcResetFailCount,
   rtcScheduleResumeIfConnected,
   rtcShouldConnect,

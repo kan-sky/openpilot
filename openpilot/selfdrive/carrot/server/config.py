@@ -12,7 +12,8 @@ ASSETS_DIR = os.path.join(WEB_DIR, "assets")
 PAGES_DIR = os.path.join(WEB_DIR, "pages")
 TRAINING_ASSETS_DIR = os.path.join(os.path.dirname(ROOT_DIR), "assets", "training")
 OFFROAD_ASSETS_DIR = os.path.join(os.path.dirname(ROOT_DIR), "assets", "offroad")
-SOUND_ASSETS_DIR = os.path.join(os.path.dirname(ROOT_DIR), "assets")
+SELFDRIVE_ASSETS_DIR = os.path.join(os.path.dirname(ROOT_DIR), "assets")
+SOUND_ASSETS_DIR = SELFDRIVE_ASSETS_DIR
 
 # Settings file
 DEFAULT_SETTINGS_PATH = os.environ.get(
@@ -33,8 +34,12 @@ CARROT_LEGACY_STATE_DIR = "/data/openpilot/openpilot/selfdrive/carrot/data/state
 CARROT_GIT_STATE_PATH = os.path.join(CARROT_STATE_DIR, "git.json")
 CARROT_TOOL_JOBS_STATE_PATH = os.path.join(CARROT_STATE_DIR, "tool_jobs.json")
 CARROT_WEB_SETTINGS_PATH = os.path.join(CARROT_STATE_DIR, "web_settings.json")
+CARROT_DASHCAM_READ_STATE_PATH = os.path.join(CARROT_STATE_DIR, "dashcam_read_state.json")
 CARROT_SETTING_FAVORITES_PATH = os.path.join(CARROT_STATE_DIR, "setting_favorites.json")
 CARROT_SETTING_PROFILES_PATH = os.path.join(CARROT_STATE_DIR, "setting_profiles.json")
+CARROT_PARAM_CHANGES_PATH = os.path.join(CARROT_STATE_DIR, "param_changes.jsonl")
+CARROT_SETTING_UNIT_INDEX_PATH = os.path.join(CARROT_STATE_DIR, "setting_unit_index.json")
+CARROT_FINGERPRINT_BASELINE_PATH = os.path.join(CARROT_STATE_DIR, "fingerprint_baseline.json")
 CARROT_YOUTUBE_LIVE_STATE_PATH = os.path.join(CARROT_STATE_DIR, "youtube_live.json")
 CARROT_YOUTUBE_LIVE_SECRET_PATH = os.path.join(CARROT_STATE_DIR, "youtube_live_secret.json")
 

@@ -11,7 +11,7 @@
 #include <stdexcept>
 #include <unistd.h>
 
-#include "third_party/json11/json11.hpp"
+#include "json11/json11.hpp"
 
 namespace fs = std::filesystem;
 
@@ -189,7 +189,7 @@ PythonEvalResult evaluate_custom_python_series(const AppSession &session,
 
     const CommandResult process = run_process_capture_output({
       "python3",
-      (repo_root() / "tools" / "jotpluggler" / "math_eval.py").string(),
+      (repo_root() / "openpilot" / "tools" / "jotpluggler" / "math_eval.py").string(),
       manifest_path.string(),
       globals_path.string(),
       code_path.string(),
@@ -292,7 +292,7 @@ void draw_custom_series_help_popup(CustomSeriesEditorState *editor) {
     ImGui::OpenPopup("Custom Series Help");
     editor->open_help = false;
   }
-  if (!ImGui::BeginPopupModal("Custom Series Help", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+  if (!app_begin_popup_modal("Custom Series Help")) {
     return;
   }
   ImGui::TextUnformatted("Available variables");

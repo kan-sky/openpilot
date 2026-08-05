@@ -84,6 +84,21 @@ class DebugPlotSnapshot:
 
 
 @dataclass(frozen=True, slots=True)
+class TripReportState:
+    duration_s: float = 0.0
+    moving_time_s: float = 0.0
+    distance_m: float = 0.0
+    average_speed_kph: float = 0.0
+    max_speed_kph: float = 0.0
+    max_accel_mps2: float = 0.0
+    max_decel_mps2: float = 0.0
+    auto_ratio_percent: float = 0.0
+    hard_accel_count: int = 0
+    hard_brake_count: int = 0
+    hard_corner_count: int = 0
+
+
+@dataclass(frozen=True, slots=True)
 class NaviItemMeta:
     sequence: int
     source_timestamp_ms: int
@@ -135,6 +150,9 @@ class NaviSpeedInfo:
     sdi_type: int | None = None
     sdi_distance_m: int | None = None
     sdi_speed_limit_kph: int | None = None
+    secondary_sdi_type: int | None = None
+    secondary_sdi_distance_m: int | None = None
+    secondary_sdi_speed_limit_kph: int | None = None
     section_active: bool = False
     section_speed_limit_kph: int | None = None
     section_average_kph: float | None = None
@@ -232,6 +250,9 @@ class NaviMediaFrame:
     height: int = 0
     data: bytes | None = None
     reason: str | None = None
+    plane_data: tuple[bytes, bytes, bytes] | None = None
+    plane_strides: tuple[int, int, int] | None = None
+    hardware_buffer: object | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -332,6 +353,15 @@ class TpmsInfo:
 
 
 @dataclass(frozen=True, slots=True)
+class ClusterAlert:
+    text1: str
+    text2: str = ""
+    size: int = 0
+    status: int = 0
+    alert_type: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class ClusterUiState:
     speed_kph: float
     accel_mps2: float
@@ -362,6 +392,7 @@ class ClusterUiState:
     surround_view_active: bool
     lanes: tuple[LaneMarking, ...]
     onroad: bool = False
+    active_lane_line: bool | None = None
     camera_view_mode: int = 0
     extra_left_lane_visible: bool = False
     extra_right_lane_visible: bool = False
@@ -384,6 +415,7 @@ class ClusterUiState:
     route_overlay: RouteOverlay | None = None
     live_debug: LiveDebugInfo | None = None
     debug_plot: DebugPlotSnapshot | None = None
+    trip_report: TripReportState | None = None
     navi_debug: NaviDebugInfo | None = None
     navi_live: NaviLiveState | None = None
     navi_dashboard: NaviDashboardState | None = None
@@ -449,9 +481,14 @@ class ClusterUiState:
     lateral_plan_curvature_rates: tuple[float, ...] = ()
     display_speed_kph: float | None = None
     traffic_state: int = 0
+    driving_mode: int | None = None
     git_status: GitBranchStatus | None = None
     actual_fps: float | None = None
     cluster_core_usage_text: str | None = None
+    cpu_usage_percent: float | None = None
+    cpu_temp_c: float | None = None
+    memory_used_percent: float | None = None
+    disk_used_percent: float | None = None
     network_address: str | None = None
     network_connected: bool = False
     external_nav_active: bool = False
@@ -461,9 +498,14 @@ class ClusterUiState:
     fuel_gauge: float | None = None
     energy_gauge_label: Literal["fuel", "battery"] = "fuel"
     urea_gauge: float | None = None
+    ev_mode_valid: bool = False
+    ev_mode_active: bool = False
     cruise_override_kph: float | None = None
     cruise_override_label: str | None = None
     cruise_override_color_mode: int = 0
+    recorded_cutin_active: bool = False
+    recorded_cutin_sound: bool = False
+    alert: ClusterAlert | None = None
 
 
 @dataclass(frozen=True, slots=True)

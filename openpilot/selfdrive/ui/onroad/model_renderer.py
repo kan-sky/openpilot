@@ -1,6 +1,5 @@
 import math
 import colorsys
-import time
 import numpy as np
 import pyray as rl
 from openpilot.cereal import messaging, car, log
@@ -11,12 +10,13 @@ from openpilot.selfdrive.locationd.calibrationd import HEIGHT_INIT
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.application import gui_app, FontWeight
 from openpilot.system.ui.lib.text_draw import draw_text_ui_style
-from openpilot.system.ui.lib.shader_polygon import draw_polygon, Gradient
+from openpilot.system.ui.lib.shader_polygon import draw_polygon, draw_polygon_solid, Gradient
 from openpilot.system.ui.widgets import Widget
 
 CLIP_MARGIN = 500
 MIN_DRAW_DISTANCE = 10.0
 MAX_DRAW_DISTANCE = 100.0
+CARROT_PARAM_REFRESH_INTERVAL = 1.0
 
 LaneChangeState = log.LaneChangeState
 
@@ -59,7 +59,8 @@ class RadarLeadInfo:
   radar: bool = False
   model_prob: float = 0.0
   has_future_point: bool = False
-  
+
+
 class ModelRenderer(Widget):
   def __init__(self):
     super().__init__()
@@ -125,33 +126,26 @@ class ModelRenderer(Widget):
       self._longitudinal_control = sm['carParams'].openpilotLongitudinalControl
 
     model = sm['modelV2']
-    radar_state = sm['radarState'] if sm.valid['radarState'] else None
-    lead_one = radar_state.leadOne if radar_state else None
-    render_lead_indicator = self._longitudinal_control and radar_state is not None
+    if sm.updated['modelV2']:
+      self._update_raw_points(model)
 
-    # Update model data when needed
-    model_updated = sm.updated['modelV2']
-    if model_updated or sm.updated['radarState'] or self._transform_dirty:
-      if model_updated:
-        self._update_raw_points(model)
+    if self._path.raw_points.shape[0] == 0:
+      return
 
-      path_x_array = self._path.raw_points[:, 0]
-      if path_x_array.size == 0:
-        return
+    # The Carrot renderers below rebuild all projected geometry they consume.
+    # The legacy _update_model/_update_leads results only feed the disabled draw
+    # calls, and _draw_path_carrot immediately replaces path.projected_points.
+    self._transform_dirty = False
 
-      self._update_model(lead_one, path_x_array)
-      if render_lead_indicator:
-        self._update_leads(radar_state, path_x_array)
-      self._transform_dirty = False
+    # Legacy renderers are intentionally disabled. Restore their update pipeline
+    # together with these draw calls if they are ever enabled again.
+    # self._draw_lane_lines()
+    # self._draw_path(sm)
+    # self._draw_lead_indicator()
+    self._draw_carrot_overlays(sm)
 
-    # Draw elements
-    #self._draw_lane_lines()
-    #self._draw_path(sm)
-
-    #if render_lead_indicator and radar_state:
-    #  self._draw_lead_indicator()
+  def _draw_carrot_overlays(self, sm) -> None:
     self._draw_path_carrot(sm)
-    self._draw_lane_center_indicator_carrot(sm)
     self._draw_lane_lines_carrot(sm)
     self._draw_blind_spot_carrot(sm)
     self._draw_radar_info_carrot(sm)
@@ -463,8 +457,8 @@ class ModelRenderer(Widget):
 
 
   def _init_carrot(self):
+    self._carrot_params_next_refresh_time = 0.0
     self._carrot_show_lane_info = 1
-    self._carrot_tire_trajectory = False
     self._carrot_show_radar_info = 0
     self._carrot_radar_lat_factor = 0.5
 
@@ -480,6 +474,7 @@ class ModelRenderer(Widget):
     self._carrot_active_lane_line = False
     self._carrot_long_active = False
     self._carrot_use_lane_line_speed_apply = 0
+    self._carrot_tire_trajectory = 0
 
     self._carrot_path_draw_seq = 0.0
     self._carrot_pos_t = 0.0
@@ -532,9 +527,11 @@ class ModelRenderer(Widget):
     ]
 
 
-  def _refresh_carrot_params(self):
+  def _refresh_carrot_params(self, now: float):
+    if now < self._carrot_params_next_refresh_time:
+      return
+
     self._carrot_show_lane_info = ui_state.params.get_int("ShowLaneInfo")
-    self._carrot_tire_trajectory = ui_state.params.get_bool("CarrotTireTrajectory")
     self._carrot_show_radar_info = ui_state.params.get_int("ShowRadarInfo")
     self._carrot_radar_lat_factor = 0.5
 
@@ -543,6 +540,8 @@ class ModelRenderer(Widget):
     self._carrot_show_path_mode_lane = ui_state.params.get_int("ShowPathModeLane")
     self._carrot_show_path_color_lane = ui_state.params.get_int("ShowPathColorLane")
     self._carrot_show_path_color_cruise_off = ui_state.params.get_int("ShowPathColorCruiseOff")
+    self._carrot_tire_trajectory = ui_state.params.get_int("CarrotTireTrajectory")
+    self._carrot_params_next_refresh_time = now + CARROT_PARAM_REFRESH_INTERVAL
 
 
   def _carrot_interp(self, x: float, xp, fp) -> float:
@@ -657,7 +656,7 @@ class ModelRenderer(Widget):
 
   def _draw_quad_fill_carrot(self, p0, p1, p2, p3, color: rl.Color):
     pts = np.array([p0, p1, p2, p3], dtype=np.float32)
-    draw_polygon(self._rect, pts, color)
+    draw_polygon_solid(pts, color)
 
   def _draw_two_quads_from_6pts_carrot(self, x, y, fill_color: rl.Color, brake_valid: bool, color_idx: int):
     pts = np.array(list(zip(x, y)), dtype=np.float32)
@@ -667,8 +666,8 @@ class ModelRenderer(Widget):
     left_pts = np.array([pts[0], pts[1], pts[2], pts[5]], dtype=np.float32)
     right_pts = np.array([pts[5], pts[2], pts[3], pts[4]], dtype=np.float32)
 
-    draw_polygon(self._rect, left_pts, fill_color)
-    draw_polygon(self._rect, right_pts, fill_color)
+    draw_polygon_solid(left_pts, fill_color)
+    draw_polygon_solid(right_pts, fill_color)
 
     if color_idx >= 10 or brake_valid:
       self._draw_polygon_outline_carrot(
@@ -678,7 +677,12 @@ class ModelRenderer(Widget):
       )
 
   def _draw_polygon_from_xy_carrot(self, xs, ys, fill_color: rl.Color, brake_valid: bool, color_idx: int):
-    pts = np.array(list(zip(xs, ys)), dtype=np.float32)
+    pts = np.column_stack((xs, ys)).astype(np.float32, copy=False)
+    self._draw_polygon_points_carrot(pts, fill_color, brake_valid, color_idx)
+
+
+  def _draw_polygon_points_carrot(self, pts: np.ndarray, fill_color: rl.Color, brake_valid: bool, color_idx: int):
+    pts = np.asarray(pts, dtype=np.float32)
 
     if pts.shape[0] >= 2:
       keep = [0]
@@ -694,7 +698,7 @@ class ModelRenderer(Widget):
     if pts.shape[0] < 3:
       return
 
-    draw_polygon(self._rect, pts, fill_color)
+    draw_polygon_solid(pts, fill_color)
 
     if color_idx >= 10 or brake_valid:
       self._draw_polygon_outline_carrot(
@@ -906,225 +910,62 @@ class ModelRenderer(Widget):
       )
 
 
-  @staticmethod
-  def _lane_center_gradient_color_carrot(danger_ratio: float, alpha: int = 255) -> rl.Color:
-    if danger_ratio <= 0.10:
-      red, green = 0.0, 180.0
-    elif danger_ratio <= 0.60:
-      factor = (danger_ratio - 0.10) / 0.50
-      red, green = factor * 255.0, 180.0
-    elif danger_ratio <= 1.00:
-      factor = (danger_ratio - 0.60) / 0.40
-      red, green = 255.0, 180.0 - factor * 180.0
-    else:
-      red, green = 255.0, 0.0
-    return rl.Color(int(red), int(green), 0, alpha)
-
-
-  def _draw_tire_edge_band_carrot(
-    self,
-    left_points: np.ndarray,
-    right_points: np.ndarray,
-    is_left: bool,
-    color: rl.Color,
-  ) -> None:
-    n_edge = min(len(left_points), len(right_points))
-    if n_edge < 2 or self._rect.width <= 0 or self._rect.height <= 0:
-      return
-
-    # Keep C3's 5 px subdivision and edge fade, but submit the whole side as
-    # one rlgl batch. The previous path allocated a Gradient and NumPy array
-    # and entered/exited the shader once for every tiny quad.
-    rl.rl_disable_texture()
-    rl.rl_begin(rl.RL_QUADS)
-    try:
-      for i in range(n_edge - 1):
-        lx0, ly0 = map(float, left_points[i])
-        rx0, ry0 = map(float, right_points[i])
-        lx1, ly1 = map(float, left_points[i + 1])
-        rx1, ry1 = map(float, right_points[i + 1])
-        outer_y0 = ly0 if is_left else ry0
-        outer_y1 = ly1 if is_left else ry1
-        subdivisions = max(1, int(abs(outer_y1 - outer_y0) / 5.0))
-
-        for subdivision in range(subdivisions):
-          t0 = subdivision / subdivisions
-          t1 = (subdivision + 1) / subdivisions
-          slx_b = lx0 + (lx1 - lx0) * t0
-          sly_b = ly0 + (ly1 - ly0) * t0
-          srx_b = rx0 + (rx1 - rx0) * t0
-          sry_b = ry0 + (ry1 - ry0) * t0
-          slx_t = lx0 + (lx1 - lx0) * t1
-          sly_t = ly0 + (ly1 - ly0) * t1
-          srx_t = rx0 + (rx1 - rx0) * t1
-          sry_t = ry0 + (ry1 - ry0) * t1
-
-          band_width_bottom = abs(slx_b - srx_b) / 6.0
-          band_width_top = abs(slx_t - srx_t) / 6.0
-          outer_x_bottom = slx_b if is_left else srx_b
-          outer_y_bottom = sly_b if is_left else sry_b
-          outer_x_top = slx_t if is_left else srx_t
-          outer_y_top = sly_t if is_left else sry_t
-          center_bottom = (slx_b + srx_b) * 0.5
-          direction = 1.0 if center_bottom > outer_x_bottom else -1.0
-          inner_x_bottom = outer_x_bottom + direction * band_width_bottom
-          inner_x_top = outer_x_top + direction * band_width_top
-
-          if math.hypot(outer_x_top - outer_x_bottom, outer_y_top - outer_y_bottom) < 0.5:
-            continue
-
-          rl.rl_color4ub(color.r, color.g, color.b, color.a)
-          rl.rl_vertex2f(outer_x_bottom, outer_y_bottom)
-          rl.rl_color4ub(color.r, color.g, color.b, 0)
-          rl.rl_vertex2f(inner_x_bottom, outer_y_bottom)
-          rl.rl_color4ub(color.r, color.g, color.b, 0)
-          rl.rl_vertex2f(inner_x_top, outer_y_top)
-          rl.rl_color4ub(color.r, color.g, color.b, color.a)
-          rl.rl_vertex2f(outer_x_top, outer_y_top)
-    finally:
-      rl.rl_end()
-
-
-  def _draw_lane_center_indicator_carrot(self, sm) -> None:
-    if not self._carrot_tire_trajectory or not sm.alive['modelV2'] or not sm.valid['modelV2']:
-      return
-
-    model = sm['modelV2']
-    lane_lines = model.laneLines
-    lane_line_probs = model.laneLineProbs
-    if len(lane_lines) < 3 or len(lane_line_probs) < 3 or len(lane_lines[1].y) == 0 or len(lane_lines[2].y) == 0:
-      return
-
-    left_m = float(lane_lines[1].y[0])
-    right_m = -float(lane_lines[2].y[0])
-    if lane_line_probs[1] < 0.3 and lane_line_probs[2] > 0.3:
-      left_m = 3.0 - right_m
-    elif lane_line_probs[2] < 0.3 and lane_line_probs[1] > 0.3:
-      right_m = 3.0 - left_m
-
-    total_width = left_m + right_m
-    if total_width < 0.5:
-      total_width = 3.0
-    offset_m = (left_m - right_m) / 2.0
-    limit_offset = max(total_width / 2.0 - 0.9, 0.1)
-    danger_ratio = abs(offset_m) / limit_offset
-    direction_label = "L" if offset_m > 0.02 else ("R" if offset_m < -0.02 else "C")
-    distance_text = f"{abs(offset_m):.2f}"
-
-    position = self._path.raw_points
-    if position.shape[0] == 0:
-      return
-    max_distance = 40.0
-    if len(model.leadsV3) > 0:
-      lead = model.leadsV3[0]
-      if lead.prob > 0.5 and len(lead.x) > 0 and 3.0 < lead.x[0] < max_distance:
-        max_distance = float(lead.x[0])
-    max_idx = self._get_path_length_idx(position[:, 0], max_distance)
-    if max_idx < 5:
-      return
-
-    left_points = []
-    right_points = []
-    for i in range(max_idx + 1):
-      path_x, path_y, path_z = map(float, position[i])
-      if path_x < 0.0:
-        continue
-      left = self._map_to_screen(path_x, path_y - 0.9, path_z + 1.22)
-      right = self._map_to_screen(path_x, path_y + 0.9, path_z + 1.22)
-      if left is not None and right is not None:
-        if left_points and left[1] > left_points[-1][1]:
-          continue
-        left_points.append(left)
-        right_points.append(right)
-
-    if not left_points or not right_points:
-      return
-    left_array = np.asarray(left_points, dtype=np.float32)
-    right_array = np.asarray(right_points, dtype=np.float32)
-
-    lane_warning = abs(offset_m) >= 0.5
-    warning_pulse = lane_warning and int(time.monotonic() * 1000) % 800 < 400
-    edge_green = rl.Color(0, 200, 0, 255)
-    if lane_warning:
-      warning_color = rl.Color(255, 0, 0, 255) if warning_pulse else rl.Color(255, 100, 0, 200)
-      left_color = warning_color if offset_m > 0.0 else edge_green
-      right_color = warning_color if offset_m < 0.0 else edge_green
-    elif offset_m > 0.02:
-      left_color = self._lane_center_gradient_color_carrot(danger_ratio)
-      right_color = edge_green
-    elif offset_m < -0.02:
-      left_color = edge_green
-      right_color = self._lane_center_gradient_color_carrot(danger_ratio)
-    else:
-      left_color = right_color = edge_green
-
-    self._draw_tire_edge_band_carrot(left_array, right_array, True, left_color)
-    self._draw_tire_edge_band_carrot(left_array, right_array, False, right_color)
-
-    if danger_ratio < 1.5:
-      text_y = float(left_array[0][1]) - 130.0
-      center_x = int(self._rect.x + self._rect.width / 2.0)
-      draw_text_ui_style(
-        direction_label, center_x, int(text_y), 72, rl.WHITE,
-        font=self._font_display, border_width=3.5, shadow_offset=0.0, align="center",
-      )
-      draw_text_ui_style(
-        distance_text, center_x, int(text_y + 70.0), 58, rl.WHITE,
-        font=self._font_display, border_width=3.0, shadow_offset=0.0, align="center",
-      )
-
-
   def _draw_lane_lines_carrot(self, sm):
     if self._carrot_show_lane_info < 1:
       return
     if not sm.valid['modelV2'] or not sm.valid['carState']:
       return
 
-    model = sm['modelV2']
     car_state = sm['carState']
+    lane_line_probs = self._lane_line_probs
+    lane_line_visible = lane_line_probs > 0.3
+    road_edge_stds = self._road_edge_stds
+    lane_zero = self._lane_lines[0].raw_points
 
-    lane_lines_raw = [np.array([ll.x, ll.y, ll.z], dtype=np.float32).T for ll in model.laneLines]
-    road_edges_raw = [np.array([re.x, re.y, re.z], dtype=np.float32).T for re in model.roadEdges]
-    lane_line_probs = np.array(model.laneLineProbs, dtype=np.float32)
-    road_edge_stds = np.array(model.roadEdgeStds, dtype=np.float32)
-
-    if lane_lines_raw[0].shape[0] == 0:
+    if lane_zero.shape[0] == 0:
+      return
+    if self._carrot_show_lane_info == 1 and not np.any(lane_line_visible):
       return
 
-    max_idx = self._get_path_length_idx(lane_lines_raw[0][:, 0], np.clip(lane_lines_raw[0][-1, 0], MIN_DRAW_DISTANCE, MAX_DRAW_DISTANCE))
+    max_distance = float(np.clip(lane_zero[-1, 0], MIN_DRAW_DISTANCE, MAX_DRAW_DISTANCE))
+    max_idx = self._get_path_length_idx(lane_zero[:, 0], max_distance)
     left_lane_line = car_state.leftLaneLine
     right_lane_line = car_state.rightLaneLine
+    draw_double_left = left_lane_line % 10 == 4
 
     lane_vertices = []
-    lane_vertices_double = np.empty((0, 2), dtype=np.float32)
+    empty_vertices = np.empty((0, 2), dtype=np.float32)
+    lane_vertices_double = empty_vertices
 
-    for i in range(4):
+    for i, lane_line in enumerate(self._lane_lines):
+      # The old path projected and submitted low-confidence lanes with alpha
+      # zero. They cannot affect the framebuffer, so avoid both the projection
+      # work and the draw call while preserving the > 0.3 visibility threshold.
+      if not lane_line_visible[i]:
+        lane_vertices.append(empty_vertices)
+        continue
+
       line_width = 0.025
       if i == 1 and left_lane_line >= 20:
         line_width = 0.05
-      pts = self._map_line_to_polygon(lane_lines_raw[i], line_width, 0.0, max_idx, np.clip(lane_lines_raw[0][-1, 0], MIN_DRAW_DISTANCE, MAX_DRAW_DISTANCE))
+      pts = self._map_line_to_polygon(lane_line.raw_points, line_width, 0.0, max_idx, max_distance)
       lane_vertices.append(pts)
 
-      if i == 1:
+      if i == 1 and draw_double_left:
         lane_vertices_double = self._map_line_to_polygon(
-          lane_lines_raw[i],
+          lane_line.raw_points,
           line_width,
           0.0,
           max_idx,
-          np.clip(lane_lines_raw[0][-1, 0], MIN_DRAW_DISTANCE, MAX_DRAW_DISTANCE),
+          max_distance,
           True,
           -0.3,
         )
 
-    road_vertices = []
-    max_idx_road_edge = self._get_path_length_idx(lane_lines_raw[0][:, 0], 100.0)
-    for i in range(2):
-      road_vertices.append(self._map_line_to_polygon(road_edges_raw[i], 0.025, 0.0, max_idx_road_edge, 100.0))
-
     for i in range(4):
       if lane_vertices[i].size == 0:
         continue
-      alpha = 220 if lane_line_probs[i] > 0.3 else 0
+      alpha = 220
       stroke = 0.0
       if i == 1:
         color = rl.Color(218, 202, 37, alpha) if left_lane_line >= 20 else rl.Color(255, 255, 255, alpha)
@@ -1134,81 +975,108 @@ class ModelRenderer(Widget):
       else:
         color = rl.Color(255, 255, 255, alpha)
 
-      draw_polygon(self._rect, lane_vertices[i], color)
+      draw_polygon_solid(lane_vertices[i], color)
       if stroke > 0.0:
         self._draw_polygon_outline_carrot(lane_vertices[i], color, stroke)
 
-      if i == 1 and (left_lane_line % 10 == 4) and lane_vertices_double.size != 0:
-        draw_polygon(self._rect, lane_vertices_double, color)
+      if i == 1 and draw_double_left and lane_vertices_double.size != 0:
+        draw_polygon_solid(lane_vertices_double, color)
         if stroke > 0.0:
           self._draw_polygon_outline_carrot(lane_vertices_double, color, stroke)
 
     if self._carrot_show_lane_info > 1:
+      max_idx_road_edge = self._get_path_length_idx(lane_zero[:, 0], 100.0)
+      road_vertices = [
+        self._map_line_to_polygon(road_edge.raw_points, 0.025, 0.0, max_idx_road_edge, 100.0)
+        for road_edge in self._road_edges
+      ]
       for i in range(2):
         if road_vertices[i].size == 0:
           continue
         temp_f = float(np.clip(road_edge_stds[i] / 2.0, 0.0, 1.0))
         color = rl.Color(int((1.0 - temp_f) * 255.0), 0, int(temp_f * 255.0), 255)
-        draw_polygon(self._rect, road_vertices[i], color)
+        draw_polygon_solid(road_vertices[i], color)
 
 
 
-  def _update_blind_spot_barriers_carrot(self, sm):
+  def _build_blind_spot_barrier_carrot(self, model_position: np.ndarray, y_shift: float) -> np.ndarray:
+    max_idx_barrier = self._get_path_length_idx(model_position[:, 0], 40.0)
+    points = model_position[:max_idx_barrier + 1]
+    points = points[points[:, 0] >= 0]
+    if points.shape[0] == 0:
+      return np.empty((0, 2), dtype=np.float32)
+
+    # Project the upper/lower barrier edges together. This preserves the old
+    # point and clipping rules without two Python projection calls per point.
+    offsets = np.array(
+      [[0.0, y_shift, 1.15], [0.0, y_shift, 0.6]],
+      dtype=np.float32,
+    )
+    points_3d = points[None, :, :] + offsets[:, None, :]
+    # Keep the former three-term float32 dot-product order while applying the
+    # projection to both edges and all model points at once.
+    transform = self._car_space_transform
+    projected = (
+      transform[:, 0, None, None] * points_3d[None, :, :, 0] +
+      transform[:, 1, None, None] * points_3d[None, :, :, 1] +
+      transform[:, 2, None, None] * points_3d[None, :, :, 2]
+    )
+    upper_projected = projected[:, 0, :]
+    lower_projected = projected[:, 1, :]
+
+    valid_depth = (np.abs(upper_projected[2]) >= 1e-6) & (np.abs(lower_projected[2]) >= 1e-6)
+    if not np.any(valid_depth):
+      return np.empty((0, 2), dtype=np.float32)
+
+    upper_screen = upper_projected[:2, valid_depth] / upper_projected[2, valid_depth][None, :]
+    lower_screen = lower_projected[:2, valid_depth] / lower_projected[2, valid_depth][None, :]
+
+    clip = self._clip_region
+    x_min, x_max = clip.x, clip.x + clip.width
+    y_min, y_max = clip.y, clip.y + clip.height
+    upper_in_clip = (
+      (upper_screen[0] >= x_min) & (upper_screen[0] <= x_max) &
+      (upper_screen[1] >= y_min) & (upper_screen[1] <= y_max)
+    )
+    lower_in_clip = (
+      (lower_screen[0] >= x_min) & (lower_screen[0] <= x_max) &
+      (lower_screen[1] >= y_min) & (lower_screen[1] <= y_max)
+    )
+    both_in_clip = upper_in_clip & lower_in_clip
+    if not np.any(both_in_clip):
+      return np.empty((0, 2), dtype=np.float32)
+
+    upper_screen = upper_screen[:, both_in_clip]
+    lower_screen = lower_screen[:, both_in_clip]
+
+    # Match the old hill/inversion filter: keep a point only when its upper
+    # screen Y does not increase relative to the last accepted point.
+    if upper_screen.shape[1] > 1:
+      keep = upper_screen[1] == np.minimum.accumulate(upper_screen[1])
+      upper_screen = upper_screen[:, keep]
+      lower_screen = lower_screen[:, keep]
+
+    if upper_screen.shape[1] == 0:
+      return np.empty((0, 2), dtype=np.float32)
+    return np.vstack((upper_screen.T, lower_screen[:, ::-1].T)).astype(np.float32)
+
+
+  def _update_blind_spot_barriers_carrot(self, sm, update_left: bool = True, update_right: bool = True):
     if not sm.valid['modelV2']:
       self._carrot_lane_barrier_vertices[0] = np.empty((0, 2), dtype=np.float32)
       self._carrot_lane_barrier_vertices[1] = np.empty((0, 2), dtype=np.float32)
       return
 
-    model = sm['modelV2']
-    if len(model.position.x) == 0:
+    model_position = self._path.raw_points
+    if model_position.shape[0] == 0:
       self._carrot_lane_barrier_vertices[0] = np.empty((0, 2), dtype=np.float32)
       self._carrot_lane_barrier_vertices[1] = np.empty((0, 2), dtype=np.float32)
       return
 
-    model_position = np.array([model.position.x, model.position.y, model.position.z], dtype=np.float32).T
-    max_idx_barrier = self._get_path_length_idx(model_position[:, 0], 40.0)
-
-    def build_barrier(y_shift: float) -> np.ndarray:
-      left_points = []
-      right_points = []
-
-      for i in range(0, max_idx_barrier + 1):
-        if model_position[i, 0] < 0:
-          continue
-
-        left = self._map_to_screen(
-          model_position[i, 0],
-          model_position[i, 1] + y_shift,
-          model_position[i, 2] + (1.2 - 0.05),
-        )
-        right = self._map_to_screen(
-          model_position[i, 0],
-          model_position[i, 1] + y_shift,
-          model_position[i, 2] + (1.2 - 0.6),
-        )
-
-        if left is not None and right is not None:
-          if len(left_points) > 0 and left[1] > left_points[-1][1]:
-            continue
-          left_points.append(left)
-          right_points.insert(0, right)
-
-      if len(left_points) == 0:
-        return np.empty((0, 2), dtype=np.float32)
-      return np.array(left_points + right_points, dtype=np.float32)
-
-    self._carrot_lane_barrier_vertices[0] = build_barrier(-1.7)
-    self._carrot_lane_barrier_vertices[1] = build_barrier(1.7)
-
-
-  def _order_polygon_points_carrot(self, pts: np.ndarray) -> np.ndarray:
-    if pts.shape[0] < 3:
-      return pts
-
-    center = np.mean(pts, axis=0)
-    angles = np.arctan2(pts[:, 1] - center[1], pts[:, 0] - center[0])
-    order = np.argsort(angles)
-    return pts[order]
+    if update_left:
+      self._carrot_lane_barrier_vertices[0] = self._build_blind_spot_barrier_carrot(model_position, -1.7)
+    if update_right:
+      self._carrot_lane_barrier_vertices[1] = self._build_blind_spot_barrier_carrot(model_position, 1.7)
 
   def _draw_blind_spot_segments_carrot(self, points: np.ndarray, color: rl.Color):
     if points.size == 0:
@@ -1219,53 +1087,81 @@ class ModelRenderer(Widget):
     if half < 3:
       return
 
-    for i in range(0, half - 2, 2):
-      p0 = points[i + 0]
-      p1 = points[i + 1]
-      p2 = points[count - i - 3]
-      p3 = points[count - i - 2]
-
-      quad = np.array([p0, p1, p2, p3], dtype=np.float32)
-      quad = self._order_polygon_points_carrot(quad)
-
-      xs = [float(p[0]) for p in quad]
-      ys = [float(p[1]) for p in quad]
-
-      self._draw_polygon_from_xy_carrot(xs, ys, color, False, 10)
-
-
-  def _draw_blind_spot_carrot(self, sm):
-    if not sm.valid['modelV2'] or not sm.valid['carState'] or not sm.valid['radarState']:
+    starts = np.arange(0, half - 2, 2)
+    if starts.size == 0:
       return
 
-    self._update_blind_spot_barriers_carrot(sm)
+    quads = np.stack(
+      (
+        points[starts],
+        points[starts + 1],
+        points[count - starts - 3],
+        points[count - starts - 2],
+      ),
+      axis=1,
+    )
+    centers = np.mean(quads, axis=1, keepdims=True)
+    angles = np.arctan2(quads[:, :, 1] - centers[:, :, 1], quads[:, :, 0] - centers[:, :, 0])
+    order = np.argsort(angles, axis=1)
+    ordered_quads = np.take_along_axis(quads, order[:, :, None], axis=1)
 
-    warn_color = rl.Color(255, 215, 0, 150)
-    assist_color = rl.Color(0, 204, 0, 150)
+    for quad in ordered_quads:
+      self._draw_polygon_points_carrot(quad, color, False, 10)
+
+
+  @staticmethod
+  def _blind_spot_draw_state_carrot(car_state, radar_state, meta) -> tuple[bool, bool, bool, bool]:
+    left_blindspot = bool(car_state.leftBlindspot)
+    right_blindspot = bool(car_state.rightBlindspot)
+
+    lane_change_state = meta.laneChangeState
+    lane_change_direction = str(meta.laneChangeDirection).lower()
+    right_lane_change = lane_change_state == LaneChangeState.preLaneChange and "right" in lane_change_direction
+    left_lane_change = lane_change_state == LaneChangeState.preLaneChange and "left" in lane_change_direction
+
+    assist_distance = float(car_state.vEgo) * 3.0
+    left_assist = (
+      not left_blindspot and radar_state.leadLeft.status and
+      float(radar_state.leadLeft.dRel) < assist_distance and left_lane_change
+    )
+    right_assist = (
+      not right_blindspot and radar_state.leadRight.status and
+      float(radar_state.leadRight.dRel) < assist_distance and right_lane_change
+    )
+    return left_blindspot, right_blindspot, left_assist, right_assist
+
+
+  def _draw_blind_spot_carrot(self, sm) -> None:
+    input_services = ("modelV2", "carState", "radarState")
+    if not all(sm.valid[service] for service in input_services):
+      return
 
     car_state = sm['carState']
     radar_state = sm['radarState']
     meta = sm['modelV2'].meta
 
-    left_blindspot = bool(car_state.leftBlindspot)
-    right_blindspot = bool(car_state.rightBlindspot)
+    left_blindspot, right_blindspot, left_assist, right_assist = self._blind_spot_draw_state_carrot(
+      car_state, radar_state, meta,
+    )
+    if not (left_blindspot or right_blindspot or left_assist or right_assist):
+      return
 
-    lead_left = radar_state.leadLeft
-    lead_right = radar_state.leadRight
-
-    lane_change_state = meta.laneChangeState
-    lane_change_direction = str(meta.laneChangeDirection).lower()
-    right_lane_change = (lane_change_state == LaneChangeState.preLaneChange) and ("right" in lane_change_direction)
-    left_lane_change = (lane_change_state == LaneChangeState.preLaneChange) and ("left" in lane_change_direction)
+    warn_color = rl.Color(255, 215, 0, 150)
+    assist_color = rl.Color(0, 204, 0, 150)
+    self._update_blind_spot_barriers_carrot(
+      sm,
+      update_left=left_blindspot or left_assist,
+      update_right=right_blindspot or right_assist,
+    )
 
     if left_blindspot:
       self._draw_blind_spot_segments_carrot(self._carrot_lane_barrier_vertices[0], warn_color)
-    elif lead_left.status and float(lead_left.dRel) < float(car_state.vEgo) * 3.0 and left_lane_change:
+    elif left_assist:
       self._draw_blind_spot_segments_carrot(self._carrot_lane_barrier_vertices[0], assist_color)
 
     if right_blindspot:
       self._draw_blind_spot_segments_carrot(self._carrot_lane_barrier_vertices[1], warn_color)
-    elif lead_right.status and float(lead_right.dRel) < float(car_state.vEgo) * 3.0 and right_lane_change:
+    elif right_assist:
       self._draw_blind_spot_segments_carrot(self._carrot_lane_barrier_vertices[1], assist_color)
 
 
@@ -1735,7 +1631,7 @@ class ModelRenderer(Widget):
 
 
   def _draw_path_carrot(self, sm):
-    self._refresh_carrot_params()
+    self._refresh_carrot_params(rl.get_time())
     if not self._make_path_data_carrot(sm):
       return
 
@@ -1769,7 +1665,7 @@ class ModelRenderer(Widget):
     show_path_mode = self._carrot_show_path_mode
 
     if show_path_mode == 0:
-      draw_polygon(self._rect, self._path.projected_points, self._carrot_colors[show_path_color % 10])
+      draw_polygon_solid(self._path.projected_points, self._carrot_colors[show_path_color % 10])
       if show_path_color >= 10 or brake_valid:
         self._draw_polygon_outline_carrot(
           self._path.projected_points,
@@ -1784,3 +1680,117 @@ class ModelRenderer(Widget):
       self._draw_animated_path_carrot(sm, show_path_mode, show_path_color, brake_valid)
 
     self._draw_path_end_overlay_carrot()
+    self._draw_tire_trajectory_carrot(sm)
+
+  @staticmethod
+  def _tire_grad_color(d: float, a: int) -> rl.Color:
+    # danger 0(중앙)->1(차선밟음): 초록 -> 노랑 -> 빨강 멀티스톱
+    d = max(0.0, min(1.5, d))
+    if d <= 0.10:
+      r, g = 0.0, 200.0
+    elif d <= 0.60:
+      f = (d - 0.10) / 0.50
+      r, g = f * 255.0, 200.0
+    elif d <= 1.00:
+      f = (d - 0.60) / 0.40
+      r, g = 255.0, 200.0 - f * 200.0
+    else:
+      r, g = 255.0, 0.0
+    return rl.Color(int(r), int(g), 0, a)
+
+  def _draw_tire_trajectory_carrot(self, sm):
+    """타이어 궤적: 모델 예측 경로 위에 차폭(±0.9m) 타이어 트랙을 그라데이션 밴드로 그리고,
+    차선 중앙 대비 편차(danger_ratio)에 따라 초록->빨강으로 색을 바꾼다. 이탈 임박 시 펄스.
+    하단에 L/R/C 방향 + 편차(m) 표시. CarrotTireTrajectory 토글로만 노출된다."""
+    if self._carrot_tire_trajectory <= 0:
+      return
+    if not sm.valid['modelV2']:
+      return
+
+    model = sm['modelV2']
+    lane_lines = model.laneLines
+    probs = model.laneLineProbs
+    if len(lane_lines) < 3 or len(probs) < 3:
+      return
+
+    left_y, right_y = lane_lines[1].y, lane_lines[2].y
+    if len(left_y) == 0 or len(right_y) == 0:
+      return
+
+    # 차량 중심에서 좌/우 차선까지 거리(m). openpilot 모델 +Y=좌측 이므로 우측은 부호 반전.
+    left_m = float(left_y[0])
+    right_m = -float(right_y[0])
+    # 한쪽 차선 인식이 약하면 기본 차선폭(3.0m)으로 반대쪽 추정.
+    if probs[1] < 0.3 and probs[2] > 0.3:
+      left_m = 3.0 - right_m
+    elif probs[2] < 0.3 and probs[1] > 0.3:
+      right_m = 3.0 - left_m
+    total = left_m + right_m
+    if total < 0.5:
+      total = 3.0
+
+    # drift>0 => 차량이 좌측 차선쪽으로 치우침(좌측 타이어가 좌측 차선에 근접).
+    drift = (right_m - left_m) / 2.0
+    limit = max(0.1, total / 2.0 - 0.9)   # 타이어(차폭 절반 0.9m)가 차선을 밟는 지점을 1.0
+    danger = abs(drift) / limit
+
+    if drift > 0.02:
+      dir_label = "L"
+    elif drift < -0.02:
+      dir_label = "R"
+    else:
+      dir_label = "C"
+    dist_str = f"{abs(drift):.2f}"
+
+    # 모델 예측 주행경로. 선행차가 있으면 그 거리까지만, 없으면 최대 40m.
+    path = self._path.raw_points
+    if path.shape[0] < 5:
+      return
+    max_dist = 40.0
+    radar_state = sm['radarState'] if sm.valid['radarState'] else None
+    if radar_state is not None and radar_state.leadOne.status:
+      d_rel = float(radar_state.leadOne.dRel)
+      if 3.0 < d_rel < max_dist:
+        max_dist = d_rel
+    max_idx = self._get_path_length_idx(path[:, 0], max_dist)
+    if max_idx < 5:
+      return
+
+    # 색상: 치우친 쪽 = danger 그라데이션, 반대쪽 = 초록. 심한 이탈 시 좌/우 밴드 펄스.
+    green = rl.Color(0, 200, 0, 255)
+    warn = abs(drift) >= 0.5
+    pulse = warn and (int(rl.get_time() * 1000) % 800 < 400)
+    if warn:
+      side = rl.Color(255, 0, 0, 255) if pulse else rl.Color(255, 100, 0, 220)
+      color_left = side if drift > 0.0 else green
+      color_right = side if drift < 0.0 else green
+    elif drift > 0.02:
+      color_left, color_right = self._tire_grad_color(danger, 255), green
+    elif drift < -0.02:
+      color_left, color_right = green, self._tire_grad_color(danger, 255)
+    else:
+      color_left = color_right = green
+
+    # 타이어 트랙 밴드: 경로중심 ±0.9m 위치에 얇은 리본. 원근투영으로 폭은 자동 축소.
+    # 화면 좌측 타이어 = +Y(y_shift=+0.9), 우측 = -Y. 아래(가까움)=진하게 위(멀리)=투명.
+    band_half = 0.16
+    for y_shift, col in ((0.9, color_left), (-0.9, color_right)):
+      ribbon = self._map_line_to_polygon(path, band_half, 1.22, max_idx, max_dist, True, y_shift)
+      if ribbon.size == 0:
+        continue
+      grad = Gradient(
+        start=(0.0, 1.0),  # 경로 하단(차량 근처)
+        end=(0.0, 0.0),    # 경로 상단(원거리)
+        colors=[rl.Color(col.r, col.g, col.b, col.a), rl.Color(col.r, col.g, col.b, 0)],
+        stops=[0.0, 1.0],
+      )
+      draw_polygon(self._rect, ribbon, gradient=grad)
+
+    # 하단 L/R/C + 편차(m) 텍스트 (경로 시작점 부근에 투영).
+    if danger < 1.5:
+      base = self._map_to_screen(3.0, float(path[0, 1]), float(path[0, 2]) + self._path_offset_z)
+      if base is not None:
+        tx, ty = base
+        white = rl.Color(255, 255, 255, 255)
+        draw_text_ui_style(dir_label, tx, ty - 56.0, 72, white, font=self._font_display, align="center", y_offset=0.0)
+        draw_text_ui_style(dist_str, tx, ty + 18.0, 52, white, font=self._font_display, align="center", y_offset=0.0)

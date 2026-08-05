@@ -38,13 +38,17 @@ def build_cluster_args(args: argparse.Namespace, passthrough: list[str]) -> list
         "--input", "route",
         "--route", str(args.route),
         "--route-log", args.route_log,
+        "--route-corner-source", args.corner_source,
         "--route-overlay", args.route_overlay,
         "--route-tools", args.route_tools,
         "--camera-view-mode", str(args.camera_view_mode),
+        "--panel-layout", args.panel_layout,
         "--output", args.output,
         "--usb-codec", args.usb_codec,
         "--fps", str(args.fps),
         "--route-replay-speed", str(args.speed),
+        "--language", args.language,
+        "--metric" if args.is_metric else "--imperial",
     ]
     if args.duration is not None:
         cluster_args.extend(("--duration", str(args.duration)))
@@ -75,7 +79,7 @@ def build_cluster_args(args: argparse.Namespace, passthrough: list[str]) -> list
         cluster_args.extend(("--navi-map-theme", args.navi_map_theme))
         if args.navi_no_beacon:
             cluster_args.append("--navi-no-beacon")
-    screen_mode = args.screen_mode or ("navi" if args.navi_overlay else None)
+    screen_mode = "trip-report" if args.trip_report else args.screen_mode or ("navi" if args.navi_overlay else None)
     if screen_mode is not None:
         cluster_args.extend(("--screen-mode", screen_mode))
     return [*cluster_args, *passthrough]
@@ -88,6 +92,15 @@ def parse_args(argv: list[str]) -> tuple[argparse.Namespace, list[str]]:
     )
     parser.add_argument("route", type=Path, help="rlog.zst file, segment directory, or route directory")
     parser.add_argument("--route-log", choices=("rlog", "qlog"), default="rlog", help="Log type to replay")
+    parser.add_argument(
+        "--corner-source",
+        choices=("live", "stable", "raw"),
+        default="live",
+        help=" ".join((
+            "Corner-radar source: live shows device-published liveTracks,",
+            "stable reconstructs physical tracks from raw CAN, and raw shows untracked CAN slots",
+        )),
+    )
     parser.add_argument("--output", choices=("usb", "window", "both"), default="both", help="Render target")
     parser.add_argument("--usb-codec", choices=("jpeg", "png", "h264"), default="jpeg", help="USB transport codec")
     parser.add_argument("--fps", type=float, default=20.0, help="Replay/render FPS")
@@ -101,7 +114,7 @@ def parse_args(argv: list[str]) -> tuple[argparse.Namespace, list[str]]:
         "--pause-on-cutin",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="Play a Windows alert and pause when any cut-in detector becomes active",
+        help="Play a Windows alert and pause when radarState.leadsCutIn becomes active",
     )
     parser.add_argument("--route-overlay", choices=("off", "compact", "full"), default="compact", help="Replay camera/data detail level")
     parser.add_argument(
@@ -110,16 +123,51 @@ def parse_args(argv: list[str]) -> tuple[argparse.Namespace, list[str]]:
         default="separate",
         help="Place replay debug and seek controls in a separate PC window by default",
     )
-    parser.add_argument("--show-recorded-cutins", action="store_true", help="Show cut-in decisions stored in the original radarState")
+    parser.add_argument(
+        "--show-recorded-cutins",
+        action="store_true",
+        help="Compatibility option; recorded radarState cut-ins are always shown",
+    )
     parser.add_argument("--front-radar-only", action="store_true", help="Ignore corner radar data and replay as a front-radar-only vehicle")
     parser.add_argument(
         "--cutin-radar-source",
         choices=("corner", "front"),
         default="corner",
-        help="Radar tracks used by the offline current-code cut-in evaluator",
+        help="Compatibility option; route playback always uses logged radarState cut-ins",
     )
-    parser.add_argument("--cutin-sensitivity", type=float, default=50.0, help="Sensitivity used by the offline current-code cut-in evaluator")
+    parser.add_argument(
+        "--cutin-sensitivity",
+        type=float,
+        default=50.0,
+        help="Compatibility option; route playback does not recompute cut-ins",
+    )
     parser.add_argument("--camera-view-mode", type=int, choices=(0, 1, 2), default=2, help="Cluster camera view mode (default: 2, road camera background)")
+    parser.add_argument(
+        "--panel-layout",
+        choices=("driving-left", "driving-right"),
+        default="driving-left",
+        help="Place the driving view on the left or right side",
+    )
+    parser.add_argument(
+        "--language",
+        choices=("ko", "en"),
+        default="ko",
+        help="Cluster labels language",
+    )
+    unit_group = parser.add_mutually_exclusive_group()
+    unit_group.add_argument(
+        "--metric",
+        dest="is_metric",
+        action="store_true",
+        help="Show km/h, m, and km",
+    )
+    unit_group.add_argument(
+        "--imperial",
+        dest="is_metric",
+        action="store_false",
+        help="Show mph, ft, and mi",
+    )
+    parser.set_defaults(is_metric=True)
     parser.add_argument("--usb-brightness", type=int, default=None, help="Manual USB display brightness 0-100")
     parser.add_argument("--profile-render", action="store_true", help="Print render/USB timing profile")
     parser.add_argument("--profile-interval", type=float, default=None, help="Seconds between profile reports")
@@ -133,16 +181,23 @@ def parse_args(argv: list[str]) -> tuple[argparse.Namespace, list[str]]:
     parser.add_argument("--navi-advertise-ip", default=None, help="Address advertised to the Android navigation app")
     parser.add_argument("--navi-map-theme", choices=("dark", "auto", "light"), default="dark", help="Theme requested for the smartphone-rendered map")
     parser.add_argument("--navi-no-beacon", action="store_true", help="Disable UDP 7705 navigation discovery")
-    parser.add_argument("--screen-mode", default=None, help="Cluster screen mode; navi is used by default with --navi-overlay")
+    screen_group = parser.add_mutually_exclusive_group()
+    screen_group.add_argument(
+        "--screen-mode",
+        default=None,
+        help="Cluster screen mode; navi is used by default with --navi-overlay",
+    )
+    screen_group.add_argument(
+        "--trip-report",
+        action="store_true",
+        help="Show external HUD screen mode 5 with the live driving report",
+    )
     return parser.parse_known_args(argv)
 
 
 def main() -> None:
     args, passthrough = parse_args(sys.argv[1:])
-    if args.show_recorded_cutins:
-        os.environ["CLUSTER_ROUTE_SHOW_RECORDED_CUTINS"] = "1"
-    else:
-        os.environ.pop("CLUSTER_ROUTE_SHOW_RECORDED_CUTINS", None)
+    os.environ["CLUSTER_ROUTE_SHOW_RECORDED_CUTINS"] = "1"
     if args.front_radar_only:
         os.environ["CLUSTER_ROUTE_FRONT_RADAR_ONLY"] = "1"
     else:

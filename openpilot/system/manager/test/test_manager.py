@@ -34,6 +34,46 @@ class TestManager:
   def test_duplicate_procs(self):
     assert len(procs) == len(managed_processes), "Duplicate process names"
 
+  def test_radard_modes_are_mutually_exclusive(self):
+    CP = car.CarParams.new_message()
+    params = Params()
+
+    params.put("CarrotRadarMode", "0")
+    assert not managed_processes["radard"].should_run(False, params, CP)
+    assert not managed_processes["radard_dpath"].should_run(False, params, CP)
+    assert managed_processes["radard"].should_run(True, params, CP)
+    assert not managed_processes["radard_dpath"].should_run(True, params, CP)
+
+    params.put("CarrotRadarMode", "1")
+    # A live parameter write must not replace the radar publisher mid-drive.
+    assert managed_processes["radard"].should_run(True, params, CP)
+    assert not managed_processes["radard_dpath"].should_run(True, params, CP)
+
+    # The next off-road-to-on-road transition applies the new mode.
+    assert not managed_processes["radard"].should_run(False, params, CP)
+    assert not managed_processes["radard_dpath"].should_run(False, params, CP)
+    assert not managed_processes["radard"].should_run(True, params, CP)
+    assert managed_processes["radard_dpath"].should_run(True, params, CP)
+    assert not managed_processes["radard"].should_run(False, params, CP)
+    assert not managed_processes["radard_dpath"].should_run(False, params, CP)
+
+  def test_legacy_radar_motion_mode_is_migrated_once(self):
+    params = Params()
+    params.remove("CarrotRadarMode")
+    params.put("RadarMotionMode", "1")
+
+    manager.migrate_legacy_carrot_radar_mode(params)
+
+    assert params.get_int("CarrotRadarMode") == 1
+    assert params.get("RadarMotionMode") is None
+
+    params.put("CarrotRadarMode", "0")
+    params.put("RadarMotionMode", "1")
+    manager.migrate_legacy_carrot_radar_mode(params)
+
+    assert params.get_int("CarrotRadarMode") == 0
+    assert params.get("RadarMotionMode") is None
+
   def test_carrot_navi_is_permanent_7714_owner(self):
     process = managed_processes["carrot_navi"]
     CP = car.CarParams.new_message()
@@ -43,6 +83,34 @@ class TestManager:
     assert process.should_run(False, params, CP)
     params.put("ClusterHud", "1")
     assert process.should_run(False, params, CP)
+
+  def test_cluster_hud_excludes_carrot_vision_processes(self):
+    CP = car.CarParams.new_message()
+    CP.notCar = False
+    params = Params()
+    params.put("DisableDM", "2")
+    params.put_bool("CarrotVisionActive", True)
+
+    params.put("ClusterHud", "0")
+    assert managed_processes["carrot_webrtcd"].should_run(True, params, CP)
+    assert managed_processes["carrot_vision_encoderd"].should_run(True, params, CP)
+
+    params.put("ClusterHud", "1")
+    assert managed_processes["carrot_cluster"].should_run(True, params, CP)
+    assert not managed_processes["carrot_webrtcd"].should_run(True, params, CP)
+    assert not managed_processes["carrot_vision_encoderd"].should_run(True, params, CP)
+
+  def test_removed_cluster_hud_mode_is_inactive(self):
+    CP = car.CarParams.new_message()
+    CP.notCar = False
+    params = Params()
+    params.put("DisableDM", "2")
+    params.put_bool("CarrotVisionActive", True)
+    params.put("ClusterHud", "2")
+
+    assert not managed_processes["carrot_cluster"].should_run(True, params, CP)
+    assert managed_processes["carrot_webrtcd"].should_run(True, params, CP)
+    assert managed_processes["carrot_vision_encoderd"].should_run(True, params, CP)
 
   def test_blacklisted_procs(self):
     # TODO: ensure there are blacklisted procs until we have a dedicated test

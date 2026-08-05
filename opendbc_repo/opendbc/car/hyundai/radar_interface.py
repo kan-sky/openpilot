@@ -9,14 +9,16 @@ from opendbc.car.interfaces import RadarInterfaceBase
 from opendbc.car.hyundai.values import DBC, HyundaiFlags, HyundaiExtFlags
 from openpilot.common.params import Params
 from opendbc.car.hyundai.hyundaicanfd import CanBus
-from openpilot.common.filter_simple import MyMovingAverage
 
 SCC_TID = 0
 RADAR_START_ADDR = 0x500
 RADAR_MSG_COUNT = 32
+RADAR_MSG_COUNT4 = 8
+RADAR_GROUP4_MAX_LONG_DIST = 325.0
+RADAR_GROUP4_MAX_YREL = 6.0
 RADAR_START_ADDR_CANFD1 = 0x210
 RADAR_MSG_COUNT1 = 16
-RADAR_START_ADDR_CANFD2 = 0x3A5 # Group 2, Group 1: 0x210 2개씩?�어???�단 보류.
+RADAR_START_ADDR_CANFD2 = 0x3A5  # Group 2; Group 1 uses two 0x210 messages. Pending validation.
 RADAR_MSG_COUNT2 = 32
 RADAR_START_ADDR_CANFD3 = 0x400
 RADAR_MSG_COUNT3 = 30
@@ -72,6 +74,12 @@ CORNER_OBJECT_430_INWARD_KEEP_YVREL_ABS_YREL = 2.2
 CORNER_OBJECT_430_EARLY_INWARD_NONCENTER_FRAMES = 2
 CORNER_OBJECT_430_SIDE_KEEP_ABS_YREL = 2.0
 CORNER_OBJECT_STABLE_TRACK_ID_START = 1000
+CORNER_OBJECT_IDENTITY_STALE_CYCLES = 3
+CORNER_OBJECT_IDENTITY_MAX_DREL_DELTA = 7.0
+CORNER_OBJECT_IDENTITY_MAX_YREL_DELTA = 3.2
+CORNER_OBJECT_HANDOFF_MAX_DREL_DELTA = 2.0
+CORNER_OBJECT_HANDOFF_MAX_YREL_DELTA = 1.0
+CORNER_OBJECT_HANDOFF_MAX_VREL_DELTA = 3.0
 CORNER_SIDE_OBJECT_MAX_DREL = 0.2
 CORNER_SIDE_OBJECT_MIN_ABS_YREL = 1.4
 CORNER_SIDE_OBJECT_MAX_ABS_YREL = 4.5
@@ -82,21 +90,73 @@ CORNER_SIDE_OBJECT_MAX_ABS_YREL = 4.5
 class CornerObjectTrackIdManager:
   def __init__(self):
     self.next_track_id = CORNER_OBJECT_STABLE_TRACK_ID_START
-    self.objects: dict[tuple[str, int], tuple[int, int]] = {}
-
-  def get_track_id(self, source: str, object_id: int, age: int) -> int:
-    key = (source, object_id)
-    previous = self.objects.get(key)
-    if previous is None or age < previous[1]:
-      track_id = self.next_track_id
-      self.next_track_id += 1
-    else:
-      track_id = previous[0]
-    self.objects[key] = (track_id, age)
-    return track_id
+    self.source_cycles: dict[str, int] = {}
+    self.track_states: dict[tuple[str, int], tuple[int, int, int, float, float, int]] = {}
 
   def clear_source(self, source: str):
-    self.objects = {key: value for key, value in self.objects.items() if key[0] != source}
+    self.track_states = {key: value for key, value in self.track_states.items() if key[0] != source}
+    self.source_cycles.pop(source, None)
+
+  def get_track_ids(self, source: str, candidates) -> dict[int, int]:
+    cycle = self.source_cycles.get(source, 0) + 1
+    self.source_cycles[source] = cycle
+    previous = {
+      track_id: state for (state_source, track_id), state in self.track_states.items()
+      if state_source == source and cycle - state[5] <= CORNER_OBJECT_IDENTITY_STALE_CYCLES
+    }
+    used_track_ids = set()
+    assignments = {}
+
+    # Prefer the previous CAN slot, then permit a physically continuous slot
+    # handoff. Object IDs are not globally unique: two distant objects can use
+    # the same ID at the same time.
+    for candidate in candidates:
+      slot_id, object_id, age, _, d_rel, y_rel, *_ = candidate
+      matches = []
+      for track_id, state in previous.items():
+        previous_slot, previous_object_id, previous_age, previous_d_rel, previous_y_rel, _ = state
+        if track_id in used_track_ids or object_id != previous_object_id or age < previous_age:
+          continue
+        d_delta = abs(d_rel - previous_d_rel)
+        y_delta = abs(y_rel - previous_y_rel)
+        if d_delta > CORNER_OBJECT_IDENTITY_MAX_DREL_DELTA or y_delta > CORNER_OBJECT_IDENTITY_MAX_YREL_DELTA:
+          continue
+        matches.append((previous_slot != slot_id, d_delta + y_delta * 1.5, track_id))
+
+      if matches:
+        track_id = min(matches)[2]
+      else:
+        track_id = self.next_track_id
+        self.next_track_id += 1
+      assignments[slot_id] = track_id
+      used_track_ids.add(track_id)
+      self.track_states[(source, track_id)] = (slot_id, object_id, age, d_rel, y_rel, cycle)
+
+    self.track_states = {
+      key: state for key, state in self.track_states.items()
+      if key[0] != source or cycle - state[5] <= CORNER_OBJECT_IDENTITY_STALE_CYCLES
+    }
+    return assignments
+
+
+def deduplicate_corner_candidates(candidates):
+  objects = []
+  for candidate in candidates:
+    _, object_id, age, quality, d_rel, y_rel, v_rel, *_ = candidate
+    duplicate_index = None
+    for index, previous in enumerate(objects):
+      if object_id != previous[1]:
+        continue
+      if (abs(d_rel - previous[4]) <= CORNER_OBJECT_HANDOFF_MAX_DREL_DELTA and
+          abs(y_rel - previous[5]) <= CORNER_OBJECT_HANDOFF_MAX_YREL_DELTA and
+          abs(v_rel - previous[6]) <= CORNER_OBJECT_HANDOFF_MAX_VREL_DELTA):
+        duplicate_index = index
+        break
+    if duplicate_index is None:
+      objects.append(candidate)
+    elif (age, quality) > (objects[duplicate_index][2], objects[duplicate_index][3]):
+      objects[duplicate_index] = candidate
+  return objects
 
 
 def corner_object_position_valid(d_rel: float, y_rel: float) -> bool:
@@ -108,7 +168,7 @@ def corner_object_position_valid(d_rel: float, y_rel: float) -> bool:
   return (normal_object or clipped_side_object) and abs(y_rel) < 40.0
 
 
-def get_radar_can_parser(CP, radar_tracks, msg_start_addr, msg_count):
+def get_radar_can_parser(CP, radar_tracks, msg_start_addr, msg_count, radar_group4=False):
   if not radar_tracks:
     return None
   #if Bus.radar not in DBC[CP.carFingerprint]:
@@ -122,7 +182,8 @@ def get_radar_can_parser(CP, radar_tracks, msg_start_addr, msg_count):
   else:
     messages = [(f"RADAR_TRACK_{addr:x}", 20) for addr in range(msg_start_addr, msg_start_addr + msg_count)]
   #return CANParser(DBC[CP.carFingerprint][Bus.radar], messages, 1)
-    return CANParser('hyundai_kia_mando_front_radar_generated', messages, 1)
+    dbc_name = 'hyundai_kia_denso_front_radar_generated' if radar_group4 else 'hyundai_kia_mando_front_radar_generated'
+    return CANParser(dbc_name, messages, 1)
 
 def get_corner_object_can_parser(CP, enabled):
   if not enabled or not (CP.flags & HyundaiFlags.CANFD):
@@ -184,6 +245,7 @@ class RadarInterface(RadarInterfaceBase):
     self.canfd = True if CP.flags & HyundaiFlags.CANFD else False
     self.radar_group1 = False
     self.radar_group3 = False
+    self.radar_group4 = not self.canfd and bool(CP.extFlags & HyundaiExtFlags.RADAR_GROUP4.value)
     if self.canfd:
       if CP.extFlags & HyundaiExtFlags.RADAR_GROUP1.value:
         self.radar_start_addr = RADAR_START_ADDR_CANFD1
@@ -198,7 +260,7 @@ class RadarInterface(RadarInterfaceBase):
         self.radar_msg_count = RADAR_MSG_COUNT2
     else:
       self.radar_start_addr = RADAR_START_ADDR
-      self.radar_msg_count = RADAR_MSG_COUNT
+      self.radar_msg_count = RADAR_MSG_COUNT4 if self.radar_group4 else RADAR_MSG_COUNT
       
     self.params = Params()
     self.radar_tracks = self.params.get_int("EnableRadarTracks") >= 1
@@ -214,7 +276,7 @@ class RadarInterface(RadarInterfaceBase):
     self.corner_object_180_missed_updates = 0
     self.corner_object_430_missed_updates = 0
     self.corner_object_track_ids = CornerObjectTrackIdManager()
-    self.rcp_tracks = get_radar_can_parser(CP, self.radar_tracks, self.radar_start_addr, self.radar_msg_count)
+    self.rcp_tracks = get_radar_can_parser(CP, self.radar_tracks, self.radar_start_addr, self.radar_msg_count, self.radar_group4)
     self.rcp_corner_objects = get_corner_object_can_parser(CP, self.corner_object_tracks)
     self.rcp_corner_objects_180 = get_corner_object_180_can_parser(CP, self.corner_object_180_tracks)
     self.rcp_corner_objects_430 = get_corner_object_430_can_parser(CP, self.corner_object_430_tracks)
@@ -235,6 +297,7 @@ class RadarInterface(RadarInterfaceBase):
     print(
       "RadarInterface: "
       f"radarUnavailable={CP.radarUnavailable} radarTracks={self.radar_tracks} "
+      f"group4={self.radar_group4} "
       f"corner235={self.rcp_corner_objects is not None} corner180={self.rcp_corner_objects_180 is not None} "
       f"corner430={self.rcp_corner_objects_430 is not None} "
       f"radarOffCan={self.radar_off_can}"
@@ -283,6 +346,7 @@ class RadarInterface(RadarInterfaceBase):
         self.pts[t_id] = structs.RadarData.RadarPoint()
         self.pts[t_id].measured = False
         self.pts[t_id].trackId = t_id
+        self.pts[t_id].radarSource = "corner430"
 
     self.frame = 0
 
@@ -402,6 +466,22 @@ class RadarInterface(RadarInterfaceBase):
         valid = msg['LONG_DIST'] < 204.7
       elif self.canfd:
         valid = msg['VALID_CNT'] > 10
+      elif self.radar_group4:
+        # EN: DNMWR006 exposes eight stable tracked-object slots at 0x500-0x507.
+        #     Messages from 0x508 onward are distance-sorted raw detections without
+        #     stable IDs, so they are excluded. OBJECT_STATE 3 is a confirmed track;
+        #     empty slots use LONG_DIST raw 0xfff8 (409.55 m). Driving logs reached
+        #     317.80 m, so 325 m preserves every observed confirmed track while
+        #     retaining margin from the empty-slot sentinel. Keep the +/-6 m
+        #     ego/adjacent-lane envelope to suppress farther roadside reflections.
+        # KO: DNMWR006의 안정적인 추적 객체 슬롯은 0x500~0x507의 8개임.
+        #     0x508 이후 메시지는 고정 ID가 없는 거리순 raw detection이므로 제외함.
+        #     OBJECT_STATE 3은 확정 추적 객체이며, 빈 슬롯은 LONG_DIST raw
+        #     0xfff8(409.55m)을 사용함. 주행 로그의 최대값은 317.80m였으므로
+        #     325m 상한으로 관측된 확정 트랙을 모두 보존하면서 빈 슬롯 값과 충분한
+        #     여유를 확보함. 원거리 도로변 반사를 줄이기 위해 좌우 6m 범위를 유지함.
+        valid = (msg['OBJECT_STATE'] == 3 and 0.2 < msg['LONG_DIST'] < RADAR_GROUP4_MAX_LONG_DIST and
+                 abs(msg['LAT_DIST']) <= RADAR_GROUP4_MAX_YREL)
       else:
         valid = msg['STATE'] in (3, 4)
 
@@ -431,6 +511,13 @@ class RadarInterface(RadarInterfaceBase):
         self.pts[t_id].vLead = self.pts[t_id].vRel + self.v_ego
         self.pts[t_id].aRel = float('nan') if self.radar_group3 else msg['REL_ACCEL']
         self.pts[t_id].yvRel = 0.0 if self.radar_group3 else msg['LAT_SPEED']
+      elif self.radar_group4:
+        self.pts[t_id].dRel = msg['LONG_DIST']
+        self.pts[t_id].yRel = -msg['LAT_DIST']
+        self.pts[t_id].vRel = msg['REL_SPEED']
+        self.pts[t_id].vLead = self.pts[t_id].vRel + self.v_ego
+        self.pts[t_id].aRel = float('nan')
+        self.pts[t_id].yvRel = 0.0
       else:
         azimuth = math.radians(msg['AZIMUTH'])
         self.pts[t_id].dRel = math.cos(azimuth) * msg['LONG_DIST']
@@ -441,7 +528,7 @@ class RadarInterface(RadarInterfaceBase):
         self.pts[t_id].yvRel = 0.0
 
       t_id += 1
-    # radar group1?� ?�나??msg??2개의 ?�이?��? ?�어?�음.
+    # Radar group 1 carries two messages per object.
     if self.radar_group1:
       for addr in range(self.radar_start_addr, self.radar_start_addr + self.radar_msg_count):
         msg = self.rcp_tracks.vl[f"RADAR_TRACK_{addr:x}"]
@@ -532,18 +619,15 @@ class RadarInterface(RadarInterfaceBase):
       self._clear_point(t_id)
 
     # The same object can occupy two CAN slots for one cycle during a slot handoff.
-    # Publish only the newest/highest-quality copy so trackId stays unique.
-    objects = {}
-    for candidate in candidates:
-      object_id = candidate[1]
-      previous = objects.get(object_id)
-      if previous is None or (candidate[2], candidate[3]) > (previous[2], previous[3]):
-        objects[object_id] = candidate
+    # Only merge physically close copies. The radar can assign one object ID to
+    # two distant objects concurrently, so object ID alone is not an identity.
+    objects = deduplicate_corner_candidates(candidates)
+    track_ids = self.corner_object_track_ids.get_track_ids(source, objects)
 
-    for t_id, object_id, age, _, d_rel, y_rel, v_rel, yv_rel, a_rel in objects.values():
+    for t_id, _, _, _, d_rel, y_rel, v_rel, yv_rel, a_rel in objects:
       point = self.pts[t_id]
       point.measured = True
-      point.trackId = self.corner_object_track_ids.get_track_id(source, object_id, age)
+      point.trackId = track_ids[t_id]
       point.radarSource = source
       point.dRel = d_rel
       point.yRel = y_rel
@@ -551,7 +635,6 @@ class RadarInterface(RadarInterfaceBase):
       point.vLead = v_rel + self.v_ego
       point.aRel = a_rel
       point.yvRel = yv_rel
-
 
   def _update_corner_objects_430(self, updated_messages):
     if self.rcp_corner_objects_430 is None:

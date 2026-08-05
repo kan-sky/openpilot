@@ -2,13 +2,182 @@
   "sensitivity": 50,
   "cases": [
     {
+      "id": "palisade-bef-2-motorcycle-leadone",
+      "vehicle_folder": "HYUNDAI_PALISADE b84b4a4fbb604be1",
+      "log": "00000bef--a8eb1d8c98--2/rlog.zst",
+      "source": "front",
+      "window": [10.0, 20.0],
+      "expected": "clear",
+      "human_verified": true,
+      "required_lead_one_ids": [34],
+      "forbidden_lead_one_ids": [43],
+      "require_lead_one_continuous": true,
+      "scene": "Closer in-path motorcycle track 34 must replace the previously held farther moving track 43 without repeated leadOne skips"
+    },
+    {
+      "id": "ioniq9-234-6-stationary-range-outlier",
+      "vehicle_folder": "HYUNDAI_IONIQ_9 c92fab3f15c0dbfb",
+      "log": "00000234--127adb09bb--6/rlog.zst",
+      "source": "front+corner",
+      "window": [12.5, 19.5],
+      "expected": "stationary",
+      "human_verified": true,
+      "target_track_ids": [45, 1004],
+      "required_lead_one_ids": [45, 1004],
+      "scene": "Stopped lead corroborated by front track 45 and corner track 1004 while the visual longitudinal range is initially overestimated"
+    },
+    {
+      "id": "azera-109-271-corner-moving-ghost",
+      "vehicle_folder": "HYUNDAI_AZERA_7TH_GEN f3a537501c7197ec",
+      "log": "00000109--5260b42384--271/rlog.zst",
+      "source": "corner",
+      "window": [4.5, 12.0],
+      "expected": "clear",
+      "human_verified": true,
+      "forbidden_lead_one_ids": [1001, 1002],
+      "scene": "Empty road: reject central moving corner ghosts whose measured range change contradicts reported relative speed"
+    },
+    {
+      "id": "azera-109-270-stationary-roadside-ghost",
+      "vehicle_folder": "HYUNDAI_AZERA_7TH_GEN f3a537501c7197ec",
+      "log": "00000109--5260b42384--270/rlog.zst",
+      "source": "front+corner",
+      "window": [52.5, 57.0],
+      "expected": "clear",
+      "human_verified": true,
+      "forbidden_lead_one_ids": [1023, 1024],
+      "forbidden_lead_two_ids": [1023, 1024],
+      "scene": "Empty curved road: brief central corner and front-correlated roadside reflections must not become sticky stationary leads"
+    },
+    {
+      "id": "ev9-29-52-front-stationary-ghost",
+      "vehicle_folder": "KIA_EV9 e81593da6ddcb8b2",
+      "log": "00000029--832a1507a7--52/rlog.zst",
+      "source": "front+corner",
+      "window": [44.0, 46.5],
+      "expected": "clear",
+      "human_verified": true,
+      "forbidden_lead_one_ids": [60],
+      "forbidden_lead_two_ids": [60],
+      "scene": "Front-only stationary reflection 60 must not cross the moving speed boundary and trigger close-range braking"
+    },
+    {
+      "id": "ioniq5-d39-41-closest-moving-leadone",
+      "vehicle_folder": "HYUNDAI_IONIQ_5_PE 8b06424f3adf2bd3",
+      "log": "00000d39--67b49e7acd--41/rlog.zst",
+      "source": "front+corner",
+      "window": [18.0, 24.0],
+      "expected": "clear",
+      "human_verified": true,
+      "required_lead_one_ids": [39],
+      "forbidden_lead_one_ids": [45],
+      "require_lead_one_continuous": true,
+      "scene": "Keep the nearest confirmed in-path moving front track 39 as leadOne instead of following the farther vision-range match 45"
+    },
+    {
+      "id": "ioniq9-a7-22-truck",
+      "vehicle_folder": "HYUNDAI_IONIQ_9 c92fab3f15c0dbfb",
+      "log": "000001a7--54660d9df7--22/rlog.zst",
+      "source": "front+corner",
+      "window": [20.0, 29.0],
+      "expected": "detect",
+      "human_verified": true,
+      "target_track_ids": [56, 1003],
+      "scene": "Right truck enters; L1 must recover front track 56 when the narrow vision likelihood misses it"
+    },
+    {
+      "id": "santafe-495-7-slow-leadone",
+      "vehicle_folder": "HYUNDAI_SANTAFE_MX5_HEV 61d2c91e1039ab5e",
+      "log": "00000495--f78491e8e3--7/rlog.zst",
+      "source": "front+corner",
+      "window": [9.5, 14.5],
+      "expected": "stationary",
+      "target_track_ids": [56],
+      "scene": "Slow front track 56 must remain leadOne through vision/radar disagreement without switching to farther corner track 1020"
+    },
+    {
+      "id": "ioniq9-1b9-26-tunnel-ghost",
+      "vehicle_folder": "HYUNDAI_IONIQ_9 c92fab3f15c0dbfb",
+      "log": "000001b9--a2a8fbc84b--26/rlog.zst",
+      "source": "front+corner",
+      "window": [0.0, 6.0],
+      "expected": "clear",
+      "forbidden_lead_one_ids": [40, 61],
+      "forbidden_lead_two_ids": [40, 51],
+      "scene": "Tunnel reflections must not become a vision-matched leadOne or stationary leadTwo"
+    },
+    {
+      "id": "sorento-1-4-stationary-113m",
+      "vehicle_folder": "KIA_SORENTO_HEV_4TH_GEN ec52e28535e2b281",
+      "log": "00000001--468b94c6c9--4/rlog.zst",
+      "source": "front+corner",
+      "window": [16.5, 27.5],
+      "expected": "stationary",
+      "target_track_ids": [60, 1003],
+      "scene": "Night stopped vehicle approached from 113 m with front and corner radar"
+    },
+    {
+      "id": "ioniq9-209-30-l1-handoff-no-duplicate-cutin",
+      "vehicle_folder": "HYUNDAI_IONIQ_9 c92fab3f15c0dbfb",
+      "log": "00000209--a5dd001251--30/rlog.zst",
+      "source": "front+corner",
+      "window": [54.5, 55.5],
+      "expected": "clear",
+      "forbidden_lead_two_ids": [1010],
+      "scene": "Fast right-side corner track 1010 hands off to matching front leadOne 60 without duplicate leadTwo"
+    },
+    {
+      "id": "santafe-494-4-born-in-path-l2-ghosts",
+      "vehicle_folder": "HYUNDAI_SANTAFE_MX5_HEV 61d2c91e1039ab5e",
+      "log": "00000494--0d89801e48--4/rlog.zst",
+      "source": "front+corner",
+      "window": [29.5, 41.5],
+      "expected": "clear",
+      "forbidden_lead_two_ids": [1000, 1040, 1042, 1043, 1045],
+      "scene": "Corner tracks born inside the path must not churn as leadTwo while stable front leadOne 63 remains"
+    },
+    {
       "id": "carnival-5b-18-early",
       "vehicle_folder": "KIA_CARNIVAL_4TH_GEN c4dcf95545dafe68",
       "log": "0000005b--02344a68f2--18/rlog.1.zst",
       "source": "corner",
       "window": [0.0, 10.0],
       "expected": "detect",
+      "human_verified": true,
+      "target_track_ids": [1013],
+      "latest_detection_s": 5.6,
       "scene": "Multiple early cut-ins"
+    },
+    {
+      "id": "carnival-5b-18-post-takeover",
+      "vehicle_folder": "KIA_CARNIVAL_4TH_GEN c4dcf95545dafe68",
+      "log": "0000005b--02344a68f2--18/rlog.1.zst",
+      "source": "corner",
+      "window": [7.3, 8.5],
+      "expected": "detect",
+      "human_verified": true,
+      "target_track_ids": [1013],
+      "scene": "Do not re-report a cut-in after the same vehicle became leadOne"
+    },
+    {
+      "id": "carnival-5b-18-close-entry",
+      "vehicle_folder": "KIA_CARNIVAL_4TH_GEN c4dcf95545dafe68",
+      "log": "0000005b--02344a68f2--18/rlog.1.zst",
+      "source": "corner",
+      "window": [17.5, 19.2],
+      "expected": "detect",
+      "human_verified": true,
+      "scene": "Close vehicle enters from the right; detect before it reaches the lane line"
+    },
+    {
+      "id": "carnival-5b-18-adjacent-29",
+      "vehicle_folder": "KIA_CARNIVAL_4TH_GEN c4dcf95545dafe68",
+      "log": "0000005b--02344a68f2--18/rlog.1.zst",
+      "source": "corner",
+      "window": [28.0, 38.5],
+      "expected": "clear",
+      "human_verified": true,
+      "scene": "Fast adjacent-lane change remains outside the ego lane"
     },
     {
       "id": "carnival-5b-15-truck",
@@ -17,7 +186,38 @@
       "source": "corner",
       "window": [45.0, 50.0],
       "expected": "detect",
+      "human_verified": true,
+      "target_track_ids": [39, 1071],
       "scene": "Truck enters from the left"
+    },
+    {
+      "id": "carnival-5b-15-truck-before-entry-42",
+      "vehicle_folder": "KIA_CARNIVAL_4TH_GEN c4dcf95545dafe68",
+      "log": "0000005b--02344a68f2--15/rlog.1.zst",
+      "source": "corner",
+      "window": [42.3, 43.6],
+      "expected": "clear",
+      "forbidden_lead_two_ids": [39, 1071],
+      "scene": "Truck remains parallel before beginning its lane entry"
+    },
+    {
+      "id": "carnival-5b-15-truck-before-entry-45",
+      "vehicle_folder": "KIA_CARNIVAL_4TH_GEN c4dcf95545dafe68",
+      "log": "0000005b--02344a68f2--15/rlog.1.zst",
+      "source": "corner",
+      "window": [44.8, 46.1],
+      "expected": "clear",
+      "forbidden_lead_two_ids": [39, 1071],
+      "scene": "Truck remains outside before sustained inward motion starts"
+    },
+    {
+      "id": "carnival-5b-15-adjacent-27",
+      "vehicle_folder": "KIA_CARNIVAL_4TH_GEN c4dcf95545dafe68",
+      "log": "0000005b--02344a68f2--15/rlog.1.zst",
+      "source": "corner",
+      "window": [26.0, 29.0],
+      "expected": "clear",
+      "scene": "Right adjacent SUV remains in its lane"
     },
     {
       "id": "azera-6d-1-front",
@@ -26,6 +226,7 @@
       "source": "front",
       "window": [8.0, 13.0],
       "expected": "detect",
+      "human_verified": true,
       "scene": "Left vehicle cuts in"
     },
     {
@@ -35,25 +236,62 @@
       "source": "front",
       "window": [24.0, 30.0],
       "expected": "detect",
+      "human_verified": true,
+      "target_track_ids": [55, 1068],
       "scene": "Front-radar cut-in around 26 seconds"
+    },
+    {
+      "id": "palisade-bef-2-front-close",
+      "vehicle_folder": "HYUNDAI_PALISADE b84b4a4fbb604be1",
+      "log": "00000bef--a8eb1d8c98--2/rlog.zst",
+      "source": "front",
+      "window": [24.4, 25.2],
+      "expected": "detect",
+      "human_verified": true,
+      "target_track_ids": [35],
+      "scene": "Close right vehicle enters using front radar only before becoming leadOne"
+    },
+    {
+      "id": "palisade-bef-2-roadside-pass",
+      "vehicle_folder": "HYUNDAI_PALISADE b84b4a4fbb604be1",
+      "log": "00000bef--a8eb1d8c98--2/rlog.zst",
+      "source": "front",
+      "window": [49.2, 50.1],
+      "expected": "clear",
+      "forbidden_lead_two_ids": [37],
+      "scene": "Close right roadside vehicle is passed without entering the ego lane"
     },
     {
       "id": "carnival-6a-27-close",
       "vehicle_folder": "KIA_CARNIVAL_4TH_GEN c4dcf95545dafe68",
       "log": "0000006a--f0976fc330--27/rlog.zst",
       "source": "corner",
-      "window": [54.0, 60.0],
+      "window": [55.7, 59.0],
+      "label_window": [55.75, 58.45],
       "expected": "detect",
-      "scene": "Very close white vehicle enters from the left"
+      "human_verified": true,
+      "target_track_ids": [52, 1024],
+      "latest_detection_s": 56.2,
+      "scene": "Very close white vehicle enters from the left; report early and keep the provisional control output softened"
     },
     {
-      "id": "ioniq9-a7-22-truck",
-      "vehicle_folder": "HYUNDAI_IONIQ_9 c92fab3f15c0dbfb",
-      "log": "000001a7--54660d9df7--22/rlog.zst",
-      "source": "corner",
-      "window": [20.0, 29.0],
+      "id": "ioniq5-cd0-1-merge",
+      "vehicle_folder": "HYUNDAI_IONIQ_5_PE 8b06424f3adf2bd3",
+      "log": "00000cd0--3956077d94--1/rlog.zst",
+      "source": "front+corner",
+      "window": [36.5, 39.0],
       "expected": "detect",
-      "scene": "Large truck begins entering around 21 seconds"
+      "target_track_ids": [57, 1019],
+      "scene": "Fused left vehicle enters the ego path around 37 seconds"
+    },
+    {
+      "id": "ioniq5-cd0-1-close-point-jump",
+      "vehicle_folder": "HYUNDAI_IONIQ_5_PE 8b06424f3adf2bd3",
+      "log": "00000cd0--3956077d94--1/rlog.zst",
+      "source": "front+corner",
+      "window": [27.5, 29.0],
+      "expected": "clear",
+      "scene": "Close front-only point IDs jump without a visible cut-in"
     },
     {
       "id": "ioniq5-cab-49-curve",
@@ -65,14 +303,47 @@
       "scene": "Right curve; adjacent vehicle stays in its lane"
     },
     {
+      "id": "ioniq5-cab-49-curve-late",
+      "vehicle_folder": "HYUNDAI_IONIQ_5_PE 8b06424f3adf2bd3",
+      "log": "00000cab--0e0be97e78--49/rlog.zst",
+      "source": "corner",
+      "window": [40.0, 44.0],
+      "expected": "clear",
+      "scene": "Low-confidence curve lanes and a parallel right-side vehicle"
+    },
+    {
       "id": "ioniq9-192-7-early",
       "vehicle_folder": "HYUNDAI_IONIQ_9 c92fab3f15c0dbfb",
       "log": "00000192--b0f1546431--7/rlog.zst",
       "source": "corner",
       "window": [0.0, 10.0],
       "expected": "clear",
+      "human_verified": true,
       "scene": "Early corner-radar false positive"
     },
+      {
+        "id": "ioniq9-192-7-adjacent-42",
+        "vehicle_folder": "HYUNDAI_IONIQ_9 c92fab3f15c0dbfb",
+        "log": "00000192--b0f1546431--7/rlog.zst",
+      "source": "corner",
+      "window": [41.5, 42.6],
+      "expected": "clear",
+      "human_verified": true,
+      "target_track_ids": [1044],
+        "forbidden_lead_two_ids": [1044],
+        "scene": "Adjacent corner track remains outside the ego lane near 42 seconds"
+      },
+      {
+        "id": "ioniq9-192-7-single-frame-27",
+        "vehicle_folder": "HYUNDAI_IONIQ_9 c92fab3f15c0dbfb",
+        "log": "00000192--b0f1546431--7/rlog.zst",
+        "source": "corner",
+        "window": [27.0, 28.0],
+        "expected": "clear",
+        "human_verified": true,
+        "forbidden_lead_two_ids": [48, 1002],
+        "scene": "One-frame corner candidate remains in the adjacent lane"
+      },
     {
       "id": "santafe-421-1",
       "vehicle_folder": "HYUNDAI_SANTAFE_MX5_HEV 61d2c91e1039ab5e",
@@ -83,23 +354,44 @@
       "scene": "False cut-in around 17 seconds"
     },
     {
+      "id": "santafe-421-1-truck",
+      "vehicle_folder": "HYUNDAI_SANTAFE_MX5_HEV 61d2c91e1039ab5e",
+      "log": "00000421--6bbe001d3d--1/rlog.zst",
+      "source": "corner",
+      "window": [26.0, 29.0],
+      "expected": "detect",
+      "scene": "Truck enters from the left around 27 seconds"
+    },
+    {
       "id": "ioniq5-cb5-3-adjacent",
       "vehicle_folder": "HYUNDAI_IONIQ_5_PE 8b06424f3adf2bd3",
       "log": "00000cb5--cf3e24bc3d--3/rlog.zst",
       "source": "corner",
       "window": [0.0, 60.0],
       "expected": "clear",
+      "human_verified": true,
       "scene": "Adjacent vehicles before meeting a center lead"
     },
-    {
-      "id": "k8-216-4-slot-change",
-      "vehicle_folder": "KIA_K8_HEV_1ST_GEN 4aa2ded146fd78b9",
-      "log": "00000216--f69e641982--4/rlog.zst",
+      {
+        "id": "k8-216-4-slot-change",
+        "vehicle_folder": "KIA_K8_HEV_1ST_GEN 4aa2ded146fd78b9",
+        "log": "00000216--f69e641982--4/rlog.zst",
       "source": "corner",
       "window": [12.0, 17.0],
-      "expected": "clear",
-      "scene": "Raw corner slot changes object near 14 seconds"
-    },
+        "expected": "clear",
+        "scene": "Raw corner slot changes object near 14 seconds"
+      },
+      {
+        "id": "k8-216-4-early-adjacent",
+        "vehicle_folder": "KIA_K8_HEV_1ST_GEN 4aa2ded146fd78b9",
+        "log": "00000216--f69e641982--4/rlog.zst",
+        "source": "corner",
+        "window": [0.0, 3.2],
+        "expected": "detect",
+        "human_verified": true,
+        "forbidden_lead_two_ids": [48, 1010],
+        "scene": "Early right adjacent vehicle stays outside the ego lane"
+      },
     {
       "id": "gv80-218-2-close-pass",
       "vehicle_folder": "GENESIS_GV80 4857b2d26ed4648e",
@@ -107,7 +399,49 @@
       "source": "corner",
       "window": [35.0, 40.0],
       "expected": "clear",
+      "human_verified": true,
       "scene": "Passing a close adjacent vehicle near 37 seconds"
+    },
+      {
+        "id": "gv80-218-2-adjacent-pass-44",
+        "vehicle_folder": "GENESIS_GV80 4857b2d26ed4648e",
+        "log": "00000218--6aa147e461--2/rlog.zst",
+      "source": "corner",
+      "window": [43.0, 45.5],
+        "expected": "clear",
+        "scene": "Adjacent vehicle approaches but remains outside the ego lane"
+      },
+      {
+        "id": "gv80-218-2-adjacent-pass-47",
+        "vehicle_folder": "GENESIS_GV80 4857b2d26ed4648e",
+        "log": "00000218--6aa147e461--2/rlog.zst",
+        "source": "corner",
+        "window": [46.8, 48.0],
+        "expected": "detect",
+        "human_verified": true,
+        "forbidden_lead_two_ids": [51],
+        "scene": "Right adjacent vehicle remains outside before the later close pass"
+      },
+    {
+      "id": "gv80-218-2-adjacent-pass-49",
+      "vehicle_folder": "GENESIS_GV80 4857b2d26ed4648e",
+      "log": "00000218--6aa147e461--2/rlog.zst",
+      "source": "corner",
+      "window": [48.0, 50.5],
+      "expected": "clear",
+      "human_verified": true,
+      "scene": "Close adjacent vehicle remains outside the ego lane"
+    },
+    {
+      "id": "gv80-218-2-adjacent-pass-54",
+      "vehicle_folder": "GENESIS_GV80 4857b2d26ed4648e",
+      "log": "00000218--6aa147e461--2/rlog.zst",
+      "source": "corner",
+      "window": [53.2, 54.2],
+      "expected": "clear",
+      "target_track_ids": [40],
+      "forbidden_lead_two_ids": [40],
+      "scene": "Adjacent vehicle remains in its lane near 54 seconds"
     },
     {
       "id": "gv80-218-6-point-jump",
@@ -116,7 +450,18 @@
       "source": "corner",
       "window": [39.0, 44.0],
       "expected": "clear",
+      "human_verified": true,
       "scene": "Lateral point jump near 41 seconds"
+    },
+    {
+      "id": "gv80-218-6-parallel-truck",
+      "vehicle_folder": "GENESIS_GV80 4857b2d26ed4648e",
+      "log": "00000218--6aa147e461--6/rlog.zst",
+      "source": "corner",
+      "window": [46.0, 48.5],
+      "expected": "clear",
+      "forbidden_lead_two_ids": [51],
+      "scene": "Close truck continues parallel with negligible lateral motion"
     },
     {
       "id": "k8-221-18-persistent",
@@ -128,12 +473,23 @@
       "scene": "Persistent false cut-in around 50 seconds"
     },
     {
+      "id": "k8-221-18-persistent-late",
+      "vehicle_folder": "KIA_K8_HEV_1ST_GEN 4aa2ded146fd78b9",
+      "log": "00000221--1ee7be4212--18/rlog.zst",
+      "source": "corner",
+      "window": [58.4, 59.7],
+      "expected": "clear",
+      "forbidden_lead_two_ids": [62],
+      "scene": "Distant adjacent corner track must not become a persistent stealth leadTwo"
+    },
+    {
       "id": "ioniq9-a7-2-two-false",
       "vehicle_folder": "HYUNDAI_IONIQ_9 c92fab3f15c0dbfb",
       "log": "000001a7--54660d9df7--2/rlog.zst",
       "source": "corner",
       "window": [0.0, 33.0],
       "expected": "clear",
+      "human_verified": true,
       "scene": "False positives near 2 and 29 seconds"
     },
     {
@@ -144,6 +500,466 @@
       "window": [30.0, 37.0],
       "expected": "clear",
       "scene": "Adjacent vehicle remains in its lane on a curve around 33 seconds"
+    },
+    {
+      "id": "ioniq9-1b9-2-stopped",
+      "vehicle_folder": "HYUNDAI_IONIQ_9 c92fab3f15c0dbfb",
+      "log": "000001b9--a2a8fbc84b--2/rlog.zst",
+      "source": "front+corner",
+      "window": [27.0, 32.0],
+      "expected": "clear",
+      "forbidden_lead_two_ids": [1053],
+      "scene": "Stopped traffic must not promote the adjacent corner point to leadTwo"
+    },
+    {
+      "id": "ioniq5-cd2-4-stopped-false-cutin",
+      "vehicle_folder": "HYUNDAI_IONIQ_5_PE 8b06424f3adf2bd3",
+      "log": "00000cd2--ea0776cc10--4/rlog.zst",
+      "source": "front+corner",
+      "window": [12.0, 14.5],
+      "expected": "clear",
+      "forbidden_lead_two_ids": [33],
+      "scene": "Stopped object id 33 at 7.65 m must not trigger cut-in audio"
+    },
+    {
+      "id": "ioniq9-1c1-25-close-stationary-reflection",
+      "vehicle_folder": "HYUNDAI_IONIQ_9 c92fab3f15c0dbfb",
+      "log": "000001c1--f5225bd6f1--25/rlog.zst",
+      "source": "front",
+      "window": [4.8, 6.7],
+      "expected": "clear",
+      "target_track_ids": [44],
+      "forbidden_lead_two_ids": [44],
+      "scene": "Close stationary front-radar reflection outside the lane must not trigger repeated cut-in audio"
+    },
+    {
+      "id": "k5-247-38-close-front-ghost",
+      "vehicle_folder": "KIA_K5_DL3_24 36698f7150e1af97",
+      "log": "00000247--b445287f3d--38/rlog.zst",
+      "source": "front",
+      "window": [21.5, 23.3],
+      "expected": "clear",
+      "target_track_ids": [50],
+      "forbidden_lead_two_ids": [50],
+      "scene": "Close front-radar ghost must not become a cut-in from lane-center motion alone"
+    },
+      {
+        "id": "k5-247-38-late-parallel",
+        "vehicle_folder": "KIA_K5_DL3_24 36698f7150e1af97",
+        "log": "00000247--b445287f3d--38/rlog.zst",
+      "source": "front",
+      "window": [54.8, 57.0],
+      "expected": "clear",
+      "target_track_ids": [35, 52],
+        "forbidden_lead_two_ids": [35, 52],
+        "scene": "Parallel front-radar tracks briefly drift toward the path without cutting in"
+      },
+      {
+        "id": "k5-247-38-mid-parallel",
+        "vehicle_folder": "KIA_K5_DL3_24 36698f7150e1af97",
+        "log": "00000247--b445287f3d--38/rlog.zst",
+        "source": "front",
+        "window": [41.5, 42.7],
+        "expected": "clear",
+        "forbidden_lead_two_ids": [44],
+        "scene": "Night front-radar candidate remains parallel outside the ego lane"
+      },
+    {
+      "id": "pv5-129-8-right-front-cutin",
+      "vehicle_folder": "KIA_PV5 8ca0d3863b1b3c32",
+      "log": "00000129--fc54fff840--8/rlog.zst",
+      "source": "front",
+      "window": [34.4, 35.5],
+      "expected": "detect",
+      "human_verified": true,
+      "target_track_ids": [49],
+      "require_cutin_continuity": true,
+      "require_lead_one_takeover": true,
+      "max_cutin_gap_s": 0.15,
+      "scene": "Front-only right vehicle should be detected before vision promotes it to leadOne"
+    },
+    {
+      "id": "ioniq9-1d6-28-left-cutin",
+      "vehicle_folder": "HYUNDAI_IONIQ_9 c92fab3f15c0dbfb",
+      "log": "000001d6--b3030f2f2e--28/rlog.zst",
+      "source": "front+corner",
+      "window": [23.3, 25.0],
+      "expected": "detect",
+      "human_verified": true,
+      "target_track_ids": [36, 1006],
+      "require_cutin_continuity": true,
+      "require_lead_one_takeover": true,
+      "max_cutin_gap_s": 0.15,
+      "scene": "Left vehicle entering the ego lane must become leadTwo before leadOne takeover"
+    },
+    {
+      "id": "ioniq5-aa5-3-stationary-114m",
+      "vehicle_folder": "HYUNDAI_IONIQ_5_PE 8b06424f3adf2bd3",
+      "log": "00000aa5--26e26ea9a8--3/rlog.zst",
+      "source": "front",
+      "window": [29.5, 40.5],
+      "expected": "stationary",
+      "target_track_ids": [35],
+      "scene": "Night stationary queue approached from 114 m"
+    },
+    {
+      "id": "sonata-237-0-stationary-99m",
+      "vehicle_folder": "HYUNDAI_SONATA 81685acfb327ceef",
+      "log": "00000237--5ab0b3e53c--0/rlog.1.zst",
+      "source": "front",
+      "window": [25.0, 36.0],
+      "expected": "stationary",
+      "target_track_ids": [41, 48],
+      "scene": "Rainy night stationary queue approached from 99 m"
+    },
+    {
+      "id": "santafe-d3-6-left-cutin",
+      "vehicle_folder": "HYUNDAI_SANTAFE_MX5 d9ec903afdbac0bd",
+      "log": "000002d3--74e5ed8754--6/rlog.zst",
+      "source": "front+corner",
+      "window": [41.3, 43.3],
+      "expected": "detect",
+      "target_track_ids": [52, 1018],
+      "scene": "Close left vehicle enters while a center lead remains active"
+    },
+    {
+      "id": "santafe-d3-6-adjacent-bus-51",
+      "vehicle_folder": "HYUNDAI_SANTAFE_MX5 d9ec903afdbac0bd",
+      "log": "000002d3--74e5ed8754--6/rlog.zst",
+      "source": "front+corner",
+      "window": [50.8, 52.2],
+      "expected": "clear",
+      "forbidden_lead_two_ids": [57],
+      "scene": "Right bus remains adjacent while front-radar range increases"
+    },
+    {
+      "id": "santafe-d3-6-adjacent-bus-57",
+      "vehicle_folder": "HYUNDAI_SANTAFE_MX5 d9ec903afdbac0bd",
+      "log": "000002d3--74e5ed8754--6/rlog.zst",
+      "source": "front+corner",
+      "window": [57.0, 58.7],
+      "expected": "clear",
+      "forbidden_lead_two_ids": [33],
+      "scene": "Close bus reflection sweeps laterally while range increases"
+    },
+    {
+      "id": "santafe-d3-7-adjacent-left",
+      "vehicle_folder": "HYUNDAI_SANTAFE_MX5 d9ec903afdbac0bd",
+      "log": "000002d3--74e5ed8754--7/rlog.zst",
+      "source": "front+corner",
+      "window": [19.5, 21.0],
+      "expected": "clear",
+      "human_verified": true,
+      "forbidden_lead_two_ids": [44, 1011],
+      "scene": "Left adjacent vehicle remains in its lane"
+    },
+      {
+        "id": "santafe-df-9-adjacent-right-56",
+        "vehicle_folder": "HYUNDAI_SANTAFE_MX5 d9ec903afdbac0bd",
+        "log": "000002df--aada072b63--9/rlog.zst",
+        "source": "front+corner",
+        "window": [56.2, 57.4],
+        "expected": "clear",
+        "forbidden_lead_two_ids": [42, 46],
+        "scene": "Close right adjacent vehicle remains outside the ego lane"
+      },
+    {
+      "id": "azera-b1-14-right-cutin",
+      "vehicle_folder": "HYUNDAI_AZERA_7TH_GEN f3a537501c7197ec",
+      "log": "000000b1--b241e88f9b--14/rlog.zst",
+      "source": "front+corner",
+      "window": [5.5, 6.5],
+      "expected": "detect",
+      "human_verified": true,
+      "target_track_ids": [47, 1004],
+      "scene": "Close right vehicle enters while a center lead remains active"
+    },
+    {
+      "id": "ioniq9-1ce-11-right-cutin",
+      "vehicle_folder": "HYUNDAI_IONIQ_9 c92fab3f15c0dbfb",
+      "log": "000001ce--d184d0265e--11/rlog.zst",
+      "source": "front+corner",
+      "window": [15.0, 15.25],
+      "label_window": [15.0, 16.3],
+      "expected": "detect",
+      "human_verified": true,
+      "target_track_ids": [62, 1018],
+      "scene": "Fast right cut-in must be detected before crossing the lane line"
+    },
+      {
+        "id": "ioniq5-cfb-6-left-cutin",
+        "vehicle_folder": "HYUNDAI_IONIQ_5_PE 8b06424f3adf2bd3",
+        "log": "00000cfb--69588de3d7--6/rlog.zst",
+      "source": "front+corner",
+      "window": [36.8, 39.7],
+      "expected": "detect",
+      "human_verified": true,
+      "target_track_ids": [62, 1028],
+      "latest_detection_s": 37.2,
+      "require_cutin_continuity": true,
+        "require_lead_one_takeover": true,
+        "max_cutin_gap_s": 0.15,
+        "scene": "Close left vehicle must be detected before lane entry and handed over to leadOne"
+      },
+      {
+        "id": "ioniq5-cfb-6-early-clear",
+        "vehicle_folder": "HYUNDAI_IONIQ_5_PE 8b06424f3adf2bd3",
+        "log": "00000cfb--69588de3d7--6/rlog.zst",
+        "source": "corner",
+        "window": [0.0, 2.0],
+        "expected": "detect",
+        "human_verified": true,
+        "forbidden_lead_two_ids": [39],
+        "scene": "Early adjacent corner candidate does not enter the ego lane"
+      },
+    {
+      "id": "ioniq9-1ce-26-lead-continuity",
+      "vehicle_folder": "HYUNDAI_IONIQ_9 c92fab3f15c0dbfb",
+      "log": "000001ce--d184d0265e--26/rlog.zst",
+      "source": "front+corner",
+      "window": [49.0, 50.11],
+      "expected": "clear",
+      "required_lead_one_ids": [40],
+      "require_lead_one_continuous": true,
+      "scene": "Stable fused lead must survive temporary vision distance jitter"
+    },
+    {
+      "id": "ioniq9-1ce-26-tunnel-ghost",
+      "vehicle_folder": "HYUNDAI_IONIQ_9 c92fab3f15c0dbfb",
+      "log": "000001ce--d184d0265e--26/rlog.zst",
+      "source": "front+corner",
+      "window": [40.4, 40.75],
+      "expected": "clear",
+      "forbidden_lead_one_ids": [46],
+      "scene": "Long-range off-path tunnel return must not become leadOne"
+    },
+    {
+      "id": "ioniq9-1ce-6-stationary-corner-lead",
+      "vehicle_folder": "HYUNDAI_IONIQ_9 c92fab3f15c0dbfb",
+      "log": "000001ce--d184d0265e--6/rlog.zst",
+      "source": "front+corner",
+      "window": [42.85, 43.10],
+      "expected": "clear",
+      "required_lead_one_ids": [60, 61, 1012],
+      "scene": "Corner and front corroboration should acquire the slow vehicle near 85 m"
+    },
+    {
+      "id": "palisade-c21-8-close-left-pass",
+      "vehicle_folder": "HYUNDAI_PALISADE b84b4a4fbb604be1",
+      "log": "00000c21--f9485787d6--8/rlog.zst",
+      "source": "front+corner",
+      "window": [11.4, 13.2],
+      "expected": "clear",
+      "forbidden_lead_two_ids": [32],
+      "scene": "Close left vehicle passes longitudinally without entering the ego lane"
+    },
+    {
+      "id": "palisade-c21-8-right-cutin-31",
+      "vehicle_folder": "HYUNDAI_PALISADE b84b4a4fbb604be1",
+      "log": "00000c21--f9485787d6--8/rlog.zst",
+      "source": "front+corner",
+      "window": [30.4, 31.4],
+      "expected": "detect",
+      "human_verified": true,
+      "target_track_ids": [51],
+      "latest_detection_s": 30.8,
+      "scene": "Right front-radar track enters with missing instantaneous lateral velocity"
+    },
+    {
+      "id": "palisade-c21-8-right-cutin-56",
+      "vehicle_folder": "HYUNDAI_PALISADE b84b4a4fbb604be1",
+      "log": "00000c21--f9485787d6--8/rlog.zst",
+      "source": "front+corner",
+      "window": [56.2, 56.9],
+      "expected": "detect",
+      "human_verified": true,
+      "target_track_ids": [34],
+      "latest_detection_s": 56.7,
+      "scene": "Right cut-in should be detected from sustained history before lane crossing"
+    },
+    {
+      "id": "palisade-c21-9-right-cutin-14",
+      "vehicle_folder": "HYUNDAI_PALISADE b84b4a4fbb604be1",
+      "log": "00000c21--f9485787d6--9/rlog.zst",
+      "source": "front+corner",
+      "window": [13.8, 15.0],
+      "expected": "detect",
+      "human_verified": true,
+      "target_track_ids": [40],
+      "scene": "Right vehicle enters while front radar reports zero lateral velocity"
+    },
+    {
+      "id": "palisade-c21-9-right-bus-pass-10",
+      "vehicle_folder": "HYUNDAI_PALISADE b84b4a4fbb604be1",
+      "log": "00000c21--f9485787d6--9/rlog.zst",
+      "source": "front+corner",
+      "window": [10.2, 11.0],
+      "expected": "clear",
+      "forbidden_lead_two_ids": [48],
+      "scene": "Right bus passes close without entering the ego lane"
+    },
+    {
+      "id": "palisade-c21-9-right-vehicle-early",
+      "vehicle_folder": "HYUNDAI_PALISADE b84b4a4fbb604be1",
+      "log": "00000c21--f9485787d6--9/rlog.zst",
+      "source": "front+corner",
+      "window": [12.5, 13.4],
+      "expected": "clear",
+      "human_verified": true,
+      "forbidden_lead_two_ids": [40],
+      "scene": "Right vehicle remains outside before its later lane entry"
+    },
+      {
+        "id": "carnival-5b-15-adjacent-right-56",
+        "vehicle_folder": "KIA_CARNIVAL_4TH_GEN c4dcf95545dafe68",
+        "log": "0000005b--02344a68f2--15/rlog.1.zst",
+        "source": "front+corner",
+        "window": [56.2, 59.9],
+        "expected": "detect",
+        "human_verified": true,
+        "target_track_ids": [50, 1080],
+        "scene": "Right SUV crosses into the ego path near the end of the route"
+    },
+    {
+      "id": "azera-6d-1-adjacent-left-16",
+      "vehicle_folder": "HYUNDAI_AZERA_7TH_GEN f3a537501c7197ec",
+      "log": "0000006d--50a44bb074--1/rlog.zst",
+      "source": "front+corner",
+      "window": [16.2, 17.6],
+      "expected": "clear",
+      "human_verified": true,
+      "forbidden_lead_two_ids": [62, 1005],
+      "scene": "Left vehicle remains in the adjacent lane after the earlier cut-in"
+    },
+      {
+        "id": "ioniq9-18f-2-second-cutin",
+        "vehicle_folder": "HYUNDAI_IONIQ_9 c92fab3f15c0dbfb",
+        "log": "0000018f--2bb73a4538--2/rlog.zst",
+        "source": "front+corner",
+        "window": [36.8, 41.0],
+        "expected": "detect",
+        "target_track_ids": [48, 1085],
+        "latest_detection_s": 38.0,
+        "scene": "White vehicle merges left into the ego lane"
+      },
+    {
+      "id": "gv80-218-2-adjacent-right-14",
+      "vehicle_folder": "GENESIS_GV80 4857b2d26ed4648e",
+      "log": "00000218--6aa147e461--2/rlog.zst",
+      "source": "front+corner",
+      "window": [13.7, 14.5],
+      "expected": "clear",
+      "forbidden_lead_two_ids": [48, 1009],
+      "scene": "Black sedan remains in the right adjacent lane"
+    },
+    {
+      "id": "gv80-218-6-adjacent-right-36",
+      "vehicle_folder": "GENESIS_GV80 4857b2d26ed4648e",
+      "log": "00000218--6aa147e461--6/rlog.zst",
+      "source": "front+corner",
+      "window": [36.1, 37.2],
+      "expected": "clear",
+      "forbidden_lead_two_ids": [62, 1031],
+      "scene": "White SUV remains in the right adjacent lane"
+    },
+    {
+      "id": "ioniq9-1c1-25-underpass-side-23",
+      "vehicle_folder": "HYUNDAI_IONIQ_9 c92fab3f15c0dbfb",
+      "log": "000001c1--f5225bd6f1--25/rlog.zst",
+      "source": "front+corner",
+      "window": [22.4, 23.2],
+      "expected": "clear",
+      "human_verified": true,
+      "forbidden_lead_two_ids": [39, 1000],
+      "scene": "Side vehicle stays outside the ego lane through the underpass"
+    },
+    {
+      "id": "ioniq9-1c1-25-adjacent-right-40",
+      "vehicle_folder": "HYUNDAI_IONIQ_9 c92fab3f15c0dbfb",
+      "log": "000001c1--f5225bd6f1--25/rlog.zst",
+      "source": "front+corner",
+      "window": [39.4, 41.2],
+      "expected": "clear",
+      "human_verified": true,
+      "forbidden_lead_two_ids": [39, 1000],
+      "scene": "Right SUV remains in its lane while the road curves"
+    },
+    {
+      "id": "santafe-df-9-adjacent-right-59",
+      "vehicle_folder": "HYUNDAI_SANTAFE_MX5 d9ec903afdbac0bd",
+      "log": "000002df--aada072b63--9/rlog.zst",
+      "source": "front+corner",
+      "window": [59.2, 59.9],
+      "expected": "clear",
+      "forbidden_lead_two_ids": [35, 1052],
+      "scene": "Close right vehicle remains adjacent at the end of the route"
+    },
+    {
+      "id": "azera-b1-14-adjacent-right-10",
+      "vehicle_folder": "HYUNDAI_AZERA_7TH_GEN f3a537501c7197ec",
+      "log": "000000b1--b241e88f9b--14/rlog.zst",
+      "source": "front+corner",
+      "window": [9.7, 11.8],
+      "expected": "clear",
+      "forbidden_lead_two_ids": [50, 1011],
+      "scene": "White SUV remains beside the construction barrier"
+    },
+    {
+      "id": "ioniq9-1ce-11-adjacent-left-5",
+      "vehicle_folder": "HYUNDAI_IONIQ_9 c92fab3f15c0dbfb",
+      "log": "000001ce--d184d0265e--11/rlog.zst",
+      "source": "front+corner",
+      "window": [4.3, 5.8],
+      "expected": "clear",
+      "human_verified": true,
+      "forbidden_lead_two_ids": [60, 1001],
+      "scene": "White sedan remains in the left adjacent lane"
+    },
+    {
+      "id": "ioniq9-1ce-11-left-cutin-44",
+      "vehicle_folder": "HYUNDAI_IONIQ_9 c92fab3f15c0dbfb",
+      "log": "000001ce--d184d0265e--11/rlog.zst",
+      "source": "front+corner",
+      "window": [43.2, 46.1],
+      "expected": "detect",
+      "human_verified": true,
+      "target_track_ids": [56, 1044],
+      "latest_detection_s": 44.0,
+      "scene": "Black sedan enters the ego lane from the left"
+    },
+    {
+      "id": "ioniq9-1ce-26-right-cutin-12",
+      "vehicle_folder": "HYUNDAI_IONIQ_9 c92fab3f15c0dbfb",
+      "log": "000001ce--d184d0265e--26/rlog.zst",
+      "source": "front+corner",
+      "window": [11.1, 13.2],
+      "expected": "detect",
+      "target_track_ids": [48, 1041],
+      "latest_detection_s": 11.8,
+      "scene": "White vehicle moves from the right into the ego lane"
+    },
+    {
+      "id": "azera-cf-3-left-cutin-16",
+      "vehicle_folder": "HYUNDAI_AZERA_7TH_GEN f3a537501c7197ec",
+      "log": "000000cf--04b9851018--3/rlog.zst",
+      "source": "front+corner",
+      "window": [15.5, 17.5],
+      "expected": "detect",
+      "human_verified": true,
+      "target_track_ids": [62, 1000],
+      "latest_detection_s": 16.3,
+      "scene": "Dark SUV enters the ego lane from the left"
+    },
+    {
+      "id": "azera-cf-15-straight-ahead-7",
+      "vehicle_folder": "HYUNDAI_AZERA_7TH_GEN f3a537501c7197ec",
+      "log": "000000cf--04b9851018--15/rlog.zst",
+      "source": "front+corner",
+      "window": [6.5, 8.3],
+      "expected": "detect",
+      "human_verified": true,
+      "forbidden_lead_two_ids": [58, 1005],
+      "scene": "Vehicle ahead continues in its lane without cutting in"
     }
   ]
 }

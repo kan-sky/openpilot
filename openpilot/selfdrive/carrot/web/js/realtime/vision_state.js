@@ -8,19 +8,21 @@
     FIRST_FRAME_WAITING: "first-frame-waiting",
     READY: "ready",
     RECOVERING: "recovering",
+    BUSY: "busy",
     FAILED: "failed",
   });
   const CARROT_VISION_PHASE_SET = new Set(Object.values(CARROT_VISION_PHASE));
-  // Control state = the 4 states code actually reasons about. The 9 phases
+  // Control state = the 5 states code actually reasons about. Display phases
   // above are kept purely as display labels (they drive the status/detail
   // text); each phase maps onto exactly one control state. Consumers should
-  // branch on controlState (live / connecting / reconnecting / idle), not on a
+  // branch on controlState (live / connecting / reconnecting / blocked / idle), not on a
   // specific phase value.
   const CARROT_VISION_CONTROL = Object.freeze({
     IDLE: "idle",
     CONNECTING: "connecting",
     LIVE: "live",
     RECONNECTING: "reconnecting",
+    BLOCKED: "blocked",
   });
   const PHASE_TO_CONTROL = Object.freeze({
     [CARROT_VISION_PHASE.UNAVAILABLE]: CARROT_VISION_CONTROL.IDLE,
@@ -32,6 +34,7 @@
     [CARROT_VISION_PHASE.FIRST_FRAME_WAITING]: CARROT_VISION_CONTROL.CONNECTING,
     [CARROT_VISION_PHASE.READY]: CARROT_VISION_CONTROL.LIVE,
     [CARROT_VISION_PHASE.RECOVERING]: CARROT_VISION_CONTROL.RECONNECTING,
+    [CARROT_VISION_PHASE.BUSY]: CARROT_VISION_CONTROL.BLOCKED,
   });
   function controlStateForPhase(phase) {
     return PHASE_TO_CONTROL[phase] || CARROT_VISION_CONTROL.IDLE;
@@ -57,6 +60,19 @@
       hud: "idle",
       overlay: "idle",
     },
+    ownership: {
+      blocked: false,
+      code: "",
+    },
+    environment: {
+      disableDm: null,
+      clusterHud: null,
+      isOffroad: null,
+      isOnroad: null,
+      testActive: false,
+      testStatus: "stopped",
+      testError: "",
+    },
   };
 
   function isCarrotVisionActive() {
@@ -78,6 +94,16 @@
   }
 
   function getCarrotVisionPhaseStatusText(phase) {
+    const environment = CARROT_VISION_STATE.environment || {};
+    if (environment.testStatus === "error" && environment.testError) {
+      return getUIText("vision_test_failed_title", "Camera check stopped");
+    }
+    if (CARROT_VISION_STATE.active && environment.isOffroad === true && !environment.testActive) {
+      if (environment.testStatus === "starting") {
+        return getUIText("vision_test_starting_title", "Preparing camera check");
+      }
+      return getUIText("vision_parked_title", "Vehicle is parked");
+    }
     switch (phase) {
       case CARROT_VISION_PHASE.UNAVAILABLE:
         return CARROT_VISION_STATE.disabledMessage || getUIText("vision_unavailable_hint", "Available when DisableDM is 2.");
@@ -94,6 +120,8 @@
         return getUIText("connected", "Connected");
       case CARROT_VISION_PHASE.RECOVERING:
         return getUIText("reconnecting", "Reconnecting...");
+      case CARROT_VISION_PHASE.BUSY:
+        return getUIText("vision_stream_busy", "Carrot Vision is active on another device.");
       case CARROT_VISION_PHASE.FAILED:
         return getUIText("disable_dm_check_failed", "Could not check DisableDM status.");
       default:
@@ -102,6 +130,16 @@
   }
 
   function getCarrotVisionPhaseDetailText(phase) {
+    const environment = CARROT_VISION_STATE.environment || {};
+    if (environment.testStatus === "error" && environment.testError) {
+      return getUIText("vision_test_failed_detail", "Check the camera test log and try again.");
+    }
+    if (CARROT_VISION_STATE.active && environment.isOffroad === true && !environment.testActive) {
+      if (environment.testStatus === "starting") {
+        return getUIText("vision_step_starting", "Preparing the device camera.");
+      }
+      return getUIText("vision_parked_detail", "The camera will connect automatically when driving starts.");
+    }
     switch (phase) {
       case CARROT_VISION_PHASE.UNAVAILABLE:
         return getUIText("vision_step_unavailable", "Enable DisableDM 2 to use Carrot Vision.");
@@ -119,6 +157,8 @@
         return getUIText("vision_step_ready", "Camera and overlay are live.");
       case CARROT_VISION_PHASE.RECOVERING:
         return getUIText("vision_step_recovering", "Refreshing the stream connection.");
+      case CARROT_VISION_PHASE.BUSY:
+        return "";
       case CARROT_VISION_PHASE.FAILED:
         return getUIText("vision_step_failed", "Connection check failed. Retrying when available.");
       default:
@@ -141,6 +181,8 @@
     const next = { ...patch };
     if (next.rtc == null) delete next.rtc;
     if (next.raw == null) delete next.raw;
+    if (next.ownership == null) delete next.ownership;
+    if (next.environment == null) delete next.environment;
     if (next.rtc && typeof next.rtc === "object") {
       Object.assign(CARROT_VISION_STATE.rtc, next.rtc);
       delete next.rtc;
@@ -148,6 +190,14 @@
     if (next.raw && typeof next.raw === "object") {
       Object.assign(CARROT_VISION_STATE.raw, next.raw);
       delete next.raw;
+    }
+    if (next.ownership && typeof next.ownership === "object") {
+      Object.assign(CARROT_VISION_STATE.ownership, next.ownership);
+      delete next.ownership;
+    }
+    if (next.environment && typeof next.environment === "object") {
+      Object.assign(CARROT_VISION_STATE.environment, next.environment);
+      delete next.environment;
     }
     Object.assign(CARROT_VISION_STATE, next);
     CARROT_VISION_STATE.active = Boolean(CARROT_VISION_STATE.active);
@@ -257,9 +307,12 @@
 
   function relocalizeCarrotVisionState() {
     const phase = CARROT_VISION_STATE.phase || CARROT_VISION_PHASE.UNAVAILABLE;
+    const clusterHudActive = Number(CARROT_VISION_STATE.environment?.clusterHud || 0) > 0;
     const disabledMessage = CARROT_VISION_STATE.available
       ? ""
-      : getUIText("vision_unavailable_hint", "Available when DisableDM is 2.");
+      : (clusterHudActive
+        ? getUIText("vision_unavailable_cluster_hud", "Carrot Vision is unavailable while Cluster HUD is enabled.")
+        : getUIText("vision_unavailable_hint", "Available when DisableDM is 2."));
     if (disabledMessage) CARROT_VISION_STATE.disabledMessage = disabledMessage;
     setCarrotVisionState({
       statusText: getCarrotVisionPhaseStatusText(phase),

@@ -1,194 +1,279 @@
-# Cut-in Route Validation Set
+# Radar cut-in validation
 
-Last validated: 2026-07-16
+The maintained validation sources are:
 
-This document records the 16-case route-based regression set used for the S50 cut-in
-logic in `radard.py` and the offline evaluator used by `cluster_replay_usb.py`.
-All paths are below `W:\routes`.
+- `cutin_validation_cases.json`: control-facing CUT-IN, CLEAR, and STATIONARY windows.
+- `radar_trajectory_labels.json`: point-level CUT-IN and CLEAR review labels.
 
-## How To Use This File
+Both files are validation-only. Do not use their values to fit a model, tune the
+physical equations, select thresholds, or add scene-specific exceptions.
 
-Use this document as the human checklist: the table says which video interval
-to inspect and whether current code should detect a cut-in. The executable case
-list is `cutin_validation_cases.json`; run all 16 current-code checks from the
-repository root with:
+## Current architecture
 
-```powershell
-.\.venv\Scripts\python.exe `
-  openpilot\selfdrive\carrot\cluster\validate_cutin_routes.py
-```
+`RadarLeadModelMode` and the learned radar-lead/path-occupancy runtimes have
+been removed. `CarrotRadarMode=0` runs only
+`openpilot/selfdrive/controls/radard.py` and preserves its existing lead
+selection. `CarrotRadarMode=1` does not start or import that implementation. It
+runs only `openpilot/selfdrive/carrot/radar/radard_dpath.py`, first calculates
+the normal front/SCC vision-matched `leadOne` or a vision-seeded physically
+continuous stationary `leadOne`, then supplies `leadTwo` from either a
+different measured moving point already in the current path or a physically
+confirmed dPath CUT-IN. An in-path second lead may be beyond leadOne, while a
+predicted CUT-IN must be closer than leadOne. It rejects the primary object
+itself and every candidate beyond the fixed 80 m limit. An outside candidate
+within ±8 m longitudinally of leadOne also needs an actual corridor-entry
+sample in its two-second forecast; proximity alone cannot promote a same-row
+vehicle. Front, SCC, and corner inputs retain their production source identity.
+CUT-OUT remains a diagnostic prediction only. It never removes leadOne,
+latches an identity out, or excludes either control-lead candidate. LeadOne
+changes only when the primary model-to-front/SCC-radar matcher loses its match
+or switches to another object. This intentionally prefers a brief conservative
+hold on a departing vehicle over a no-lead acceleration gap caused by an
+uncertain future-path prediction. A separate measured moving object already in
+the current path still needs the normal motion history before starting leadTwo.
 
-Run one matching case while changing the logic:
+The stationary leadOne path requires a measured in-path point with
+`|vLead| <= 4.0 m/s`, model-lead support at probability 0.40 or higher, and
+0.25 seconds of physical continuity. A front-only stationary point needs three
+vision-supported frames. A central radar-only corner/SCC point instead uses a
+0.50 second confirmation and a narrow center gate. When a front point and a
+corner point are mutually consistent within 5 m longitudinally, 0.75 m raw
+lateral position, and 2.5 m/s target speed, a high-uncertainty visual lead may
+seed the front point despite up to 30 m visual range error. The front point
+must still satisfy the 4.0 m/s stationary limit; the corroborating corner point
+may be as high as 6.0 m/s to tolerate corner velocity noise. Once seeded, weak
+vision may be bridged only while the same measured pair remains physically
+continuous. A strong visual lead outside its uncertainty gate or a broken
+radar pair releases the hold. This path never creates leadTwo. A fresh moving
+leadOne also needs at least `1e-4` joint distance/lateral/velocity likelihood,
+matching conventional radard's score floor; an already continuous identity
+may tolerate a brief lower score.
 
-```powershell
-.\.venv\Scripts\python.exe `
-  openpilot\selfdrive\carrot\cluster\validate_cutin_routes.py `
-  --case ioniq9-a7-22
-```
+PC visual replay runs only the new `DPathRadarController` and
+`RadarMotionPredictor`. Its lead roles are recalculated from logged model and
+radar inputs; it does not import or display recorded conventional-radard lead
+roles or CUT-IN events. The headless validator may compute existing-radard
+metrics separately, but those values are never input to the physical predictor.
 
-The script checks only `NEW CUT-IN`, returns exit code 1 on a regression, and
-does not count stored `radarState.leadsCutIn`. After it passes, use the replay
-commands below to inspect the video, `leadOne`, and detection timing manually.
+When an older log needs raw-CAN corner-track reconstruction, reconstructed
+points older than 100 ms are excluded from predictor input. The longer display
+tracker hold must never create a synthetic motion candidate.
 
-## Sequential Video Review
+The predictor:
 
-Review all 16 labeled windows in order:
+1. accepts only `measured=true` points;
+2. limits motion prediction to `-5 <= dRel <= 100 m`;
+3. projects replay points to the model-path timestamp with measured relative
+   velocity, using `modelV2.timestampEof`, the configured front-radar delay,
+   and a 50 ms corner-object measurement delay, then projects them onto that
+   actually measured same-time model-path polyline without extending a noisy
+   terminal segment; `S` is centerline arc distance and `dPath` is signed
+   centerline-normal distance. Scope also uses distance to that finite
+   polyline, so a short or reversing path at a stop cannot pull a distant
+   side object onto an artificial centerline;
+4. limits history and shadow candidates to the ego lane plus the immediate
+   left/right lanes with the fixed model-path-relative
+   `|dPath| <= 5.4 m` range;
+5. keeps points inside 5 m and the nearest point at or beyond 5 m on each
+   adjacent side; a farther same-side point is also visible when it remains
+   closer than the current leadOne, while other occluded points are excluded
+   from detection and retain only their in-scope physical history; an already
+   selected, still-measured, physically continuous leadTwo is protected from
+   this occlusion until it transfers to leadOne or becomes physically invalid;
+6. uses corner motion only when the log has measured corner data, otherwise
+   `frontRadar` raw-track motion; SCC stays available to existing radard but is
+   not predictor input, and the source choice never switches per frame;
+7. treats `|vLead| < 3 km/h` as position-only and never builds or extrapolates
+   motion history for those points;
+8. requires front-radar CUT-IN detection at `dRel >= 5 m`, prevents a newly
+   observed front point inside 5 m from starting current-path leadTwo, and
+   requires the sensor's minimum measured motion history before any new
+   current-path point starts leadTwo, while still allowing an already selected
+   physically continuous leadTwo to remain sticky inside that distance;
+9. does not switch to lane center and does not apply yaw correction again
+   after the point and path share a timestamp and ego frame;
+10. checks track-ID reuse and short gaps with physical continuity;
+11. keeps front and corner histories and parameters independent; when a
+   corner object and front point are mutually nearest within fixed
+   longitudinal, lateral, and speed gates, the corner history supplies motion
+   state while published longitudinal kinematics use the front measurement;
+12. builds a 2-D path-relative history from projected centerline progress `S`,
+   integrated ego travel, and signed-normal `dPath`, without treating raw
+   `dRel` as centerline distance;
+13. fits `dPath` against target progress in `S`, uses the long-window vector
+   and model-path tangent angle error as the prediction mean, reduces
+   confidence beyond the observed spatial baseline, and sends short-window
+   disagreement to curvature and uncertainty;
+14. scales path-proximity evidence by inward displacement relative to measured
+   path uncertainty, so static proximity or sub-noise drift is insufficient;
+15. for corner radar, checks position-derived normal motion against the most
+   recent 0.1 seconds of reported lateral velocity and promptly lowers motion
+   confidence when current motion no longer supports an older inward trend;
+16. for front-only radar, requires a new predicted CUT-IN to sustain at least
+   `0.75 m/s` of inward long-window `dPath` motion independently of the
+   path-proximity sensitivity;
+17. predicts synchronized future `dRel` and `dPath`;
+18. confirms a threshold crossing for 0.25 seconds before producing a CUT-IN
+   event; and
+19. reports CUT-IN and CUT-OUT probabilities independently.
 
-```powershell
-.\.venv\Scripts\python.exe `
-  openpilot\selfdrive\carrot\cluster\review_cutin_routes.py
-```
+The current IN state includes ego and target vehicle half-widths. A tracked
+OUT-to-IN crossing keeps its pending entry evidence after overlap begins so
+the confirmation interval can complete. A point first observed inside has no
+such entry evidence. Only small path-state and confirmation hysteresis are allowed. Do not add per-route,
+per-vehicle, or scene-specific exceptions in response to a poor validation
+case; report the underlying history, continuity, geometry, or uncertainty
+failure instead.
 
-Each replay starts three seconds before its labeled window, ends three seconds
-after it, and then opens the next case. Stored cut-ins are off by default. Add
-`--show-recorded-cutins` only for old-versus-current comparison, or use
-`--output both` to render to the PC and USB display together.
+## Headless full replay
 
-Resume at a particular case, or keep each replay open until manually closed:
-
-```powershell
-.\.venv\Scripts\python.exe `
-  openpilot\selfdrive\carrot\cluster\review_cutin_routes.py `
-  --start-at ioniq9-a7-22 --manual --pause-on-cutin
-```
-
-## Validation Rules
-
-- Use sensitivity 50.
-- `corner` cases evaluate corner-radar tracks reconstructed with stable raw CAN
-  object identity.
-- `front` cases evaluate front-radar tracks with `--front-radar-only`.
-- A positive case passes when at least one current-code cut-in detection overlaps
-  the validation window.
-- A negative case passes when the current-code evaluator produces no cut-in in
-  the validation window.
-- Stored `radarState.leadsCutIn` decisions are not part of the pass/fail result.
-  Add `--show-recorded-cutins` only when comparing the old stored decision with
-  the current evaluator.
-- Results outside a listed validation window are not labeled by this document.
-  They must be checked against video before being treated as true or false.
-
-## Positive Cases
-
-| Vehicle folder | Segment and log | Source | Window | Scene to verify | 2026-07-16 result |
-| --- | --- | --- | --- | --- | --- |
-| `KIA_CARNIVAL_4TH_GEN c4dcf95545dafe68` | `0000005b--02344a68f2--18\rlog.1.zst` | corner | 0-10 s | Multiple early cut-ins | PASS, first detection 5.39 s |
-| `KIA_CARNIVAL_4TH_GEN c4dcf95545dafe68` | `0000005b--02344a68f2--15\rlog.1.zst` | corner | 45-50 s | Truck enters from the left | PASS, 47.87-49.11 s |
-| `HYUNDAI_AZERA_7TH_GEN f3a537501c7197ec` | `0000006d--50a44bb074--1\rlog.zst` | front | 8-13 s | Left vehicle cuts in | PASS, 10.43-12.82 s, id 63 |
-| `HYUNDAI_IONIQ_9 c92fab3f15c0dbfb` | `0000018f--2bb73a4538--2\rlog.zst` | front | 24-30 s | Front-radar cut-in around 26 s | PASS, 26.61-29.20 s, id 55 |
-| `KIA_CARNIVAL_4TH_GEN c4dcf95545dafe68` | `0000006a--f0976fc330--27\rlog.zst` | corner | 54-60 s | Very close white vehicle enters from the left | PASS, 57.32-59.97 s, id 32 |
-| `HYUNDAI_IONIQ_9 c92fab3f15c0dbfb` | `000001a7--54660d9df7--22\rlog.zst` | corner | 20-29 s | Large truck begins entering around 21 s; compare `leadOne` timing | PASS, `leadOne` first selects id 56 at 22.46 s; `NEW CUT-IN` 25.29-27.08 s, id 2102 |
-
-The large truck in `000001a7--54660d9df7--22` is the slow-entry regression.
-Its stable corner track moves from roughly `yRel=-3.5 m` toward `-1.5 m`, but
-its inward speed peaks around `0.40 m/s`, below the normal S50 threshold of
-`0.50 m/s`. It must be accepted through the sustained radar-motion path.
-The front-radar `leadOne` selection at 22.46 s means longitudinal control sees
-the truck about 2.8 seconds before the separate cut-in warning. `leadOne`
-alternates with the vision lead, so warning timing and control acquisition must
-be reviewed as separate results.
-
-## Negative Cases
-
-| Vehicle folder | Segment and log | Source | Window | False-positive scene | 2026-07-16 result |
-| --- | --- | --- | --- | --- | --- |
-| `HYUNDAI_IONIQ_5_PE 8b06424f3adf2bd3` | `00000cab--0e0be97e78--49\rlog.zst` | corner | 0-30 s | Right curve; adjacent vehicle stays in its lane | PASS, no detection |
-| `HYUNDAI_IONIQ_9 c92fab3f15c0dbfb` | `00000192--b0f1546431--7\rlog.zst` | corner | 0-10 s | Early corner-radar false positive | PASS, no detection |
-| `HYUNDAI_SANTAFE_MX5_HEV 61d2c91e1039ab5e` | `00000421--6bbe001d3d--1\rlog.zst` | corner | 15-20 s | False cut-in around 17 s | PASS, no detection |
-| `HYUNDAI_IONIQ_5_PE 8b06424f3adf2bd3` | `00000cb5--cf3e24bc3d--3\rlog.zst` | corner | 0-60 s | Adjacent vehicles before meeting a center lead | PASS, no detection |
-| `KIA_K8_HEV_1ST_GEN 4aa2ded146fd78b9` | `00000216--f69e641982--4\rlog.zst` | corner | 12-17 s | Raw corner slot changes object near 14 s | PASS, no detection |
-| `GENESIS_GV80 4857b2d26ed4648e` | `00000218--6aa147e461--2\rlog.zst` | corner | 35-40 s | Passing a close adjacent vehicle near 37 s | PASS, no detection |
-| `GENESIS_GV80 4857b2d26ed4648e` | `00000218--6aa147e461--6\rlog.zst` | corner | 39-44 s | Lateral point jump near 41 s | PASS, no detection |
-| `KIA_K8_HEV_1ST_GEN 4aa2ded146fd78b9` | `00000221--1ee7be4212--18\rlog.zst` | corner | 48-53 s | Persistent false cut-in around 50 s | PASS, no detection |
-| `HYUNDAI_IONIQ_9 c92fab3f15c0dbfb` | `000001a7--54660d9df7--2\rlog.zst` | corner | 0-33 s | False positives near 2 s and 29 s | PASS, no detection |
-| `HYUNDAI_IONIQ_9 c92fab3f15c0dbfb` | `000001a5--ba129171a3--22\rlog.zst` | corner | 30-37 s | Adjacent vehicle remains in its lane on a curve near 33 s | PASS, no detection |
-
-The two `000001a7--54660d9df7--2` failures cover different mechanisms:
-
-- Near 2 s, lane-relative motion reached about `1.25-2.19 m/s` while radar
-  inward motion was only about `0.16-0.36 m/s`. The projection must not outrun
-  radar motion by more than the normal consistency margin.
-- Near 29 s, a corner track at about 46 m swept laterally during a curve while
-  the vehicle remained in its lane.
-
-In `000001a5--ba129171a3--22`, corner track 2967 appeared to move inward at
-about 34 m while a matching front track and video showed an adjacent-lane
-vehicle on a curve. All maintained true corner-radar detections begin within
-4.8 m, while the front radar covers the validated 18.5 m cut-in. New corner
-cut-in entry is therefore limited to 30 m; the false 34 m and 46 m sweeps are
-rejected, while the front-radar cut-in range remains 50 m.
-
-## Replay Commands
-
-Run a corner-radar case from the repository root:
-
-```powershell
-.\.venv\Scripts\python.exe openpilot\selfdrive\carrot\cluster_replay_usb.py `
-  "W:\routes\HYUNDAI_IONIQ_9 c92fab3f15c0dbfb\000001a7--54660d9df7--22\rlog.zst" `
-  --output window --route-overlay full --cutin-radar-source corner `
-  --cutin-sensitivity 50
-```
-
-Run a front-radar case:
+From the repository root:
 
 ```powershell
-.\.venv\Scripts\python.exe openpilot\selfdrive\carrot\cluster_replay_usb.py `
-  "W:\routes\HYUNDAI_AZERA_7TH_GEN f3a537501c7197ec\0000006d--50a44bb074--1\rlog.zst" `
-  --output window --route-overlay full --front-radar-only `
-  --cutin-radar-source front --cutin-sensitivity 50
+python openpilot/selfdrive/carrot/validate_radar_lead_model.py
 ```
 
-Add `--show-recorded-cutins` to overlay decisions stored in the original
-`radarState`. The replay tools window also exposes this as a checkbox. Current
-code detections remain labeled `NEW CUTIN`; stored detections are comparison
-data and must not be counted as a current-code regression failure.
+The historical script name is retained for operator compatibility. It no
+longer loads a learned model. By default it replays both maintained JSON files
+from `W:\routes`, reports existing-radard and physical-shadow metrics
+separately, and does not fail on shadow regressions.
 
-Use `--no-pause-on-cutin` when scanning a whole route without stopping at each
-detection.
-
-## Radar Model Visual Review
-
-Open all maintained cases as a visual playlist using the bundled three-head
-radar model:
+Useful options:
 
 ```powershell
-py -3.12 openpilot/selfdrive/carrot/radar_lead_validation_review.py
+# Maintained control cases only
+python openpilot/selfdrive/carrot/validate_radar_lead_model.py --cases-only
+
+# One named case
+python openpilot/selfdrive/carrot/validate_radar_lead_model.py --case carnival-5b-18-early
+
+# Treat existing-radard expectation failures as a nonzero result
+python openpilot/selfdrive/carrot/validate_radar_lead_model.py --strict-radard
+
+# Remove corner inputs
+python openpilot/selfdrive/carrot/validate_radar_lead_model.py --front-only
 ```
 
-Each route starts two seconds before its validation window. Playback pauses on
-the first appearance of each new `leadOne`, `leadTwo`, and model cut-in, then
-pauses again at the end of the window with a PASS/FAIL verdict. Press Space to
-resume after an event, press R to restart the current review window, and close
-the window to open the next case. Recorded `radarState` leads are hidden by
-default and can be enabled with the `REC L1` and `REC L2` checkboxes.
+An optional `--report PATH` writes a validation replay report. Reports are
+diagnostic output, not a production artifact.
 
-Review only positive or negative cases:
+## Visual replay
+
+List or open maintained cases:
 
 ```powershell
-py -3.12 openpilot/selfdrive/carrot/radar_lead_validation_review.py --expected detect
-py -3.12 openpilot/selfdrive/carrot/radar_lead_validation_review.py --expected clear
+python openpilot/selfdrive/carrot/radar_lead_validation_review.py --list
+python openpilot/selfdrive/carrot/radar_lead_validation_review.py --case carnival-5b-18-early
 ```
 
-Review one matching case directly:
+The screen shows only new-controller and physical-predictor data:
+
+- synchronized qcamera video;
+- a -30 through 130 m distance view with ego as a white point, recalculated
+  leadOne in an orange square, and recalculated leadTwo in a yellow square;
+- measured front points as an optional `F`-key overlay and corner points with
+  their source identity;
+- source-colored `(S, dPath)` history actually consumed by the predictor and
+  its 0.5/1.0/1.5/2.0-second future paths;
+- an optional `A`-key gray overlay of ego-motion-stabilized raw radar history
+  (observation-derived, not predictor input or target-motion ground truth);
+- gray model lane lines, a display-only white dashed lane center, and the blue
+  model path that remains the predictor's only corridor;
+- current IN, CUT-IN, and CUT-OUT probabilities; and
+- short/long `dPath` rate, curvature, uncertainty, and continuity ID;
+- a full-log continuity graph of recalculated leadOne distance in orange,
+  leadTwo distance in yellow, and the first raw model vision lead as a blue
+  `V` whenever its probability is at least 0.4. Missing leads and unrelated
+  track-ID changes break the line; near-stationary handoffs remain connected
+  only when adjacent distance, lateral position, and speed are physically
+  continuous. It spans the window at twice the previous height, its horizontal
+  time axis exactly matches the seek bar, and
+  clicking the graph seeks both cursors;
+- a clickable seek bar with physical-predictor CUT-IN entry markers in orange
+  and validation windows above it. Existing-radard markers are absent.
+
+The UI uses a Korean-capable font and Korean operator labels. Gray future rings
+are unselected or control-ineligible motion, including new front points inside
+5 m. Green means control-eligible current-IN motion or a sticky selected lead.
+Orange points, rings, and timeline markers mean confirmed
+physical-predictor CUT-IN only. One physical continuity creates at most one
+automatic pause even if it briefly moves between lead roles; a physically
+discontinuous reuse of the same track ID may create another pause.
+
+With no filters, the maintained cases cover 48 unique logs. They open in
+sequence, and finishing one log automatically opens the next.
+
+Controls:
+
+- Space: pause/resume.
+- Left/Right: seek.
+- Up/Down: playback speed.
+- Mouse click on the horizontal bar: seek directly.
+- `H`: show/hide continuity-local measured-history trails and synchronized
+  0.5/1.0/1.5/2.0-second future trajectories.
+- `A`: show/hide the separate raw-radar observation overlay. It is off by
+  default and is never used as the predictor's displayed input history.
+- `F`: show/hide current measured front-radar points without changing the
+  selected motion sensor or predictor inputs.
+- `T`: switch the saved processing mode. Normal mode prefers corner radar when
+  present and falls back to front radar; front-only mode ignores corner points
+  for motion and stationary leadOne matching.
+- Drag the `CUT-IN path-proximity sensitivity` slider and release it to
+  recalculate validation events and lead continuity, then save the value for
+  later logs and review runs. The score combines uncertainty-aware body overlap
+  with normalized physical clearance: full evidence at the vehicle-width-aware
+  ego-path boundary and zero 1.2 m outside it, followed by motion-consistency
+  and future-history support. The 0.20 end reacts earlier near the boundary;
+  the 0.80 end requires stronger overlap or proximity evidence.
+  It does not bypass measured-history, inward-motion, confirmation, range,
+  speed, or leadOne-priority checks. Recalculation immediately reuses the
+  physical trajectories and leadOne history, reevaluating only temporal
+  confirmation and leadTwo selection. Requested and applied values remain
+  distinct while dragging. Corner and front values are saved independently.
+  Validation and production share sensor defaults of 0.30 and 0.67
+  respectively.
+- A measured moving point already overlapping the model-path corridor can be
+  leadTwo without creating a CUT-IN event or pause. Once selected, physical
+  identity and position continuity can retain it if its reported speed later
+  approaches zero; a new stationary point is never promoted this way. If
+  leadOne disappears, its in-path moving radar point can immediately continue
+  as leadTwo; duplicate suppression is applied while leadOne is present.
+- `M`: show/hide physical-shadow timeline markers.
+- `R`: restart and re-arm already handled physical-predictor CUT-IN pauses.
+- `I`: CUT-IN/detect label.
+- `C`: CLEAR label.
+- `S`: STATIONARY label.
+- Escape: close.
+
+Inside a maintained window, a label updates the matching validation case.
+Outside every maintained window, it is stored in
+`radar_trajectory_labels.json`.
+
+The slider writes both sensor values and the `T` processing mode to the
+user-local `carrotpilot/radar_validation.json`. `--prob` provides a one-run
+override for the selected sensor without replacing its saved value. Neither
+changes conventional radard, production Radar Motion's fixed 0.30 corner and
+0.67 front thresholds, physical equations, or stored labels.
+`--motion-mode normal|front` chooses the
+initial mode; `--front-only` is a compatibility alias for front mode. Manual
+seek-bar or L1/L2-graph navigation re-arms handled events at and after the new
+position so later CUT-IN entries pause again after playback resumes.
+
+Open an arbitrary log outside the maintained case list:
 
 ```powershell
-py -3.12 openpilot/selfdrive/carrot/radar_lead_simulator.py `
-  --validation-case ioniq9-a7-22-truck
+.venv\Scripts\python.exe -m openpilot.selfdrive.carrot.radar.tools.radar_lead_simulator `
+  "W:\routes\vehicle\segment\rlog.zst" --start 30 --paused
 ```
 
-The initial three-head radar-model scan on 2026-07-16 passed 14 of 16 cases.
-It missed cut-in output in these two positive windows, which should be reviewed
-first even though lead acquisition can still occur:
+The replay finds `qcamera.ts` beside that `rlog.zst` automatically.
 
-- `carnival-5b-15-truck`: no model cut-in from 45-50 s.
-- `ioniq9-a7-22-truck`: `leadTwo` id 56 at 20.58 s and `leadOne` id 56 at
-  22.74 s, but no model cut-in from 20-29 s.
+## Review discipline
 
-## Unit Coverage
-
-The route fixes are supported by focused tests in
-`openpilot/selfdrive/controls/tests/test_front_radar_cutin.py`:
-
-- slow sustained radar motion accepts the large-truck cut-in;
-- lane projection cannot substantially outrun measured radar motion;
-- unreliable far corner tracks cannot start a new cut-in.
+- Keep the original log path, source, window, and physical track identity.
+- A reused ID is not the same vehicle unless position and velocity are
+  continuous.
+- Inspect measured points and `dPath` history before interpreting a probability.
+- Compare front and corner independently; never average their histories.
+- Record poor results as predictor limitations. Do not silently add a
+  case-specific exception.

@@ -2,7 +2,9 @@ from opendbc.car import Bus, get_safety_config, structs
 from opendbc.car.hyundai.hyundaicanfd import CanBus
 from opendbc.car.hyundai.values import HyundaiFlags, CAR, DBC, CANFD_RADAR_SCC_CAR, \
                                                    CANFD_UNSUPPORTED_LONGITUDINAL_CAR, \
-                                                   UNSUPPORTED_LONGITUDINAL_CAR, HyundaiSafetyFlags, HyundaiExtFlags
+                                                   UNSUPPORTED_LONGITUDINAL_CAR, HyundaiSafetyFlags, HyundaiExtFlags, \
+                                                   CANFD_HYBRID_STATUS_ADDR, CANFD_HYBRID_STATUS_DLC, \
+                                                   EV_MODE_STATUS_ADDR, EV_MODE_STATUS_DLC
 from opendbc.car.hyundai.radar_interface import RADAR_START_ADDR
 from opendbc.car.interfaces import CarInterfaceBase
 from opendbc.car.disable_ecu import disable_ecu
@@ -37,6 +39,9 @@ class CarInterface(CarInterfaceBase):
 
     ret.brand = "hyundai"
 
+    if candidate == CAR.KIA_SORENTO:
+      ret.extFlags |= HyundaiExtFlags.RADAR_GROUP4.value
+
     cam_can = CanBus(None, fingerprint).CAM if camera_scc == 0 else 1
     hda2 = False #0x50 in fingerprint[cam_can] or 0x110 in fingerprint[cam_can]
     hda2 = hda2 or params.get_int("CanfdHDA2") > 0
@@ -50,6 +55,12 @@ class CarInterface(CarInterfaceBase):
 
       if 0x105 in fingerprint[CAN.ECAN]:
         ret.flags |= HyundaiFlags.HYBRID.value
+
+      # Keep drivetrain/safety classification unchanged: this capability is display-only and requires both exact ECAN frames.
+      has_ev_mode_status = fingerprint[CAN.ECAN].get(CANFD_HYBRID_STATUS_ADDR) == CANFD_HYBRID_STATUS_DLC and \
+                           fingerprint[CAN.ECAN].get(EV_MODE_STATUS_ADDR) == EV_MODE_STATUS_DLC
+      if has_ev_mode_status:
+        ret.extFlags |= HyundaiExtFlags.EV_MODE_STATUS_230.value
 
       if 203 in fingerprint[CAN.CAM]: # LFA_ALT
         print("##### Anglecontrol detected (LFA_ALT)")

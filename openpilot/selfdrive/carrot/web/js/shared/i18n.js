@@ -228,8 +228,6 @@ function renderUIText() {
   setNavText("btnTools", s.tools);
   setNavText("btnLogs", s.logs);
   setNavText("btnTerminal", s.terminal);
-  setText("btnQuickLinkWeb", "CarrotMan");
-
   setText("carrotTitle", "CarrotPilot");
 
   // Car Select
@@ -242,7 +240,6 @@ function renderUIText() {
   setText("settingTitleText", s.setting);
   setText("settingTabDeviceLabel", getUIText("setting_tab_device", "Device"));
   setText("settingTabCarrotLabel", getUIText("setting_tab_carrot", "CarrotPilot"));
-  setText("settingCarEyebrow", s.car_select);
   setText("btnBackGroups", s.back);
   setText("groupsTitle", s.groups);
   setText("itemsTitle", s.items);
@@ -253,10 +250,11 @@ function renderUIText() {
   setText("userSystemTitle", getUIText("user_system", "User / System"));
   setText("toolsQuickLinkTitle", getUIText("quick_link", "Link"));
   setText("userSettingsTitle", getUIText("section_settings_backup", "Settings"));
-  setText("btnDeviceInfo", getUIText("carrot_info", "Carrot Info"));
-  setText("btnGitRemote", "change repository");
+  setText("btnToolsCarSelect", getUIText("car_select", "Car Select"));
+  setText("btnToolsLanguage", getUIText("language", "Language"));
+  setText("btnToolsWebSettings", getUIText("web_settings", "Web Settings"));
+  setText("btnDeviceInfo", getUIText("info", "Info"));
   setText("btnGitBranch", "change branch");
-  setText("btnGitAddRemote", "add remote");
   setText("btnGitResetRepo", "reset repo");
   setText("btnDeviceLang", "Device Lang");
   setText("btnResetCalib", "Reset Calib");
@@ -286,9 +284,7 @@ function renderUIText() {
   setText("btnStartVision", `▶ ${s.start_vision || "Start Drive Vision"}`);
   setText("btnVisionStop", s.vision_stop || "Stop");
   if (typeof applyRecordFabState === "function") applyRecordFabState();
-  if (window.HomeDrive && typeof window.HomeDrive.renderText === "function") {
-    window.HomeDrive.renderText();
-  }
+  window.DriveVisionFacade?.lifecycle?.renderText?.();
   setText("settingSearchTitle", s.setting_search);
   if (settingSearchInput) settingSearchInput.placeholder = s.setting_search_placeholder || "";
   if (settingSearchMeta && (!settingSearchInput || !settingSearchInput.value.trim())) {
@@ -308,6 +304,11 @@ function renderUIText() {
     btnSettingFabProfileAdd.setAttribute("aria-label", s.profile_add || "Add Profile");
     btnSettingFabProfileAdd.title = s.profile_add || "Add Profile";
   }
+  if (settingFabFingerprintLabel) settingFabFingerprintLabel.textContent = s.setting_fingerprint_title || "Settings fingerprint";
+  if (btnSettingFabFingerprint) {
+    btnSettingFabFingerprint.setAttribute("aria-label", s.setting_fingerprint_title || "Settings fingerprint");
+    btnSettingFabFingerprint.title = s.setting_fingerprint_title || "Settings fingerprint";
+  }
   if (settingFabResetDefaultsLabel) settingFabResetDefaultsLabel.textContent = s.setting_reset_defaults || "Reset Settings";
   if (btnSettingFabResetDefaults) {
     btnSettingFabResetDefaults.setAttribute("aria-label", s.setting_reset_defaults || "Reset Settings");
@@ -326,9 +327,7 @@ function renderUIText() {
   setText("appCarPickerClose", s.cancel);
   updateLangLabel();
   syncHomeUtilityButtons();
-  if (window.DrivingHud && typeof window.DrivingHud.renderText === "function") {
-    window.DrivingHud.renderText();
-  }
+  window.DriveVisionHudContent?.renderText?.();
   renderQuickLinkUI();
 }
 

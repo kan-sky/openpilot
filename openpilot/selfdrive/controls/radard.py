@@ -3,7 +3,6 @@ import math
 import numpy as np
 from collections import deque
 from typing import Any
-import heapq
 import copy
 
 import capnp
@@ -12,7 +11,6 @@ from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.params import Params
 from openpilot.common.realtime import DT_MDL, Priority, config_realtime_process
 from openpilot.common.swaglog import cloudlog
-from openpilot.common.simple_kalman import KF1D
 from openpilot.selfdrive.controls.lib.drive_helpers import is_volkswagen_meb
 from openpilot.selfdrive.controls.lib.cutin_helpers import (
   associate_cutin_tracks,
@@ -101,6 +99,7 @@ RADAR_CENTER_PROMOTION_RECEDING_VREL = 0.5
 CORNER_FRONT_MATCH_DREL = 3.0
 CORNER_FRONT_MATCH_VREL = 2.0
 CORNER_CENTER_MIN_AGE = int(0.25 / DT_MDL)
+CORNER_CENTER_UNMATCHED_MAX_DREL = 45.0
 CORNER_STOPPED_MIN_AGE = int(0.35 / DT_MDL)
 CORNER_STOPPED_MIN_DREL = 5.0
 CORNER_STOPPED_MAX_DREL = 120.0
@@ -115,6 +114,11 @@ CORNER_STOPPED_FAR_DREL = 60.0
 def laplacian_pdf(x: float, mu: float, b: float):
   diff = abs(x - mu) / max(b, 1e-4)
   return 0.0 if diff > 50.0 else math.exp(-diff)
+
+
+def is_vision_radar_lateral_match_sane(radar_y_rel: float, vision_y_rel: float, d_path: float) -> bool:
+  return abs(radar_y_rel - vision_y_rel) < 2.0 or abs(d_path) < 2.4
+
 
 def clamp(x: float, lo: float, hi: float) -> float:
   return float(np.clip(x, lo, hi))
@@ -289,6 +293,7 @@ class Track:
       # optional: also reset filter init when track is not measured
       self._vLead_filt_init = False
     elif track_discontinuous:
+      self.cnt = 0
       self.selected_count = 0
       self.is_stopped_car_count = 0
       self.cut_in_count = 0
@@ -614,6 +619,8 @@ def match_vision_to_track(v_ego: float, lead: capnp._DynamicStructReader, lead_p
   for t in tracks.values():
     s1, s2 = score_pair(t)
     t.score = s1
+    if not is_vision_radar_lateral_match_sane(t.yRel, -float(lead.y[0]), t.dPath):
+      continue
 
     if s1 > first_score:
       second_track, second_score = first_track, first_score
@@ -645,7 +652,7 @@ def match_vision_to_track(v_ego: float, lead: capnp._DynamicStructReader, lead_p
         best_track = first_track
       elif lead_prob > 0.4 and first_track.selected_count > 0:
         best_track = first_track
-    elif lead_prob > 0.6:
+    elif lead_prob > 0.6 and abs(first_track.dPath) < 2.4:
       best_track = first_track
 
   # B) stopped-car-like (only if not chosen yet)
@@ -1020,11 +1027,12 @@ class RadarD:
 
     return self._is_center_lead_candidate(t)
 
-  def _is_corner_center_candidate(self, t: Track) -> bool:
+  def _is_corner_center_candidate(self, t: Track, matched_front: bool = False) -> bool:
     return (
       self._is_corner_track(t) and
       t.cnt >= CORNER_CENTER_MIN_AGE and
       3.0 < t.dRel < RADAR_ONLY_CENTER_MAX_DREL and
+      (matched_front or t.dRel <= CORNER_CENTER_UNMATCHED_MAX_DREL) and
       t.vLead > 2.0 and
       self._corner_in_lane_ok(t)
     )
@@ -1388,7 +1396,7 @@ class RadarD:
     front_left_list, front_right_list = [], []
     corner_left_list, corner_right_list = [], []
     center_list, cutin_list = [], []
-    corner_center_list, corner_stopped_list = [], []
+    corner_stopped_list = []
     for c in tracks.values():
       y_rel_neg = - c.yRel
       is_corner = self._is_corner_track(c)
@@ -1396,12 +1404,11 @@ class RadarD:
       # center
       if self._is_center_lead_candidate(c):
         c.cut_in_count = max(c.cut_in_count - 1, 0)
-        if c.cnt > 3:
+        center_usable = not is_corner or self._is_corner_center_candidate(c, matching_front is not None)
+        if c.cnt > 3 and center_usable:
           ld = self._corner_lead_from_track(c, lead_prob, float(-lead_msg.y[0])) if is_corner else c.get_RadarState(lead_prob, float(-lead_msg.y[0]))
           ld['modelProb'] = 0.01
           center_list.append(ld)
-          if self._is_corner_center_candidate(c):
-            corner_center_list.append(ld)
 
       if self._is_corner_stopped_candidate(c, matched_front=matching_front is not None):
         corner_stopped_list.append(self._corner_stopped_lead_from_track(c, lead_prob))
@@ -1521,11 +1528,6 @@ class RadarD:
 
 # fuses camera and radar data for best lead detection
 def main() -> None:
-  if Params().get_int("RadarLeadModelMode") == 1:
-    from openpilot.selfdrive.carrot.radard_model import main as model_main
-    model_main()
-    return
-
   config_realtime_process(5, Priority.CTRL_LOW)
 
   # wait for stats about the car to come in from controls

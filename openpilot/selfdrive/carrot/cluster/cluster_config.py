@@ -54,6 +54,7 @@ CLUSTER_ENCODER_SOFTWARE = 3
 CLUSTER_HUD_PARAM = "ClusterHud"
 CLUSTER_HUD_DEBUG_PARAM = "ClusterHudDebug"
 CLUSTER_BRIGHTNESS_PARAM = "ClusterHudBrightness"
+CLUSTER_ORIENTATION_PARAM = "ClusterHudOrientation"
 CLUSTER_ENCODER_PARAM = "ClusterHudEncoder"
 CLUSTER_HUD_MIRROR_PARAM = "ClusterHudMirror"
 CLUSTER_CORE_MODE_PARAM = "ClusterHudCoreMode"
@@ -72,12 +73,16 @@ CLUSTER_CAMERA_VIEW_MODE_DEFAULT = 0
 CLUSTER_CAMERA_VIEW_MODE_EGO_BOTTOM = 1
 CLUSTER_CAMERA_VIEW_MODE_ROAD_CAMERA = 2
 CLUSTER_CAMERA_VIEW_MODE_PARAM = "ClusterHudCameraViewMode"
+CLUSTER_PANEL_LAYOUT_DRIVING_LEFT = 0
+CLUSTER_PANEL_LAYOUT_DRIVING_RIGHT = 1
+CLUSTER_PANEL_LAYOUT_PARAM = "ClusterHudPanelLayout"
+CLUSTER_SCREEN_MODE_FULLSCREEN_3D = -1
 CLUSTER_SCREEN_MODE_DEFAULT = 0
 CLUSTER_SCREEN_MODE_DEBUG = 1
 CLUSTER_SCREEN_MODE_DEBUG_SYSTEM = 2
 CLUSTER_SCREEN_MODE_DEBUG_GRAPH = 3
 CLUSTER_SCREEN_MODE_DEBUG_GRAPH_RIGHT = 4
-CLUSTER_SCREEN_MODE_NAVI_DEBUG = 5
+CLUSTER_SCREEN_MODE_TRIP_REPORT = 5
 CLUSTER_SCREEN_MODE_NAVI = 6
 CLUSTER_SCREEN_MODE_PARAM = "ClusterHudScreenMode"
 CLUSTER_RADAR_INFO_NONE = 0
@@ -101,6 +106,11 @@ CLUSTER_LIVE_FPS_BY_MODE = {
     5: 50.0,
     6: 60.0,
 }
+H264_AUTO_BITRATE_REFERENCE_FPS = 30
+H264_AUTO_BITRATE_REFERENCE_BPS = 7_000_000
+H264_AUTO_BITRATE_MIN_BPS = 1_000_000
+H264_AUTO_BITRATE_MAX_BPS = 14_000_000
+H264_AUTO_BITRATE_GRANULARITY_BPS = 1_000
 
 LIGHT_CLUSTER_THEME = ClusterTheme(
     name="light",
@@ -138,7 +148,8 @@ LIGHT_CLUSTER_THEME = ClusterTheme(
 DARK_CLUSTER_THEME = ClusterTheme(
     name="dark",
     is_dark=True,
-    bg=(7, 10, 14),
+    # Match the map and disconnected backings on wide external displays.
+    bg=(0, 0, 0),
     panel_bg=(18, 23, 29),
     text=(238, 242, 247),
     muted=(150, 160, 172),
@@ -197,6 +208,25 @@ def normalize_cluster_live_fps(value: object) -> float:
     except (TypeError, ValueError):
         return 0.0
     return CLUSTER_LIVE_FPS_BY_MODE.get(mode, 0.0)
+
+
+def resolved_usb_h264_bitrate(requested_bitrate: str, target_fps: float, h264_fps: int) -> str:
+    text = requested_bitrate.strip()
+    if text.lower() != "auto":
+        return text
+    source_fps = int(max(1, round(target_fps if target_fps > 0 else float(h264_fps))))
+    denominator = H264_AUTO_BITRATE_REFERENCE_FPS * H264_AUTO_BITRATE_GRANULARITY_BPS
+    bitrate_bps = (
+        (source_fps * H264_AUTO_BITRATE_REFERENCE_BPS + denominator // 2)
+        // denominator
+        * H264_AUTO_BITRATE_GRANULARITY_BPS
+    )
+    bitrate_bps = int(max(H264_AUTO_BITRATE_MIN_BPS, min(H264_AUTO_BITRATE_MAX_BPS, bitrate_bps)))
+    if bitrate_bps % 1_000_000 == 0:
+        return f"{bitrate_bps // 1_000_000}M"
+    if bitrate_bps % 1_000 == 0:
+        return f"{bitrate_bps // 1_000}k"
+    return str(bitrate_bps)
 
 
 def normalize_cluster_encoder_mode(value: object) -> int:
@@ -307,6 +337,37 @@ def normalize_cluster_camera_view_mode(value: object) -> int:
     return CLUSTER_CAMERA_VIEW_MODE_DEFAULT
 
 
+def normalize_cluster_panel_layout(value: object) -> int:
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        aliases = {
+            "default": CLUSTER_PANEL_LAYOUT_DRIVING_LEFT,
+            "driving-left": CLUSTER_PANEL_LAYOUT_DRIVING_LEFT,
+            "driving_left": CLUSTER_PANEL_LAYOUT_DRIVING_LEFT,
+            "camera-left": CLUSTER_PANEL_LAYOUT_DRIVING_LEFT,
+            "camera_left": CLUSTER_PANEL_LAYOUT_DRIVING_LEFT,
+            "swapped": CLUSTER_PANEL_LAYOUT_DRIVING_RIGHT,
+            "swap": CLUSTER_PANEL_LAYOUT_DRIVING_RIGHT,
+            "driving-right": CLUSTER_PANEL_LAYOUT_DRIVING_RIGHT,
+            "driving_right": CLUSTER_PANEL_LAYOUT_DRIVING_RIGHT,
+            "camera-right": CLUSTER_PANEL_LAYOUT_DRIVING_RIGHT,
+            "camera_right": CLUSTER_PANEL_LAYOUT_DRIVING_RIGHT,
+        }
+        if normalized in aliases:
+            return aliases[normalized]
+        try:
+            value = int(normalized)
+        except ValueError:
+            return CLUSTER_PANEL_LAYOUT_DRIVING_LEFT
+    try:
+        layout = int(value)
+    except (TypeError, ValueError):
+        return CLUSTER_PANEL_LAYOUT_DRIVING_LEFT
+    if layout == CLUSTER_PANEL_LAYOUT_DRIVING_RIGHT:
+        return CLUSTER_PANEL_LAYOUT_DRIVING_RIGHT
+    return CLUSTER_PANEL_LAYOUT_DRIVING_LEFT
+
+
 def normalize_cluster_brightness_percent(value: object) -> int:
     if isinstance(value, str):
         normalized = value.strip()
@@ -325,6 +386,10 @@ def normalize_cluster_screen_mode(value: object) -> int:
     if isinstance(value, str):
         normalized = value.strip().lower()
         aliases = {
+            "3d-fullscreen": CLUSTER_SCREEN_MODE_FULLSCREEN_3D,
+            "3d_fullscreen": CLUSTER_SCREEN_MODE_FULLSCREEN_3D,
+            "fullscreen-3d": CLUSTER_SCREEN_MODE_FULLSCREEN_3D,
+            "fullscreen_3d": CLUSTER_SCREEN_MODE_FULLSCREEN_3D,
             "default": CLUSTER_SCREEN_MODE_DEFAULT,
             "debug": CLUSTER_SCREEN_MODE_DEBUG,
             "system": CLUSTER_SCREEN_MODE_DEBUG_SYSTEM,
@@ -339,10 +404,11 @@ def normalize_cluster_screen_mode(value: object) -> int:
             "debug_graph": CLUSTER_SCREEN_MODE_DEBUG_GRAPH,
             "debug-graph-right": CLUSTER_SCREEN_MODE_DEBUG_GRAPH_RIGHT,
             "debug_graph_right": CLUSTER_SCREEN_MODE_DEBUG_GRAPH_RIGHT,
-            "navi-debug": CLUSTER_SCREEN_MODE_NAVI_DEBUG,
-            "navi_debug": CLUSTER_SCREEN_MODE_NAVI_DEBUG,
-            "navigation-debug": CLUSTER_SCREEN_MODE_NAVI_DEBUG,
-            "navigation_debug": CLUSTER_SCREEN_MODE_NAVI_DEBUG,
+            "trip-report": CLUSTER_SCREEN_MODE_TRIP_REPORT,
+            "trip_report": CLUSTER_SCREEN_MODE_TRIP_REPORT,
+            "report": CLUSTER_SCREEN_MODE_TRIP_REPORT,
+            "driving-report": CLUSTER_SCREEN_MODE_TRIP_REPORT,
+            "driving_report": CLUSTER_SCREEN_MODE_TRIP_REPORT,
             "navi": CLUSTER_SCREEN_MODE_NAVI,
             "navigation": CLUSTER_SCREEN_MODE_NAVI,
         }
@@ -357,12 +423,13 @@ def normalize_cluster_screen_mode(value: object) -> int:
     except (TypeError, ValueError):
         return CLUSTER_SCREEN_MODE_DEFAULT
     if mode in (
+        CLUSTER_SCREEN_MODE_FULLSCREEN_3D,
         CLUSTER_SCREEN_MODE_DEFAULT,
         CLUSTER_SCREEN_MODE_DEBUG,
         CLUSTER_SCREEN_MODE_DEBUG_SYSTEM,
         CLUSTER_SCREEN_MODE_DEBUG_GRAPH,
         CLUSTER_SCREEN_MODE_DEBUG_GRAPH_RIGHT,
-        CLUSTER_SCREEN_MODE_NAVI_DEBUG,
+        CLUSTER_SCREEN_MODE_TRIP_REPORT,
         CLUSTER_SCREEN_MODE_NAVI,
     ):
         return mode
