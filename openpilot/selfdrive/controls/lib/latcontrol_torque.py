@@ -12,6 +12,8 @@ from openpilot.common.pid import PIDController
 from openpilot.selfdrive.controls.lib.latcontrol import LatControl
 from openpilot.selfdrive.modeld.constants import ModelConstants
 
+from openpilot.common.realtime import DT_CTRL
+
 # Current comma lateral-acceleration controller gains.
 KP = 0.8
 KI = 0.15
@@ -77,7 +79,7 @@ class LatControlTorque(LatControl):
 
     self.params = Params()
     self.frame = 0
-
+    self.dt = DT_CTRL
     self.torque_params = CP.lateralTuning.torque.as_builder()
     self.torque_from_lateral_accel = CI.torque_from_lateral_accel()
     self.torque_from_lateral_accel_context = CI.torque_from_lateral_accel_context
