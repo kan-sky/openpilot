@@ -164,7 +164,7 @@ class LatControlTorque(LatControl):
     lookahead = np.interp(CS.vEgo, self.friction_look_ahead_bp, self.friction_look_ahead_v)
     upper_idx = next((index for index, value in enumerate(ModelConstants.T_IDXS) if value > lookahead), len(ModelConstants.T_IDXS) - 1)
     predicted_jerk = get_predicted_lateral_jerk(model_data.acceleration.y, self.t_diffs)
-    desired_time = max(self.dt, self.nn_time_offset + 0.1)
+    desired_time = max(DT_CTRL, self.nn_time_offset + 0.1)
     planned_accel = np.interp(desired_time, ModelConstants.T_IDXS, model_data.acceleration.y)
     desired_jerk = (planned_accel - desired_lateral_accel) / desired_time
     return get_lookahead_value(predicted_jerk[LAT_PLAN_MIN_IDX:upper_idx], desired_jerk)
@@ -282,14 +282,14 @@ class LatControlTorque(LatControl):
     curvature_deadzone = abs(VM.calc_curvature(math.radians(self.steering_angle_deadzone_deg), CS.vEgo, 0.0))
     lateral_accel_deadzone = curvature_deadzone * CS.vEgo ** 2
 
-    delay_frames = int(np.clip(lat_delay / self.dt + 1, 1, self.lat_accel_request_buffer_len))
+    delay_frames = int(np.clip(lat_delay / DT_CTRL + 1, 1, self.lat_accel_request_buffer_len))
     expected_lateral_accel = self.lat_accel_request_buffer[-delay_frames]
     error = expected_lateral_accel - actual_lateral_accel
 
     lookahead_idx = int(np.clip(-delay_frames + self.lookahead_frames,
                                 -self.lat_accel_request_buffer_len + 1, -2))
     raw_lateral_jerk = (self.lat_accel_request_buffer[lookahead_idx + 1] -
-                        self.lat_accel_request_buffer[lookahead_idx - 1]) / (2 * self.dt)
+                        self.lat_accel_request_buffer[lookahead_idx - 1]) / (2 * DT_CTRL)
     buffered_desired_lateral_jerk = self.jerk_filter.update(raw_lateral_jerk)
 
     full_nnff = self.params.get_bool("NNFF") and self.extended_nnff_available and self._model_good(model_data)
