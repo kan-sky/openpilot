@@ -83,7 +83,7 @@ class Sidebar(Widget):
     self._mic_img = gui_app.texture("icons/microphone.png", 30, 30)
     self._mic_indicator_rect = rl.Rectangle(0, 0, 0, 0)
     self._font_regular = gui_app.font(FontWeight.NORMAL)
-    self._font_bold = gui_app.font(FontWeight.SEMI_BOLD)
+    self._font_bold = gui_app.font(FontWeight.DISPLAY)
 
     # Callbacks
     self._on_settings_click: Callable | None = None
@@ -202,9 +202,9 @@ class Sidebar(Widget):
         calib = messaging.log_from_bytes(calib_bytes, log.Event).liveCalibration
         pitch = math.degrees(calib.rpyCalib[1])
         yaw = math.degrees(calib.rpyCalib[2])
-        desc += str("{:.2f}¢®¨¡ {} | {:.2f}¢®¨¡ {}").format(
-          abs(pitch), str("¢®e") if pitch > 0 else str("¢®e"),
-          abs(yaw), str("¢®c") if yaw > 0 else str("¢®©¡"))
+        desc += str("{:.2f}Â° {} | {:.2f}Â° {}").format(
+          abs(pitch), str("â†“") if pitch > 0 else str("â†‘"),
+          abs(yaw), str("â†") if yaw > 0 else str("â†’"))
       except Exception:
         cloudlog.exception("invalid CalibrationParams")
     device_text_y = rect.y + 800
