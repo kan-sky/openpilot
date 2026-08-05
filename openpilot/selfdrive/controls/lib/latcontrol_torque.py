@@ -11,6 +11,7 @@ from openpilot.common.params import Params
 from openpilot.common.pid import PIDController
 from openpilot.selfdrive.controls.lib.latcontrol import LatControl
 from openpilot.selfdrive.modeld.constants import ModelConstants
+from openpilot.common.realtime import DT_CTRL
 
 # Current comma lateral-acceleration controller gains.
 KP = 0.8
@@ -84,11 +85,11 @@ class LatControlTorque(LatControl):
     self.lateral_accel_from_torque = CI.lateral_accel_from_torque()
 
     # Current comma path: PID output is lateral acceleration, converted to torque at the end.
-    self.pid = PIDController([INTERP_SPEEDS, KP_INTERP], KI, rate=1 / self.dt)
+    self.pid = PIDController([INTERP_SPEEDS, KP_INTERP], KI, rate=1 / DT_CTRL)
     self.update_limits()
 
     # Full NNFF torque
-    self.nn_pid = PIDController(NNFF_KP, NNFF_KI, k_d=NNFF_KD, k_f=1.0, rate=1 / self.dt)
+    self.nn_pid = PIDController(NNFF_KP, NNFF_KI, k_d=NNFF_KD, k_f=1.0, rate=1 / DT_CTRL)
     self.nn_pid.set_limits(self.steer_max, -self.steer_max)
 
     self.lateralTorqueCustom = self.params.get_bool("LateralTorqueCustom")
@@ -113,11 +114,11 @@ class LatControlTorque(LatControl):
     self.nn_friction_override = bool(getattr(self.extended_nnff_model, "friction_override", False))
 
     self.steering_angle_deadzone_deg = self.torque_params.steeringAngleDeadzoneDeg
-    self.lat_accel_request_buffer_len = max(3, int(LAT_ACCEL_REQUEST_BUFFER_SECONDS / self.dt))
+    self.lat_accel_request_buffer_len = max(3, int(LAT_ACCEL_REQUEST_BUFFER_SECONDS / DT_CTRL))
     self.lat_accel_request_buffer = deque([0.0] * self.lat_accel_request_buffer_len,
                                           maxlen=self.lat_accel_request_buffer_len)
-    self.lookahead_frames = int(JERK_LOOKAHEAD_SECONDS / self.dt)
-    self.jerk_filter = FirstOrderFilter(0.0, 1 / (2 * np.pi * LP_FILTER_CUTOFF_HZ), self.dt)
+    self.lookahead_frames = int(JERK_LOOKAHEAD_SECONDS / DT_CTRL)
+    self.jerk_filter = FirstOrderFilter(0.0, 1 / (2 * np.pi * LP_FILTER_CUTOFF_HZ), DT_CTRL)
 
     # Original full NNFF history/future layout: 3 past and 4 future samples.
     self.t_diffs = np.diff(ModelConstants.T_IDXS)
@@ -128,7 +129,7 @@ class LatControlTorque(LatControl):
     self.nn_time_offset = CP.steerActuatorDelay + 0.2
     self.nn_future_times = np.asarray([0.3, 0.6, 1.0, 1.5], dtype=float) + self.nn_time_offset
     self.past_times = [-0.3, -0.2, -0.1]
-    history_frames = [max(1, int(round(abs(value) / self.dt))) for value in self.past_times]
+    history_frames = [max(1, int(round(abs(value) / DT_CTRL))) for value in self.past_times]
     self.history_frame_offsets = [history_frames[0] - value for value in history_frames]
     self.lateral_accel_desired_deque = deque([0.0] * history_frames[0], maxlen=history_frames[0])
     self.roll_deque = deque([0.0] * history_frames[0], maxlen=history_frames[0])
