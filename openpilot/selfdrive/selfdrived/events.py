@@ -288,14 +288,14 @@ def torque_nn_load_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubM
     return Alert(
       "NNFF Torque Controller not available",
       "Donate logs to Twilsonco to get it added!",
-      AlertStatus.userPrompt, AlertSize.mid,
+      AlertStatus.userPrompt, AlertSize.none,
       Priority.LOW, VisualAlert.none, AudibleAlert.prompt, 6.0)
   else:
     return Alert(
       "NNFF Torque Controller loaded",
       model_name,
-      AlertStatus.userPrompt, AlertSize.mid,
-      Priority.LOW, VisualAlert.none, AudibleAlert.prompt, 5.0)
+      AlertStatus.userPrompt, AlertSize.none,
+      Priority.LOW, VisualAlert.none, AudibleAlert.nnff, 5.0)
 
 # *** debug alerts ***
 
@@ -1165,7 +1165,13 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
   EventName.torqueNNLoad: {
     ET.PERMANENT: torque_nn_load_alert,
   },
-
+  EventName.autoHold: {
+    ET.WARNING: Alert(
+      "AutoHold Activated.",
+      "",
+      AlertStatus.normal, AlertSize.small,
+      Priority.LOW, VisualAlert.none, AudibleAlert.autoHold, 2.),
+  },
 }
 if HARDWARE.get_device_type() == 'mici':
   EVENTS.update({

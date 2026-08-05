@@ -20,7 +20,7 @@ from openpilot.system.hardware import HARDWARE
 SAMPLE_RATE = 48000
 SAMPLE_BUFFER = 4096 # (approx 100ms)
 MAX_VOLUME = 1.0
-MIN_VOLUME = 0.1
+MIN_VOLUME = 0.4
 SELFDRIVE_STATE_TIMEOUT = 5 # 5 seconds
 FILTER_DT = 1. / (micd.SAMPLE_RATE / micd.FFT_SAMPLES)
 
@@ -38,8 +38,8 @@ ButtonType = car.CarState.ButtonEvent.Type
 
 sound_list: dict[int, tuple[str, int | None, float]] = {
   # AudibleAlert, file name, play count (none for infinite)
-  AudibleAlert.engage: ("engage.wav", 1, float(Params().get_int("SoundVolumeAdjustEngage"))/100.),
-  AudibleAlert.disengage: ("disengage.wav", 1, float(Params().get_int("SoundVolumeAdjustEngage"))/100.),
+  AudibleAlert.engage: ("engage.wav", 1, MAX_VOLUME),
+  AudibleAlert.disengage: ("disengage.wav", 1, MAX_VOLUME),
   AudibleAlert.refuse: ("refuse.wav", 1, MAX_VOLUME),
 
   AudibleAlert.prompt: ("prompt.wav", 1, MAX_VOLUME),
@@ -49,21 +49,21 @@ sound_list: dict[int, tuple[str, int | None, float]] = {
   AudibleAlert.warningSoft: ("warning_soft.wav", None, MAX_VOLUME),
   AudibleAlert.warningImmediate: ("warning_immediate.wav", None, MAX_VOLUME),
 
-  AudibleAlert.longEngaged: ("tici_engaged.wav", None, MAX_VOLUME),
-  AudibleAlert.longDisengaged: ("tici_disengaged.wav", None, MAX_VOLUME),
-  AudibleAlert.trafficSignGreen: ("traffic_sign_green.wav", None, MAX_VOLUME),
-  AudibleAlert.trafficSignChanged: ("traffic_sign_changed.wav", None, MAX_VOLUME),
+  AudibleAlert.longEngaged: ("tici_engaged.wav", 1, MAX_VOLUME),
+  AudibleAlert.longDisengaged: ("tici_disengaged.wav", 1, MAX_VOLUME),
+  AudibleAlert.trafficSignGreen: ("traffic_sign_green.wav", 1, MAX_VOLUME),
+  AudibleAlert.trafficSignChanged: ("traffic_sign_changed.wav", 1, MAX_VOLUME),
   AudibleAlert.trafficError: ("audio_traffic_error.wav", None, MAX_VOLUME),
   AudibleAlert.bsdWarning: ("audio_car_watchout.wav", None, MAX_VOLUME),
   AudibleAlert.laneChange: ("audio_lane_change.wav", None, MAX_VOLUME),
   AudibleAlert.stopStop: ("audio_stopstop.wav", None, MAX_VOLUME),
   AudibleAlert.stopping: ("audio_stopping.wav", None, MAX_VOLUME),
-  AudibleAlert.autoHold: ("audio_auto_hold.wav", None, MAX_VOLUME),
+  AudibleAlert.autoHold: ("audio_auto_hold.wav", 1, MAX_VOLUME),
   AudibleAlert.engage2: ("audio_engage.wav", None, MAX_VOLUME),
-  AudibleAlert.disengage2:  ("audio_disengage.wav", None, MAX_VOLUME),
-  AudibleAlert.speedDown:  ("audio_speed_down.wav", None, MAX_VOLUME),
+  AudibleAlert.disengage2: ("audio_disengage.wav", None, MAX_VOLUME),
+  AudibleAlert.speedDown: ("audio_speed_down.wav", None, MAX_VOLUME),
   AudibleAlert.audioTurn: ("audio_turn.wav", None, MAX_VOLUME),
-  AudibleAlert.reverseGear: ("reverse_gear.wav", 1, float(Params().get_int("SoundVolumeAdjustEngage"))/100.),
+  AudibleAlert.reverseGear: ("reverse_gear.wav", 1, MAX_VOLUME),
   AudibleAlert.audio1: ("audio_1.wav", None, MAX_VOLUME),
   AudibleAlert.audio2: ("audio_2.wav", None, MAX_VOLUME),
   AudibleAlert.audio3: ("audio_3.wav", None, MAX_VOLUME),
@@ -78,8 +78,8 @@ sound_list: dict[int, tuple[str, int | None, float]] = {
 }
 if HARDWARE.get_device_type() == "tizi":
   sound_list.update({
-    AudibleAlert.engage: ("engage_tizi.wav", 1, float(Params().get_int("SoundVolumeAdjustEngage"))/100.),
-    AudibleAlert.disengage: ("disengage_tizi.wav", 1, float(Params().get_int("SoundVolumeAdjustEngage"))/100.),
+    AudibleAlert.engage: ("tici_engaged.wav", 1, MAX_VOLUME),
+    AudibleAlert.disengage: ("disengage_tizi.wav", 1, MAX_VOLUME),
   })
 
 def _param_string(value) -> str:
@@ -292,7 +292,7 @@ class Soundd:
 
   def calculate_volume(self, weighted_db):
     volume = ((weighted_db - AMBIENT_DB) / DB_SCALE) * (MAX_VOLUME - MIN_VOLUME) + MIN_VOLUME
-    return math.pow(VOLUME_BASE, (np.clip(volume, MIN_VOLUME, MAX_VOLUME) - 1))
+    return math.pow(40, (np.clip(volume, MIN_VOLUME, MAX_VOLUME) - 1))
 
   @retry(attempts=10, delay=3)
   def get_stream(self, sd):

@@ -9,10 +9,10 @@ SELFDRIVE_DIR = FONT_DIR.parents[1]
 TRANSLATIONS_DIR = SELFDRIVE_DIR / "ui" / "translations"
 LANGUAGES_FILE = TRANSLATIONS_DIR / "languages.json"
 
-GLYPH_PADDING = 6
-EXTRA_CHARS = "–‑✓×°§•X⚙✕◀▶✔⌫⇧␣○●↳çêüñ–‑✓×°§•€£¥"
+GLYPH_PADDING = 5
+EXTRA_CHARS = "–‑✓×°§•X⚙✕◀▶✔⌫⇧␣○●↳çêüñ–‑✓×°§•€£¥↑↓←→↖↗↘↙±÷℃℉✔✕✖■□◆◇…“”‘’"
 UNIFONT_LANGUAGES = {"th", "zh-CHT", "zh-CHS", "ko", "ja"}
-KR_FONTS = {"KaiGenGothicKR-Bold"}
+KR_FONTS = {"NanumGothicBold"}
 
 def _languages():
   if not LANGUAGES_FILE.exists():
@@ -101,7 +101,7 @@ def _process_font(font_path: Path, codepoints: tuple[int, ...]):
     padding = GLYPH_PADDING
 
   if font_path.stem in KR_FONTS:
-    font_size = 48
+    font_size = 45
     padding = 2
     
   data = font_path.read_bytes()

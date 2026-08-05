@@ -265,6 +265,11 @@ struct CarState {
   steeringCurvature @84 :Float32; # VW MEB: measured road curvature from EPS (QFK_01), rad/m. Used for closed-loop curvature correction.
   evModeActive @85 :Bool; # decoded hybrid power-flow mode calls for the EV indicator
   evModeValid @86 :Bool; # evModeActive is backed by a fresh, checksum-valid CAN frame of the expected bus and length
+  steeringDisengage @87 :Bool;     # more force than steeringPressed, disengages for applicable brands
+  stockLkas @88 :Bool;
+  blockPcmEnable @89 :Bool;  # whether to allow PCM to enable this frame
+  accStatus @90 :UInt16;
+  autoHoldActivated @91 :Bool;
 
   struct Tpms {
     fl @0 :Float32;
@@ -654,6 +659,7 @@ struct CarParams {
     useSteeringAngle @0 :Bool;
     kp @1 :Float32;
     ki @2 :Float32;
+    kd @8 : Float32;
     friction @3 :Float32;
     kf @4 :Float32;
     steeringAngleDeadzoneDeg @5 :Float32;

@@ -256,12 +256,29 @@ class LateralPlanner:
 
     self.x_sol = self.lat_mpc.x_sol
 
+    # Kans: model 1초 후 yStd(modeld.py의 get_lat_smooth_seconds_dynamic) debug
+    y_std_1s = 0.0
+    if sm.valid['modelV2']:
+      try:
+        if len(sm['modelV2'].position.yStd) > 10:
+          y_std_1s = float(sm['modelV2'].position.yStd[10])
+      except Exception:
+        y_std_1s = 0.0
+    # Kans: LatSmoothDebug
+    lat_smooth_dbg = self.params.get("LatSmoothDebug")
+    if lat_smooth_dbg is None:
+      lat_smooth_dbg = "0.000/0.000"
+    elif isinstance(lat_smooth_dbg, bytes):
+      lat_smooth_dbg = lat_smooth_dbg.decode("utf8", errors="ignore")
+
     debugText = (
-      f"{'lanemode' if self.lanelines_active else 'laneless'} | " +
-      f"{self.LP.lane_width_left:.1f}m | " +
-      f"{self.LP.lane_width:.1f}m | " +
-      f"{self.LP.lane_width_right:.1f}m | " +
-      f"{f'offset={self.LP.offset_total * 100.0:.1f}cm turn={np.clip(self.curve_speed, -200, 200):.0f}km/h' if self.lanelines_active else ''}"
+      f"{'lanemode' if self.lanelines_active else 'laneless'} /" +
+      f"{self.LP.lane_width_left:.1f}m /" +
+      f"{self.LP.lane_width:.1f}m /" +
+      f"{self.LP.lane_width_right:.1f}m /" + 
+      f"yStd1s={y_std_1s:.2f} /" +
+      f"latSmooth={lat_smooth_dbg} /" +
+      f"{f'curv={self.LP.curvature:.4f}' if self.lanelines_active else ''}"
     )
 
     lateralPlan.latDebugText = debugText

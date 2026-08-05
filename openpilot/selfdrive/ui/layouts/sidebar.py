@@ -8,6 +8,10 @@ from openpilot.system.ui.lib.application import gui_app, FontWeight, MousePos, F
 from openpilot.system.ui.lib.multilang import tr, tr_noop
 from openpilot.system.ui.lib.text_measure import measure_text_cached
 from openpilot.system.ui.widgets import Widget
+#Kans: Device Position
+import math
+from openpilot.common.params import Params
+from openpilot.cereal import messaging, log
 
 SIDEBAR_WIDTH = 300
 METRIC_HEIGHT = 126
@@ -73,7 +77,8 @@ class Sidebar(Widget):
     self._connect_status = MetricData(tr_noop("CONNECT"), tr_noop("OFFLINE"), Colors.WARNING)
     self._recording_audio = False
 
-    self._carrot_web_img = gui_app.texture("icons/carrot_web.png", HOME_BTN.width, HOME_BTN.height)
+    self._home_img = gui_app.texture("images/img_c3x.png", HOME_BTN.width + 50, HOME_BTN.height + 50)
+    self._flag_img = gui_app.texture("images/button_flag.png", HOME_BTN.width, HOME_BTN.height)
     self._settings_img = gui_app.texture("images/button_settings.png", SETTINGS_BTN.width, SETTINGS_BTN.height)
     self._mic_img = gui_app.texture("icons/microphone.png", 30, 30)
     self._mic_indicator_rect = rl.Rectangle(0, 0, 0, 0)
@@ -82,13 +87,16 @@ class Sidebar(Widget):
 
     # Callbacks
     self._on_settings_click: Callable | None = None
-    self._on_carrot_web_click: Callable | None = None
+    self._on_flag_click: Callable | None = None
     self._open_settings_callback: Callable | None = None
+    self._ip_address = "N/A"
+    # Kans: Device Position
+    self._params = Params()
 
-  def set_callbacks(self, on_settings: Callable | None = None, on_carrot_web: Callable | None = None,
+  def set_callbacks(self, on_settings: Callable | None = None, on_flag: Callable | None = None,
                     open_settings: Callable | None = None):
     self._on_settings_click = on_settings
-    self._on_carrot_web_click = on_carrot_web
+    self._on_flag_click = on_flag
     self._open_settings_callback = open_settings
 
   def _render(self, rect: rl.Rectangle):
@@ -98,6 +106,7 @@ class Sidebar(Widget):
     self._draw_buttons(rect)
     self._draw_network_indicator(rect)
     self._draw_metrics(rect)
+    self._update_device_pos_status(rect)
 
   def _update_state(self):
     sm = ui_state.sm
@@ -116,6 +125,11 @@ class Sidebar(Widget):
     self._net_type = NETWORK_TYPES.get(device_state.networkType.raw, tr_noop("Unknown"))
     strength = device_state.networkStrength
     self._net_strength = max(0, min(5, strength.raw + 1)) if strength.raw > 0 else 0
+
+    try:
+      self._ip_address = str(device_state.ipAddress or "N/A")
+    except Exception:
+      self._ip_address = "N/A"
 
   def _update_temperature_status(self, device_state):
     thermal_status = device_state.thermalStatus
@@ -146,9 +160,9 @@ class Sidebar(Widget):
     if rl.check_collision_point_rec(mouse_pos, SETTINGS_BTN):
       if self._on_settings_click:
         self._on_settings_click()
-    elif rl.check_collision_point_rec(mouse_pos, HOME_BTN):
-      if self._on_carrot_web_click:
-        self._on_carrot_web_click()
+    elif rl.check_collision_point_rec(mouse_pos, HOME_BTN) and ui_state.started:
+      if self._on_flag_click:
+        self._on_flag_click()
     elif self._recording_audio and rl.check_collision_point_rec(mouse_pos, self._mic_indicator_rect):
       if self._open_settings_callback:
         self._open_settings_callback()
@@ -162,10 +176,12 @@ class Sidebar(Widget):
     tint = Colors.BUTTON_PRESSED if settings_down else Colors.BUTTON_NORMAL
     rl.draw_texture_ex(self._settings_img, rl.Vector2(SETTINGS_BTN.x, SETTINGS_BTN.y), 0.0, 1.0, tint)
 
-    # Carrot Web button
-    carrot_web_pressed = mouse_down and rl.check_collision_point_rec(mouse_pos, HOME_BTN)
-    tint = Colors.BUTTON_PRESSED if carrot_web_pressed else Colors.BUTTON_NORMAL
-    rl.draw_texture_ex(self._carrot_web_img, rl.Vector2(HOME_BTN.x, HOME_BTN.y), 0.0, 1.0, tint)
+    # Home/Flag button
+    flag_pressed = mouse_down and rl.check_collision_point_rec(mouse_pos, HOME_BTN)
+    button_img = self._home_img if ui_state.started else self._home_img
+
+    tint = Colors.BUTTON_PRESSED if (ui_state.started and flag_pressed) else Colors.BUTTON_NORMAL
+    rl.draw_texture_ex(button_img, rl.Vector2(HOME_BTN.x - 30, HOME_BTN.y), 0.0, 1.0, tint)
 
     # Microphone button
     if self._recording_audio:
@@ -177,6 +193,23 @@ class Sidebar(Widget):
       rl.draw_rectangle_rounded(self._mic_indicator_rect, 1, 10, bg_color)
       rl.draw_texture_ex(self._mic_img, rl.Vector2(self._mic_indicator_rect.x + (self._mic_indicator_rect.width - self._mic_img.width) / 2,
                          self._mic_indicator_rect.y + (self._mic_indicator_rect.height - self._mic_img.height) / 2), 0.0, 1.0, Colors.WHITE)
+
+  def _update_device_pos_status(self, rect: rl.Rectangle):
+    desc = str()
+    calib_bytes = self._params.get("CalibrationParams")
+    if calib_bytes:
+      try:
+        calib = messaging.log_from_bytes(calib_bytes, log.Event).liveCalibration
+        pitch = math.degrees(calib.rpyCalib[1])
+        yaw = math.degrees(calib.rpyCalib[2])
+        desc += str("{:.2f}воиб {} | {:.2f}воиб {}").format(
+          abs(pitch), str("воe") if pitch > 0 else str("воe"),
+          abs(yaw), str("воc") if yaw > 0 else str("войб"))
+      except Exception:
+        cloudlog.exception("invalid CalibrationParams")
+    device_text_y = rect.y + 800
+    device_text_pos = rl.Vector2(rect.x + 32, device_text_y)
+    rl.draw_text_ex(self._font_regular, desc, device_text_pos, FONT_SIZE-2, 0, Colors.WHITE)
 
   def _draw_network_indicator(self, rect: rl.Rectangle):
     # Signal strength dots
@@ -191,10 +224,10 @@ class Sidebar(Widget):
       y = int(y_pos + dot_size // 2)
       rl.draw_circle(x, y, dot_size // 2, color)
 
-    # Network type text
+    # Network type text -> IP text
     text_y = rect.y + 247
-    text_pos = rl.Vector2(rect.x + 58, text_y)
-    rl.draw_text_ex(self._font_regular, tr(self._net_type), text_pos, FONT_SIZE, 0, Colors.WHITE)
+    text_pos = rl.Vector2(rect.x + 32, text_y)
+    rl.draw_text_ex(self._font_regular, self._ip_address, text_pos, FONT_SIZE-1, 0, Colors.WHITE)
 
   def _draw_metrics(self, rect: rl.Rectangle):
     metrics = [(self._temp_status, 338), (self._panda_status, 496), (self._connect_status, 654)]

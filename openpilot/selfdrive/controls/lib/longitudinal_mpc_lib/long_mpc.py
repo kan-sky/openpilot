@@ -439,7 +439,10 @@ class LongitudinalMpc:
       cruise_obstacle = np.cumsum(T_DIFFS * v_cruise_clipped) + get_safe_obstacle_distance(v_cruise_clipped, t_follow, comfort_brake, stop_distance)
 
       adjust_dist = carrot.trafficStopDistanceAdjust if v_ego > 0.1 else -2.0
-      if 50 < stop_x + adjust_dist < cruise_obstacle[0]:
+      adjust_dist = np.clip(adjust_dist, -2.0, 0.0)  # Kans: traffic stop Dist offset
+
+      d_min = np.interp(v_ego, [0.0, 10.0, 15.0, 20.0], [5.0, 45.0, 65.0, 75.0])
+      if d_min < stop_x + adjust_dist < cruise_obstacle[0]:
         stop_x = cruise_obstacle[0] - adjust_dist
       x2 = stop_x * np.ones(N+1) + adjust_dist
 
