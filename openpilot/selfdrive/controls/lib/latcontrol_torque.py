@@ -125,7 +125,7 @@ class LatControlTorque(LatControl):
     self.friction_look_ahead_bp = [9.0, 30.0]
     self.lat_jerk_friction_factor = 0.4
     self.lat_accel_friction_factor = 0.7
-    self.nn_time_offset = CP.steerActuatorDelay + 0.2
+    self.nn_time_offset = CP.steerActuatorDelay
     self.nn_future_times = np.asarray([0.3, 0.6, 1.0, 1.5], dtype=float) + self.nn_time_offset
     self.past_times = [-0.3, -0.2, -0.1]
     history_frames = [max(1, int(round(abs(value) / self.dt))) for value in self.past_times]
