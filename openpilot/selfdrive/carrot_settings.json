@@ -154,7 +154,7 @@
                 "UseLaneLineSpeed",
                 "UseLaneLineCurveSpeed",
                 "PsiDampingStraight",
-                "PsiDampingSCurve",
+                "PsiDampingSCurve"
               ]
             },
             {
