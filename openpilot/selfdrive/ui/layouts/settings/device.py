@@ -65,7 +65,6 @@ class DeviceLayout(Widget):
                   self._on_review_training_guide, enabled=ui_state.is_offroad),
       button_item(lambda: tr("Regulatory"), lambda: tr("VIEW"), callback=self._on_regulatory, enabled=ui_state.is_offroad),
       button_item(lambda: tr("Change Language"), lambda: tr("CHANGE"), callback=self._show_language_dialog),
-      self._power_off_btn,
     ]
     return items
 
