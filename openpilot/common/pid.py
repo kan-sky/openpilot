@@ -46,6 +46,10 @@ class PIDController:
     self.f = 0.0
     self.control = 0
 
+  def set_limits(self, pos_limit, neg_limit):
+    self.pos_limit = pos_limit
+    self.neg_limit = neg_limit
+  
   def update(self, error, error_rate=0.0, speed=0.0, override=False, feedforward=0., freeze_integrator=False):
     self.speed = speed
 
