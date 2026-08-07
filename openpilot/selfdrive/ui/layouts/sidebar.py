@@ -87,16 +87,16 @@ class Sidebar(Widget):
 
     # Callbacks
     self._on_settings_click: Callable | None = None
-    self._on_flag_click: Callable | None = None
+    self._on_carrot_web_click: Callable | None = None
     self._open_settings_callback: Callable | None = None
     self._ip_address = "N/A"
     # Kans: Device Position
     self._params = Params()
 
-  def set_callbacks(self, on_settings: Callable | None = None, on_flag: Callable | None = None,
+  def set_callbacks(self, on_settings: Callable | None = None, on_carrot_web: Callable | None = None,
                     open_settings: Callable | None = None):
     self._on_settings_click = on_settings
-    self._on_flag_click = on_flag
+    self._on_carrot_web_click = on_carrot_web
     self._open_settings_callback = open_settings
 
   def _render(self, rect: rl.Rectangle):
@@ -160,9 +160,9 @@ class Sidebar(Widget):
     if rl.check_collision_point_rec(mouse_pos, SETTINGS_BTN):
       if self._on_settings_click:
         self._on_settings_click()
-    elif rl.check_collision_point_rec(mouse_pos, HOME_BTN) and ui_state.started:
-      if self._on_flag_click:
-        self._on_flag_click()
+    elif rl.check_collision_point_rec(mouse_pos, HOME_BTN):
+      if self._on_carrot_web_click:
+        self._on_carrot_web_click()
     elif self._recording_audio and rl.check_collision_point_rec(mouse_pos, self._mic_indicator_rect):
       if self._open_settings_callback:
         self._open_settings_callback()
