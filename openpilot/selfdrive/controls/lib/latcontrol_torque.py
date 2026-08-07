@@ -32,6 +32,7 @@ VERSION = 2
 
 LOW_SPEED_X = [0.0, 10.0, 20.0, 30.0]
 LOW_SPEED_Y = [15.0, 13.0, 10.0, 5.0]
+LOW_SPEED_Y_NN = [12.0, 3.0, 1.0, 0.0]
 LAT_PLAN_MIN_IDX = 5
 
 
@@ -78,6 +79,7 @@ class LatControlTorque(LatControl):
 
     self.params = Params()
     self.frame = 0
+    self.dt = DT_CTRL
 
     self.torque_params = CP.lateralTuning.torque.as_builder()
     self.torque_from_lateral_accel = CI.torque_from_lateral_accel()
@@ -85,11 +87,11 @@ class LatControlTorque(LatControl):
     self.lateral_accel_from_torque = CI.lateral_accel_from_torque()
 
     # Current comma path: PID output is lateral acceleration, converted to torque at the end.
-    self.pid = PIDController([INTERP_SPEEDS, KP_INTERP], KI, rate=1 / DT_CTRL)
+    self.pid = PIDController([INTERP_SPEEDS, KP_INTERP], KI, rate=1 / self.dt)
     self.update_limits()
 
     # Full NNFF torque
-    self.nn_pid = PIDController(NNFF_KP, NNFF_KI, k_d=NNFF_KD, k_f=1.0, rate=1 / DT_CTRL)
+    self.nn_pid = PIDController(NNFF_KP, NNFF_KI, k_d=NNFF_KD, k_f=1.0, rate=1 / self.dt)
     self.nn_pid.set_limits(self.steer_max, -self.steer_max)
 
     self.lateralTorqueCustom = self.params.get_bool("LateralTorqueCustom")
@@ -114,11 +116,11 @@ class LatControlTorque(LatControl):
     self.nn_friction_override = bool(getattr(self.extended_nnff_model, "friction_override", False))
 
     self.steering_angle_deadzone_deg = self.torque_params.steeringAngleDeadzoneDeg
-    self.lat_accel_request_buffer_len = max(3, int(LAT_ACCEL_REQUEST_BUFFER_SECONDS / DT_CTRL))
+    self.lat_accel_request_buffer_len = max(3, int(LAT_ACCEL_REQUEST_BUFFER_SECONDS / self.dt))
     self.lat_accel_request_buffer = deque([0.0] * self.lat_accel_request_buffer_len,
                                           maxlen=self.lat_accel_request_buffer_len)
-    self.lookahead_frames = int(JERK_LOOKAHEAD_SECONDS / DT_CTRL)
-    self.jerk_filter = FirstOrderFilter(0.0, 1 / (2 * np.pi * LP_FILTER_CUTOFF_HZ), DT_CTRL)
+    self.lookahead_frames = int(JERK_LOOKAHEAD_SECONDS / self.dt)
+    self.jerk_filter = FirstOrderFilter(0.0, 1 / (2 * np.pi * LP_FILTER_CUTOFF_HZ), self.dt)
 
     # Original full NNFF history/future layout: 3 past and 4 future samples.
     self.t_diffs = np.diff(ModelConstants.T_IDXS)
@@ -129,7 +131,7 @@ class LatControlTorque(LatControl):
     self.nn_time_offset = CP.steerActuatorDelay + 0.2
     self.nn_future_times = np.asarray([0.3, 0.6, 1.0, 1.5], dtype=float) + self.nn_time_offset
     self.past_times = [-0.3, -0.2, -0.1]
-    history_frames = [max(1, int(round(abs(value) / DT_CTRL))) for value in self.past_times]
+    history_frames = [max(1, int(round(abs(value) / self.dt))) for value in self.past_times]
     self.history_frame_offsets = [history_frames[0] - value for value in history_frames]
     self.lateral_accel_desired_deque = deque([0.0] * history_frames[0], maxlen=history_frames[0])
     self.roll_deque = deque([0.0] * history_frames[0], maxlen=history_frames[0])
@@ -164,7 +166,7 @@ class LatControlTorque(LatControl):
     lookahead = np.interp(CS.vEgo, self.friction_look_ahead_bp, self.friction_look_ahead_v)
     upper_idx = next((index for index, value in enumerate(ModelConstants.T_IDXS) if value > lookahead), len(ModelConstants.T_IDXS) - 1)
     predicted_jerk = get_predicted_lateral_jerk(model_data.acceleration.y, self.t_diffs)
-    desired_time = max(DT_CTRL, self.nn_time_offset + 0.1)
+    desired_time = max(self.dt, self.nn_time_offset + 0.1)
     planned_accel = np.interp(desired_time, ModelConstants.T_IDXS, model_data.acceleration.y)
     desired_jerk = (planned_accel - desired_lateral_accel) / desired_time
     return get_lookahead_value(predicted_jerk[LAT_PLAN_MIN_IDX:upper_idx], desired_jerk)
@@ -282,21 +284,22 @@ class LatControlTorque(LatControl):
     curvature_deadzone = abs(VM.calc_curvature(math.radians(self.steering_angle_deadzone_deg), CS.vEgo, 0.0))
     lateral_accel_deadzone = curvature_deadzone * CS.vEgo ** 2
 
-    delay_frames = int(np.clip(lat_delay / DT_CTRL + 1, 1, self.lat_accel_request_buffer_len))
+    delay_frames = int(np.clip(lat_delay / self.dt + 1, 1, self.lat_accel_request_buffer_len))
     expected_lateral_accel = self.lat_accel_request_buffer[-delay_frames]
     error = expected_lateral_accel - actual_lateral_accel
 
     lookahead_idx = int(np.clip(-delay_frames + self.lookahead_frames,
                                 -self.lat_accel_request_buffer_len + 1, -2))
     raw_lateral_jerk = (self.lat_accel_request_buffer[lookahead_idx + 1] -
-                        self.lat_accel_request_buffer[lookahead_idx - 1]) / (2 * DT_CTRL)
+                        self.lat_accel_request_buffer[lookahead_idx - 1]) / (2 * self.dt)
     buffered_desired_lateral_jerk = self.jerk_filter.update(raw_lateral_jerk)
 
     full_nnff = self.params.get_bool("NNFF") and self.extended_nnff_available and self._model_good(model_data)
     nnff_lite = not full_nnff and self.params.get_bool("NNFFLite") and self._model_good(model_data)
 
     if full_nnff:
-      low_speed_factor = np.interp(CS.vEgo, LOW_SPEED_X, LOW_SPEED_Y) ** 2
+      low_speed_y = LOW_SPEED_Y_NN if full_nnff else LOW_SPEED_Y
+      low_speed_factor = np.interp(CS.vEgo, LOW_SPEED_X, low_speed_y) ** 2
       setpoint = expected_lateral_accel + low_speed_factor * desired_curvature
       measurement = actual_lateral_accel + low_speed_factor * measured_curvature
       torque_error, feedforward_torque, desired_lateral_jerk = self._full_nnff(

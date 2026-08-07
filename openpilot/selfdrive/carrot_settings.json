@@ -120,8 +120,7 @@
                 "LatSmoothSec",
                 "LatSuspendAngleDeg",
                 "CustomSR",
-                "SteerRatioRate",
-                "MaxLatAccelNoRollLowSpeed"
+                "SteerRatioRate"
               ]
             },
             {
@@ -154,7 +153,8 @@
                 "UseLaneLineSpeed",
                 "UseLaneLineCurveSpeed",
                 "PsiDampingStraight",
-                "PsiDampingSCurve"
+                "PsiDampingSCurve",
+                "MaxLatAccelNoRollLowSpeed"
               ]
             },
             {
