@@ -149,12 +149,14 @@ def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.
     neginf=0.0))
   desired_velocity_now = max(0.0, desired_velocity_now)
 
-  return (log.ModelDataV2.Action(desiredCurvature=float(desired_curvature),
-                                desiredAcceleration=float(desired_accel),
-                                shouldStop=bool(should_stop),
-                                desiredVelocity=float(desired_velocity_now)),
-                                curve_smooth_max,
-                                applied_lat_smooth_seconds)
+  return (log.ModelDataV2.Action(
+      desiredCurvature=float(desired_curvature),
+      desiredAcceleration=float(desired_accel),
+      shouldStop=bool(should_stop),
+      desiredVelocity=float(desired_velocity_now)
+    ),
+    curve_smooth_max,
+    applied_lat_smooth_seconds)
 
 class FrameMeta:
   frame_id: int = 0
@@ -183,7 +185,7 @@ class ModelState:
     self.frame_skip = ModelConstants.MODEL_RUN_FREQ // ModelConstants.MODEL_CONTEXT_FREQ
     self.input_queues, self.npy = make_input_queues(self.input_shapes, self.frame_skip, device=self.QUEUE_DEV)
     self.full_frames: dict[str, Tensor] = {}
-    self._blob_cache: dict[tuple[str, int], Tensor] = {}
+    self._blob_cache: dict[int, Tensor] = {}
     self.parser = Parser()
     self.frame_buf_params = {k: get_nv12_info(cam_w, cam_h) for k in ('img', 'big_img')}
     self.run_policy = jits['run_policy']

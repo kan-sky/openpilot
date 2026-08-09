@@ -2293,7 +2293,7 @@
       "name": "MaxLatAccelNoRollLowSpeed",
       "title": "레인모드: 저속 최대 횡가속(3.3 m/s²)",
       "descr": "100Km/h이하 허용하는 최대횡가속값.\n 크면 오버스티어(=커브마진 효과 약화), 낮으면 언더스티어.",
-      "egroup": "LAT",
+      "egroup": "LANE",
       "etitle": "Max Lateral Acceleration (Low Speed)",
       "edescr": "Maximum allowed lateral acceleration below 100 km/h.",
       "min": 0,
