@@ -198,11 +198,12 @@ class Controls:
         curvature = get_lag_adjusted_curvature(self.CP, CS.vEgo, lat_plan.psis, lat_plan.curvatures, steer_actuator_delay, lat_plan.distances)
         new_desired_curvature = smooth_value(curvature, self.desired_curvature, lat_smooth_seconds)
     else:
-      # 레인리스: modeld의 최종 action 곡률을 그대로 사용한다.
-      new_desired_curvature = float(model_v2.action.desiredCurvature)
+      # 레인리스는 modeld의 최종 action 곡률을 그대로 사용한다.-> 스무딩값으로 원복
+      #new_desired_curvature = float(model_v2.action.desiredCurvature)
+      new_desired_curvature = smooth_value(model_v2.action.desiredCurvature, self.desired_curvature, 0.1)
 
     self.desired_curvature, curvature_limited = clip_curvature(CS.vEgo, self.desired_curvature, new_desired_curvature, lp.roll)
-    lat_delay = self.sm["liveDelay"].lateralDelay
+    lat_delay = self.sm["liveDelay"].lateralDelay + lat_smooth_seconds
     actuators.curvature = float(self.desired_curvature)
 
     # VW MEB 폐루프 곡률 보정 = infiniteCable2 LatControlCurvature.update() 정확 복제.
@@ -318,9 +319,9 @@ class Controls:
         navi_event_speed = int(self.atc_turn_speed)
       elif carrot_man.szSdiDescr in ("병목지점", "Bottleneck point", "瓶颈路段"):  # 티맵 SDI 50 (경보 범위 내 수신)
         navi_event_type = 5
-      elif carrot_man.desiredSource == "road" and 0 < carrot_man.desiredSpeed < 200:
-        navi_event_type = 8  # 도로제한속도 자동속도 제어 중 (제한값 변경 시 "인식됨" 배너 -> km/h 아이콘)
-        navi_event_speed = int(carrot_man.nRoadLimitSpeed)
+      #elif carrot_man.desiredSource == "road" and 0 < carrot_man.desiredSpeed < 200:
+      #  navi_event_type = 8  # 도로제한속도 자동속도 제어 중 (제한값 변경 시 "인식됨" 배너 -> km/h 아이콘)
+      #  navi_event_speed = int(carrot_man.nRoadLimitSpeed)
       # 앞차가 실제로 속도를 제한 중(MPC lead 모드)이면 계기판 앞차 하이라이트 우선 (km/h 아이콘 양보)
       hudControl.leadLimiting = bool(hudControl.leadVisible and self.sm['longitudinalPlan'].xState == 0)  # XState.lead
       hudControl.naviEventType = navi_event_type
