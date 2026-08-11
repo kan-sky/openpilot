@@ -41,6 +41,7 @@ from cluster_config import (
     VEHICLE_LANE_CHANGE_SLOPE,
     VEHICLE_LENGTH_M,
     VEHICLE_WIDTH_M,
+    cluster_camera_view_is_road_camera,
 )
 from cluster_models import (
     ClusterUiState,
@@ -103,7 +104,15 @@ RADAR_MERGED_SOURCE_TAG = "+radar:"
 CORNER_RADAR_LABELS = frozenset(("LF", "RF", "LR", "RR"))
 CORNER_RADAR_HEADING_COMPONENT_MIN_MPS = 0.5
 CORNER_RADAR_EGO_LATERAL_COMP_MAX_MPS = 3.5
+CORNER_RADAR_EGO_LATERAL_COMP_GAIN = 0.25
 CORNER_RADAR_EGO_LATERAL_COMP_MIN_POINTS = 2
+CORNER_RADAR_HEADING_YAW_COMP_MAX_DREL = 120.0
+CORNER_RADAR_HEADING_YAW_COMP_MAX_YAW_RATE = 0.35
+CORNER_RADAR_HEADING_YAW_COMP_MAX_MPS = 3.0
+CORNER_RADAR_INPUT_POINT_LIMIT = 64
+CORNER_RADAR_DISPLAY_POINT_LIMIT = 34
+RADAR_VEHICLE_DISPLAY_LIMIT = 10
+RADAR_MARKER_DISPLAY_LIMIT = 24
 DRIVE_CAMERA_FORWARD_SHIFT_M = 5.0
 DRIVE_CAMERA_EGO_BOTTOM_POSITION_M = (0.0, -6.0, 5.00)
 DRIVE_CAMERA_EGO_BOTTOM_TARGET_M = (0.0, 14.0, -1.00)
@@ -116,6 +125,7 @@ DRIVE_VIEW_ROAD_START_M = (
 )
 VEHICLE_BADGE_TTC_S = 9.9
 VEHICLE_BADGE_ACCEL_MPS2 = 1.0
+DETECTED_VEHICLE_DISPLAY_HEIGHT_OFFSET_M = -0.3
 MODEL_LINE_STRIP_GROUP_CACHE_LIMIT = 48
 MODEL_LINE_STRIP_GROUP_CACHE_GRID_M = 0.5
 MODEL_LINE_STRIP_GROUP_CACHE_POINT_GRID_M = 0.05
@@ -159,12 +169,20 @@ PATH_BODY_LAYER_M = PATH_HEIGHT_M + 0.046
 PATH_METRIC_LAYER_M = PATH_HEIGHT_M + 0.066
 PATH_HIGHLIGHT_LAYER_M = PATH_HEIGHT_M + 0.088
 FOLLOW_DISTANCE_MARKER_BACKING_LAYER_M = PATH_HEIGHT_M + 0.116
-FOLLOW_DISTANCE_MARKER_BODY_LAYER_M = PATH_HEIGHT_M + 0.132
-FOLLOW_DISTANCE_MARKER_BACKING_FORWARD_M = 0.28
-FOLLOW_DISTANCE_MARKER_BODY_FORWARD_M = 0.14
-FOLLOW_DISTANCE_MARKER_BACKING_EXTRA_WIDTH_M = 0.22
-FOLLOW_DISTANCE_MARKER_BACKING_COLOR: Color = (42, 0, 38, 230)
-FOLLOW_DISTANCE_MARKER_BODY_COLOR: Color = (255, 0, 220, 248)
+FOLLOW_DISTANCE_MARKER_BODY_LAYER_M = FOLLOW_DISTANCE_MARKER_BACKING_LAYER_M + 0.001
+FOLLOW_DISTANCE_MARKER_WIDTH_M = 1.8
+FOLLOW_DISTANCE_MARKER_BODY_FORWARD_M = 0.26
+FOLLOW_DISTANCE_MARKER_OUTLINE_M = 0.07
+FOLLOW_DISTANCE_MARKER_CAP_STEPS = 10
+FOLLOW_DISTANCE_MARKER_BACKING_COLOR: Color = (5, 9, 12, 230)
+FOLLOW_DISTANCE_MARKER_BODY_COLOR: Color = (255, 255, 255, 242)
+FOLLOW_DISTANCE_STOP_DISTANCE_M = 6.0
+FOLLOW_DISTANCE_GAP_T_FOLLOW_S = {
+    1: 1.25,
+    2: 1.45,
+    3: 1.75,
+    4: 2.0,
+}
 EGO_VEHICLE_CENTER_FORWARD_M = EGO_FORWARD_M - VEHICLE_LENGTH_M * 0.5
 LANE_HIGHLIGHT_COLOR = (64, 148, 255)
 LANE_HIGHLIGHT_ALPHA = 220
@@ -254,6 +272,7 @@ ModelLineStripGeometrySpecs = tuple[tuple[int, float], ...]
 ModelLineStripPointKey = tuple[tuple[int, int], ...]
 ModelLineStripCacheKey = tuple[
     ModelLineStripPointKey,
+    float,
     float,
     float,
     str,
@@ -381,12 +400,34 @@ def data_scene_forward_m(relative_forward_m: float) -> float:
     return EGO_FORWARD_M + relative_forward_m
 
 
-def render_relative_forward_m(relative_forward_m: float) -> float:
-    return relative_forward_m * LONGITUDINAL_RENDER_DISTANCE_SCALE
+def longitudinal_render_distance_scale(state: ClusterUiState) -> float:
+    if cluster_camera_view_is_road_camera(state.camera_view_mode):
+        return 1.0
+    return LONGITUDINAL_RENDER_DISTANCE_SCALE
 
 
-def render_scene_forward_m(relative_forward_m: float) -> float:
-    return data_scene_forward_m(render_relative_forward_m(relative_forward_m))
+def render_scene_forward_m(relative_forward_m: float, state: ClusterUiState) -> float:
+    return render_scene_forward_m_for_scale(
+        relative_forward_m,
+        longitudinal_render_distance_scale(state),
+    )
+
+
+def render_scene_forward_m_for_scale(relative_forward_m: float, longitudinal_scale: float) -> float:
+    scale = max(0.001, float(longitudinal_scale))
+    return data_scene_forward_m(relative_forward_m * scale)
+
+
+def render_relative_forward_m_from_scene(forward_m: float, longitudinal_scale: float) -> float:
+    scale = max(0.001, float(longitudinal_scale))
+    return scene_data_relative_forward_m(forward_m) / scale
+
+
+def detected_vehicle_scene_forward_m(vehicle: DetectedVehicle, state: ClusterUiState) -> float:
+    forward_m = render_scene_forward_m(vehicle.longitudinal_m, state)
+    if vehicle.longitudinal_m > 0.0 and (vehicle.primary or vehicle.cut_in):
+        forward_m += VEHICLE_LENGTH_M * 0.5
+    return forward_m
 
 
 def scene_data_relative_forward_m(forward_m: float) -> float:
@@ -459,28 +500,30 @@ def strip_between_model_lines(
     steps: int,
     color: Color,
     height_m: float,
+    longitudinal_scale: float = 1.0,
     extend_before_model: bool = False,
 ) -> MeshStrip | None:
     if len(left_points) < 2 or len(right_points) < 2:
         return None
 
-    relative_start_m = max(0.0, scene_data_relative_forward_m(start_m))
+    scale = max(0.001, float(longitudinal_scale))
+    relative_start_m = max(0.0, render_relative_forward_m_from_scene(start_m, scale))
     if not extend_before_model:
         relative_start_m = max(relative_start_m, left_points[0].forward_m, right_points[0].forward_m)
     relative_end_m = min(
-        scene_data_relative_forward_m(end_m),
+        render_relative_forward_m_from_scene(end_m, scale),
         left_points[-1].forward_m,
         right_points[-1].forward_m,
     )
-    scene_start_m = start_m if extend_before_model else data_scene_forward_m(relative_start_m)
-    scene_end_m = min(end_m, data_scene_forward_m(relative_end_m))
+    scene_start_m = start_m if extend_before_model else render_scene_forward_m_for_scale(relative_start_m, scale)
+    scene_end_m = min(end_m, render_scene_forward_m_for_scale(relative_end_m, scale))
     if scene_end_m <= scene_start_m + 1.0:
         return None
 
     left: list[Vec3] = []
     right: list[Vec3] = []
     for forward_m in sample_range(scene_start_m, scene_end_m, steps):
-        relative_forward_m = scene_data_relative_forward_m(forward_m)
+        relative_forward_m = render_relative_forward_m_from_scene(forward_m, scale)
         left_lateral = (
             left_points[0].lateral_m + left_lateral_shift_m
             if extend_before_model and relative_forward_m < left_points[0].forward_m
@@ -537,6 +580,7 @@ def lane_floor_strip(
             road_steps,
             color,
             height_m,
+            longitudinal_scale=longitudinal_render_distance_scale(state),
             extend_before_model=True,
         )
         if model_strip is not None:
@@ -584,11 +628,11 @@ def model_line_centerline(
     end_m: float,
     height_m: float,
     lateral_shift_m: float = 0.0,
+    longitudinal_scale: float = 1.0,
 ) -> tuple[Vec3, ...]:
     centerline: list[Vec3] = []
-    ego_forward_m = EGO_FORWARD_M
     for point in model_points:
-        forward_m = ego_forward_m + point.forward_m
+        forward_m = render_scene_forward_m_for_scale(point.forward_m, longitudinal_scale)
         if start_m <= forward_m <= end_m:
             centerline.append(Vec3(point.lateral_m + lateral_shift_m, forward_m, height_m))
     return tuple(centerline)
@@ -733,6 +777,7 @@ def lane_marking_segments_for_marking(
     start_m: float,
     end_m: float,
     extend_before_model: bool = False,
+    longitudinal_scale: float = 1.0,
 ) -> tuple[tuple[Vec3, ...], ...]:
     if marking.model_points:
         centerline = model_line_centerline(
@@ -741,6 +786,7 @@ def lane_marking_segments_for_marking(
             end_m,
             0.0,
             marking.model_lateral_shift_m,
+            longitudinal_scale,
         )
         if len(centerline) < 2:
             if not extend_before_model:
@@ -1158,9 +1204,11 @@ def cached_model_line_strip_groups(
     specs: tuple[tuple[int, Color, float], ...],
     style: str,
     extend_before_model: bool,
+    longitudinal_scale: float = 1.0,
     profile_add: ProfileAdd | None = None,
     profile_prefix: str = "scene.model_line",
 ) -> ModelLineStripGroups:
+    scale = max(0.001, float(longitudinal_scale))
     cache_start_m = model_line_cache_start_m(start_m)
     cache_end_m = model_line_cache_end_m(end_m)
     geometry_specs = model_line_geometry_specs(specs)
@@ -1171,6 +1219,7 @@ def cached_model_line_strip_groups(
         point_key,
         cache_start_m,
         cache_end_m,
+        scale,
         style,
         extend_before_model,
         geometry_specs,
@@ -1183,7 +1232,13 @@ def cached_model_line_strip_groups(
 
     profile_scene_add_elapsed(profile_add, f"{profile_prefix}.miss", 0.0)
     profile_stage = profile_scene_start(profile_add)
-    centerline = model_line_centerline(render_points, cache_start_m, cache_end_m, 0.0)
+    centerline = model_line_centerline(
+        render_points,
+        cache_start_m,
+        cache_end_m,
+        0.0,
+        longitudinal_scale=scale,
+    )
     profile_scene_add(profile_add, f"{profile_prefix}.centerline", profile_stage)
     if len(centerline) < 2:
         groups: ModelLineStripGroups = None if extend_before_model else tuple(() for _ in geometry_specs)
@@ -1356,6 +1411,7 @@ def model_line_strip_groups(
     specs: tuple[tuple[int, Color, float], ...],
     style: str,
     extend_before_model: bool,
+    longitudinal_scale: float = 1.0,
     profile_add: ProfileAdd | None = None,
     profile_prefix: str = "scene.model_line",
 ) -> ModelLineStripGroups:
@@ -1366,6 +1422,7 @@ def model_line_strip_groups(
         specs,
         style,
         extend_before_model,
+        longitudinal_scale,
         profile_add,
         profile_prefix,
     )
@@ -1425,7 +1482,11 @@ def model_path_lateral_at_forward(state: ClusterUiState, relative_forward_m: flo
 
 
 def model_path_world_x(state: ClusterUiState, lane_width_m: float, forward_m: float) -> float | None:
-    lateral_m = model_path_lateral_at_forward(state, scene_data_relative_forward_m(forward_m))
+    relative_forward_m = render_relative_forward_m_from_scene(
+        forward_m,
+        longitudinal_render_distance_scale(state),
+    )
+    lateral_m = model_path_lateral_at_forward(state, relative_forward_m)
     if lateral_m is None:
         return None
     ego_offset = clamp(state.ego_lane_offset, -1.25, 1.25)
@@ -1437,7 +1498,7 @@ def model_path_end_m(state: ClusterUiState, lane_width_m: float, blockers: tuple
     if len(state.model_path) < 2:
         return None
     last_forward_m = state.model_path[-1].forward_m
-    end_m = min(PATH_END_M, data_scene_forward_m(last_forward_m))
+    end_m = min(PATH_END_M, render_scene_forward_m(last_forward_m, state))
     if end_m <= PATH_START_M + 0.6:
         return None
 
@@ -1463,8 +1524,12 @@ def model_path_centerline(
     end_m = model_path_end_m(state, lane_width_m, blockers)
     if end_m is None:
         return ()
-    relative_start_m = max(0.0, scene_data_relative_forward_m(PATH_START_M))
-    relative_end_m = max(relative_start_m, scene_data_relative_forward_m(end_m))
+    longitudinal_scale = longitudinal_render_distance_scale(state)
+    relative_start_m = max(0.0, render_relative_forward_m_from_scene(PATH_START_M, longitudinal_scale))
+    relative_end_m = max(
+        relative_start_m,
+        render_relative_forward_m_from_scene(end_m, longitudinal_scale),
+    )
     model_points = tuple(
         point
         for point in state.model_path
@@ -1483,7 +1548,11 @@ def model_path_centerline(
         ego_offset = clamp(state.ego_lane_offset, -1.25, 1.25)
         ego_x_m = road_world_x(ego_offset, EGO_FORWARD_M, state.steering, lane_width_m)
         points = [
-            Vec3(ego_x_m + point.lateral_m, data_scene_forward_m(point.forward_m), PATH_HEIGHT_M)
+            Vec3(
+                ego_x_m + point.lateral_m,
+                render_scene_forward_m_for_scale(point.forward_m, longitudinal_scale),
+                PATH_HEIGHT_M,
+            )
             for point in model_points
         ]
     return tuple(points) if len(points) >= 2 else ()
@@ -1534,7 +1603,8 @@ def planned_path_strips(
         if highlight_strip is not None:
             strips.append(highlight_strip)
     profile_stage = profile_scene_start(profile_add)
-    strips.extend(follow_distance_marker_strips(state, points, lane_width_m))
+    marker_points = model_path_centerline(state, lane_width_m, ()) if blockers else points
+    strips.extend(follow_distance_marker_strips(state, marker_points or points, lane_width_m))
     profile_scene_add(profile_add, "scene.build.planned_path.follow_distance", profile_stage)
     return tuple(strips)
 
@@ -1544,48 +1614,58 @@ def follow_distance_marker_strips(
     points: tuple[Vec3, ...],
     lane_width_m: float,
 ) -> tuple[MeshStrip, ...]:
-    distance_m = state.longitudinal_desired_distance_m
+    distance_m = cruise_follow_distance_marker_m(state)
     if distance_m is None or distance_m <= 0.0 or len(points) < 2:
         return ()
-    forward_m = render_scene_forward_m(distance_m)
+    forward_m = render_scene_forward_m(distance_m, state)
     if forward_m < points[0].y or forward_m > points[-1].y:
         return ()
     center_x_m = centerline_x_at_forward(points, forward_m)
     if center_x_m is None:
         return ()
-    half_width_m = lane_width_m * 0.5
-
-    def marker_strip(half_forward_m: float, extra_width_m: float, height_m: float, color: Color) -> MeshStrip:
-        left_x_m = center_x_m - half_width_m - extra_width_m
-        right_x_m = center_x_m + half_width_m + extra_width_m
-        near_m = forward_m - half_forward_m
-        far_m = forward_m + half_forward_m
+    def marker_strip(width_m: float, half_forward_m: float, height_m: float, color: Color) -> MeshStrip:
+        radius_m = min(width_m * 0.5, half_forward_m)
+        straight_half_width_m = width_m * 0.5 - radius_m
+        left: list[Vec3] = []
+        right: list[Vec3] = []
+        for index in range(FOLLOW_DISTANCE_MARKER_CAP_STEPS + 1):
+            offset_m = -half_forward_m + 2.0 * half_forward_m * index / FOLLOW_DISTANCE_MARKER_CAP_STEPS
+            cap_x_m = math.sqrt(max(0.0, radius_m * radius_m - offset_m * offset_m))
+            half_width_m = straight_half_width_m + cap_x_m
+            left.append(Vec3(center_x_m - half_width_m, forward_m + offset_m, height_m))
+            right.append(Vec3(center_x_m + half_width_m, forward_m + offset_m, height_m))
         return MeshStrip(
-            left=(
-                Vec3(left_x_m, near_m, height_m),
-                Vec3(left_x_m, far_m, height_m),
-            ),
-            right=(
-                Vec3(right_x_m, near_m, height_m),
-                Vec3(right_x_m, far_m, height_m),
-            ),
+            left=tuple(left),
+            right=tuple(right),
             color=color,
         )
 
     return (
         marker_strip(
-            FOLLOW_DISTANCE_MARKER_BACKING_FORWARD_M,
-            FOLLOW_DISTANCE_MARKER_BACKING_EXTRA_WIDTH_M,
+            FOLLOW_DISTANCE_MARKER_WIDTH_M + FOLLOW_DISTANCE_MARKER_OUTLINE_M * 2.0,
+            FOLLOW_DISTANCE_MARKER_BODY_FORWARD_M + FOLLOW_DISTANCE_MARKER_OUTLINE_M,
             FOLLOW_DISTANCE_MARKER_BACKING_LAYER_M,
             FOLLOW_DISTANCE_MARKER_BACKING_COLOR,
         ),
         marker_strip(
+            FOLLOW_DISTANCE_MARKER_WIDTH_M,
             FOLLOW_DISTANCE_MARKER_BODY_FORWARD_M,
-            0.0,
             FOLLOW_DISTANCE_MARKER_BODY_LAYER_M,
             FOLLOW_DISTANCE_MARKER_BODY_COLOR,
         ),
     )
+
+
+def cruise_follow_distance_marker_m(state: ClusterUiState) -> float | None:
+    if state.cruise_display_state == "off":
+        return None
+    t_follow = state.longitudinal_t_follow_s
+    if t_follow is None and state.cruise_gap is not None:
+        t_follow = FOLLOW_DISTANCE_GAP_T_FOLLOW_S.get(int(clamp(float(state.cruise_gap), 1.0, 4.0)))
+    if t_follow is None or not math.isfinite(t_follow) or t_follow <= 0.0:
+        return None
+    speed_mps = max(0.0, state.speed_kph / 3.6)
+    return FOLLOW_DISTANCE_STOP_DISTANCE_M + speed_mps * t_follow
 
 
 def centerline_x_at_forward(points: tuple[Vec3, ...], forward_m: float) -> float | None:
@@ -1671,6 +1751,61 @@ def raw_corner_radar_points(points: tuple[RadarPoint, ...]) -> tuple[RadarPoint,
     return tuple(sorted(corners, key=lambda point: (point.longitudinal_m, abs(point.lateral_m), point.label)))
 
 
+def detected_vehicle_is_lead_one_or_two(vehicle: DetectedVehicle) -> bool:
+    label = vehicle.label.upper()
+    return label.startswith("L1") or label.startswith("L2")
+
+
+def corner_radar_point_is_in_ego_lane(
+    point: RadarPoint,
+    state: ClusterUiState,
+    lane_width_m: float,
+) -> bool:
+    if point.in_my_lane is not None:
+        return point.in_my_lane > 0
+    path_lateral_m = model_path_lateral_at_forward(state, point.longitudinal_m)
+    lane_center_m = path_lateral_m if path_lateral_m is not None else 0.0
+    return abs(point.lateral_m - lane_center_m) <= lane_width_m * 0.5
+
+
+def corner_radar_points_for_cluster_display(
+    points: tuple[RadarPoint, ...],
+    state: ClusterUiState,
+    lane_width_m: float,
+) -> tuple[RadarPoint, ...]:
+    del lane_width_m
+    if not points:
+        return ()
+    bounded = tuple(sorted(points, key=lambda point: radar_point_display_priority(point, state)))
+    bounded = bounded[:CORNER_RADAR_INPUT_POINT_LIMIT]
+    if state.radar_display_mode != CLUSTER_RADAR_DISPLAY_DETAIL:
+        bounded = merged_radar_points(bounded, state)
+    return tuple(sorted(bounded, key=lambda point: radar_point_display_priority(point, state)))[
+        :CORNER_RADAR_DISPLAY_POINT_LIMIT
+    ]
+
+
+def radar_point_display_priority(point: RadarPoint, state: ClusterUiState) -> tuple[object, ...]:
+    detected_match = radar_point_matches_detected_vehicle(point, state)
+    hazardous_motion = radar_point_is_oncoming(point, state) or radar_point_is_cross_traffic(point)
+    meaningful_motion = radar_point_has_meaningful_motion(point, state)
+    in_my_lane = point.in_my_lane is not None and point.in_my_lane > 0
+    valid = point.valid is None or point.valid > 0
+    return (
+        0 if detected_match else 1,
+        0 if hazardous_motion else 1,
+        0 if point.promotion_held else 1,
+        0 if in_my_lane else 1,
+        0 if meaningful_motion else 1,
+        0 if valid else 1,
+        abs(point.longitudinal_m),
+        abs(point.lateral_m),
+        -(point.valid_count or 0),
+        -(point.probability or 0.0),
+        point.label,
+    )
+
+
 def corner_radar_common_lateral_speed_mps(points: tuple[RadarPoint, ...], state: ClusterUiState) -> float:
     candidates = [
         point.lateral_speed_mps
@@ -1683,7 +1818,8 @@ def corner_radar_common_lateral_speed_mps(points: tuple[RadarPoint, ...], state:
     ]
     if len(candidates) < CORNER_RADAR_EGO_LATERAL_COMP_MIN_POINTS:
         return 0.0
-    return clamp(float(median(candidates)), -CORNER_RADAR_EGO_LATERAL_COMP_MAX_MPS, CORNER_RADAR_EGO_LATERAL_COMP_MAX_MPS)
+    offset = float(median(candidates)) * CORNER_RADAR_EGO_LATERAL_COMP_GAIN
+    return clamp(offset, -CORNER_RADAR_EGO_LATERAL_COMP_MAX_MPS, CORNER_RADAR_EGO_LATERAL_COMP_MAX_MPS)
 
 
 def radar_point_display_lateral_speed_mps(point: RadarPoint, lateral_speed_offset_mps: float = 0.0) -> float | None:
@@ -1694,8 +1830,36 @@ def radar_point_display_lateral_speed_mps(point: RadarPoint, lateral_speed_offse
     return point.lateral_speed_mps - lateral_speed_offset_mps
 
 
+def radar_point_heading_lateral_speed_mps(
+    point: RadarPoint,
+    state: ClusterUiState,
+    lateral_speed_offset_mps: float = 0.0,
+) -> float | None:
+    lateral_speed_mps = radar_point_display_lateral_speed_mps(point, lateral_speed_offset_mps)
+    if point.source != "cornerRadar" or lateral_speed_mps is None:
+        return lateral_speed_mps
+    yaw_rate = state.vision_yaw_rate_rps
+    if yaw_rate is None or not math.isfinite(yaw_rate) or abs(yaw_rate) >= CORNER_RADAR_HEADING_YAW_COMP_MAX_YAW_RATE:
+        return lateral_speed_mps
+    yaw_d_rel = clamp(point.longitudinal_m, 0.0, CORNER_RADAR_HEADING_YAW_COMP_MAX_DREL)
+    yaw_lateral_mps = clamp(
+        yaw_rate * yaw_d_rel,
+        -CORNER_RADAR_HEADING_YAW_COMP_MAX_MPS,
+        CORNER_RADAR_HEADING_YAW_COMP_MAX_MPS,
+    )
+    return lateral_speed_mps + yaw_lateral_mps
+
+
 def detected_vehicle_is_rear_corner_summary(vehicle: DetectedVehicle) -> bool:
     return vehicle.label in ("LR", "RR") and vehicle_source_is_adas(vehicle.source)
+
+
+def detected_vehicle_is_rear_car_state_summary(vehicle: DetectedVehicle) -> bool:
+    return vehicle.label in ("LR", "RR") and vehicle_source_base(vehicle.source) == "carState"
+
+
+def detected_vehicle_is_corner_summary(vehicle: DetectedVehicle) -> bool:
+    return vehicle.label in CORNER_RADAR_LABELS and vehicle_source_is_adas(vehicle.source)
 
 
 def detected_vehicle_is_zero_radar_sample(vehicle: DetectedVehicle) -> bool:
@@ -1826,10 +1990,10 @@ def radar_point_markers(
     lateral_speed_offset_mps: float = 0.0,
 ) -> tuple[RadarPointMarker, ...]:
     markers: list[RadarPointMarker] = []
-    for point in state.radar_points:
+    for point in sorted(state.radar_points, key=lambda item: radar_point_display_priority(item, state)):
         if radar_point_hidden_by_vehicle_box(point, vehicle_points, state):
             continue
-        forward_m = render_scene_forward_m(point.longitudinal_m)
+        forward_m = render_scene_forward_m(point.longitudinal_m, state)
         if forward_m < min_forward_m or forward_m > max_forward_m:
             continue
         color = radar_point_color(point)
@@ -1837,7 +2001,7 @@ def radar_point_markers(
         markers.append(
             RadarPointMarker(
                 center=Vec3(
-                    radar_point_display_lateral_m(point, lane_width_m) + x_offset_m,
+                    radar_point_scene_x_m(point, state, lane_width_m, forward_m) + x_offset_m,
                     forward_m,
                     0.20,
                 ),
@@ -1855,6 +2019,8 @@ def radar_point_markers(
                 in_my_lane=point.in_my_lane,
             )
         )
+        if len(markers) >= RADAR_MARKER_DISPLAY_LIMIT:
+            break
     return tuple(markers)
 
 
@@ -1876,23 +2042,14 @@ def radar_vehicle_points(state: ClusterUiState, lane_width_m: float) -> tuple[Ra
             for point in state.radar_points
             if radar_point_is_vehicle_candidate(point, state, lane_width_m)
         ),
-        key=lambda point: (
-            0 if radar_point_matches_detected_vehicle(point, state) else 1,
-            point.longitudinal_m,
-            abs(point.lateral_m),
-        ),
+        key=lambda point: radar_point_display_priority(point, state),
     )
-    if state.radar_display_mode == CLUSTER_RADAR_DISPLAY_DETAIL:
-        return tuple(
-            sorted(
-                candidates,
-                key=lambda point: (point.longitudinal_m, abs(point.lateral_m), point.label),
-            )
-        )
     for point in candidates:
         if any(radar_points_same_vehicle(point, existing) for existing in selected):
             continue
         selected.append(point)
+        if len(selected) >= RADAR_VEHICLE_DISPLAY_LIMIT:
+            break
     selected.sort(key=lambda point: point.longitudinal_m)
     return tuple(selected)
 
@@ -2045,7 +2202,12 @@ def merge_detected_vehicle_for_display(base: DetectedVehicle, other: DetectedVeh
         ttc_s=base.ttc_s if base.ttc_s is not None else other.ttc_s,
         x_std_m=base.x_std_m if base.x_std_m is not None else other.x_std_m,
         y_std_m=base.y_std_m if base.y_std_m is not None else other.y_std_m,
+        radar_track_id=base.radar_track_id if base.radar_track_id is not None else other.radar_track_id,
     )
+
+
+def detected_vehicles_have_same_radar_track(left: DetectedVehicle, right: DetectedVehicle) -> bool:
+    return left.radar_track_id is not None and left.radar_track_id == right.radar_track_id
 
 
 def merged_detected_vehicle_source(base_source: str, other_source: str) -> str:
@@ -2152,10 +2314,10 @@ def radar_vehicle_box(
         body_color = AMBER
     else:
         body_color = vehicle_color_for_source(point.source, theme, state.radar_source_color_mode)
-    forward_m = render_scene_forward_m(point.longitudinal_m)
-    center_x_m = radar_point_display_lateral_m(point, lane_width_m)
+    forward_m = render_scene_forward_m(point.longitudinal_m, state)
+    center_x_m = radar_point_scene_x_m(point, state, lane_width_m, forward_m)
     right_x, right_y, forward_x, forward_y = radar_point_vehicle_heading(point, state, lateral_speed_offset_mps)
-    if point.source == "cornerRadar":
+    if point.source == "cornerRadar" and state.surround_view_active:
         center_x_m += forward_x * VEHICLE_LENGTH_M * 0.5
         forward_m += forward_y * VEHICLE_LENGTH_M * 0.5
     return VehicleBox(
@@ -2295,6 +2457,10 @@ def radar_point_display_lateral_m(point: RadarPoint, lane_width_m: float) -> flo
     return math.copysign(magnitude, lateral_m) if magnitude > 0.0 else 0.0
 
 
+def radar_point_scene_x_m(point: RadarPoint, state: ClusterUiState, lane_width_m: float, forward_m: float) -> float:
+    return radar_point_display_lateral_m(point, lane_width_m)
+
+
 def radar_point_has_vehicle_estimate(point: RadarPoint, state: ClusterUiState, lane_width_m: float) -> bool:
     if radar_point_matches_detected_vehicle(point, state):
         return True
@@ -2398,7 +2564,16 @@ def radar_point_hidden_by_detected_vehicle(
     return False
 
 
+def radar_point_matches_corner_summary_distance(point: RadarPoint, vehicle: DetectedVehicle) -> bool:
+    if point.source != "cornerRadar" or not detected_vehicle_is_corner_summary(vehicle):
+        return False
+    longitudinal_tolerance = max(2.0, min(4.0, vehicle.longitudinal_m * 0.05))
+    return abs(point.longitudinal_m - vehicle.longitudinal_m) <= longitudinal_tolerance
+
+
 def radar_point_close_to_detected_vehicle(point: RadarPoint, vehicle: DetectedVehicle) -> bool:
+    if radar_point_matches_corner_summary_distance(point, vehicle):
+        return True
     if detected_vehicle_is_front_lead(vehicle):
         longitudinal_tolerance = max(
             RADAR_FRONT_DETECTED_MERGE_LONGITUDINAL_MIN_M,
@@ -2468,7 +2643,7 @@ def radar_point_vehicle_heading(
     longitudinal_speed_kph = radar_point_absolute_speed_kph(point, state)
     return vehicle_heading_from_velocity(
         longitudinal_speed_kph,
-        radar_point_display_lateral_speed_mps(point, lateral_speed_offset_mps),
+        radar_point_heading_lateral_speed_mps(point, state, lateral_speed_offset_mps),
         (1.0, 0.0, 0.0, 1.0),
         min_speed_kph=1.0 if point.source == "cornerRadar" else RADAR_MOVING_VEHICLE_MIN_SPEED_KPH,
         min_component_mps=CORNER_RADAR_HEADING_COMPONENT_MIN_MPS if point.source == "cornerRadar" else 0.0,
@@ -2669,11 +2844,17 @@ def vehicle_box(
     primary: bool = False,
     annotate: bool = False,
     x_offset_m: float = 0.0,
+    center_x_m_override: float | None = None,
+    center_z_m_offset: float = 0.0,
 ) -> VehicleBox:
     confidence = clamp(confidence, 0.0, 1.0)
     alpha = int(92 + 163 * confidence)
     body_color = color
-    center_x_m = road_world_x(offset, forward_m, steering, lane_width_m) + x_offset_m
+    center_x_m = (
+        center_x_m_override
+        if center_x_m_override is not None
+        else road_world_x(offset, forward_m, steering, lane_width_m) + x_offset_m
+    )
     right_x, right_y, forward_x, forward_y = vehicle_heading(
         offset,
         forward_m,
@@ -2696,7 +2877,7 @@ def vehicle_box(
     )
 
     return VehicleBox(
-        center=Vec3(center_x_m, forward_m, height_m * 0.5),
+        center=Vec3(center_x_m, forward_m, height_m * 0.5 + center_z_m_offset),
         right_x=right_x,
         right_y=right_y,
         forward_x=forward_x,
@@ -2998,6 +3179,7 @@ def road_edge_model_strips(
     side: float,
     start_m: float,
     end_m: float,
+    longitudinal_scale: float = 1.0,
     theme: ClusterTheme = LIGHT_CLUSTER_THEME,
     profile_add: ProfileAdd | None = None,
 ) -> tuple[MeshStrip, ...]:
@@ -3014,6 +3196,7 @@ def road_edge_model_strips(
         specs,
         "solid",
         True,
+        longitudinal_scale,
         profile_add,
         "scene.road_model",
     )
@@ -3084,6 +3267,10 @@ def vehicle_color_for_detection(
     theme: ClusterTheme = LIGHT_CLUSTER_THEME,
     source_color_mode: int = 0,
 ) -> tuple[int, int, int]:
+    if vehicle.cut_in:
+        return AMBER
+    if vehicle.primary:
+        return theme.primary_vehicle
     if (
         vehicle.absolute_speed_kph is not None
         and vehicle.absolute_speed_kph <= -RADAR_MOVING_VEHICLE_MIN_SPEED_KPH
@@ -3122,6 +3309,8 @@ def road_edge_strips(
     theme: ClusterTheme = LIGHT_CLUSTER_THEME,
     profile_add: ProfileAdd | None = None,
 ) -> tuple[MeshStrip, ...]:
+    longitudinal_scale = longitudinal_render_distance_scale(state)
+
     def default_road_edge_strips() -> tuple[MeshStrip, ...]:
         default_color = road_edge_color(None, 1.0, theme)
         left_offset, right_offset = road_surface_offsets(state, route_mode)
@@ -3163,7 +3352,9 @@ def road_edge_strips(
                     -1.0,
                     road_start_m,
                     road_end_m,
+                    longitudinal_scale,
                     theme,
+                    profile_add,
                 )
             )
         elif state.left_road_edge_offset is not None:
@@ -3190,6 +3381,7 @@ def road_edge_strips(
                     1.0,
                     road_start_m,
                     road_end_m,
+                    longitudinal_scale,
                     theme,
                     profile_add,
                 )
@@ -3270,6 +3462,52 @@ def data_geometry_mode_for_state(state: ClusterUiState) -> bool:
     )
 
 
+SCENE_STATE_FIELDS = (
+    "speed_kph",
+    "steering",
+    "vision_yaw_rate_rps",
+    "camera_view_mode",
+    "surround_view_active",
+    "surround_yaw_deg",
+    "surround_pitch_deg",
+    "lane_width_m",
+    "lanes",
+    "lane_change",
+    "lane_change_phase",
+    "highlight_lane",
+    "highlight_lane_offset",
+    "ego_lane_offset",
+    "road_view_lane_position",
+    "extra_left_lane_visible",
+    "extra_right_lane_visible",
+    "left_blindspot",
+    "right_blindspot",
+    "model_path",
+    "route_overlay",
+    "detected_vehicles",
+    "radar_points",
+    "radar_display_mode",
+    "radar_source_color_mode",
+    "left_road_edge_offset",
+    "right_road_edge_offset",
+    "left_road_edge_points",
+    "right_road_edge_points",
+    "left_road_edge_lateral_shift_m",
+    "right_road_edge_lateral_shift_m",
+    "left_road_edge_distance_m",
+    "right_road_edge_distance_m",
+    "left_road_edge_confidence",
+    "right_road_edge_confidence",
+    "cruise_display_state",
+    "cruise_gap",
+    "longitudinal_t_follow_s",
+)
+
+
+def cluster_scene_state_key(state: ClusterUiState) -> tuple[object, ...]:
+    return tuple(getattr(state, field) for field in SCENE_STATE_FIELDS)
+
+
 def build_cluster_scene(
     state: ClusterUiState,
     profile_add: ProfileAdd | None = None,
@@ -3278,27 +3516,53 @@ def build_cluster_scene(
 ) -> ClusterScene:
     profile_stage = profile_scene_start(profile_add)
     lane_width_m = max(2.4, min(4.6, state.lane_width_m or DEFAULT_LANE_WIDTH_M))
-    raw_corner_points = raw_corner_radar_points(state.radar_points)
-    raw_corner_active = bool(raw_corner_points)
+    longitudinal_scale = longitudinal_render_distance_scale(state)
+    all_raw_corner_points = raw_corner_radar_points(state.radar_points)
+    raw_corner_active = bool(all_raw_corner_points)
+    if (
+        raw_corner_active
+        and cluster_camera_view_is_road_camera(state.camera_view_mode)
+        and any(detected_vehicle_is_lead_one_or_two(vehicle) for vehicle in state.detected_vehicles)
+    ):
+        all_raw_corner_points = tuple(
+            point
+            for point in all_raw_corner_points
+            if not corner_radar_point_is_in_ego_lane(point, state, lane_width_m)
+        )
+    raw_corner_points = corner_radar_points_for_cluster_display(all_raw_corner_points, state, lane_width_m)
     display_radar_points = raw_corner_points if raw_corner_active else radar_points_for_display(state)
     display_detected_vehicles = detected_vehicles_without_zero_radar_samples(state.detected_vehicles)
     if raw_corner_active:
         display_detected_vehicles = tuple(
-            vehicle for vehicle in display_detected_vehicles if detected_vehicle_is_rear_corner_summary(vehicle)
+            vehicle for vehicle in display_detected_vehicles
+            if vehicle.cut_in
+            or detected_vehicle_is_front_lead(vehicle)
+            or detected_vehicle_is_rear_car_state_summary(vehicle)
+        )
+    cutin_vehicles = tuple(vehicle for vehicle in display_detected_vehicles if vehicle.cut_in)
+    if cutin_vehicles:
+        display_detected_vehicles = tuple(
+            vehicle for vehicle in display_detected_vehicles
+            if vehicle.cut_in
+            or not any(detected_vehicles_have_same_radar_track(vehicle, cutin) for cutin in cutin_vehicles)
+        )
+    lead_one_vehicles = tuple(vehicle for vehicle in display_detected_vehicles if vehicle.label.upper().startswith("L1"))
+    if lead_one_vehicles:
+        display_detected_vehicles = tuple(
+            vehicle for vehicle in display_detected_vehicles
+            if not vehicle.label.upper().startswith("L2")
+            or not any(detected_vehicles_have_same_radar_track(vehicle, lead_one) for lead_one in lead_one_vehicles)
         )
     if display_radar_points is not state.radar_points or display_detected_vehicles != state.detected_vehicles:
         state = replace(state, radar_points=display_radar_points, detected_vehicles=display_detected_vehicles)
-    corner_lateral_speed_offset_mps = corner_radar_common_lateral_speed_mps(raw_corner_points, state) if raw_corner_active else 0.0
+    corner_lateral_speed_offset_mps = 0.0
     anchor_x_m = ego_anchor_x_m(state, lane_width_m)
     scene_shift_x_m = -anchor_x_m
     relative_scene_x_offset_m = -scene_shift_x_m
+    radar_vehicle_x_offset_m = relative_scene_x_offset_m
     camera = scene_camera(state, lane_width_m, anchor_x_m)
     camera_active = state.surround_view_active
-    selected_radar_vehicle_points = (
-        raw_corner_points
-        if raw_corner_active
-        else radar_vehicle_points(state, lane_width_m)
-    )
+    selected_radar_vehicle_points = radar_vehicle_points(state, lane_width_m)
     selected_radar_vehicle_boxes = tuple(
         radar_vehicle_box(point, state, lane_width_m, theme, corner_lateral_speed_offset_mps)
         for point in selected_radar_vehicle_points
@@ -3315,7 +3579,7 @@ def build_cluster_scene(
     road_steps = ROAD_STEPS_SURROUND if camera_active else ROAD_STEPS_MODEL if route_mode else ROAD_STEPS_SIM
     if (state.detected_vehicles or selected_radar_vehicle_boxes) and not camera_active:
         nearest_detected_y = min(
-            (render_scene_forward_m(vehicle.longitudinal_m) for vehicle in state.detected_vehicles),
+            (render_scene_forward_m(vehicle.longitudinal_m, state) for vehicle in state.detected_vehicles),
             default=ROAD_FAR_M,
         )
         nearest_radar_y = min((vehicle.center.y for vehicle in selected_radar_vehicle_boxes), default=ROAD_FAR_M)
@@ -3374,6 +3638,7 @@ def build_cluster_scene(
                 marking_specs,
                 marking.style,
                 True,
+                longitudinal_scale,
                 profile_add,
                 "scene.lane_model",
             )
@@ -3418,6 +3683,7 @@ def build_cluster_scene(
         camera_active,
         target_offset,
     )
+    show_ego_vehicle = not cluster_camera_view_is_road_camera(state.camera_view_mode)
     merged_radar_labels = frozenset[str]()
     if route_mode:
         if raw_corner_active:
@@ -3441,7 +3707,7 @@ def build_cluster_scene(
         detected_vehicle_boxes = tuple(
             vehicle_box(
                 clamp(detected.lateral_m / lane_width_m, -2.2, 2.2),
-                render_scene_forward_m(detected.longitudinal_m),
+                detected_vehicle_scene_forward_m(detected, state),
                 state.steering,
                 lane_width_m,
                 vehicle_color_for_detection(detected, theme, state.radar_source_color_mode),
@@ -3464,7 +3730,8 @@ def build_cluster_scene(
                 cut_in=detected.cut_in,
                 primary=detected.primary,
                 annotate=vehicle_badge_has_special_info(detected),
-                x_offset_m=relative_scene_x_offset_m,
+                center_x_m_override=detected.lateral_m + relative_scene_x_offset_m,
+                center_z_m_offset=DETECTED_VEHICLE_DISPLAY_HEIGHT_OFFSET_M,
             )
             for detected in render_detected_vehicles
         )
@@ -3474,7 +3741,7 @@ def build_cluster_scene(
         detected_blockers = tuple(
             PathBlocker(
                 clamp(detected.lateral_m / lane_width_m, -2.2, 2.2),
-                render_scene_forward_m(detected.longitudinal_m),
+                render_scene_forward_m(detected.longitudinal_m, state),
                 VEHICLE_LENGTH_M,
             )
             for detected in blocking_detected_vehicles
@@ -3496,14 +3763,15 @@ def build_cluster_scene(
             for vehicle in visible_radar_vehicle_boxes_raw
         )
         visible_radar_vehicle_boxes = tuple(
-            vehicle_box_with_x_offset(vehicle, relative_scene_x_offset_m)
+            vehicle_box_with_x_offset(vehicle, radar_vehicle_x_offset_m)
             for vehicle in visible_radar_vehicle_boxes_raw
         )
         blockers = (*detected_blockers, *radar_blockers)
-        vehicles = (ego_vehicle, *detected_vehicle_boxes, *visible_radar_vehicle_boxes)
+        scene_vehicles = (*detected_vehicle_boxes, *visible_radar_vehicle_boxes)
+        vehicles = (ego_vehicle, *scene_vehicles) if show_ego_vehicle else scene_vehicles
     else:
         blockers = ()
-        vehicles = (ego_vehicle,)
+        vehicles = (ego_vehicle,) if show_ego_vehicle else ()
     profile_scene_add(profile_add, "scene.build.vehicles", profile_stage)
 
     profile_stage = profile_scene_start(profile_add)
@@ -3525,7 +3793,15 @@ def build_cluster_scene(
 
     profile_stage = profile_scene_start(profile_add)
     if raw_corner_active:
-        radar_points = ()
+        radar_points = radar_point_markers(
+            state,
+            lane_width_m,
+            selected_radar_vehicle_points,
+            min_forward_m=road_start_m,
+            max_forward_m=road_end_m if camera_active else ROAD_FAR_M + 30.0,
+            x_offset_m=relative_scene_x_offset_m,
+            lateral_speed_offset_mps=corner_lateral_speed_offset_mps,
+        )
     else:
         hidden_merged_radar_points = tuple(point for point in state.radar_points if point.label in merged_radar_labels)
         radar_points = radar_point_markers(

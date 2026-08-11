@@ -1,8 +1,10 @@
 from aiohttp import web
 
 from . import (
+  carrot_navi,
   cars,
   dashcam,
+  intro,
   mapbox_tokens,
   params,
   screenrecord,
@@ -13,6 +15,7 @@ from . import (
   ssh_keys,
   static,
   stream,
+  support_terminal,
   system,
   terminal,
   tools,
@@ -27,7 +30,10 @@ from . import (
 
 def register_all(app: web.Application) -> None:
   static.register(app)
+  intro.register(app)
+  carrot_navi.register(app)
   stream.register(app)
+  support_terminal.register(app)
   ws.register(app)
   settings.register(app)
   params.register(app)

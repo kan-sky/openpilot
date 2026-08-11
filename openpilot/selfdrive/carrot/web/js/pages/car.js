@@ -3,7 +3,6 @@
 // Car page + Drive-page record FAB + currentCar status (cross-cutting with setting page).
 
 const CURRENT_CAR_CACHE_KEY = "carrot_web_current_car_label";
-const CURRENT_CAR_PROMPT_SESSION_KEY = "carrot_web_missing_car_prompted";
 const CURRENT_CAR_RETRY_DELAYS_MS = [350, 800, 1500, 2500, 4000];
 const RECORD_STATE_POLL_MS = 1200;
 
@@ -16,7 +15,6 @@ let currentCarLastKnownLabel = "";
 let currentCarLoadPromise = null;
 let currentCarLoadedAt = 0;
 let currentCarHasSnapshot = false;
-let currentCarPromptActive = false;
 let recordStateLoadPromise = null;
 let recordStateLoadedAt = 0;
 let carsLoadPromise = null;
@@ -25,23 +23,11 @@ let carPickerCloseTimer = null;
 let carPickerMode = "makers";
 let carPickerMaker = null;
 
-function updateSettingCarEntryState(label) {
-  if (!settingCarRow) return;
-  const text = String(label || "").trim();
-  const isEmpty = !text || text === "-";
-  settingCarRow.classList.toggle("is-empty", isEmpty);
-  settingCarRow.setAttribute("aria-label", isEmpty
-    ? getUIText("open_car_select", "Open car select")
-    : getUIText("open_car_select_named", "Open car select for {name}", { name: text }));
-}
-
 function applyCurrentCarLabel(label, { persist = true, blank = false } = {}) {
   const text = String(label || "").trim();
   if (text) {
     currentCarLastKnownLabel = text;
     if (curCarLabelCar) curCarLabelCar.textContent = text;
-    if (curCarLabelSetting) curCarLabelSetting.textContent = text;
-    updateSettingCarEntryState(text);
     if (persist) {
       try {
         localStorage.setItem(CURRENT_CAR_CACHE_KEY, text);
@@ -52,15 +38,11 @@ function applyCurrentCarLabel(label, { persist = true, blank = false } = {}) {
 
   if (currentCarLastKnownLabel) {
     if (curCarLabelCar) curCarLabelCar.textContent = currentCarLastKnownLabel;
-    if (curCarLabelSetting) curCarLabelSetting.textContent = currentCarLastKnownLabel;
-    updateSettingCarEntryState(currentCarLastKnownLabel);
     return;
   }
 
   if (blank) {
     if (curCarLabelCar) curCarLabelCar.textContent = "-";
-    if (curCarLabelSetting) curCarLabelSetting.textContent = "-";
-    updateSettingCarEntryState("-");
   }
 }
 
@@ -97,7 +79,6 @@ function resolveCurrentCarLabel(values) {
 }
 
 restoreCurrentCarLabelFromCache();
-updateSettingCarEntryState(curCarLabelSetting?.textContent || curCarLabelCar?.textContent || "-");
 
 function parseRecordStateValue(value) {
   return (
@@ -167,17 +148,9 @@ async function loadCurrentCar(options = {}) {
         cancelCurrentCarRetry();
         currentCarRetryIndex = 0;
         applyCurrentCarLabel(label);
-        if (isMissingCarSelectionValues(values)) {
-          window.setTimeout(() => {
-            promptMissingCurrentCarSelection(values).catch(() => {});
-          }, 350);
-        }
       } else {
         applyCurrentCarLabel("", { blank: !currentCarLastKnownLabel });
         scheduleCurrentCarRetry();
-        window.setTimeout(() => {
-          promptMissingCurrentCarSelection(values).catch(() => {});
-        }, 350);
       }
       currentCarHasSnapshot = true;
       currentCarLoadedAt = Date.now();
@@ -247,14 +220,31 @@ async function toggleRecord() {
   recordTogglePending = true;
   try {
     await setParam("ScreenRecord", next);
-    await waitMs(650);
-    recordTogglePending = false;
-    await loadRecordState({ force: true });
   } catch (e) {
+    // A disconnected response can be ambiguous: the device may have accepted
+    // the write before the browser saw the failure. Confirm the stored value
+    // once before reporting a false recording error.
+    recordTogglePending = false;
+    try {
+      const observed = await loadRecordState({ force: true });
+      if (observed === next) return;
+    } catch {}
     applyRecordFabState(prev);
     showAppToast((UI_STRINGS[LANG].record || "Failed to toggle record: ") + e.message, { tone: "error" });
-  } finally {
-    recordTogglePending = false;
+    return;
+  }
+
+  // The parameter write is authoritative. A transient follow-up read must not
+  // turn a recording that already started into an error in the web UI.
+  applyRecordFabState(next);
+  recordStateLoadedAt = Date.now();
+  await waitMs(650);
+  recordTogglePending = false;
+  try {
+    await loadRecordState({ force: true });
+  } catch {
+    applyRecordFabState(next);
+    recordStateLoadedAt = Date.now();
   }
 }
 
@@ -301,7 +291,7 @@ function closeCarPicker(immediate = false) {
 
 function syncCarPickerChrome() {
   if (!appCarPickerTitle || !appCarPickerMeta || !appCarPickerClose) return;
-  const currentLabel = String(curCarLabelSetting?.textContent || curCarLabelCar?.textContent || "").trim() || "-";
+  const currentLabel = String(curCarLabelCar?.textContent || "").trim() || "-";
   if (carPickerMode === "models" && carPickerMaker) {
     appCarPickerTitle.textContent = carPickerMaker;
     const arr = (CARS?.makers && CARS.makers[carPickerMaker]) ? CARS.makers[carPickerMaker] : [];
@@ -387,6 +377,15 @@ window.openCarPickerFlow = () => {
     appAlert(e?.message || String(e), { title: getUIText("error", "Error") });
   });
 };
+
+window.CarrotCurrentCar = Object.freeze({
+  getLabel() {
+    return String(currentCarLastKnownLabel || document.getElementById("curCarLabelCar")?.textContent || "").trim();
+  },
+  refresh(options = {}) {
+    return loadCurrentCar(options);
+  },
+});
 
 if (appCarPickerBackdrop) appCarPickerBackdrop.onclick = () => closeCarPicker();
 if (appCarPickerClose) {
@@ -496,8 +495,7 @@ async function onSelectCar(maker, modelOnly, fullLine) {
 
   if (typeof applyCurrentCarLabel === "function") applyCurrentCarLabel(modelOnly);
   else {
-    curCarLabelCar.textContent = modelOnly;
-    curCarLabelSetting.textContent = modelOnly;
+    if (curCarLabelCar) curCarLabelCar.textContent = modelOnly;
   }
   closeCarPicker(true);
 

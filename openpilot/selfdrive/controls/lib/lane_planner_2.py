@@ -140,7 +140,7 @@ class LanePlanner:
     else:
       self.lane_width_estimate.update(self.lane_width_last)
 
-    self.lane_width =  self.lane_width_estimate.x
+    self.lane_width = self.lane_width_estimate.x
     clipped_lane_width = min(4.0, self.lane_width)
     path_from_left_lane = self.lll_y + clipped_lane_width / 2.0
     path_from_right_lane = self.rll_y - clipped_lane_width / 2.0
@@ -150,7 +150,7 @@ class LanePlanner:
     one_lane_good = max(l_prob, r_prob) > 0.6
     self.d_prob = 1.0 if both_lane_available else (0.65 if one_lane_good else 0.4)
 
-    # 좌/우의 차선폭을 필터링.
+    # 좌/우의 차선폭을 필터링
     if self.lane_width_left > 0:
       self.lane_width_left_filtered.update(self.lane_width_left)
     if self.lane_width_right > 0:
@@ -188,28 +188,26 @@ class LanePlanner:
 
     self.d_prob *= self.lane_change_multiplier  ## 차선변경중에는 꺼버림.
 
-    ## laneless at lowspeed
-    self.d_prob *= np.interp(v_ego*3.6, [5., 10.], [0.0, 1.0])
+    # laneless at lowspeed
+    self.d_prob *= np.interp(v_ego * 3.6, [5., 10.], [0.0, 1.0])
 
-    #self.debugText = "OFFSET({:.2f}={:.2f}+{:.2f}+{:.2f}),Vc:{:.2f},dp:{:.1f},lf:{},lrw={:.1f}|{:.1f}|{:.1f}".format(
-    #  self.lane_offset_filtered.x,
-    #  diff_center, offset_lane, offset_curve,
-    #  curve_speed,
-    #  self.d_prob, self.lanefull_mode,
-    #  self.lane_width_left_filtered.x, self.lane_width, self.lane_width_right_filtered.x)
-
-    #adjustLaneTime = self.params.get_float("LatMpcInputOffset") * 0.01 # 0.06 
+    adjustLaneTime = self.params.get_float("LatMpcInputOffset") * 0.01
     laneline_active = False
     self.d_prob_count = self.d_prob_count + 1 if self.d_prob > 0.3 else 0
+
+    # Kans: 커브 안쪽마진 적용시에도 양쪽 차선이 모두 유효할 때만 d_prob 신뢰도(0.7로) 유지.
+    # 한쪽 차선만 보이는 상태에서 lane_blend(=d_prob)를 강제로 살리면 한쪽 쏠림이 다시 발생할 수 있음.
+    lane_blend = self.d_prob
+    if inside_margin_active and both_lane_available:
+      lane_blend = max(lane_blend, 0.7)
+
+
     if self.lanefull_mode and self.d_prob_count > int(1 / DT_MDL):
       laneline_active = True
-      # Kans: 시간축(ll_t)에서 위치축(ll_x)으로 변경
-      lane_path_y_np = np.asarray(lane_path_y)
-      ll_x_np = np.asarray(self.ll_x)
-      safe_idxs = np.isfinite(ll_x_np) & np.isfinite(lane_path_y_np)
-      if np.count_nonzero(safe_idxs) >= 2:
-        lane_path_y_interp = np.interp(path_xyz[:, 0], ll_x_np[safe_idxs], lane_path_y_np[safe_idxs])
-        path_xyz[:, 1] = self.d_prob * lane_path_y_interp + (1.0 - self.d_prob) * path_xyz[:, 1]
+      safe_idxs = np.isfinite(self.ll_t)
+      if safe_idxs[0]:
+        lane_path_y_interp = np.interp(path_t * (1.0 + adjustLaneTime), self.ll_t[safe_idxs], lane_path_y[safe_idxs])
+        path_xyz[:, 1] = lane_blend * lane_path_y_interp + (1.0 - lane_blend) * path_xyz[:, 1]
 
     return path_xyz, laneline_active
 

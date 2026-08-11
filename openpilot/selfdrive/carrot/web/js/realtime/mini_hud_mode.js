@@ -16,14 +16,22 @@
 
   function readRequestMode() {
     const search = new URLSearchParams(window.location.search);
-    // View-test mode (mini_hud_demo.js) always forces the HUD on so mock
-    // scenarios render on any viewport, even without a vehicle connected.
-    if (search.has("mhud_test")) return "force";
     const value = search.get(PARAM);
     if (value === "0" || value === "off") return "off";
     if (value === "1" || value === "force") return "force";
     if (value === "auto") return "auto";
     return "detect";
+  }
+
+  // Web setting gate. Only the default "detect" path is gated; explicit URL
+  // params (off/force/auto) stay honored as overrides.
+  function settingEnabled() {
+    const settings = window.CarrotWebSettingsState || {};
+    const value = Object.prototype.hasOwnProperty.call(settings, "mini_hud_enabled")
+      ? settings.mini_hud_enabled
+      : true;
+    if (typeof value === "string") return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
+    return Boolean(value);
   }
 
   function viewportMetrics() {
@@ -69,7 +77,6 @@
       '[role="dialog"][aria-modal="true"]',
       ".training-guide-modal",
       ".dashcam-player-overlay.is-open",
-      ".dashcam-upload-progress",
     ].join(",");
     return Array.from(document.querySelectorAll(modalSelector)).some(isRendered);
   }
@@ -131,6 +138,11 @@
     if (requestMode === "force") {
       result.active = true;
       result.reason = "request-force";
+      return result;
+    }
+
+    if (requestMode === "detect" && !settingEnabled()) {
+      result.reason = "setting-off";
       return result;
     }
 
@@ -234,6 +246,9 @@
     window.addEventListener("resize", onResize, { passive: true });
     window.addEventListener("orientationchange", onResize, { passive: true });
     window.addEventListener("carrot:pagechange", () => schedule("pagechange"));
+    window.addEventListener("carrot:websettingschange", (event) => {
+      if (!event?.detail || event.detail.key === "mini_hud_enabled") schedule("websettingschange");
+    });
     if (window.visualViewport) {
       window.visualViewport.addEventListener("resize", onResize, { passive: true });
     }

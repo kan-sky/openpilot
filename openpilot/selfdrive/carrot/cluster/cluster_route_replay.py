@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import bz2
 import io
@@ -13,6 +13,7 @@ import sys
 import tempfile
 import threading
 import traceback
+import numpy as np
 from bisect import bisect_right
 from dataclasses import dataclass, replace
 from functools import cache
@@ -22,16 +23,20 @@ from typing import Any
 from cluster_config import (
     BLUE,
     BLUE_SOFT,
+    CLUSTER_CAMERA_VIEW_MODE_ROAD_CAMERA,
     DEFAULT_LANE_WIDTH_M,
     MAX_ACCEL_MPS2,
     MAX_SPEED_KPH,
     MAX_STEERING_ANGLE_DEG,
     MODEL_DIRECT_LANE_RECENTER_SECONDS,
+    RADAR_TO_CAMERA_M,
     ROAD_CURVE_M_PER_M2,
     WHITE,
     YELLOW,
+    cluster_camera_view_prefers_wide,
 )
 from cluster_models import (
+    ClusterAlert,
     ClusterUiState,
     CruiseDisplayState,
     DetectedVehicle,
@@ -42,9 +47,38 @@ from cluster_models import (
     RADAR_MOVING_VEHICLE_MIN_SPEED_KPH,
     RouteOverlay,
     TpmsInfo,
+    TripReportState,
     radar_position_is_zero,
 )
+from cluster_trip_report import TripReportTracker
 from cluster_utils import clamp, smoothstep
+from openpilot.selfdrive.controls.lib.cutin_helpers import (
+    associate_cutin_tracks,
+    combine_cutin_future_projection,
+    CORNER_CUTIN_MAX_DREL_M,
+    cutin_confirmation_frames,
+    cutin_min_track_age_frames,
+    cutin_entry_rejection_reason,
+    cutin_tuning_from_sensitivity,
+    effective_cutin_inward_speed,
+    hold_side_corner_front_matches,
+    FRONT_CUTIN_MAX_ABS_YREL_M,
+    FRONT_CUTIN_MAX_DREL_M,
+    is_cutin_track_discontinuous,
+    FRONT_CUTIN_MIN_CONFIRM_S,
+    FRONT_CUTIN_MIN_DREL_M,
+    is_corner_confirmed_near_cutin,
+    is_side_corner_object,
+    is_corner_track_id,
+    is_corner_radar_source,
+    is_stable_corner_track_id,
+    STABLE_CORNER_TRACK_ID_START,
+    is_fast_cutin_entry,
+    match_side_corner_to_front_tracks,
+    new_cutin_position_history,
+    update_cutin_confirmation,
+    update_lane_relative_motion,
+)
 
 
 DBC_SIGNAL_RE = re.compile(
@@ -55,6 +89,9 @@ LOG_FILENAMES = {
     "qlog": "qlog.zst",
     "rlog": "rlog.zst",
 }
+NUMBERED_FOLDER_RE = re.compile(r"^(.*?)(\d+)$")
+ROUTE_ROAD_VIDEO_FILENAMES = ("qcamera.ts", "fcamera.hevc", "fcamera.ts")
+ROUTE_WIDE_VIDEO_FILENAMES = ("ecamera.hevc", "ecamera.ts")
 
 
 @dataclass(frozen=True)
@@ -67,8 +104,7 @@ class DbcSignalSpec:
     offset: float
 
 
-RADAR_TO_CAMERA_M = 1.52
-MODEL_LEAD_MIN_PROB = 0.08
+MODEL_LEAD_MIN_PROB = 0.50
 RADAR_POINT_STALE_S = 0.25
 CORNER_DETECTION_STALE_S = 0.8
 RADAR_MIN_LONGITUDINAL_M = 0.0
@@ -76,16 +112,51 @@ RADAR_FRONT_MAX_LONGITUDINAL_M = 180.0
 CORNER_RADAR_REAR_MIN_LONGITUDINAL_M = -180.0
 CCNC_CORNER_RADAR_ADDRESS = 0x162
 ADRV_CORNER_RADAR_ADDRESS = 0x1EA
-CORNER_OBJECT_START_ADDRESS = 0x235
-CORNER_OBJECT_END_ADDRESS = 0x248
 CORNER_OBJECT_TRACK_ID_OFFSET = 200
-CORNER_OBJECT_180_START_ADDRESS = 0x180
-CORNER_OBJECT_180_END_ADDRESS = 0x184
+CORNER_OBJECT_TRACK_COUNT = 20
 CORNER_OBJECT_180_TRACK_ID_OFFSET = 240
-CORNER_OBJECT_180_SLOTS_PER_MESSAGE = 2
+CORNER_OBJECT_180_TRACK_COUNT = 10
+CORNER_OBJECT_430_TRACK_ID_OFFSET = 300
+CORNER_OBJECT_430_TRACK_COUNT = 112
 CORNER_OBJECT_SOURCE = "cornerRadar"
+RAW_CORNER_RADAR_BUS = 1
+RAW_CORNER_235_START_ADDR = 0x235
+RAW_CORNER_235_END_ADDR = 0x248
+RAW_CORNER_180_START_ADDR = 0x180
+RAW_CORNER_180_END_ADDR = 0x184
+RAW_CORNER_OBJECT_MAX_X_M = 180.0
+RAW_CORNER_OBJECT_MAX_ABS_Y_M = 12.0
+RAW_CORNER_TRACK_STALE_S = 0.55
+RAW_CORNER_TRACK_MAX_MATCH_X_M = 7.0
+RAW_CORNER_TRACK_MAX_MATCH_Y_M = 3.2
+RAW_CORNER_TRACK_MAX_COST = 5.5
+RAW_CORNER_TRACK_POSITION_ALPHA = 0.62
+RAW_CORNER_TRACK_VELOCITY_ALPHA = 0.45
+RAW_CORNER_TRACK_DISPLAY_MIN_HITS = 4
+RAW_CORNER_TRACK_DISPLAY_OUTER_ABS_Y_M = 8.0
+RAW_CORNER_TRACK_DISPLAY_OUTER_MIN_HITS = 12
+REPLAY_CUTIN_RAW_OBJECT_MAX_AGE_S = 0.15
+REPLAY_CUTIN_RAW_OBJECT_MAX_DREL_M = 1.5
+REPLAY_CUTIN_RAW_OBJECT_MAX_YREL_M = 0.75
+REPLAY_CUTIN_RAW_OBJECT_MAX_VREL_MPS = 2.5
+ROUTE_CORNER_SOURCE_STABLE = "stable"
+ROUTE_CORNER_SOURCE_RAW = "raw"
+ROUTE_CORNER_SOURCE_LIVE = "live"
+ROUTE_CORNER_SOURCE_CHOICES = (
+    ROUTE_CORNER_SOURCE_STABLE,
+    ROUTE_CORNER_SOURCE_RAW,
+    ROUTE_CORNER_SOURCE_LIVE,
+)
+CORNER_YAW_COMP_MAX_DREL = 50.0
+CORNER_YAW_COMP_MAX_YAW_RATE = 0.35
+CORNER_YAW_COMP_MAX_YVREL_CORRECTION = 1.5
+CORNER_DISPLAY_CENTERING_DEFAULT_M = 0.0
+CORNER_DISPLAY_CENTERING_SIDE_LANE_MIN_M = 1.8
+CORNER_DISPLAY_CENTERING_SIDE_LANE_WIDTH_RATIO = 0.55
+CORNER_RADAR_OBJECTS_235_EXT_FLAG = 2 ** 12
+CORNER_RADAR_OBJECTS_180_EXT_FLAG = 2 ** 13
+CORNER_RADAR_OBJECTS_EXT_FLAGS = CORNER_RADAR_OBJECTS_235_EXT_FLAG | CORNER_RADAR_OBJECTS_180_EXT_FLAG
 HYUNDAI_CAMERA_CAN_BUS_MOD = 2
-HYUNDAI_A_CAN_BUS_MOD = 1
 CORNER_RADAR_DBC_MESSAGES = {
     CCNC_CORNER_RADAR_ADDRESS: "CCNC_0x162",
     ADRV_CORNER_RADAR_ADDRESS: "ADRV_0x1ea",
@@ -113,10 +184,28 @@ ROUTE_REPLAY_READAHEAD_S = 5.0
 ROUTE_REPLAY_PRELOAD_READY_AHEAD_S = 20.0
 ROUTE_REPLAY_RETAIN_BEHIND_S = 1.0
 ROUTE_REPLAY_PRELOAD_NICE = 10
-ROUTE_VIDEO_FPS = 20.0
+ROUTE_VIDEO_FPS = 10.0
 ROUTE_VIDEO_DECODE_WIDTH = 388
 ROUTE_VIDEO_DECODE_HEIGHT = 244
 ROUTE_VIDEO_SEEK_RESTART_FRAMES = 45
+ROUTE_VIDEO_FFMPEG_ENV = "CLUSTER_ROUTE_FFMPEG"
+ROUTE_SHOW_RECORDED_CUTINS_ENV = "CLUSTER_ROUTE_SHOW_RECORDED_CUTINS"
+ROUTE_FRONT_RADAR_ONLY_ENV = "CLUSTER_ROUTE_FRONT_RADAR_ONLY"
+ROUTE_CUTIN_RADAR_SOURCE_ENV = "CLUSTER_ROUTE_CUTIN_RADAR_SOURCE"
+ROUTE_CUTIN_SENSITIVITY_ENV = "CLUSTER_ROUTE_CUTIN_SENSITIVITY"
+ROUTE_CUTIN_RADAR_SOURCE_CORNER = "corner"
+ROUTE_CUTIN_RADAR_SOURCE_FRONT = "front"
+REPLAY_CUTIN_DT = 0.05
+RECORDED_CUTIN_REPLAY_HOLD_S = 0.08
+REPLAY_CUTIN_STICKY_FRAMES = int(0.7 / REPLAY_CUTIN_DT)
+REPLAY_CUTIN_OUTPUT_HOLD_FRAMES = max(1, int(round(0.5 / REPLAY_CUTIN_DT)))
+REPLAY_CUTIN_OUTPUT_HOLD_DREL_M = 3.0
+REPLAY_CUTIN_OUTPUT_HOLD_YREL_M = 1.0
+REPLAY_CUTIN_OUTPUT_HOLD_VREL_MPS = 2.0
+REPLAY_CUTIN_KEEP_FUTURE_IN_LANE_PROB = 0.12
+REPLAY_CUTIN_KEEP_MAX_DPATH_FUTURE = 1.6
+REPLAY_CUTIN_KEEP_MAX_MOVING_AWAY = 0.3
+REPLAY_CUTIN_YAW_GAIN = 0.6
 NAV_SPEED_LIMIT_HOLD_SECONDS = 10.0
 ROAD_EDGE_VEHICLE_OUTSIDE_MARGIN_M = 0.25
 NEAR_ROAD_EDGE_VEHICLE_BLOCK_DISTANCE_M = 10.0
@@ -124,6 +213,7 @@ LANE_CHANGE_REINDEX_PEAK_THRESHOLD = 0.22
 LANE_CHANGE_REINDEX_RESET_THRESHOLD = -0.08
 CONTINUOUS_LANE_CHANGE_REBASE_PROGRESS = 0.12
 LANE_CHANGE_MODEL_DIRECT_ONLY = True
+ROUTE_REPLAY_USE_LANE_CHANGE_ANIMATION = True
 LANE_LINE_PROBABILITY_MIN = 0.4
 MODEL_DIRECT_LANE_SETTLE_MIN_PROGRESS = 0.65
 LONGITUDINAL_PERSONALITY_GAPS = {
@@ -132,6 +222,259 @@ LONGITUDINAL_PERSONALITY_GAPS = {
     "relaxed": 3,
     "morerelaxed": 4,
 }
+
+
+@dataclass(frozen=True, slots=True)
+class RawCornerObject:
+    t: float
+    group: str
+    address: int
+    slot: int
+    quality: int
+    age: int
+    object_id: int
+    object_class: int
+    width: float
+    x: float
+    y: float
+    vx: float
+    vy: float
+    ax: float
+
+
+@dataclass(slots=True)
+class StableCornerTrack:
+    track_id: int
+    object_id: int
+    group: str
+    slot: int
+    last_t: float
+    x: float
+    y: float
+    vx: float
+    vy: float
+    ax: float
+    quality: int
+    age: int
+    hits: int = 1
+    lead_filter_t: float | None = None
+    lead_filter_count: int = 0
+    v_lead_filtered: float = 0.0
+    v_lead_filtered_last: float = 0.0
+    a_lead_filtered: float = 0.0
+    j_lead_filtered: float = 0.0
+
+
+@dataclass(frozen=True, slots=True)
+class ReconstructedLiveTrack:
+    trackId: int
+    dRel: float
+    yRel: float
+    vRel: float
+    aRel: float
+    yvRel: float
+    vLead: float
+    measured: bool
+    radarSource: str
+    aLead: float = 0.0
+    jLead: float = 0.0
+
+
+class StableCornerObjectTracker:
+    def __init__(self) -> None:
+        self.tracks: dict[int, StableCornerTrack] = {}
+        self.next_track_id = 0
+
+    def update(self, obj: RawCornerObject) -> None:
+        self._expire(obj.t)
+        match = self._match(obj)
+        if match is None:
+            track_id = self.next_track_id
+            self.next_track_id += 1
+            self.tracks[track_id] = StableCornerTrack(
+                track_id=track_id,
+                object_id=obj.object_id,
+                group=obj.group,
+                slot=obj.slot,
+                last_t=obj.t,
+                x=obj.x,
+                y=obj.y,
+                vx=obj.vx,
+                vy=obj.vy,
+                ax=obj.ax,
+                quality=obj.quality,
+                age=obj.age,
+            )
+            return
+
+        dt = max(0.0, obj.t - match.last_t)
+        predicted_x = match.x + match.vx * dt
+        predicted_y = match.y + match.vy * dt
+        pos_alpha = RAW_CORNER_TRACK_POSITION_ALPHA
+        vel_alpha = RAW_CORNER_TRACK_VELOCITY_ALPHA
+        match.object_id = obj.object_id
+        match.group = obj.group
+        match.slot = obj.slot
+        match.last_t = obj.t
+        match.x = predicted_x * (1.0 - pos_alpha) + obj.x * pos_alpha
+        match.y = predicted_y * (1.0 - pos_alpha) + obj.y * pos_alpha
+        match.vx = match.vx * (1.0 - vel_alpha) + obj.vx * vel_alpha
+        match.vy = match.vy * (1.0 - vel_alpha) + obj.vy * vel_alpha
+        match.ax = obj.ax
+        match.quality = obj.quality
+        match.age = obj.age
+        match.hits += 1
+
+    def _visible_tracks_at(
+        self,
+        t: float,
+        max_measurement_age_s: float | None = None,
+    ) -> tuple[tuple[StableCornerTrack, float, float], ...]:
+        self._expire(t)
+        visible_tracks: list[tuple[StableCornerTrack, float, float]] = []
+        for track in self.tracks.values():
+            if track.hits < RAW_CORNER_TRACK_DISPLAY_MIN_HITS:
+                continue
+            dt = max(0.0, t - track.last_t)
+            if max_measurement_age_s is not None and dt > max_measurement_age_s:
+                continue
+            x = track.x + track.vx * dt
+            y = track.y + track.vy * dt
+            if abs(y) > RAW_CORNER_TRACK_DISPLAY_OUTER_ABS_Y_M and track.hits < RAW_CORNER_TRACK_DISPLAY_OUTER_MIN_HITS:
+                continue
+            if not RADAR_MIN_LONGITUDINAL_M <= x <= RADAR_FRONT_MAX_LONGITUDINAL_M:
+                continue
+            if abs(y) > RAW_CORNER_OBJECT_MAX_ABS_Y_M:
+                continue
+            visible_tracks.append((track, x, y))
+        return tuple(visible_tracks)
+
+    def live_tracks_at(
+        self,
+        t: float,
+        v_ego: float,
+        max_measurement_age_s: float | None = None,
+    ) -> tuple[ReconstructedLiveTrack, ...]:
+        live_tracks: list[ReconstructedLiveTrack] = []
+        for track, x, y in self._visible_tracks_at(t, max_measurement_age_s):
+            v_lead = v_ego + track.vx
+            a_lead, j_lead = self._update_lead_dynamics(track, t, v_lead)
+            live_tracks.append(ReconstructedLiveTrack(
+                trackId=STABLE_CORNER_TRACK_ID_START + track.track_id,
+                dRel=x,
+                yRel=y,
+                vRel=track.vx,
+                aRel=track.ax,
+                yvRel=track.vy,
+                vLead=v_lead,
+                measured=True,
+                radarSource="corner235" if track.group == "235" else "corner180",
+                aLead=a_lead,
+                jLead=j_lead,
+            ))
+        return tuple(live_tracks)
+
+    @staticmethod
+    def _update_lead_dynamics(track: StableCornerTrack, t: float, v_lead: float) -> tuple[float, float]:
+        # Mirrors the RadarInterface MyTrack filter for raw-CAN replay. The
+        # six-sample warm-up keeps reconstructed corner points aligned with
+        # the values emitted by a running device.
+        if track.lead_filter_t is None or t <= track.lead_filter_t or t - track.lead_filter_t > 0.25:
+            track.lead_filter_t = t
+            track.lead_filter_count = 1
+            track.v_lead_filtered = v_lead
+            track.v_lead_filtered_last = v_lead
+            track.a_lead_filtered = 0.0
+            track.j_lead_filtered = 0.0
+            return 0.0, 0.0
+
+        dt = max(0.01, min(0.10, t - track.lead_filter_t))
+        track.lead_filter_t = t
+        v_alpha = dt / (0.1 + dt)
+        a_alpha = dt / (0.15 + dt)
+        j_alpha = dt / (0.4 + dt)
+        track.v_lead_filtered += v_alpha * (v_lead - track.v_lead_filtered)
+        pseudo_stop = abs(track.v_lead_filtered) < 0.3 and abs(v_lead - track.v_lead_filtered) < 0.05
+        a_raw = (track.v_lead_filtered - track.v_lead_filtered_last) / dt
+        track.v_lead_filtered_last = track.v_lead_filtered
+        if abs(a_raw - track.a_lead_filtered) > 3.0:
+            track.lead_filter_count = 0
+        a_input = 0.0 if pseudo_stop else clamp(a_raw, -10.0, 5.0)
+        previous_a_lead = track.a_lead_filtered
+        track.a_lead_filtered += a_alpha * (a_input - track.a_lead_filtered)
+        j_input = (track.a_lead_filtered - previous_a_lead) / dt if track.lead_filter_count > 2 else 0.0
+        track.j_lead_filtered += j_alpha * (j_input - track.j_lead_filtered)
+        track.lead_filter_count += 1
+        if track.lead_filter_count < 6:
+            return 0.0, 0.0
+        return track.a_lead_filtered, track.j_lead_filtered
+
+    def points_at(self, t: float, ego_speed_kph: float) -> tuple[RadarPoint, ...]:
+        visible_tracks = self._visible_tracks_at(t)
+
+        id_counts: dict[int, int] = {}
+        for track, _x, _y in visible_tracks:
+            id_counts[track.object_id] = id_counts.get(track.object_id, 0) + 1
+
+        points: list[RadarPoint] = []
+        for track, x, y in visible_tracks:
+            label = (
+                f"CO{track.object_id:03d}"
+                if id_counts.get(track.object_id, 0) == 1
+                else f"CO{track.object_id:03d}_{track.track_id:02d}"
+            )
+            points.append(
+                RadarPoint(
+                    label=label,
+                    longitudinal_m=x,
+                    lateral_m=renderer_lateral_from_openpilot_yrel(y),
+                    source=CORNER_OBJECT_SOURCE,
+                    relative_speed_mps=track.vx,
+                    absolute_speed_kph=ego_speed_kph + track.vx * 3.6,
+                    lateral_speed_mps=renderer_lateral_from_openpilot_yrel(track.vy),
+                    relative_accel_mps2=track.ax,
+                    probability=clamp(0.35 + min(track.quality, 80) / 100.0, 0.35, 0.92),
+                    valid=1,
+                    valid_count=track.hits,
+                )
+            )
+        return sorted_radar_points(points)
+
+    def _match(self, obj: RawCornerObject) -> StableCornerTrack | None:
+        same_id_best: StableCornerTrack | None = None
+        same_id_best_cost = RAW_CORNER_TRACK_MAX_COST
+        fallback_best: StableCornerTrack | None = None
+        fallback_best_cost = RAW_CORNER_TRACK_MAX_COST
+        for track in self.tracks.values():
+            dt = max(0.0, obj.t - track.last_t)
+            if dt > RAW_CORNER_TRACK_STALE_S:
+                continue
+            predicted_x = track.x + track.vx * dt
+            predicted_y = track.y + track.vy * dt
+            dx = abs(obj.x - predicted_x)
+            dy = abs(obj.y - predicted_y)
+            if dx > RAW_CORNER_TRACK_MAX_MATCH_X_M or dy > RAW_CORNER_TRACK_MAX_MATCH_Y_M:
+                continue
+            dv = abs(obj.vx - track.vx)
+            age_penalty = 0.0 if obj.age >= track.age or track.age == 255 else 0.8
+            cost = dx * 0.55 + dy * 1.05 + dv * 0.12 + age_penalty
+            if obj.object_id == track.object_id:
+                if cost < same_id_best_cost:
+                    same_id_best_cost = cost
+                    same_id_best = track
+            elif cost + 3.5 < fallback_best_cost:
+                fallback_best_cost = cost + 3.5
+                fallback_best = track
+        return same_id_best if same_id_best is not None else fallback_best
+
+    def _expire(self, t: float) -> None:
+        stale = [
+            track_id
+            for track_id, track in self.tracks.items()
+            if t - track.last_t > RAW_CORNER_TRACK_STALE_S
+        ]
+        for track_id in stale:
+            self.tracks.pop(track_id, None)
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,6 +491,7 @@ class RouteReplayFrame:
     gear_text: str | None
     cruise_gap: int | None
     lfa_active: bool | None
+    active_lane_line: bool | None
     left_signal: bool
     right_signal: bool
     left_blindspot: bool
@@ -183,8 +527,13 @@ class RouteReplayFrame:
     brake: float
     detected_vehicles: tuple[DetectedVehicle, ...]
     radar_points: tuple[RadarPoint, ...] = ()
+    corner_radar_supported: bool = False
     tpms: TpmsInfo = TpmsInfo()
+    ev_mode_valid: bool = False
+    ev_mode_active: bool = False
     display_speed_kph: float | None = None
+    traffic_state: int = 0
+    driving_mode: int | None = None
     planned_speed_kph: float | None = None
     planned_accel_mps2: float | None = None
     planned_curvature_m_inv: float | None = None
@@ -219,7 +568,10 @@ class RouteReplayFrame:
     vision_yaw_rate_rps: float | None = None
     vision_speed_std_mps: float | None = None
     vision_yaw_rate_std_rps: float | None = None
+    camera_device_type: str | None = None
+    camera_sensor: str | None = None
     camera_calibration_euler: tuple[float, float, float] | None = None
+    wide_camera_from_device_euler: tuple[float, float, float] | None = None
     road_transform_trans: tuple[float, float, float] | None = None
     road_transform_std: tuple[float, float, float] | None = None
     camera_odometry_valid: bool | None = None
@@ -241,6 +593,53 @@ class RouteReplayFrame:
     lateral_plan_debug_text: str | None = None
     lateral_plan_curvatures: tuple[float, ...] = ()
     lateral_plan_curvature_rates: tuple[float, ...] = ()
+    cutin_debug_text: str = "NEW CUTIN: waiting"
+    recorded_cutin_active: bool = False
+    recorded_cutin_sound: bool = False
+    trip_report: TripReportState | None = None
+    cpu_usage_percent: float | None = None
+    cpu_temp_c: float | None = None
+    memory_used_percent: float | None = None
+    disk_used_percent: float | None = None
+    alert: ClusterAlert | None = None
+
+
+@dataclass
+class ReplayCutinTrack:
+    track_id: int
+    cnt: int = 0
+    cut_in_count: int = 0
+    cut_in_start_abs_dpath: float = 0.0
+    measured: bool = False
+    d_rel: float = 0.0
+    y_rel: float = 0.0
+    v_rel: float = 0.0
+    v_lead: float = 0.0
+    yv_rel: float = 0.0
+    d_path: float = 0.0
+    d_path_future: float = 0.0
+    in_lane_prob: float = 0.0
+    in_lane_prob_future: float = 0.0
+    d_path_rate: float = 0.0
+    inward_speed: float = 0.0
+    path_d_path: float = 0.0
+    path_d_path_future: float = 0.0
+    path_in_lane_prob: float = 0.0
+    path_in_lane_prob_future: float = 0.0
+    path_d_path_rate: float = 0.0
+    path_inward_speed: float = 0.0
+    path_y_std: float = float("inf")
+    radar_inward_speed: float = 0.0
+    side_corner_confirmed_count: int = 0
+    rejection_reason: str = "waiting"
+    position_history: Any = None
+    path_position_history: Any = None
+
+    def __post_init__(self) -> None:
+        if self.position_history is None:
+            self.position_history = new_cutin_position_history(REPLAY_CUTIN_DT)
+        if self.path_position_history is None:
+            self.path_position_history = new_cutin_position_history(REPLAY_CUTIN_DT)
 
 
 @dataclass(frozen=True, slots=True)
@@ -291,7 +690,8 @@ def normalize_route_frames(frames: list[RouteReplayFrame], first_t: float) -> li
 
 
 class RouteLogPreloadWorker:
-    def __init__(self) -> None:
+    def __init__(self, corner_source: str = ROUTE_CORNER_SOURCE_LIVE) -> None:
+        self.corner_source = corner_source
         self._requests: Any | None = None
         self._results: Any | None = None
         self._worker: Any | None = None
@@ -349,7 +749,7 @@ class RouteLogPreloadWorker:
                 self._results = context.Queue(maxsize=2)
                 self._worker = context.Process(
                     target=route_log_preload_worker,
-                    args=(self._requests, self._results, True),
+                    args=(self._requests, self._results, self.corner_source, True),
                     name="route-log-preload",
                     daemon=True,
                 )
@@ -364,21 +764,26 @@ class RouteLogPreloadWorker:
         self._results = queue.Queue()
         self._worker = threading.Thread(
             target=route_log_preload_worker,
-            args=(self._requests, self._results, False),
+            args=(self._requests, self._results, self.corner_source, False),
             name="route-log-preload",
             daemon=True,
         )
         self._worker.start()
 
 
-def route_log_preload_worker(requests: Any, results: Any, low_priority: bool = False) -> None:
+def route_log_preload_worker(
+    requests: Any,
+    results: Any,
+    corner_source: str = ROUTE_CORNER_SOURCE_LIVE,
+    low_priority: bool = False,
+) -> None:
     if low_priority:
         try:
             os.nice(ROUTE_REPLAY_PRELOAD_NICE)
         except OSError:
             pass
     log_schema = load_openpilot_log_schema()
-    parser = RouteLogParser()
+    parser = RouteLogParser(corner_source, recompute_cutins=False)
     first_t: float | None = None
     while True:
         command, generation, file_index, file_path_text = requests.get()
@@ -409,16 +814,24 @@ class RouteReplaySource:
     def __init__(
         self,
         source_files: list[Path],
+        corner_yaw_comp_gain: float = 0.0,
+        corner_source: str = ROUTE_CORNER_SOURCE_LIVE,
+        corner_lateral_offset_m: float = CORNER_DISPLAY_CENTERING_DEFAULT_M,
     ) -> None:
         if not source_files:
             raise RuntimeError("route contains no log files")
+        self.corner_yaw_comp_gain = corner_yaw_comp_gain
+        self.corner_lateral_offset_m = corner_lateral_offset_m
+        self.corner_source = route_corner_source_or_default(corner_source)
         self.source_files = source_files
         self.frames: list[RouteReplayFrame] = []
         self.times: list[float] = []
         self.duration = 0.0
         self.video_segments: list[RouteVideoSegment] = []
-        self._video_reader = RouteVideoFrameReader(self.video_segments)
-        self._preload_worker = RouteLogPreloadWorker()
+        self.wide_video_segments: list[RouteVideoSegment] = []
+        self._video_stream = "road"
+        self._video_reader = RouteVideoFrameReader(self.video_segments, self._video_stream)
+        self._preload_worker = RouteLogPreloadWorker(self.corner_source)
         self._next_file_index = 0
         self._loaded_chunks: list[RouteReplayChunk] = []
         self._loaded_file_count = 0
@@ -438,12 +851,15 @@ class RouteReplaySource:
         log_kind: str = "qlog",
         start_segment: int | None = None,
         max_segments: int | None = None,
+        corner_yaw_comp_gain: float = 0.0,
+        corner_source: str = ROUTE_CORNER_SOURCE_LIVE,
+        corner_lateral_offset_m: float = CORNER_DISPLAY_CENTERING_DEFAULT_M,
     ) -> RouteReplaySource:
         files = discover_route_logs(route_path, log_kind, start_segment, max_segments)
         if not files:
             raise RuntimeError(f"no {LOG_FILENAMES[log_kind]} files found under {route_path}")
 
-        return cls(files)
+        return cls(files, corner_yaw_comp_gain, corner_source, corner_lateral_offset_m)
 
     def is_finished(self, playback_seconds: float, loop: bool = False) -> bool:
         if not loop:
@@ -455,31 +871,32 @@ class RouteReplaySource:
         playback_seconds: float,
         loop: bool = False,
         include_overlay: bool = False,
+        camera_view_mode: int = CLUSTER_CAMERA_VIEW_MODE_ROAD_CAMERA,
     ) -> ClusterUiState:
         if loop and self._end_of_route and self.duration > 0.0:
             playback_seconds %= self.duration
         self._ensure_loaded(playback_seconds)
         if self.duration <= 0.0:
-            state = frame_to_state(self.frames[0])
-            return self._with_overlay(state, self.frames[0], 0.0, loop) if include_overlay else state
+            state = self._frame_to_state(self.frames[0])
+            return self._with_overlay(state, self.frames[0], 0.0, loop, camera_view_mode) if include_overlay else state
         if not loop or self._end_of_route:
             playback_seconds = clamp(playback_seconds, 0.0, self.duration)
 
         right_index = bisect_right(self.times, playback_seconds)
         if right_index <= 0:
-            state = frame_to_state(self.frames[0])
-            return self._with_overlay(state, self.frames[0], playback_seconds, loop) if include_overlay else state
+            state = self._frame_to_state(self.frames[0])
+            return self._with_overlay(state, self.frames[0], playback_seconds, loop, camera_view_mode) if include_overlay else state
         if right_index >= len(self.frames):
-            state = frame_to_state(self.frames[-1])
-            return self._with_overlay(state, self.frames[-1], playback_seconds, loop) if include_overlay else state
+            state = self._frame_to_state(self.frames[-1])
+            return self._with_overlay(state, self.frames[-1], playback_seconds, loop, camera_view_mode) if include_overlay else state
 
         left = self.frames[right_index - 1]
         right = self.frames[right_index]
         span = max(0.001, right.t - left.t)
         amount = clamp((playback_seconds - left.t) / span, 0.0, 1.0)
         frame = blend_frames(left, right, amount)
-        state = frame_to_state(frame)
-        return self._with_overlay(state, frame, playback_seconds, loop) if include_overlay else state
+        state = self._frame_to_state(frame)
+        return self._with_overlay(state, frame, playback_seconds, loop, camera_view_mode) if include_overlay else state
 
     def close(self) -> None:
         self._preload_generation += 1
@@ -506,11 +923,52 @@ class RouteReplaySource:
             f"files={self._loaded_file_count}/{file_count} "
             f"radar={radar_count} "
             f"detected={detected_count}"
+            f" corner={self.corner_source}"
+            f"{f' yawHead={self.corner_yaw_comp_gain:+.2f}' if self.corner_yaw_comp_gain else ''}"
+            f"{f' yCenter={self.corner_lateral_offset_m:.2f}m' if self.corner_lateral_offset_m else ''}"
         )
+
+    def _frame_to_state(self, frame: RouteReplayFrame) -> ClusterUiState:
+        state = frame_to_state(frame)
+        if self.corner_yaw_comp_gain == 0.0 and self.corner_lateral_offset_m == 0.0:
+            return state
+        radar_points = tuple(
+            replay_corner_adjusted_point(
+                point,
+                frame.vision_yaw_rate_rps,
+                self.corner_yaw_comp_gain,
+                self.corner_lateral_offset_m,
+                frame.lane_width_m,
+            )
+            for point in state.radar_points
+        )
+        return replace(state, radar_points=radar_points)
 
     @property
     def loaded_file_count(self) -> int:
         return self._loaded_file_count
+
+    def log_path_at(self, playback_seconds: float) -> Path:
+        for chunk in self._loaded_chunks:
+            if chunk.start_t - 0.5 <= playback_seconds <= chunk.end_t + 0.5:
+                return chunk.path
+        if self._loaded_chunks:
+            nearest = min(
+                self._loaded_chunks,
+                key=lambda chunk: min(abs(playback_seconds - chunk.start_t), abs(playback_seconds - chunk.end_t)),
+            )
+            return nearest.path
+        return self.source_files[0]
+
+    def log_folder_at(self, playback_seconds: float) -> Path:
+        return self.log_path_at(playback_seconds).parent
+
+    def log_offset_at(self, playback_seconds: float) -> float:
+        log_path = self.log_path_at(playback_seconds)
+        chunk = next((item for item in self._loaded_chunks if item.path == log_path), None)
+        if chunk is None:
+            return 0.0
+        return clamp(playback_seconds - chunk.start_t, 0.0, max(0.0, chunk.end_t - chunk.start_t))
 
     def _status_frame_at(self, playback_seconds: float) -> RouteReplayFrame | None:
         if not self.frames:
@@ -634,17 +1092,18 @@ class RouteReplaySource:
         return True
 
     def _append_video_segment(self, file_path: Path, chunk: RouteReplayChunk) -> None:
-        video_path = file_path.parent / "qcamera.ts"
-        if not video_path.exists():
-            return
-        self.video_segments.append(
-            RouteVideoSegment(
-                index=segment_index(file_path),
-                path=video_path,
-                start_t=chunk.start_t,
-                end_t=chunk.end_t,
+        for stream, segments in (("road", self.video_segments), ("wide", self.wide_video_segments)):
+            video_path = route_video_path_for_stream(file_path.parent, stream)
+            if video_path is None:
+                continue
+            segments.append(
+                RouteVideoSegment(
+                    index=segment_index(file_path),
+                    path=video_path,
+                    start_t=chunk.start_t,
+                    end_t=chunk.end_t,
+                )
             )
-        )
 
     def _trim_loaded_chunks(self, playback_seconds: float) -> None:
         removed = False
@@ -676,7 +1135,9 @@ class RouteReplaySource:
         self.times = []
         self.duration = 0.0
         self.video_segments = []
-        self._video_reader = RouteVideoFrameReader(self.video_segments)
+        self.wide_video_segments = []
+        self._video_stream = "road"
+        self._video_reader = RouteVideoFrameReader(self.video_segments, self._video_stream)
         self._next_file_index = 0
         self._loaded_chunks = []
         self._loaded_file_count = 0
@@ -688,8 +1149,9 @@ class RouteReplaySource:
         frame: RouteReplayFrame,
         playback_seconds: float,
         loop: bool,
+        camera_view_mode: int,
     ) -> ClusterUiState:
-        overlay = self._route_overlay(frame, state, playback_seconds, loop)
+        overlay = self._route_overlay(frame, state, playback_seconds, loop, camera_view_mode)
         return replace(state, route_overlay=overlay)
 
     def _route_overlay(
@@ -698,10 +1160,13 @@ class RouteReplaySource:
         state: ClusterUiState,
         playback_seconds: float,
         loop: bool,
+        camera_view_mode: int,
     ) -> RouteOverlay:
         shown_time = playback_seconds % self.duration if loop and self.duration > 0.0 else playback_seconds
         shown_time = clamp(shown_time, 0.0, self.duration)
-        segment = route_video_segment_at(self.video_segments, shown_time)
+        self._select_route_video_stream(camera_view_mode, state.speed_kph, shown_time)
+        active_segments = self.wide_video_segments if self._video_stream == "wide" else self.video_segments
+        segment = route_video_segment_at(active_segments, shown_time)
         segment_label = "--" if segment is None or segment.index is None else str(segment.index)
         video_frame = self._video_reader.frame_at(shown_time) if self._video_reader is not None else None
         signal_text = ("L" if frame.left_signal else "-") + ("R" if frame.right_signal else "-")
@@ -729,6 +1194,8 @@ class RouteReplaySource:
         gear_text = frame.gear_text or "--"
         gap_text = "--" if frame.cruise_gap is None else f"{frame.cruise_gap:d}"
         data_lines = (
+            f"device cutin {'YES' if frame.recorded_cutin_active else 'NO'}   "
+            f"sound {'PROMPT' if frame.recorded_cutin_sound else '--'}",
             f"t {shown_time:6.1f}/{self.duration:6.1f}s   seg {segment_label}",
             f"vEgo {state.speed_kph:5.1f} km/h   aEgo {state.accel_mps2:+.2f} m/s2",
             f"steer {frame.steering_angle_deg or 0.0:+.1f} deg   limit {limit_text}   cruise {cruise_text}",
@@ -743,39 +1210,85 @@ class RouteReplaySource:
         )
 
         if video_frame is None:
-            status = self._video_reader.status_text() if self._video_reader is not None else "qcamera unavailable"
-            return RouteOverlay(video_status=status, data_lines=data_lines)
+            status = self._video_reader.status_text() if self._video_reader is not None else "camera unavailable"
+            return RouteOverlay(
+                video_status=status,
+                camera_stream=self._video_stream,
+                cutin_status=frame.cutin_debug_text,
+                data_lines=data_lines,
+            )
         return RouteOverlay(
             video_rgba=video_frame.rgba,
             video_width=video_frame.width,
             video_height=video_frame.height,
             video_frame_id=video_frame.frame_id,
+            camera_stream=self._video_stream,
+            cutin_status=frame.cutin_debug_text,
             data_lines=data_lines,
         )
 
+    def _select_route_video_stream(self, camera_view_mode: int, speed_kph: float, playback_seconds: float) -> None:
+        currently_wide = self._video_stream == "wide"
+        prefer_wide = cluster_camera_view_prefers_wide(camera_view_mode, speed_kph, currently_wide)
+        road_available = route_video_segment_at(self.video_segments, playback_seconds) is not None
+        wide_available = route_video_segment_at(self.wide_video_segments, playback_seconds) is not None
+        next_stream = "wide" if (prefer_wide and wide_available) or (not road_available and wide_available) else "road"
+        if next_stream == self._video_stream:
+            return
+        if self._video_reader is not None:
+            self._video_reader.close()
+        self._video_stream = next_stream
+        segments = self.wide_video_segments if next_stream == "wide" else self.video_segments
+        self._video_reader = RouteVideoFrameReader(segments, next_stream)
+
+
+def route_video_path_for_stream(folder: Path, stream: str) -> Path | None:
+    filenames = ROUTE_WIDE_VIDEO_FILENAMES if stream == "wide" else ROUTE_ROAD_VIDEO_FILENAMES
+    return next((candidate for name in filenames if (candidate := folder / name).is_file()), None)
+
+
+def route_video_ffmpeg_path() -> str | None:
+    env_path = os.environ.get(ROUTE_VIDEO_FFMPEG_ENV, "").strip()
+    if env_path:
+        resolved = shutil.which(env_path) or env_path
+        if Path(resolved).exists() or shutil.which(resolved):
+            return resolved
+
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is not None:
+        return ffmpeg
+
+    try:
+        import imageio_ffmpeg  # type: ignore
+
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        return None
+
 
 class RouteVideoFrameReader:
-    def __init__(self, segments: list[RouteVideoSegment]) -> None:
+    def __init__(self, segments: list[RouteVideoSegment], stream_name: str = "road") -> None:
         self.segments = segments
-        self._ffmpeg = shutil.which("ffmpeg")
+        self.stream_name = stream_name
+        self._ffmpeg = route_video_ffmpeg_path()
         self._process: subprocess.Popen[bytes] | None = None
         self._segment_key: tuple[int | None, str, float, float] | None = None
         self._frame_index = -1
         self._last_frame: RouteVideoFrame | None = None
-        self._status = "qcamera waiting"
+        self._status = f"{self.stream_name} camera waiting"
 
     def frame_at(self, playback_seconds: float) -> RouteVideoFrame | None:
         segment = route_video_segment_at(self.segments, playback_seconds)
         if segment is None:
             self._close_process()
-            self._status = "qcamera missing"
+            self._status = f"{self.stream_name} camera missing"
             return None
         if not segment.path.exists():
             self._close_process()
-            self._status = "qcamera file missing"
+            self._status = f"{self.stream_name} camera file missing"
             return None
         if self._ffmpeg is None:
-            self._status = "qcamera ffmpeg missing"
+            self._status = f"{self.stream_name} camera ffmpeg missing"
             return None
 
         local_time_s = clamp(playback_seconds - segment.start_t, 0.0, max(0.0, segment.end_t - segment.start_t))
@@ -797,7 +1310,7 @@ class RouteVideoFrameReader:
         return self._last_frame
 
     def status_text(self) -> str:
-        return self._status or "qcamera unavailable"
+        return self._status or f"{self.stream_name} camera unavailable"
 
     def close(self) -> None:
         self._close_process()
@@ -805,7 +1318,7 @@ class RouteVideoFrameReader:
     def _open_segment(self, segment: RouteVideoSegment, start_frame: int) -> bool:
         self._close_process()
         if self._ffmpeg is None:
-            self._status = "qcamera ffmpeg missing"
+            self._status = f"{self.stream_name} camera ffmpeg missing"
             return False
         seek_s = max(0.0, start_frame / ROUTE_VIDEO_FPS)
         command = [
@@ -815,14 +1328,14 @@ class RouteVideoFrameReader:
             "error",
             "-threads",
             "1",
-            "-ss",
-            f"{seek_s:.3f}",
             "-i",
             str(segment.path),
+            "-ss",
+            f"{seek_s:.3f}",
             "-an",
             "-sn",
             "-vf",
-            f"scale={ROUTE_VIDEO_DECODE_WIDTH}:{ROUTE_VIDEO_DECODE_HEIGHT}",
+            f"fps={ROUTE_VIDEO_FPS:g},scale={ROUTE_VIDEO_DECODE_WIDTH}:{ROUTE_VIDEO_DECODE_HEIGHT}",
             "-pix_fmt",
             "rgba",
             "-f",
@@ -837,24 +1350,24 @@ class RouteVideoFrameReader:
                 stderr=subprocess.DEVNULL,
             )
         except OSError as exc:
-            self._status = f"qcamera ffmpeg failed: {exc}"
+            self._status = f"{self.stream_name} camera ffmpeg failed: {exc}"
             self._process = None
             return False
         self._segment_key = self._key_for_segment(segment)
         self._frame_index = start_frame - 1
         self._last_frame = None
-        self._status = "qcamera starting"
+        self._status = f"{self.stream_name} camera starting"
         return True
 
     def _read_next_frame(self) -> bool:
         process = self._process
         if process is None or process.stdout is None:
-            self._status = "qcamera unavailable"
+            self._status = f"{self.stream_name} camera unavailable"
             return False
         frame_size = ROUTE_VIDEO_DECODE_WIDTH * ROUTE_VIDEO_DECODE_HEIGHT * 4
         data = self._read_exact(process.stdout, frame_size)
         if data is None:
-            self._status = "qcamera ended"
+            self._status = f"{self.stream_name} camera ended"
             self._close_process()
             return False
         self._frame_index += 1
@@ -908,7 +1421,64 @@ class RouteVideoFrameReader:
 
 
 class RouteLogParser:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        corner_source: str = ROUTE_CORNER_SOURCE_LIVE,
+        reconstruct_corner_live_tracks: bool = False,
+        cutin_radar_source: str | None = None,
+        recompute_cutins: bool = True,
+    ) -> None:
+        self.corner_source = route_corner_source_or_default(corner_source)
+        self.reconstruct_corner_live_tracks = reconstruct_corner_live_tracks
+        # Normal route playback shows the radarState emitted on the device.
+        # Focused validation tools can still opt into offline recomputation.
+        self.show_recorded_cutins = True
+        self.recompute_cutins = recompute_cutins
+        self.front_radar_only = os.environ.get(ROUTE_FRONT_RADAR_ONLY_ENV) == "1"
+        self.cutin_radar_source = cutin_radar_source or os.environ.get(
+            ROUTE_CUTIN_RADAR_SOURCE_ENV, ROUTE_CUTIN_RADAR_SOURCE_CORNER
+        )
+        if self.cutin_radar_source not in (ROUTE_CUTIN_RADAR_SOURCE_CORNER, ROUTE_CUTIN_RADAR_SOURCE_FRONT):
+            self.cutin_radar_source = ROUTE_CUTIN_RADAR_SOURCE_CORNER
+        try:
+            self.cutin_sensitivity = clamp(float(os.environ.get(ROUTE_CUTIN_SENSITIVITY_ENV, "50")), 0.0, 100.0)
+        except ValueError:
+            self.cutin_sensitivity = 50.0
+        self.cutin_tuning = cutin_tuning_from_sensitivity(self.cutin_sensitivity)
+        self.cutin_confirm_frames = max(1, int(round(self.cutin_tuning["confirm_s"] / REPLAY_CUTIN_DT)))
+        if self.cutin_radar_source == ROUTE_CUTIN_RADAR_SOURCE_FRONT:
+            self.cutin_confirm_frames = max(
+                self.cutin_confirm_frames,
+                int(round(FRONT_CUTIN_MIN_CONFIRM_S / REPLAY_CUTIN_DT)),
+            )
+        self.cutin_min_track_age = max(1, int(round(self.cutin_tuning["min_track_age_s"] / REPLAY_CUTIN_DT)))
+        self.cutin_lane_xs: tuple[float, ...] = ()
+        self.cutin_left_ys: tuple[float, ...] = ()
+        self.cutin_right_ys: tuple[float, ...] = ()
+        self.cutin_path_xs: tuple[float, ...] = ()
+        self.cutin_path_ys: tuple[float, ...] = ()
+        self.cutin_path_y_stds: tuple[float, ...] = ()
+        self.cutin_yaw_rate = 0.0
+        self.cutin_tracks: dict[int, ReplayCutinTrack] = {}
+        self.cutin_side_corner_front_matches: dict[int, int] = {}
+        self.cutin_side_corner_front_match_misses: dict[int, int] = {}
+        self.cutin_corner_object_ids: dict[tuple[str, int], tuple[int, int]] = {}
+        self.next_cutin_corner_track_id = STABLE_CORNER_TRACK_ID_START
+        self.cutin_detections: tuple[DetectedVehicle, ...] = ()
+        self.cutin_detection_t = -999.0
+        self.cutin_output_hold_count = 0
+        self.cutin_output_hold_reference: tuple[float, float, float] | None = None
+        self.cutin_debug_text = f"NEW CUTIN {self.cutin_radar_source.upper()} S{self.cutin_sensitivity:.0f}: waiting"
+        self.recorded_cutin_ids: set[int] = set()
+        self.recorded_cutin_sound = False
+        self.recorded_cutin_t = -999.0
+        self.recorded_cutin_sound_t = -999.0
+        self.recorded_cutin_detections: tuple[DetectedVehicle, ...] = ()
+        self.lead_one_status = False
+        self.lead_one_d_rel = 0.0
+        self.lead_one_v_rel = 0.0
+        self.lead_one_radar = False
+        self.lead_one_track_id = -1
         self.speed_limit_kph: int | None = None
         self.speed_limit_source: str | None = None
         self.nav_speed_limit_kph: int | None = None
@@ -916,8 +1486,13 @@ class RouteLogParser:
         self.cruise_kph: int | None = None
         self.cruise_gap: int | None = None
         self.lfa_active: bool | None = None
+        self.active_lane_line: bool | None = None
         self.selfdrive_enabled: bool | None = None
         self.controls_enabled: bool | None = None
+        self.alert: ClusterAlert | None = None
+        self.wheelbase_m = 2.7
+        self.steer_ratio = 15.0
+        self.trip_report_tracker = TripReportTracker()
         self.lane_width_m = DEFAULT_LANE_WIDTH_M
         self.left_lane_y_m: float | None = None
         self.right_lane_y_m: float | None = None
@@ -971,7 +1546,14 @@ class RouteLogParser:
         self.vision_yaw_rate_rps: float | None = None
         self.vision_speed_std_mps: float | None = None
         self.vision_yaw_rate_std_rps: float | None = None
+        self.camera_device_type: str | None = None
+        self.camera_sensor: str | None = None
+        self.cpu_usage_percent: float | None = None
+        self.cpu_temp_c: float | None = None
+        self.memory_used_percent: float | None = None
+        self.disk_used_percent: float | None = None
         self.camera_calibration_euler: tuple[float, float, float] | None = None
+        self.wide_camera_from_device_euler: tuple[float, float, float] | None = None
         self.road_transform_trans: tuple[float, float, float] | None = None
         self.road_transform_std: tuple[float, float, float] | None = None
         self.camera_odometry_valid: bool | None = None
@@ -983,6 +1565,8 @@ class RouteLogParser:
         self.longitudinal_plan_should_stop = False
         self.longitudinal_plan_allow_throttle: bool | None = None
         self.longitudinal_plan_allow_brake: bool | None = None
+        self.traffic_state = 0
+        self.driving_mode: int | None = None
         self.longitudinal_t_follow_s: float | None = None
         self.longitudinal_desired_distance_m: float | None = None
         self.longitudinal_v_target_kph: float | None = None
@@ -1021,11 +1605,14 @@ class RouteLogParser:
         self.adrv_corner_message_t = -999.0
         self.adrv_lane_changing = 0
         self.adrv_lane_changing_t = -999.0
+        self.corner_radar_supported = False
+        self.car_brand = ""
+        self.corner_radar_tracks_seen = False
+        self.raw_corner_tracker = StableCornerObjectTracker()
+        self.raw_corner_objects: dict[tuple[str, int], RawCornerObject] = {}
+        self.raw_corner_track_t = -999.0
         self.live_track_radar_points: dict[str, RadarPoint] = {}
         self.live_track_radar_t = -999.0
-        self.corner_object_radar_points: dict[str, RadarPoint] = {}
-        self.corner_object_radar_point_t: dict[str, float] = {}
-        self.corner_object_radar_t = -999.0
         self.radar_detections: tuple[DetectedVehicle, ...] = ()
         self.radar_detection_t = -999.0
         self.current_speed_kph = 0.0
@@ -1034,6 +1621,11 @@ class RouteLogParser:
     def parse_file(self, file_path: Path, log_schema: Any) -> list[RouteReplayFrame]:
         frames: list[RouteReplayFrame] = []
         data = read_log_bytes(file_path)
+        if not self.car_brand:
+            for event in log_schema.Event.read_multiple_bytes(data):
+                if safe_which(event) == "carParams":
+                    self._update_car_params(event.carParams)
+                    break
         for event in log_schema.Event.read_multiple_bytes(data):
             event_type = safe_which(event)
             if event_type is None:
@@ -1050,15 +1642,28 @@ class RouteLogParser:
             elif event_type in ("navInstructionCarrot", "navInstruction"):
                 self._update_nav_instruction(getattr(event, event_type), event_t)
             elif event_type == "longitudinalPlan":
-                self._update_longitudinal_plan(event.longitudinalPlan)
+                self._update_longitudinal_plan(
+                    event.longitudinalPlan,
+                    bool(safe_get(event, "valid", True)),
+                )
             elif event_type == "controlsState":
                 self._update_controls_state(event.controlsState)
             elif event_type == "selfdriveState":
-                self._update_selfdrive_state(event.selfdriveState)
+                self._update_selfdrive_state(event.selfdriveState, event_t)
             elif event_type == "carControl":
                 self._update_car_control(event.carControl)
+            elif event_type == "deviceState":
+                self._update_device_state(event.deviceState)
+            elif event_type == "roadCameraState":
+                self._update_road_camera_state(event.roadCameraState)
             elif event_type == "cameraOdometry":
                 self._update_camera_odometry(event.cameraOdometry, bool(safe_get(event, "valid", True)))
+            elif event_type == "livePose":
+                self._update_live_pose(event.livePose, event_t)
+            elif event_type == "liveCalibration":
+                self._update_live_calibration(event.liveCalibration, bool(safe_get(event, "valid", True)))
+            elif event_type == "carParams":
+                self._update_car_params(event.carParams)
             elif event_type == "radarState":
                 self._update_radar_state(event.radarState, event_t)
             elif event_type == "liveTracks":
@@ -1133,8 +1738,26 @@ class RouteLogParser:
             lane_change,
             lane_change_phase,
         )
+        if self.recompute_cutins and event_t - self.cutin_detection_t < 0.15:
+            detected_vehicles = tuple((*detected_vehicles, *self.cutin_detections))
         radar_points = self._radar_points_from_current_state(event_t)
         tpms = tpms_info_from_car_state(car_state)
+        ev_mode_valid = bool(safe_get(car_state, "evModeValid", False))
+        ev_mode_active = ev_mode_valid and bool(safe_get(car_state, "evModeActive", False))
+        selfdrive_enabled = (
+            self.selfdrive_enabled
+            if self.selfdrive_enabled is not None
+            else bool(self.controls_enabled)
+        )
+        trip_report = self.trip_report_tracker.update(
+            event_t,
+            speed_mps,
+            accel_mps2,
+            steering_angle_deg,
+            selfdrive_enabled,
+            self.wheelbase_m,
+            self.steer_ratio,
+        )
 
         return RouteReplayFrame(
             t=event_t,
@@ -1149,6 +1772,7 @@ class RouteLogParser:
             gear_text=gear_text,
             cruise_gap=cruise_gap,
             lfa_active=self.lfa_active,
+            active_lane_line=self.active_lane_line,
             left_signal=left_signal,
             right_signal=right_signal,
             left_blindspot=left_blindspot,
@@ -1184,8 +1808,13 @@ class RouteLogParser:
             brake=clamp(safe_float(car_state, "brake", 0.0), 0.0, 1.0),
             detected_vehicles=detected_vehicles,
             radar_points=radar_points,
+            corner_radar_supported=self.corner_radar_active_for_display(),
             tpms=tpms,
+            ev_mode_valid=ev_mode_valid,
+            ev_mode_active=ev_mode_active,
             display_speed_kph=display_speed_kph,
+            traffic_state=self.traffic_state,
+            driving_mode=self.driving_mode,
             planned_speed_kph=self.planned_speed_kph,
             planned_accel_mps2=self.planned_accel_mps2,
             planned_curvature_m_inv=self.model_action_curvature_m_inv,
@@ -1220,7 +1849,14 @@ class RouteLogParser:
             vision_yaw_rate_rps=self.vision_yaw_rate_rps,
             vision_speed_std_mps=self.vision_speed_std_mps,
             vision_yaw_rate_std_rps=self.vision_yaw_rate_std_rps,
+            camera_device_type=self.camera_device_type,
+            camera_sensor=self.camera_sensor,
+            cpu_usage_percent=self.cpu_usage_percent,
+            cpu_temp_c=self.cpu_temp_c,
+            memory_used_percent=self.memory_used_percent,
+            disk_used_percent=self.disk_used_percent,
             camera_calibration_euler=self.camera_calibration_euler,
+            wide_camera_from_device_euler=self.wide_camera_from_device_euler,
             road_transform_trans=self.road_transform_trans,
             road_transform_std=self.road_transform_std,
             camera_odometry_valid=self.camera_odometry_valid,
@@ -1242,6 +1878,11 @@ class RouteLogParser:
             lateral_plan_debug_text=self.lateral_plan_debug_text,
             lateral_plan_curvatures=self.lateral_plan_curvatures,
             lateral_plan_curvature_rates=self.lateral_plan_curvature_rates,
+            cutin_debug_text=self.cutin_debug_text,
+            recorded_cutin_active=event_t - self.recorded_cutin_t <= RECORDED_CUTIN_REPLAY_HOLD_S,
+            recorded_cutin_sound=event_t - self.recorded_cutin_sound_t <= RECORDED_CUTIN_REPLAY_HOLD_S,
+            trip_report=trip_report,
+            alert=self.alert,
         )
 
     def _display_speed_kph_from_car_state(self, car_state: Any, fallback_speed_mps: float) -> float:
@@ -1288,6 +1929,9 @@ class RouteLogParser:
         if lane_lines is not None:
             self.model_lane_lines = tuple(model_line_points(lane_lines[index]) for index in range(len(lane_lines)))
         if lane_lines is not None and len(lane_lines) >= 3:
+            self.cutin_lane_xs = tuple(float(value) for value in safe_get(lane_lines[1], "x", ()))
+            self.cutin_left_ys = tuple(float(value) for value in safe_get(lane_lines[1], "y", ()))
+            self.cutin_right_ys = tuple(float(value) for value in safe_get(lane_lines[2], "y", ()))
             left_y = first_list_value(safe_get(lane_lines[1], "y"))
             right_y = first_list_value(safe_get(lane_lines[2], "y"))
             if left_y is not None and right_y is not None and right_y > left_y:
@@ -1320,6 +1964,15 @@ class RouteLogParser:
         if model_path:
             self.model_path = model_path
             self.model_path_source = "modelV2.position"
+        position = safe_get(model, "position")
+        if position is not None:
+            path_xs = tuple(float(value) for value in safe_get(position, "x", ()))
+            path_ys = tuple(float(value) for value in safe_get(position, "y", ()))
+            path_y_stds = tuple(float(value) for value in safe_get(position, "yStd", ()))
+            if len(path_xs) >= 2 and len(path_ys) == len(path_xs):
+                self.cutin_path_xs = path_xs
+                self.cutin_path_ys = path_ys
+                self.cutin_path_y_stds = path_y_stds if len(path_y_stds) == len(path_xs) else ()
 
         action = safe_get(model, "action")
         if action is not None:
@@ -1377,7 +2030,7 @@ class RouteLogParser:
             self.nav_speed_limit_kph = None
             self.nav_speed_limit_t = -999.0
 
-    def _update_longitudinal_plan(self, longitudinal_plan: Any) -> None:
+    def _update_longitudinal_plan(self, longitudinal_plan: Any, valid: bool = True) -> None:
         self.longitudinal_plan_source = enum_text(
             safe_get(longitudinal_plan, "longitudinalPlanSource", self.longitudinal_plan_source or "")
         ) or self.longitudinal_plan_source
@@ -1402,6 +2055,11 @@ class RouteLogParser:
         self.longitudinal_plan_allow_brake = bool(
             safe_get(longitudinal_plan, "allowBrake", self.longitudinal_plan_allow_brake)
         )
+        traffic_state = safe_optional_int(longitudinal_plan, "trafficState")
+        if traffic_state in (0, 1, 2):
+            self.traffic_state = traffic_state
+        driving_mode = safe_optional_int(longitudinal_plan, "myDrivingMode")
+        self.driving_mode = driving_mode if valid and driving_mode in (1, 2, 3, 4) else None
         t_follow = safe_optional_float(longitudinal_plan, "tFollow")
         if t_follow is not None and 0.0 <= t_follow <= 5.0:
             self.longitudinal_t_follow_s = t_follow
@@ -1437,14 +2095,38 @@ class RouteLogParser:
             yaw_std = finite_float(rot_std[2])
             if yaw_std is not None:
                 self.vision_yaw_rate_std_rps = clamp(yaw_std, 0.0, 2.0)
-        self.camera_calibration_euler = three_float_tuple(safe_get(camera_odometry, "wideFromDeviceEuler"))
-        self.road_transform_trans = three_float_tuple(safe_get(camera_odometry, "roadTransformTrans"))
+        wide_from_device_euler = three_float_tuple(safe_get(camera_odometry, "wideFromDeviceEuler"))
+        if wide_from_device_euler is not None and self.wide_camera_from_device_euler is None:
+            self.wide_camera_from_device_euler = wide_from_device_euler
+        # cameraOdometry's road height is a noisy per-frame vision estimate. Use
+        # it only as an initial fallback; liveCalibration supplies the stable
+        # installation height and must not be overwritten every model frame.
+        if self.road_transform_trans is None:
+            self.road_transform_trans = three_float_tuple(safe_get(camera_odometry, "roadTransformTrans"))
         self.road_transform_std = three_float_tuple(safe_get(camera_odometry, "roadTransformTransStd"))
+
+    def _update_live_calibration(self, live_calibration: Any, valid: bool) -> None:
+        if not valid:
+            return
+        rpy_calib = three_float_tuple(safe_get(live_calibration, "rpyCalib"))
+        if rpy_calib is not None:
+            self.camera_calibration_euler = rpy_calib
+        wide_from_device_euler = three_float_tuple(safe_get(live_calibration, "wideFromDeviceEuler"))
+        if wide_from_device_euler is not None:
+            self.wide_camera_from_device_euler = wide_from_device_euler
+        height_values = safe_get(live_calibration, "height")
+        height_m = numeric_tuple(height_values, limit=1, minimum=0.5, maximum=3.0)
+        if height_m:
+            self.road_transform_trans = (0.0, 0.0, height_m[0])
 
     def _update_controls_state(self, controls_state: Any) -> None:
         enabled = safe_get(controls_state, "enabled", None)
         if enabled is not None:
             self.controls_enabled = bool(enabled)
+
+        active_lane_line = safe_get(controls_state, "activeLaneLine", None)
+        if active_lane_line is not None:
+            self.active_lane_line = bool(active_lane_line)
 
         desired_curvature = safe_optional_float(controls_state, "desiredCurvature")
         if desired_curvature is not None and abs(desired_curvature) < 0.05:
@@ -1456,10 +2138,38 @@ class RouteLogParser:
             self.controls_curvature_m_inv = curvature
             self.controls_curvature_source = "controlsState"
 
-    def _update_selfdrive_state(self, selfdrive_state: Any) -> None:
+    def _update_selfdrive_state(self, selfdrive_state: Any, event_t: float) -> None:
         enabled = safe_get(selfdrive_state, "enabled", None)
         if enabled is not None:
             self.selfdrive_enabled = bool(enabled)
+        alert_size = safe_enum_int(
+            safe_get(selfdrive_state, "alertSize", 0),
+            ("none", "small", "mid", "full"),
+        )
+        if alert_size > 0:
+            self.alert = ClusterAlert(
+                text1=str(safe_get(selfdrive_state, "alertText1", "") or ""),
+                text2=str(safe_get(selfdrive_state, "alertText2", "") or ""),
+                size=alert_size,
+                status=safe_enum_int(
+                    safe_get(selfdrive_state, "alertStatus", 0),
+                    ("normal", "userprompt", "critical"),
+                ),
+                alert_type=str(safe_get(selfdrive_state, "alertType", "") or ""),
+            )
+        else:
+            self.alert = None
+        alert_sound = str(safe_get(selfdrive_state, "alertSound", "none") or "none").lower()
+        alert_type = str(safe_get(selfdrive_state, "alertType", "") or "").lower()
+        self.recorded_cutin_sound = bool(
+            self.recorded_cutin_ids
+            and (
+                (alert_sound == "prompt" and alert_type.startswith("audioprompt/"))
+                or (alert_sound == "radarcutin" and alert_type.startswith("radarcutin/"))
+            )
+        )
+        if self.recorded_cutin_sound:
+            self.recorded_cutin_sound_t = event_t
         cruise_gap = self._cruise_gap_from_personality(safe_get(selfdrive_state, "personality"))
         if cruise_gap is not None:
             self.cruise_gap = cruise_gap
@@ -1469,9 +2179,75 @@ class RouteLogParser:
         if lat_active is not None:
             self.lfa_active = bool(lat_active)
 
+    def _update_device_state(self, device_state: Any) -> None:
+        device_type = safe_get(device_state, "deviceType", None)
+        if device_type is not None:
+            self.camera_device_type = str(device_type).strip().lower()
+        cpu_usage = numeric_tuple(
+            safe_get(device_state, "cpuUsagePercent"),
+            limit=64,
+            minimum=0.0,
+            maximum=100.0,
+        )
+        if cpu_usage:
+            self.cpu_usage_percent = sum(cpu_usage) / len(cpu_usage)
+        cpu_temps = numeric_tuple(
+            safe_get(device_state, "cpuTempC"),
+            limit=64,
+            minimum=-50.0,
+            maximum=200.0,
+        )
+        if cpu_temps:
+            self.cpu_temp_c = max(cpu_temps)
+        memory_used_percent = safe_optional_float(device_state, "memoryUsagePercent")
+        if memory_used_percent is not None and 0.0 <= memory_used_percent <= 100.0:
+            self.memory_used_percent = memory_used_percent
+        free_space_percent = safe_optional_float(device_state, "freeSpacePercent")
+        if free_space_percent is not None and 0.0 <= free_space_percent <= 100.0:
+            self.disk_used_percent = 100.0 - free_space_percent
+
+    def _update_road_camera_state(self, camera_state: Any) -> None:
+        sensor = safe_get(camera_state, "sensor", None)
+        if sensor is not None:
+            self.camera_sensor = str(sensor).strip().lower()
+
+    def _update_car_params(self, car_params: Any) -> None:
+        self.car_brand = str(safe_get(car_params, "brand", "") or "").lower()
+        wheelbase_m = safe_optional_float(car_params, "wheelbase")
+        if wheelbase_m is not None and 1.5 <= wheelbase_m <= 5.0:
+            self.wheelbase_m = wheelbase_m
+        steer_ratio = safe_optional_float(car_params, "steerRatio")
+        if steer_ratio is not None and 1.0 <= steer_ratio <= 40.0:
+            self.steer_ratio = steer_ratio
+        ext_flags = safe_optional_int(car_params, "extFlags")
+        if not self.front_radar_only and ext_flags is not None and (ext_flags & CORNER_RADAR_OBJECTS_EXT_FLAGS):
+            self.corner_radar_supported = True
+
+    def _update_live_pose(self, live_pose: Any, _event_t: float) -> None:
+        self._update_cutin_live_pose(live_pose)
+
+    def corner_radar_active_for_display(self) -> bool:
+        return not self.front_radar_only and (self.corner_radar_supported or self.corner_radar_tracks_seen)
+
     def _update_radar_state(self, radar_state: Any, event_t: float) -> None:
         detections: list[DetectedVehicle] = []
-        for label, lead_name in (("TARGET", "leadOne"), ("TARGET2", "leadTwo")):
+        primary_track_ids: set[int] = set()
+        lead_one = safe_get(radar_state, "leadOne")
+        self.lead_one_status = bool(lead_one is not None and safe_get(lead_one, "status", False))
+        self.lead_one_d_rel = safe_float(lead_one, "dRel", 0.0) if lead_one is not None else 0.0
+        self.lead_one_v_rel = safe_float(lead_one, "vRel", 0.0) if lead_one is not None else 0.0
+        self.lead_one_radar = bool(lead_one is not None and safe_get(lead_one, "radar", False))
+        lead_one_track_id = safe_optional_int(lead_one, "radarTrackId") if lead_one is not None else None
+        self.lead_one_track_id = lead_one_track_id if lead_one_track_id is not None else -1
+        recorded_cutin_leads = tuple(safe_get(radar_state, "leadsCutIn", ()) or ())
+        self.recorded_cutin_ids = {
+            track_id
+            for lead in recorded_cutin_leads
+            if bool(safe_get(lead, "status", False))
+            for track_id in [safe_optional_int(lead, "radarTrackId")]
+            if track_id is not None
+        }
+        for label, lead_name in (("L1", "leadOne"), ("L2", "leadTwo")):
             lead = safe_get(radar_state, lead_name)
             if lead is None or not bool(safe_get(lead, "status", False)):
                 continue
@@ -1479,6 +2255,59 @@ class RouteLogParser:
             if not RADAR_MIN_LONGITUDINAL_M <= d_rel <= RADAR_FRONT_MAX_LONGITUDINAL_M:
                 continue
             # openpilot yRel is left-positive; this renderer uses right-positive x.
+            lateral_m = -safe_float(lead, "yRel", 0.0)
+            if radar_position_is_zero(d_rel, lateral_m):
+                continue
+            relative_speed_mps = safe_optional_float(lead, "vRel")
+            lead_speed_mps = safe_optional_float(lead, "vLead")
+            lateral_speed_mps = safe_optional_float(lead, "vLat")
+            if lateral_speed_mps is not None:
+                lateral_speed_mps = -lateral_speed_mps
+            track_id = safe_optional_int(lead, "radarTrackId")
+            if self.front_radar_only and self.car_brand == "hyundai" and radar_track_id_is_corner_object(track_id):
+                continue
+            if track_id is not None:
+                primary_track_ids.add(track_id)
+            cut_in = (
+                self.show_recorded_cutins
+                and lead_name == "leadTwo"
+                and track_id is not None
+                and track_id in self.recorded_cutin_ids
+            )
+            absolute_speed_kph = (
+                lead_speed_mps * 3.6
+                if lead_speed_mps is not None
+                else (
+                    self.current_speed_kph + relative_speed_mps * 3.6
+                    if relative_speed_mps is not None
+                    else None
+                )
+            )
+            detections.append(
+                DetectedVehicle(
+                    label="L2 CUT-IN" if cut_in else label,
+                    longitudinal_m=d_rel,
+                    lateral_m=clamp(lateral_m, -8.0, 8.0),
+                    source="radarState",
+                    relative_speed_mps=relative_speed_mps,
+                    absolute_speed_kph=absolute_speed_kph,
+                    lateral_speed_mps=lateral_speed_mps,
+                    acceleration_mps2=safe_optional_float(lead, "aLeadK"),
+                    cut_in=cut_in,
+                    primary=True,
+                    ttc_s=ttc_from_relative_speed(d_rel, relative_speed_mps),
+                    radar_track_id=track_id,
+                )
+            )
+        for lead in recorded_cutin_leads:
+            if not bool(safe_get(lead, "status", False)):
+                continue
+            d_rel = safe_float(lead, "dRel", 0.0)
+            if not RADAR_MIN_LONGITUDINAL_M <= d_rel <= RADAR_FRONT_MAX_LONGITUDINAL_M:
+                continue
+            track_id = safe_optional_int(lead, "radarTrackId")
+            if track_id is not None and track_id in primary_track_ids:
+                continue
             lateral_m = -safe_float(lead, "yRel", 0.0)
             if radar_position_is_zero(d_rel, lateral_m):
                 continue
@@ -1498,7 +2327,7 @@ class RouteLogParser:
             )
             detections.append(
                 DetectedVehicle(
-                    label=label,
+                    label="CUT-IN",
                     longitudinal_m=d_rel,
                     lateral_m=clamp(lateral_m, -8.0, 8.0),
                     source="radarState",
@@ -1506,48 +2335,63 @@ class RouteLogParser:
                     absolute_speed_kph=absolute_speed_kph,
                     lateral_speed_mps=lateral_speed_mps,
                     acceleration_mps2=safe_optional_float(lead, "aLeadK"),
+                    cut_in=True,
+                    primary=True,
                     ttc_s=ttc_from_relative_speed(d_rel, relative_speed_mps),
+                    radar_track_id=track_id,
                 )
             )
         self.radar_detections = tuple(detections)
         self.radar_detection_t = event_t
+        if not self.recompute_cutins:
+            active_leads = tuple(
+                lead for lead in recorded_cutin_leads
+                if bool(safe_get(lead, "status", False))
+            )
+            if active_leads:
+                current_cutins = tuple(detection for detection in detections if detection.cut_in)
+                if current_cutins:
+                    self.recorded_cutin_detections = current_cutins
+                self.recorded_cutin_t = event_t
+                lead = active_leads[0]
+                track_id = safe_optional_int(lead, "radarTrackId")
+                self.cutin_debug_text = (
+                    f"LOG CUT-IN: YES | id{track_id if track_id is not None else -1} "
+                    f"x {safe_float(lead, 'dRel', 0.0):.1f}m "
+                    f"y {safe_float(lead, 'yRel', 0.0):+.1f}m"
+                )
+            else:
+                held = event_t - self.recorded_cutin_t <= RECORDED_CUTIN_REPLAY_HOLD_S
+                if held and self.recorded_cutin_detections:
+                    held_ids = {detection.radar_track_id for detection in self.recorded_cutin_detections}
+                    self.radar_detections = tuple(
+                        detection for detection in self.radar_detections
+                        if detection.radar_track_id not in held_ids
+                    ) + self.recorded_cutin_detections
+                    self.cutin_debug_text = "LOG CUT-IN: YES | recorded event hold"
+                else:
+                    self.recorded_cutin_detections = ()
+                    self.cutin_debug_text = "LOG CUT-IN: NO"
 
     def _update_can_detections(self, can_messages: Any, event_t: float, source_service: str = "can") -> None:
+        if self.front_radar_only:
+            return
         for can_message in can_messages:
             address = int(safe_get(can_message, "address", -1))
             bus = int(safe_get(can_message, "src", -1))
             if source_service == "can" and bus >= 0x80:
                 continue
             data = bytes(safe_get(can_message, "dat", b""))
-            if (
-                source_service != "sendcan"
-                and CORNER_OBJECT_START_ADDRESS <= address <= CORNER_OBJECT_END_ADDRESS
-                and is_hyundai_a_can_bus(bus)
-                and len(data) == 32
-            ):
-                label = corner_object_radar_point_label(address)
-                point = decode_hyundai_corner_object_radar_point(address, data, self.current_speed_kph)
-                if point is None:
-                    self._prune_corner_object_radar_point(label, event_t)
-                else:
-                    self.corner_object_radar_points[label] = point
-                    self.corner_object_radar_point_t[label] = event_t
-                self.corner_object_radar_t = event_t
-                continue
-            if (
-                source_service != "sendcan"
-                and CORNER_OBJECT_180_START_ADDRESS <= address <= CORNER_OBJECT_180_END_ADDRESS
-                and is_hyundai_a_can_bus(bus)
-                and len(data) == 32
-            ):
-                for point in decode_hyundai_corner_object_180_radar_points(address, data, self.current_speed_kph):
-                    if point.valid is not None and point.valid > 0:
-                        self.corner_object_radar_points[point.label] = point
-                        self.corner_object_radar_point_t[point.label] = event_t
+            if source_service == "can" and bus == RAW_CORNER_RADAR_BUS:
+                for obj in decode_raw_corner_objects(event_t, address, data):
+                    raw_key = (obj.group, obj.slot)
+                    if raw_corner_object_is_valid(obj):
+                        self.raw_corner_objects[raw_key] = obj
+                        self.raw_corner_tracker.update(obj)
+                        self.raw_corner_track_t = event_t
+                        self.corner_radar_tracks_seen = True
                     else:
-                        self._prune_corner_object_radar_point(point.label, event_t)
-                self.corner_object_radar_t = event_t
-                continue
+                        self.raw_corner_objects.pop(raw_key, None)
             if address not in (CCNC_CORNER_RADAR_ADDRESS, ADRV_CORNER_RADAR_ADDRESS):
                 continue
             if source_service == "sendcan" or not is_hyundai_camera_can_bus(bus):
@@ -1567,46 +2411,705 @@ class RouteLogParser:
                 self.ccnc_corner_message_t = event_t
 
     def _update_live_tracks(self, live_tracks: Any, event_t: float) -> None:
+        tracks = tuple(safe_get(live_tracks, "points", ()) or ())
+        if self.reconstruct_corner_live_tracks:
+            tracks = merge_recorded_and_reconstructed_tracks(
+                tracks,
+                self.raw_corner_tracker.live_tracks_at(event_t, self.current_speed_kph / 3.6),
+                raw_corner_only=True,
+            )
+        if self.recompute_cutins:
+            cutin_input = ReconstructedLiveTracks(tracks) if self.reconstruct_corner_live_tracks else live_tracks
+            self._update_offline_cutin(cutin_input, event_t)
         points: dict[str, RadarPoint] = {}
-        tracks = safe_get(live_tracks, "points", ())
-        if tracks is None:
-            tracks = ()
         for index, track in enumerate(tracks):
-            point = live_track_to_radar_point(track, index, self.current_speed_kph)
-            if point is not None:
+            point = live_track_to_radar_point(
+                track,
+                index,
+                self.current_speed_kph,
+                allow_legacy_corner_ids=self.car_brand == "hyundai",
+            )
+            if point is not None and not (self.front_radar_only and point.source == CORNER_OBJECT_SOURCE):
                 points[point.label] = point
+                if point.source == CORNER_OBJECT_SOURCE:
+                    self.corner_radar_tracks_seen = True
         self.live_track_radar_points = points
         self.live_track_radar_t = event_t
 
+    def _update_cutin_live_pose(self, live_pose: Any) -> None:
+        angular_velocity = safe_get(live_pose, "angularVelocityDevice")
+        valid = bool(angular_velocity is not None and safe_get(angular_velocity, "valid", False))
+        inputs_ok = bool(safe_get(live_pose, "inputsOK", False))
+        sensors_ok = bool(safe_get(live_pose, "sensorsOK", False))
+        if not (valid and inputs_ok and sensors_ok):
+            return
+        raw_yaw_rate = clamp(safe_float(angular_velocity, "z", 0.0), -0.35, 0.35)
+        alpha = REPLAY_CUTIN_DT / (0.20 + REPLAY_CUTIN_DT)
+        self.cutin_yaw_rate = (1.0 - alpha) * self.cutin_yaw_rate + alpha * raw_yaw_rate
+
+    def _update_offline_cutin(self, live_tracks: Any, event_t: float) -> None:
+        if self.front_radar_only and self.cutin_radar_source != ROUTE_CUTIN_RADAR_SOURCE_FRONT:
+            self.cutin_tracks.clear()
+            self.cutin_detections = ()
+            self.cutin_output_hold_count = 0
+            self.cutin_output_hold_reference = None
+            self.cutin_debug_text = "NEW CUTIN: disabled | front radar only"
+            return
+        if not self._cutin_lane_geometry_available():
+            self.cutin_detections = ()
+            self.cutin_output_hold_count = 0
+            self.cutin_output_hold_reference = None
+            self.cutin_debug_text = (
+                f"NEW CUTIN {self.cutin_radar_source.upper()} S{self.cutin_sensitivity:.0f}: waiting for laneLines"
+            )
+            return
+
+        points = tuple(safe_get(live_tracks, "points", ()) or ())
+        if self.cutin_radar_source == ROUTE_CUTIN_RADAR_SOURCE_CORNER:
+            current_side_matches = self._side_corner_front_matches(points, event_t)
+            available_front_ids = {
+                int(safe_get(point, "trackId", -1))
+                for point in points
+                if bool(safe_get(point, "measured", False)) and not self._is_corner_live_track(point)
+            }
+            (
+                self.cutin_side_corner_front_matches,
+                self.cutin_side_corner_front_match_misses,
+            ) = hold_side_corner_front_matches(
+                current_side_matches,
+                self.cutin_side_corner_front_matches,
+                self.cutin_side_corner_front_match_misses,
+                available_front_ids,
+            )
+        else:
+            self.cutin_side_corner_front_matches = {}
+            self.cutin_side_corner_front_match_misses = {}
+        point_by_id = self._cutin_points_by_stable_id(points, event_t)
+        previous_positions = {
+            track_id: (track.d_rel, track.y_rel, track.v_rel)
+            for track_id, track in self.cutin_tracks.items()
+            if track.measured
+        }
+        current_positions = {
+            track_id: (
+                safe_float(point, "dRel", 0.0),
+                safe_float(point, "yRel", 0.0),
+                safe_float(point, "vRel", 0.0),
+            )
+            for track_id, point in point_by_id.items()
+            if self._is_cutin_live_track(point) and bool(safe_get(point, "measured", False))
+        }
+        associations = associate_cutin_tracks(previous_positions, current_positions)
+        previous_tracks = {
+            track_id: ReplayCutinTrack(
+                track_id=track.track_id,
+                cnt=track.cnt,
+                cut_in_count=track.cut_in_count,
+                cut_in_start_abs_dpath=track.cut_in_start_abs_dpath,
+                measured=track.measured,
+                d_rel=track.d_rel,
+                y_rel=track.y_rel,
+                v_rel=track.v_rel,
+                v_lead=track.v_lead,
+                yv_rel=track.yv_rel,
+                d_path=track.d_path,
+                d_path_future=track.d_path_future,
+                in_lane_prob=track.in_lane_prob,
+                in_lane_prob_future=track.in_lane_prob_future,
+                d_path_rate=track.d_path_rate,
+                inward_speed=track.inward_speed,
+                path_d_path=track.path_d_path,
+                path_d_path_future=track.path_d_path_future,
+                path_in_lane_prob=track.path_in_lane_prob,
+                path_in_lane_prob_future=track.path_in_lane_prob_future,
+                path_d_path_rate=track.path_d_path_rate,
+                path_inward_speed=track.path_inward_speed,
+                path_y_std=track.path_y_std,
+                radar_inward_speed=track.radar_inward_speed,
+                side_corner_confirmed_count=track.side_corner_confirmed_count,
+                position_history=track.position_history.copy(),
+                path_position_history=track.path_position_history.copy(),
+            )
+            for track_id, track in self.cutin_tracks.items()
+        }
+        valid_ids = {
+            track_id for track_id, point in point_by_id.items()
+            if self._is_cutin_live_track(point)
+        }
+        for track_id in tuple(self.cutin_tracks):
+            if track_id not in valid_ids:
+                self.cutin_tracks.pop(track_id, None)
+
+        front_points = [
+            point for track_id, point in point_by_id.items()
+            if not self._is_corner_live_track(point) and bool(safe_get(point, "measured", False))
+        ]
+        diagnostics: list[ReplayCutinTrack] = []
+        detections: list[DetectedVehicle] = []
+        lane_line_available = self.left_lane_prob > 0.5 and self.right_lane_prob > 0.5
+
+        for track_id, point in point_by_id.items():
+            if not self._is_cutin_live_track(point):
+                continue
+            track = self.cutin_tracks.setdefault(track_id, ReplayCutinTrack(track_id))
+            source_id = associations.get(track_id)
+            if source_id is not None and source_id != track_id:
+                source = previous_tracks[source_id]
+                track.measured = source.measured
+                track.d_rel = source.d_rel
+                track.y_rel = source.y_rel
+                track.v_rel = source.v_rel
+                track.v_lead = source.v_lead
+                track.cnt = source.cnt
+                track.cut_in_count = source.cut_in_count
+                track.cut_in_start_abs_dpath = source.cut_in_start_abs_dpath
+                track.position_history.clear()
+                track.position_history.extend(source.position_history)
+                track.path_d_path = source.path_d_path
+                track.path_d_path_future = source.path_d_path_future
+                track.path_in_lane_prob = source.path_in_lane_prob
+                track.path_in_lane_prob_future = source.path_in_lane_prob_future
+                track.path_d_path_rate = source.path_d_path_rate
+                track.path_inward_speed = source.path_inward_speed
+                track.path_y_std = source.path_y_std
+                track.radar_inward_speed = source.radar_inward_speed
+                track.side_corner_confirmed_count = source.side_corner_confirmed_count
+                track.path_position_history.clear()
+                track.path_position_history.extend(source.path_position_history)
+            prev_measured = track.measured
+            prev_d_rel = track.d_rel
+            prev_y_rel = track.y_rel
+            prev_v_lead = track.v_lead
+            track.measured = bool(safe_get(point, "measured", False))
+            track.d_rel = safe_float(point, "dRel", 0.0)
+            track.y_rel = safe_float(point, "yRel", 0.0)
+            track.v_rel = safe_float(point, "vRel", 0.0)
+            track.v_lead = safe_float(point, "vLead", 0.0)
+            track.yv_rel = safe_float(point, "yvRel", 0.0)
+            discontinuous = is_cutin_track_discontinuous(
+                prev_measured,
+                prev_d_rel,
+                prev_y_rel,
+                prev_v_lead,
+                track.d_rel,
+                track.y_rel,
+                track.v_lead,
+            )
+            if not track.measured:
+                track.cnt = 0
+                track.cut_in_count = 0
+                track.cut_in_start_abs_dpath = 0.0
+                track.side_corner_confirmed_count = 0
+                track.path_position_history.clear()
+            elif discontinuous:
+                track.cut_in_count = 0
+                track.cut_in_start_abs_dpath = 0.0
+                track.side_corner_confirmed_count = 0
+                track.path_position_history.clear()
+
+            side_corner_confirmed = track_id in self.cutin_side_corner_front_matches
+            if track.measured and side_corner_confirmed:
+                track.side_corner_confirmed_count += 1
+            elif not side_corner_confirmed:
+                track.side_corner_confirmed_count = 0
+
+            v_corr = clamp(self.cutin_yaw_rate * track.y_rel * REPLAY_CUTIN_YAW_GAIN, -0.6, 0.6)
+            yv_corr = clamp(
+                -self.cutin_yaw_rate * clamp(track.d_rel, 0.0, 50.0) * REPLAY_CUTIN_YAW_GAIN,
+                -1.5,
+                1.5,
+            )
+            future_d_rel = track.d_rel + (track.v_rel + v_corr) * self.cutin_tuning["horizon_s"]
+            future_y_rel = track.y_rel + (track.yv_rel + yv_corr) * self.cutin_tuning["horizon_s"]
+            track.d_path, track.in_lane_prob = self._cutin_dpath(track.d_rel, track.y_rel)
+            track.d_path_future, track.in_lane_prob_future = self._cutin_dpath(future_d_rel, future_y_rel)
+            track.radar_inward_speed = max(
+                0.0, -math.copysign(1.0, track.d_path) * (track.yv_rel + yv_corr)
+            )
+            track.d_path_rate, track.inward_speed = update_lane_relative_motion(
+                track.position_history,
+                track.d_rel,
+                track.y_rel,
+                self.cutin_lane_xs,
+                self.cutin_left_ys,
+                self.cutin_right_ys,
+                track.measured,
+                discontinuous,
+                REPLAY_CUTIN_DT,
+            )
+            lane_half_width = self._cutin_lane_half_width(track.d_rel)
+            track.d_path_future, track.in_lane_prob_future = combine_cutin_future_projection(
+                track.d_path,
+                track.d_path_rate,
+                self.cutin_tuning["horizon_s"],
+                lane_half_width,
+                track.d_path_future,
+                track.in_lane_prob_future,
+                track.radar_inward_speed,
+            )
+            track.inward_speed = effective_cutin_inward_speed(
+                track.d_rel,
+                self.current_speed_kph / 3.6,
+                track.inward_speed,
+                track.d_path,
+                track.d_path_future,
+                self.cutin_tuning["horizon_s"],
+            )
+            (
+                track.path_d_path,
+                track.path_in_lane_prob,
+                track.path_y_std,
+            ) = self._cutin_path_dpath(track.d_rel, track.y_rel)
+            (
+                track.path_d_path_future,
+                track.path_in_lane_prob_future,
+                _,
+            ) = self._cutin_path_dpath(future_d_rel, future_y_rel)
+            if self._cutin_path_geometry_available():
+                track.path_d_path_rate, track.path_inward_speed = update_lane_relative_motion(
+                    track.path_position_history,
+                    track.d_rel,
+                    track.y_rel,
+                    self.cutin_path_xs,
+                    self.cutin_path_ys,
+                    self.cutin_path_ys,
+                    track.measured,
+                    discontinuous,
+                    REPLAY_CUTIN_DT,
+                )
+                track.path_d_path_future, track.path_in_lane_prob_future = combine_cutin_future_projection(
+                    track.path_d_path,
+                    track.path_d_path_rate,
+                    self.cutin_tuning["horizon_s"],
+                    lane_half_width,
+                    track.path_d_path_future,
+                    track.path_in_lane_prob_future,
+                    max(0.0, -math.copysign(1.0, track.path_d_path) * (track.yv_rel + yv_corr)),
+                )
+                track.path_inward_speed = effective_cutin_inward_speed(
+                    track.d_rel,
+                    self.current_speed_kph / 3.6,
+                    track.path_inward_speed,
+                    track.path_d_path,
+                    track.path_d_path_future,
+                    self.cutin_tuning["horizon_s"],
+                )
+            else:
+                track.path_position_history.clear()
+                track.path_d_path_rate = 0.0
+                track.path_inward_speed = 0.0
+            if side_corner_confirmed:
+                track.radar_inward_speed = max(
+                    0.0, -math.copysign(1.0, track.path_d_path) * (track.yv_rel + yv_corr)
+                )
+            track.cnt += 1
+
+            matching_front = any(
+                abs(track.d_rel - safe_float(front, "dRel", 999.0)) < 3.0
+                and abs(track.v_rel - safe_float(front, "vRel", 999.0)) < 2.0
+                for front in front_points
+            )
+            closer = not self.lead_one_status or track.d_rel + 1.0 < self.lead_one_d_rel
+            matches_lead_one = (
+                matching_front
+                and self.lead_one_status
+                and self.lead_one_radar
+                and not self._track_id_is_corner_live(point_by_id, self.lead_one_track_id)
+                and abs(track.d_rel - self.lead_one_d_rel) < 3.0
+                and abs(track.v_rel - self.lead_one_v_rel) < 2.0
+            )
+            closer_or_matching = closer or matches_lead_one
+            special_near_cutin = (
+                side_corner_confirmed
+                and is_corner_confirmed_near_cutin(
+                    confirmed_frames=track.side_corner_confirmed_count,
+                    d_rel=track.d_rel,
+                    v_lead=track.v_lead,
+                    d_path=track.path_d_path,
+                    d_path_future=track.path_d_path_future,
+                    inward_speed=track.path_inward_speed,
+                    radar_inward_speed=track.radar_inward_speed,
+                    path_y_std=track.path_y_std,
+                )
+            )
+            if side_corner_confirmed:
+                entry_rejection_reason = None if special_near_cutin else "side-corner"
+            else:
+                entry_rejection_reason = cutin_entry_rejection_reason(
+                    enabled=self.cutin_sensitivity > 0.0,
+                    lane_line_available=lane_line_available,
+                    corner_track=True,
+                    closer_or_matching=closer_or_matching,
+                    track_count=track.cnt,
+                    min_track_age=cutin_min_track_age_frames(
+                        self.cutin_min_track_age,
+                        track.d_rel,
+                        track.inward_speed,
+                        self.current_speed_kph / 3.6,
+                    ),
+                    d_rel=track.d_rel,
+                    v_lead=track.v_lead,
+                    d_path=track.d_path,
+                    d_path_future=track.d_path_future,
+                    in_lane_prob=track.in_lane_prob,
+                    in_lane_prob_future=track.in_lane_prob_future,
+                    inward_speed=track.inward_speed,
+                    tuning=self.cutin_tuning,
+                    fast_lane_entry=is_fast_cutin_entry(
+                        track.d_rel,
+                        self.current_speed_kph / 3.6,
+                        track.d_path,
+                        lane_half_width,
+                        track.inward_speed,
+                        track.radar_inward_speed,
+                        v_rel=track.v_rel,
+                    ),
+                    radar_inward_speed=track.radar_inward_speed,
+                    max_d_rel=(
+                        CORNER_CUTIN_MAX_DREL_M if self._is_corner_live_track(point) else None
+                    ),
+                )
+            track.rejection_reason = entry_rejection_reason or "enter"
+            entering = track.rejection_reason == "enter"
+            moving_away = abs(track.d_path_future) - abs(track.d_path)
+            keep = (
+                track.cut_in_count > 0
+                and closer_or_matching
+                and 0.8 < track.d_rel < 55.0
+                and track.v_lead > 2.0
+                and moving_away <= REPLAY_CUTIN_KEEP_MAX_MOVING_AWAY
+                and (
+                    track.in_lane_prob_future > REPLAY_CUTIN_KEEP_FUTURE_IN_LANE_PROB
+                    or abs(track.d_path_future) < REPLAY_CUTIN_KEEP_MAX_DPATH_FUTURE
+                )
+            )
+            if side_corner_confirmed and track.cut_in_count > 0:
+                moving_away_path = abs(track.path_d_path_future) - abs(track.path_d_path)
+                keep = (
+                    track.side_corner_confirmed_count > 0
+                    and 0.8 < track.d_rel < 8.0
+                    and track.v_lead > 0.0
+                    and track.path_y_std <= 0.8
+                    and moving_away_path <= REPLAY_CUTIN_KEEP_MAX_MOVING_AWAY
+                    and (
+                        track.path_in_lane_prob_future > REPLAY_CUTIN_KEEP_FUTURE_IN_LANE_PROB
+                        or abs(track.path_d_path_future) < REPLAY_CUTIN_KEEP_MAX_DPATH_FUTURE
+                    )
+                )
+            if (self.cutin_radar_source == ROUTE_CUTIN_RADAR_SOURCE_FRONT or side_corner_confirmed) and keep:
+                entering = True
+                if track.rejection_reason != "enter":
+                    track.rejection_reason = "continue"
+            confirmation_d_path = track.path_d_path if side_corner_confirmed else track.d_path
+            confirmation_inward_speed = track.path_inward_speed if side_corner_confirmed else track.inward_speed
+            confirm_frames = cutin_confirmation_frames(
+                self.cutin_confirm_frames,
+                track.d_rel,
+                confirmation_inward_speed,
+                self.current_speed_kph / 3.6,
+            )
+            track.cut_in_count, track.cut_in_start_abs_dpath = update_cutin_confirmation(
+                track.cut_in_count,
+                track.cut_in_start_abs_dpath,
+                confirmation_d_path,
+                track.d_rel,
+                entering,
+                keep,
+                confirm_frames,
+                REPLAY_CUTIN_STICKY_FRAMES,
+                self.cutin_tuning["enter_min_progress"],
+                self.current_speed_kph / 3.6,
+            )
+
+            if track.measured:
+                diagnostics.append(track)
+            if track.cut_in_count >= confirm_frames:
+                detections.append(
+                    DetectedVehicle(
+                        label="NEW CUT-IN",
+                        longitudinal_m=track.d_rel,
+                        lateral_m=clamp(-track.y_rel, -8.0, 8.0),
+                        source="cutinReplay",
+                        relative_speed_mps=track.v_rel,
+                        absolute_speed_kph=track.v_lead * 3.6,
+                        lateral_speed_mps=-track.yv_rel,
+                        cut_in=True,
+                        primary=True,
+                        radar_track_id=track.track_id,
+                    )
+                )
+
+        if detections:
+            nearest = min(detections, key=lambda detection: detection.longitudinal_m)
+            self.cutin_output_hold_reference = (
+                nearest.longitudinal_m,
+                -nearest.lateral_m,
+                nearest.relative_speed_mps or 0.0,
+            )
+            self.cutin_output_hold_count = REPLAY_CUTIN_OUTPUT_HOLD_FRAMES
+        elif self.cutin_output_hold_count > 0 and self.cutin_output_hold_reference is not None:
+            d_rel, y_rel, v_rel = self.cutin_output_hold_reference
+            matches = [
+                track for track in diagnostics
+                if abs(track.d_rel - d_rel) <= REPLAY_CUTIN_OUTPUT_HOLD_DREL_M
+                and abs(track.y_rel - y_rel) <= REPLAY_CUTIN_OUTPUT_HOLD_YREL_M
+                and abs(track.v_rel - v_rel) <= REPLAY_CUTIN_OUTPUT_HOLD_VREL_MPS
+            ]
+            if matches:
+                track = min(
+                    matches,
+                    key=lambda candidate: (
+                        abs(candidate.d_rel - d_rel)
+                        + abs(candidate.y_rel - y_rel)
+                        + 0.5 * abs(candidate.v_rel - v_rel)
+                    ),
+                )
+                detections.append(
+                    DetectedVehicle(
+                        label="NEW CUT-IN",
+                        longitudinal_m=track.d_rel,
+                        lateral_m=clamp(-track.y_rel, -8.0, 8.0),
+                        source="cutinReplayHold",
+                        relative_speed_mps=track.v_rel,
+                        absolute_speed_kph=track.v_lead * 3.6,
+                        lateral_speed_mps=-track.yv_rel,
+                        cut_in=True,
+                        primary=True,
+                        radar_track_id=track.track_id,
+                    )
+                )
+                self.cutin_output_hold_reference = (track.d_rel, track.y_rel, track.v_rel)
+                self.cutin_output_hold_count -= 1
+                if self.cutin_output_hold_count == 0:
+                    self.cutin_output_hold_reference = None
+            else:
+                self.cutin_output_hold_count = 0
+                self.cutin_output_hold_reference = None
+
+        self.cutin_detections = tuple(detections)
+        self.cutin_detection_t = event_t
+        self.cutin_debug_text = self._cutin_debug_summary(diagnostics, detections)
+
+    def _is_corner_live_track(self, point: Any) -> bool:
+        source = safe_get(point, "radarSource", "frontRadar")
+        if is_corner_radar_source(source):
+            return True
+        track_id = safe_optional_int(point, "trackId")
+        return str(source) == "frontRadar" and self.car_brand == "hyundai" and radar_track_id_is_corner_object(track_id)
+
+    def _side_corner_front_matches(self, points: tuple[Any, ...], event_t: float) -> dict[int, int]:
+        corner_tracks: dict[int, tuple[float, float, float]] = {}
+        for obj in self.raw_corner_objects.values():
+            if not 0.0 <= event_t - obj.t <= REPLAY_CUTIN_RAW_OBJECT_MAX_AGE_S:
+                continue
+            if not raw_corner_object_is_valid(obj):
+                continue
+            corner_tracks[self._stable_cutin_corner_track_id(obj)] = (obj.x, obj.y, obj.vx)
+
+        front_tracks = {
+            int(safe_get(point, "trackId", -1)): (
+                safe_float(point, "dRel", 0.0),
+                safe_float(point, "yRel", 0.0),
+                safe_float(point, "vRel", 0.0),
+            )
+            for point in points
+            if bool(safe_get(point, "measured", False))
+            and not self._is_corner_live_track(point)
+            and str(safe_get(point, "radarSource", "frontRadar")) != "scc"
+            and not (self.car_brand == "hyundai" and safe_optional_int(point, "trackId") == 0)
+        }
+        return match_side_corner_to_front_tracks(corner_tracks, front_tracks)
+
+    def _cutin_points_by_stable_id(self, points: tuple[Any, ...], event_t: float) -> dict[int, Any]:
+        if self.cutin_radar_source != ROUTE_CUTIN_RADAR_SOURCE_CORNER:
+            return {int(safe_get(point, "trackId", -1)): point for point in points}
+
+        point_by_id: dict[int, Any] = {}
+        for point in points:
+            track_id = int(safe_get(point, "trackId", -1))
+            obj = self._raw_corner_object_for_live_track(point, event_t)
+            if obj is not None:
+                track_id = self._stable_cutin_corner_track_id(obj)
+            point_by_id[track_id] = point
+        return point_by_id
+
+    def _raw_corner_object_for_live_track(self, point: Any, event_t: float) -> RawCornerObject | None:
+        track_id = safe_optional_int(point, "trackId")
+        if track_id is None:
+            return None
+        if CORNER_OBJECT_180_TRACK_ID_OFFSET <= track_id < CORNER_OBJECT_180_TRACK_ID_OFFSET + CORNER_OBJECT_180_TRACK_COUNT:
+            raw_key = ("180", track_id - CORNER_OBJECT_180_TRACK_ID_OFFSET)
+        elif CORNER_OBJECT_TRACK_ID_OFFSET <= track_id < CORNER_OBJECT_TRACK_ID_OFFSET + CORNER_OBJECT_TRACK_COUNT:
+            raw_key = ("235", track_id - CORNER_OBJECT_TRACK_ID_OFFSET)
+        else:
+            return None
+
+        obj = self.raw_corner_objects.get(raw_key)
+        if obj is None or not 0.0 <= event_t - obj.t <= REPLAY_CUTIN_RAW_OBJECT_MAX_AGE_S:
+            return None
+        if (abs(safe_float(point, "dRel", 0.0) - obj.x) > REPLAY_CUTIN_RAW_OBJECT_MAX_DREL_M
+                or abs(safe_float(point, "yRel", 0.0) - obj.y) > REPLAY_CUTIN_RAW_OBJECT_MAX_YREL_M
+                or abs(safe_float(point, "vRel", 0.0) - obj.vx) > REPLAY_CUTIN_RAW_OBJECT_MAX_VREL_MPS):
+            return None
+        return obj
+
+    def _stable_cutin_corner_track_id(self, obj: RawCornerObject) -> int:
+        key = (obj.group, obj.object_id)
+        previous = self.cutin_corner_object_ids.get(key)
+        if previous is None or obj.age < previous[1]:
+            track_id = self.next_cutin_corner_track_id
+            self.next_cutin_corner_track_id += 1
+        else:
+            track_id = previous[0]
+        self.cutin_corner_object_ids[key] = (track_id, obj.age)
+        return track_id
+
+    def _is_front_cutin_track(self, point: Any) -> bool:
+        if self._is_corner_live_track(point):
+            return False
+        source = str(safe_get(point, "radarSource", "frontRadar"))
+        track_id = safe_optional_int(point, "trackId")
+        if source == "scc" or (self.car_brand == "hyundai" and track_id == 0):
+            return False
+        d_rel = safe_float(point, "dRel", 0.0)
+        y_rel = safe_float(point, "yRel", 0.0)
+        return (
+            FRONT_CUTIN_MIN_DREL_M <= d_rel <= min(FRONT_CUTIN_MAX_DREL_M, self.cutin_tuning["enter_max_x"])
+            and abs(y_rel) <= FRONT_CUTIN_MAX_ABS_YREL_M
+        )
+
+    def _is_cutin_live_track(self, point: Any) -> bool:
+        if self.cutin_radar_source == ROUTE_CUTIN_RADAR_SOURCE_FRONT:
+            return self._is_front_cutin_track(point)
+        track_id = safe_optional_int(point, "trackId")
+        return self._is_corner_live_track(point) or (
+            track_id is not None and track_id in self.cutin_side_corner_front_matches
+        )
+
+    def _track_id_is_corner_live(self, points: dict[int, Any], track_id: int) -> bool:
+        point = points.get(track_id)
+        if point is None:
+            point = next((candidate for candidate in points.values() if safe_optional_int(candidate, "trackId") == track_id), None)
+        return point is not None and self._is_corner_live_track(point)
+
+    def _cutin_lane_geometry_available(self) -> bool:
+        size = len(self.cutin_lane_xs)
+        return size >= 2 and len(self.cutin_left_ys) == size and len(self.cutin_right_ys) == size
+
+    def _cutin_dpath(self, d_rel: float, y_rel: float) -> tuple[float, float]:
+        center_y = (
+            np.interp(d_rel, self.cutin_lane_xs, self.cutin_left_ys)
+            + np.interp(d_rel, self.cutin_lane_xs, self.cutin_right_ys)
+        ) / 2.0
+        left_y = np.interp(d_rel, self.cutin_lane_xs, self.cutin_left_ys)
+        right_y = np.interp(d_rel, self.cutin_lane_xs, self.cutin_right_ys)
+        lane_half_width = max(0.1, abs(right_y - left_y) / 2.0)
+        d_path = float(y_rel + center_y)
+        return d_path, max(0.0, 1.0 - abs(d_path) / lane_half_width)
+
+    def _cutin_lane_half_width(self, d_rel: float) -> float:
+        left_y = np.interp(d_rel, self.cutin_lane_xs, self.cutin_left_ys)
+        right_y = np.interp(d_rel, self.cutin_lane_xs, self.cutin_right_ys)
+        return max(0.1, abs(right_y - left_y) / 2.0)
+
+    def _cutin_path_geometry_available(self) -> bool:
+        return (
+            len(self.cutin_path_xs) >= 2
+            and len(self.cutin_path_ys) == len(self.cutin_path_xs)
+        )
+
+    def _cutin_path_dpath(self, d_rel: float, y_rel: float) -> tuple[float, float, float]:
+        if not self._cutin_path_geometry_available():
+            d_path, in_lane_prob = self._cutin_dpath(d_rel, y_rel)
+            return d_path, in_lane_prob, float("inf")
+        path_y = float(np.interp(d_rel, self.cutin_path_xs, self.cutin_path_ys))
+        d_path = float(y_rel + path_y)
+        lane_half_width = self._cutin_lane_half_width(d_rel)
+        in_lane_prob = max(0.0, 1.0 - abs(d_path) / lane_half_width)
+        path_y_std = (
+            float(np.interp(d_rel, self.cutin_path_xs, self.cutin_path_y_stds))
+            if len(self.cutin_path_y_stds) == len(self.cutin_path_xs)
+            else float("inf")
+        )
+        return d_path, in_lane_prob, path_y_std
+
+    def _cutin_debug_summary(
+        self,
+        diagnostics: list[ReplayCutinTrack],
+        detections: list[DetectedVehicle],
+    ) -> str:
+        source = self.cutin_radar_source.upper()
+        prefix = f"NEW CUTIN {source} S{self.cutin_sensitivity:.0f}: {'YES' if detections else 'NO'}"
+        if not diagnostics:
+            return prefix + f" | no {self.cutin_radar_source} tracks"
+        reason_priority = {
+            "enter": 0,
+            "continue": 1,
+            "future-lane": 1,
+            "prob-gain": 2,
+            "center-gain": 3,
+            "lane-motion": 4,
+            "track-age": 5,
+            "already-center": 6,
+            "behind-lead": 7,
+            "range-speed": 8,
+        }
+        track = min(
+            diagnostics,
+            key=lambda item: (
+                -item.cut_in_count,
+                reason_priority.get(item.rejection_reason, 9),
+                -item.inward_speed,
+                item.d_rel,
+            ),
+        )
+        threshold = self.cutin_tuning["enter_min_inward_speed"]
+        confirm_frames = cutin_confirmation_frames(
+            self.cutin_confirm_frames,
+            track.d_rel,
+            track.inward_speed,
+            self.current_speed_kph / 3.6,
+        )
+        reason = track.rejection_reason
+        if reason in ("enter", "continue") and track.cut_in_count < confirm_frames:
+            reason = f"confirm {track.cut_in_count}/{confirm_frames}"
+        return (
+            f"{prefix} | id{track.track_id} x {track.d_rel:.1f}m dP {track.d_path:+.2f}m "
+            f"in {track.inward_speed:.2f}/{threshold:.2f}mps {reason}"
+        )
+
     def _radar_points_from_current_state(self, event_t: float) -> tuple[RadarPoint, ...]:
-        if event_t - self.corner_object_radar_t < RADAR_POINT_STALE_S:
-            self._prune_stale_corner_object_radar_points(event_t)
-            points = sorted_radar_points(self.corner_object_radar_points.values())
-            if points:
-                return points
-        if event_t - self.live_track_radar_t < RADAR_POINT_STALE_S:
+        if self.corner_source == ROUTE_CORNER_SOURCE_STABLE:
+            stable_corner_points = self.raw_corner_tracker.points_at(event_t, self.current_speed_kph)
+            if stable_corner_points:
+                return stable_corner_points
+        elif self.corner_source == ROUTE_CORNER_SOURCE_RAW:
+            raw_corner_points = self._raw_corner_points_from_current_state(event_t)
+            if raw_corner_points:
+                return raw_corner_points
+
+        live_tracks_fresh = event_t - self.live_track_radar_t < RADAR_POINT_STALE_S
+        if live_tracks_fresh:
             corner_points = sorted_radar_points(
                 point for point in self.live_track_radar_points.values() if point.source == CORNER_OBJECT_SOURCE
             )
             if corner_points:
                 return corner_points
+
+        if live_tracks_fresh:
+            if self.corner_radar_active_for_display():
+                return ()
             return sorted_radar_points(self.live_track_radar_points.values())
         return ()
 
-    def _prune_corner_object_radar_point(self, label: str, event_t: float) -> None:
-        if event_t - self.corner_object_radar_point_t.get(label, -999.0) >= RADAR_POINT_STALE_S:
-            self.corner_object_radar_points.pop(label, None)
-            self.corner_object_radar_point_t.pop(label, None)
-
-    def _prune_stale_corner_object_radar_points(self, event_t: float) -> None:
-        stale_labels = [
-            label
-            for label, point_t in self.corner_object_radar_point_t.items()
-            if event_t - point_t >= RADAR_POINT_STALE_S
-        ]
-        for label in stale_labels:
-            self.corner_object_radar_points.pop(label, None)
-            self.corner_object_radar_point_t.pop(label, None)
+    def _raw_corner_points_from_current_state(self, event_t: float) -> tuple[RadarPoint, ...]:
+        points: list[RadarPoint] = []
+        for key, obj in tuple(self.raw_corner_objects.items()):
+            if event_t - obj.t > RAW_CORNER_TRACK_STALE_S:
+                self.raw_corner_objects.pop(key, None)
+                continue
+            points.append(raw_corner_object_to_radar_point(obj, self.current_speed_kph))
+        return sorted_radar_points(points)
 
     def _detected_vehicles_from_current_state(
         self,
@@ -1620,8 +3123,10 @@ class RouteLogParser:
         if event_t - self.model_detection_t < 0.8:
             detections.extend(self.model_detections)
 
-        car_state_detections = car_state_corner_detections(car_state)
+        car_state_detections = () if self.front_radar_only else car_state_corner_detections(car_state)
         car_state_corner_labels = {vehicle.label for vehicle in car_state_detections}
+        left_blindspot = bool(safe_get(car_state, "leftBlindspot", False))
+        right_blindspot = bool(safe_get(car_state, "rightBlindspot", False))
         for vehicle in car_state_detections:
             if vehicle_is_blocked_by_near_road_edge(vehicle, lane_values):
                 continue
@@ -1633,13 +3138,17 @@ class RouteLogParser:
             if not has_nearby_vehicle(detections, vehicle, longitudinal_tolerance=3.0, lateral_tolerance=1.1):
                 detections.append(vehicle)
 
-        corner_detections = self._corner_detections_for_current_state(
+        corner_detections = None if self.front_radar_only else self._corner_detections_for_current_state(
             event_t,
             lane_change,
             lane_change_phase,
         )
         if corner_detections is not None:
             for vehicle in corner_detections:
+                if vehicle.label == "LR" and not left_blindspot:
+                    continue
+                if vehicle.label == "RR" and not right_blindspot:
+                    continue
                 if vehicle.label in car_state_corner_labels:
                     continue
                 if vehicle_is_blocked_by_near_road_edge(vehicle, lane_values):
@@ -1654,6 +3163,9 @@ class RouteLogParser:
 
         if event_t - self.radar_detection_t < 0.8:
             for vehicle in self.radar_detections:
+                if vehicle.source == "radarState" and vehicle.cut_in:
+                    detections.append(vehicle)
+                    continue
                 if vehicle_is_blocked_by_near_road_edge(vehicle, lane_values):
                     continue
                 if (
@@ -2237,6 +3749,7 @@ def frame_to_state(frame: RouteReplayFrame) -> ClusterUiState:
         gear_text=frame.gear_text,
         cruise_gap=frame.cruise_gap,
         lfa_active=frame.lfa_active,
+        active_lane_line=frame.active_lane_line,
         left_signal=frame.left_signal,
         right_signal=frame.right_signal,
         left_blindspot=frame.left_blindspot,
@@ -2268,7 +3781,10 @@ def frame_to_state(frame: RouteReplayFrame) -> ClusterUiState:
         model_path=frame.model_path,
         detected_vehicles=frame.detected_vehicles,
         radar_points=frame.radar_points,
+        corner_radar_supported=frame.corner_radar_supported,
         tpms=frame.tpms,
+        ev_mode_valid=frame.ev_mode_valid,
+        ev_mode_active=frame.ev_mode_valid and frame.ev_mode_active,
         planned_speed_kph=frame.planned_speed_kph,
         planned_accel_mps2=frame.planned_accel_mps2,
         planned_curvature_m_inv=frame.planned_curvature_m_inv,
@@ -2303,7 +3819,10 @@ def frame_to_state(frame: RouteReplayFrame) -> ClusterUiState:
         vision_yaw_rate_rps=frame.vision_yaw_rate_rps,
         vision_speed_std_mps=frame.vision_speed_std_mps,
         vision_yaw_rate_std_rps=frame.vision_yaw_rate_std_rps,
+        camera_device_type=frame.camera_device_type,
+        camera_sensor=frame.camera_sensor,
         camera_calibration_euler=frame.camera_calibration_euler,
+        wide_camera_from_device_euler=frame.wide_camera_from_device_euler,
         road_transform_trans=frame.road_transform_trans,
         road_transform_std=frame.road_transform_std,
         camera_odometry_valid=frame.camera_odometry_valid,
@@ -2326,6 +3845,16 @@ def frame_to_state(frame: RouteReplayFrame) -> ClusterUiState:
         lateral_plan_curvatures=frame.lateral_plan_curvatures,
         lateral_plan_curvature_rates=frame.lateral_plan_curvature_rates,
         display_speed_kph=frame.display_speed_kph,
+        traffic_state=frame.traffic_state,
+        driving_mode=frame.driving_mode,
+        trip_report=frame.trip_report,
+        cpu_usage_percent=frame.cpu_usage_percent,
+        cpu_temp_c=frame.cpu_temp_c,
+        memory_used_percent=frame.memory_used_percent,
+        disk_used_percent=frame.disk_used_percent,
+        recorded_cutin_active=frame.recorded_cutin_active,
+        recorded_cutin_sound=frame.recorded_cutin_sound,
+        alert=frame.alert,
     )
 
 
@@ -2338,6 +3867,14 @@ def route_lane_animation_values(
 
     direction_sign = -1.0 if frame.lane_change == "left" else 1.0
     highlight_lane_offset: float | None = direction_sign
+    if not ROUTE_REPLAY_USE_LANE_CHANGE_ANIMATION:
+        signal_matches_lane_change = (
+            (frame.lane_change == "left" and frame.left_signal)
+            or (frame.lane_change == "right" and frame.right_signal)
+        )
+        highlight_lane_offset = direction_sign if signal_matches_lane_change else None
+        return observed_ego_lane_offset, 0.0, 0.0, highlight_lane_offset, False
+
     if frame.lane_change_phase == "preparing":
         return 0.0, 0.0, 0.0, highlight_lane_offset, True
 
@@ -2419,7 +3956,10 @@ def blend_frames(left: RouteReplayFrame, right: RouteReplayFrame, amount: float)
         cruise_display_state=discrete.cruise_display_state,
         gear_text=discrete.gear_text,
         cruise_gap=discrete.cruise_gap,
+        traffic_state=discrete.traffic_state,
+        driving_mode=discrete.driving_mode,
         lfa_active=discrete.lfa_active,
+        active_lane_line=discrete.active_lane_line,
         left_signal=discrete.left_signal,
         right_signal=discrete.right_signal,
         left_blindspot=discrete.left_blindspot,
@@ -2455,7 +3995,10 @@ def blend_frames(left: RouteReplayFrame, right: RouteReplayFrame, amount: float)
         brake=lerp(left.brake, right.brake),
         detected_vehicles=discrete.detected_vehicles,
         radar_points=discrete.radar_points,
+        corner_radar_supported=discrete.corner_radar_supported,
         tpms=discrete.tpms,
+        ev_mode_valid=discrete.ev_mode_valid,
+        ev_mode_active=discrete.ev_mode_valid and discrete.ev_mode_active,
         planned_speed_kph=lerp_optional(left.planned_speed_kph, right.planned_speed_kph),
         planned_accel_mps2=lerp_optional(left.planned_accel_mps2, right.planned_accel_mps2),
         planned_curvature_m_inv=lerp_optional(left.planned_curvature_m_inv, right.planned_curvature_m_inv),
@@ -2490,7 +4033,14 @@ def blend_frames(left: RouteReplayFrame, right: RouteReplayFrame, amount: float)
         vision_yaw_rate_rps=lerp_optional(left.vision_yaw_rate_rps, right.vision_yaw_rate_rps),
         vision_speed_std_mps=lerp_optional(left.vision_speed_std_mps, right.vision_speed_std_mps),
         vision_yaw_rate_std_rps=lerp_optional(left.vision_yaw_rate_std_rps, right.vision_yaw_rate_std_rps),
+        camera_device_type=discrete.camera_device_type,
+        camera_sensor=discrete.camera_sensor,
+        cpu_usage_percent=lerp_optional(left.cpu_usage_percent, right.cpu_usage_percent),
+        cpu_temp_c=lerp_optional(left.cpu_temp_c, right.cpu_temp_c),
+        memory_used_percent=lerp_optional(left.memory_used_percent, right.memory_used_percent),
+        disk_used_percent=lerp_optional(left.disk_used_percent, right.disk_used_percent),
         camera_calibration_euler=discrete.camera_calibration_euler,
+        wide_camera_from_device_euler=discrete.wide_camera_from_device_euler,
         road_transform_trans=discrete.road_transform_trans,
         road_transform_std=discrete.road_transform_std,
         camera_odometry_valid=discrete.camera_odometry_valid,
@@ -2512,6 +4062,11 @@ def blend_frames(left: RouteReplayFrame, right: RouteReplayFrame, amount: float)
         lateral_plan_debug_text=discrete.lateral_plan_debug_text,
         lateral_plan_curvatures=discrete.lateral_plan_curvatures,
         lateral_plan_curvature_rates=discrete.lateral_plan_curvature_rates,
+        cutin_debug_text=discrete.cutin_debug_text,
+        recorded_cutin_active=discrete.recorded_cutin_active,
+        recorded_cutin_sound=discrete.recorded_cutin_sound,
+        trip_report=discrete.trip_report,
+        alert=discrete.alert,
     )
 
 
@@ -2536,8 +4091,11 @@ def lanes_for_frame(
         left_inner = frame.left_lane_offset + lane_grid_offset
         right_inner = frame.right_lane_offset + lane_grid_offset
 
-    left_inner_visible = frame.left_lane_visible
-    right_inner_visible = frame.right_lane_visible
+    # Model lane probabilities intentionally fade during a lane change. The
+    # animated grid owns visual continuity for that interval, so its current
+    # lane boundaries must remain visible while the grid moves.
+    left_inner_visible = frame.left_lane_visible or use_animated_lane_grid
+    right_inner_visible = frame.right_lane_visible or use_animated_lane_grid
     road_edge_shift = lane_grid_offset if use_animated_lane_grid else 0.0
     left_road_edge_offset = shifted_optional_offset(frame.left_road_edge_offset, road_edge_shift)
     right_road_edge_offset = shifted_optional_offset(frame.right_road_edge_offset, road_edge_shift)
@@ -2569,7 +4127,9 @@ def lanes_for_frame(
             )
             color = model_lane_color_for_index(index, frame.lane_change)
             style = model_lane_style_for_index(index)
-            visible = frame.extra_left_lane_visible
+            visible = frame.extra_left_lane_visible or (
+                use_animated_lane_grid and frame.lane_change == "left"
+            )
             width = 5
         elif index == 3:
             offset = model_lane_offset_for_index(
@@ -2582,7 +4142,9 @@ def lanes_for_frame(
             )
             color = model_lane_color_for_index(index, frame.lane_change)
             style = model_lane_style_for_index(index)
-            visible = frame.extra_right_lane_visible
+            visible = frame.extra_right_lane_visible or (
+                use_animated_lane_grid and frame.lane_change == "right"
+            )
             width = 5
         else:
             offset = model_lane_offset_for_index(
@@ -2630,7 +4192,7 @@ def lanes_for_frame(
                 left_outer,
                 left_outer_color,
                 "solid",
-                visible=frame.extra_left_lane_visible and lane_offset_inside_road_edges(
+                visible=(frame.extra_left_lane_visible or use_animated_lane_grid) and lane_offset_inside_road_edges(
                     left_outer,
                     left_road_edge_offset,
                     right_road_edge_offset,
@@ -2698,7 +4260,7 @@ def lanes_for_frame(
                 right_outer,
                 right_outer_color,
                 "dashed",
-                visible=frame.extra_right_lane_visible and lane_offset_inside_road_edges(
+                visible=(frame.extra_right_lane_visible or use_animated_lane_grid) and lane_offset_inside_road_edges(
                     right_outer,
                     left_road_edge_offset,
                     right_road_edge_offset,
@@ -2881,7 +4443,6 @@ def model_lead_detections_from_model_v2(model: Any) -> tuple[DetectedVehicle, ..
             else None
         )
         acceleration_mps2 = first_list_value(safe_get(lead, "a"))
-        cut_in = model_lead_is_cut_in(lead)
         x_std_m = first_list_value(safe_get(lead, "xStd"))
         y_std_m = first_list_value(safe_get(lead, "yStd"))
         detections.append(
@@ -2894,7 +4455,6 @@ def model_lead_detections_from_model_v2(model: Any) -> tuple[DetectedVehicle, ..
                 relative_speed_mps=relative_speed_mps,
                 absolute_speed_kph=max(0.0, lead_speed_mps * 3.6) if lead_speed_mps is not None else None,
                 acceleration_mps2=acceleration_mps2,
-                cut_in=cut_in,
                 primary=index == 0,
                 ttc_s=ttc_from_relative_speed(longitudinal_m, relative_speed_mps),
                 x_std_m=x_std_m,
@@ -2909,24 +4469,6 @@ def ttc_from_relative_speed(longitudinal_m: float, relative_speed_mps: float | N
         return None
     ttc_s = longitudinal_m / max(0.15, -relative_speed_mps)
     return clamp(ttc_s, 0.0, 99.0)
-
-
-def model_lead_is_cut_in(lead: Any) -> bool:
-    ys = safe_get(lead, "y")
-    xs = safe_get(lead, "x")
-    if ys is None or xs is None or len(ys) < 2 or len(xs) < 2:
-        return False
-    y0 = finite_float(ys[0])
-    if y0 is None or abs(y0) < 0.85:
-        return False
-    for index in range(1, min(len(ys), len(xs))):
-        future_y = finite_float(ys[index])
-        future_x = finite_float(xs[index])
-        if future_y is None or future_x is None or future_x - RADAR_TO_CAMERA_M > 75.0:
-            continue
-        if abs(future_y) < 0.70 or abs(future_y) < abs(y0) - 0.55:
-            return True
-    return False
 
 
 def lane_offset_from_y(y_m: float | None, center_m: float, lane_width_m: float) -> float | None:
@@ -2982,6 +4524,8 @@ def list_max(values: Any) -> float:
 
 
 def car_state_corner_detections(car_state: Any) -> tuple[DetectedVehicle, ...]:
+    left_blindspot = bool(safe_get(car_state, "leftBlindspot", False))
+    right_blindspot = bool(safe_get(car_state, "rightBlindspot", False))
     pairs = (
         ("LF", "leftLongDist", "leftLatDist", -1.0, 1.0),
         ("RF", "rightLongDist", "rightLatDist", 1.0, 1.0),
@@ -2990,6 +4534,10 @@ def car_state_corner_detections(car_state: Any) -> tuple[DetectedVehicle, ...]:
     )
     detections: list[DetectedVehicle] = []
     for label, distance_name, lateral_name, side, forward_sign in pairs:
+        if label == "LR" and not left_blindspot:
+            continue
+        if label == "RR" and not right_blindspot:
+            continue
         distance_m = safe_float(car_state, distance_name, 0.0)
         if not 0.2 < distance_m < 180.0:
             continue
@@ -3092,16 +4640,17 @@ def is_hyundai_camera_can_bus(bus: int) -> bool:
     return bus >= 0 and bus % 4 == HYUNDAI_CAMERA_CAN_BUS_MOD
 
 
-def is_hyundai_a_can_bus(bus: int) -> bool:
-    return bus >= 0 and bus % 4 == HYUNDAI_A_CAN_BUS_MOD
-
-
 def renderer_lateral_from_openpilot_yrel(y_rel: float) -> float:
     # openpilot radar/model UI projects radar points as -yRel; this renderer stores x as right-positive.
     return -y_rel
 
 
-def live_track_to_radar_point(track: Any, index: int, ego_speed_kph: float) -> RadarPoint | None:
+def live_track_to_radar_point(
+    track: Any,
+    index: int,
+    ego_speed_kph: float,
+    allow_legacy_corner_ids: bool = False,
+) -> RadarPoint | None:
     d_rel = safe_optional_float(track, "dRel")
     if d_rel is None or not RADAR_MIN_LONGITUDINAL_M <= d_rel <= RADAR_FRONT_MAX_LONGITUDINAL_M:
         return None
@@ -3112,28 +4661,27 @@ def live_track_to_radar_point(track: Any, index: int, ego_speed_kph: float) -> R
     if not -12.0 <= lateral_m <= 12.0:
         return None
     track_id = safe_optional_int(track, "trackId")
-    is_corner_object = (
-        track_id is not None
-        and (
-            CORNER_OBJECT_TRACK_ID_OFFSET <= track_id <= CORNER_OBJECT_TRACK_ID_OFFSET + CORNER_OBJECT_END_ADDRESS - CORNER_OBJECT_START_ADDRESS
-            or CORNER_OBJECT_180_TRACK_ID_OFFSET <= track_id < CORNER_OBJECT_180_TRACK_ID_OFFSET + (CORNER_OBJECT_180_END_ADDRESS - CORNER_OBJECT_180_START_ADDRESS + 1) * CORNER_OBJECT_180_SLOTS_PER_MESSAGE
-        )
+    radar_source = safe_get(track, "radarSource", "frontRadar")
+    is_corner_object = is_corner_radar_source(radar_source) or (
+        allow_legacy_corner_ids
+        and str(radar_source) == "frontRadar"
+        and radar_track_id_is_corner_object(track_id)
     )
     label = (
-        corner_track_label(track_id)
+        corner_track_label(track_id, str(radar_source))
         if is_corner_object
         else (f"T{track_id}" if track_id is not None else f"T{index:03d}")
     )
     rel_speed_mps = safe_optional_float(track, "vRel")
     lead_speed_mps = safe_optional_float(track, "vLead")
+    lat_speed_mps = safe_optional_float(track, "yvRel")
+    if lat_speed_mps is not None:
+        lat_speed_mps = renderer_lateral_from_openpilot_yrel(lat_speed_mps)
     absolute_speed_kph = None
     if lead_speed_mps is not None:
         absolute_speed_kph = lead_speed_mps * 3.6
     elif rel_speed_mps is not None:
         absolute_speed_kph = ego_speed_kph + rel_speed_mps * 3.6
-    lat_speed_mps = safe_optional_float(track, "yvRel")
-    if lat_speed_mps is not None:
-        lat_speed_mps = renderer_lateral_from_openpilot_yrel(lat_speed_mps)
     measured = bool(safe_get(track, "measured", True))
     return RadarPoint(
         label=label,
@@ -3149,102 +4697,18 @@ def live_track_to_radar_point(track: Any, index: int, ego_speed_kph: float) -> R
     )
 
 
-def decode_hyundai_corner_object_radar_point(
-    address: int,
-    data: bytes,
-    ego_speed_kph: float,
-) -> RadarPoint | None:
-    if len(data) != 32:
-        return None
-    quality = dbc_unsigned(data, 24, 7, "le")
-    alive_age = dbc_unsigned(data, 32, 8, "le")
-    moving_flag = dbc_unsigned(data, 40, 4, "le")
-    object_class = dbc_unsigned(data, 60, 4, "le")
-    d_rel = dbc_unsigned(data, 64, 13, "le") * 0.05
-    y_rel = dbc_unsigned(data, 78, 12, "le") * 0.05 - 102.4
-    v_rel = dbc_unsigned(data, 91, 12, "le") * 0.05 - 100.0
-    yv_rel = dbc_unsigned(data, 104, 10, "le") * 0.05 - 25.0
-    a_rel = dbc_signed(data, 115, 9, "le") * 0.05
-    if quality <= 0 or not 0.2 < d_rel < RADAR_FRONT_MAX_LONGITUDINAL_M:
-        return None
-    if abs(y_rel) >= 40.0 or v_rel <= -99.0:
-        return None
-    lateral_m = renderer_lateral_from_openpilot_yrel(y_rel)
-    absolute_speed_kph = ego_speed_kph + v_rel * 3.6
-    return RadarPoint(
-        label=corner_object_radar_point_label(address),
-        longitudinal_m=d_rel,
-        lateral_m=lateral_m,
-        source=CORNER_OBJECT_SOURCE,
-        relative_speed_mps=v_rel,
-        absolute_speed_kph=absolute_speed_kph,
-        lateral_speed_mps=renderer_lateral_from_openpilot_yrel(yv_rel),
-        relative_accel_mps2=a_rel,
-        probability=clamp(quality / 100.0, 0.05, 0.98),
-        valid=1,
-        valid_count=alive_age if alive_age > 0 else None,
-        in_my_lane=1 if abs(lateral_m) < DEFAULT_LANE_WIDTH_M * 0.55 else 0,
-        motion_consistent=moving_flag > 0 or object_class > 0,
-    )
+def radar_track_id_is_corner_object(track_id: int | None) -> bool:
+    return track_id is not None and (is_corner_track_id(track_id) or is_stable_corner_track_id(track_id))
 
 
-def decode_hyundai_corner_object_180_radar_points(
-    address: int,
-    data: bytes,
-    ego_speed_kph: float,
-) -> tuple[RadarPoint, ...]:
-    if len(data) != 32:
-        return ()
-    slot_base = (address - CORNER_OBJECT_180_START_ADDRESS) * CORNER_OBJECT_180_SLOTS_PER_MESSAGE
-    return (
-        decode_hyundai_corner_object_180_slot(address, slot_base, data, 24, ego_speed_kph),
-        decode_hyundai_corner_object_180_slot(address, slot_base + 1, data, 152, ego_speed_kph),
-    )
-
-
-def decode_hyundai_corner_object_180_slot(
-    address: int,
-    slot: int,
-    data: bytes,
-    base: int,
-    ego_speed_kph: float,
-) -> RadarPoint:
-    quality = dbc_unsigned(data, base, 7, "le")
-    alive_age = dbc_unsigned(data, base + 8, 8, "le")
-    moving_flag = dbc_unsigned(data, base + 16, 4, "le")
-    object_class = dbc_unsigned(data, base + 36, 3, "le")
-    d_rel = dbc_unsigned(data, base + 40, 13, "le") * 0.05
-    y_rel = dbc_unsigned(data, base + 54, 12, "le") * 0.05 - 102.4
-    v_rel = dbc_unsigned(data, base + 67, 12, "le") * 0.05 - 100.0
-    yv_rel = dbc_unsigned(data, base + 80, 10, "le") * 0.05 - 25.0
-    a_rel = dbc_signed(data, base + 91, 9, "le") * 0.05
-    label = f"CR180_{slot:02d}"
-    valid = quality > 0 and 0.2 < d_rel < RADAR_FRONT_MAX_LONGITUDINAL_M and abs(y_rel) < 40.0 and v_rel > -99.0
-    lateral_m = renderer_lateral_from_openpilot_yrel(y_rel)
-    return RadarPoint(
-        label=label,
-        longitudinal_m=d_rel if valid else 0.0,
-        lateral_m=lateral_m if valid else 0.0,
-        source=CORNER_OBJECT_SOURCE,
-        relative_speed_mps=v_rel if valid else None,
-        absolute_speed_kph=ego_speed_kph + v_rel * 3.6 if valid else None,
-        lateral_speed_mps=renderer_lateral_from_openpilot_yrel(yv_rel) if valid else None,
-        relative_accel_mps2=a_rel if valid else None,
-        probability=clamp(quality / 100.0, 0.05, 0.98) if valid else None,
-        valid=1 if valid else 0,
-        valid_count=alive_age if valid and alive_age > 0 else None,
-        in_my_lane=1 if valid and abs(lateral_m) < DEFAULT_LANE_WIDTH_M * 0.55 else 0,
-        motion_consistent=(moving_flag > 0 or object_class > 0) if valid else None,
-    )
-
-
-def corner_object_radar_point_label(address: int) -> str:
-    return f"CR{address - CORNER_OBJECT_START_ADDRESS:02d}"
-
-
-def corner_track_label(track_id: int) -> str:
-    if CORNER_OBJECT_180_TRACK_ID_OFFSET <= track_id < CORNER_OBJECT_180_TRACK_ID_OFFSET + (CORNER_OBJECT_180_END_ADDRESS - CORNER_OBJECT_180_START_ADDRESS + 1) * CORNER_OBJECT_180_SLOTS_PER_MESSAGE:
+def corner_track_label(track_id: int, radar_source: str = "") -> str:
+    if is_stable_corner_track_id(track_id):
+        group = "180" if radar_source == "corner180" else "430" if radar_source == "corner430" else "235"
+        return f"CR{group}_T{track_id}"
+    if CORNER_OBJECT_180_TRACK_ID_OFFSET <= track_id < CORNER_OBJECT_180_TRACK_ID_OFFSET + CORNER_OBJECT_180_TRACK_COUNT:
         return f"CR180_{track_id - CORNER_OBJECT_180_TRACK_ID_OFFSET:02d}"
+    if CORNER_OBJECT_430_TRACK_ID_OFFSET <= track_id < CORNER_OBJECT_430_TRACK_ID_OFFSET + CORNER_OBJECT_430_TRACK_COUNT:
+        return f"CR430_{track_id - CORNER_OBJECT_430_TRACK_ID_OFFSET:03d}"
     return f"CR{track_id - CORNER_OBJECT_TRACK_ID_OFFSET:02d}"
 
 
@@ -3258,6 +4722,58 @@ def sorted_radar_points(points: Any) -> tuple[RadarPoint, ...]:
     ]
     filtered.sort(key=lambda point: (point.longitudinal_m, abs(point.lateral_m), point.label))
     return tuple(filtered)
+
+
+def replay_corner_yaw_compensated_point(point: RadarPoint, yaw_rate_rps: float | None, gain: float) -> RadarPoint:
+    if (
+        gain == 0.0
+        or not replay_corner_point_uses_display_centering(point)
+        or yaw_rate_rps is None
+        or not math.isfinite(yaw_rate_rps)
+        or abs(yaw_rate_rps) >= CORNER_YAW_COMP_MAX_YAW_RATE
+    ):
+        return point
+
+    yaw_d_rel = clamp(point.longitudinal_m, 0.0, CORNER_YAW_COMP_MAX_DREL)
+    lateral_speed_corr = clamp(
+        yaw_rate_rps * yaw_d_rel * gain,
+        -CORNER_YAW_COMP_MAX_YVREL_CORRECTION,
+        CORNER_YAW_COMP_MAX_YVREL_CORRECTION,
+    )
+    return replace(
+        point,
+        lateral_speed_mps=(
+            point.lateral_speed_mps + lateral_speed_corr
+            if point.lateral_speed_mps is not None
+            else None
+        ),
+    )
+
+
+def replay_corner_adjusted_point(
+    point: RadarPoint,
+    yaw_rate_rps: float | None,
+    yaw_gain: float,
+    lateral_offset_m: float,
+    lane_width_m: float,
+) -> RadarPoint:
+    adjusted = replay_corner_yaw_compensated_point(point, yaw_rate_rps, yaw_gain)
+    if not replay_corner_point_uses_display_centering(adjusted):
+        return adjusted
+    side_lane_min_m = max(
+        CORNER_DISPLAY_CENTERING_SIDE_LANE_MIN_M,
+        clamp(lane_width_m, 2.4, 4.6) * CORNER_DISPLAY_CENTERING_SIDE_LANE_WIDTH_RATIO,
+    )
+    if lateral_offset_m == 0.0 or abs(adjusted.lateral_m) < side_lane_min_m:
+        return adjusted
+    return replace(adjusted, lateral_m=adjusted.lateral_m - math.copysign(abs(lateral_offset_m), adjusted.lateral_m))
+
+
+def replay_corner_point_uses_display_centering(point: RadarPoint) -> bool:
+    return (
+        point.source == CORNER_OBJECT_SOURCE
+        and (point.label.startswith("CO") or point.label.startswith("CR"))
+    )
 
 
 def normalized_lateral_m(value: float) -> float:
@@ -3287,6 +4803,138 @@ def dbc_signed(data: bytes, start: int, length: int, byte_order: str) -> int:
     value = dbc_unsigned(data, start, length, byte_order)
     sign_bit = 1 << (length - 1)
     return value - (1 << length) if value & sign_bit else value
+
+
+def decode_raw_corner_objects(t: float, address: int, data: bytes) -> tuple[RawCornerObject, ...]:
+    if len(data) != 32:
+        return ()
+    if RAW_CORNER_235_START_ADDR <= address <= RAW_CORNER_235_END_ADDR:
+        return (
+            decode_raw_corner_object_at(
+                t,
+                "235",
+                address,
+                address - RAW_CORNER_235_START_ADDR,
+                data,
+                24,
+            ),
+        )
+    if RAW_CORNER_180_START_ADDR <= address <= RAW_CORNER_180_END_ADDR:
+        base_slot = (address - RAW_CORNER_180_START_ADDR) * 2
+        return (
+            decode_raw_corner_object_at(t, "180", address, base_slot, data, 24),
+            decode_raw_corner_object_at(t, "180", address, base_slot + 1, data, 152),
+        )
+    return ()
+
+
+def decode_raw_corner_object_at(
+    t: float,
+    group: str,
+    address: int,
+    slot: int,
+    data: bytes,
+    base: int,
+) -> RawCornerObject:
+    width_bits = 8 if group == "235" else 7
+    width_factor = 0.01 if group == "235" else 0.05
+    class_bits = 4 if group == "235" else 3
+    return RawCornerObject(
+        t=t,
+        group=group,
+        address=address,
+        slot=slot,
+        quality=dbc_unsigned(data, base + 0, 7, "le"),
+        age=dbc_unsigned(data, base + 8, 8, "le"),
+        object_id=dbc_unsigned(data, base + 20, 7, "le"),
+        object_class=dbc_unsigned(data, base + 36, class_bits, "le"),
+        width=dbc_unsigned(data, base + 28, width_bits, "le") * width_factor,
+        x=dbc_unsigned(data, base + 40, 13, "le") * 0.05,
+        y=dbc_unsigned(data, base + 54, 12, "le") * 0.05 - 102.4,
+        vx=dbc_unsigned(data, base + 67, 12, "le") * 0.05 - 100.0,
+        vy=dbc_unsigned(data, base + 80, 10, "le") * 0.05 - 25.0,
+        ax=dbc_signed(data, base + 91, 9, "le") * 0.05,
+    )
+
+
+def raw_corner_object_is_valid(obj: RawCornerObject) -> bool:
+    if obj.quality < 1:
+        return False
+    if not 0.0 <= obj.x <= RAW_CORNER_OBJECT_MAX_X_M:
+        return False
+    if obj.x <= 0.2 and not is_side_corner_object(obj.x, obj.y):
+        return False
+    if abs(obj.y) > RAW_CORNER_OBJECT_MAX_ABS_Y_M:
+        return False
+    return not (obj.vx <= -99.0 and obj.x < 0.5)
+
+
+def raw_corner_object_to_radar_point(obj: RawCornerObject, ego_speed_kph: float) -> RadarPoint:
+    group_prefix = "R" if obj.group == "235" else "R180_"
+    return RadarPoint(
+        label=f"{group_prefix}{obj.slot:02d}",
+        longitudinal_m=obj.x,
+        lateral_m=renderer_lateral_from_openpilot_yrel(obj.y),
+        source=CORNER_OBJECT_SOURCE,
+        relative_speed_mps=obj.vx,
+        absolute_speed_kph=ego_speed_kph + obj.vx * 3.6,
+        lateral_speed_mps=renderer_lateral_from_openpilot_yrel(obj.vy),
+        relative_accel_mps2=obj.ax,
+        probability=clamp(0.35 + min(obj.quality, 80) / 100.0, 0.35, 0.92),
+        valid=1,
+        valid_count=obj.age,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class ReconstructedLiveTracks:
+    points: tuple[Any, ...]
+
+
+def merge_recorded_and_reconstructed_tracks(
+    recorded: tuple[Any, ...],
+    reconstructed: tuple[ReconstructedLiveTrack, ...],
+    prefer_reconstructed_corner: bool = False,
+    raw_corner_only: bool = False,
+) -> tuple[Any, ...]:
+    recorded_groups: set[str] = set()
+    for point in recorded:
+        source = str(safe_get(point, "radarSource", "frontRadar"))
+        track_id = int(safe_get(point, "trackId", -1))
+        if source == "corner235" or CORNER_OBJECT_TRACK_ID_OFFSET <= track_id < CORNER_OBJECT_TRACK_ID_OFFSET + CORNER_OBJECT_TRACK_COUNT:
+            recorded_groups.add("corner235")
+        if source == "corner180" or CORNER_OBJECT_180_TRACK_ID_OFFSET <= track_id < CORNER_OBJECT_180_TRACK_ID_OFFSET + CORNER_OBJECT_180_TRACK_COUNT:
+            recorded_groups.add("corner180")
+    if raw_corner_only:
+        recorded = tuple(
+            point for point in recorded
+            if not point_is_corner_group(point, "corner235") and not point_is_corner_group(point, "corner180")
+        )
+        recorded_groups.clear()
+    elif prefer_reconstructed_corner:
+        reconstructed_groups = {point.radarSource for point in reconstructed}
+        recorded = tuple(
+            point for point in recorded
+            if not (
+                ("corner235" in reconstructed_groups and point_is_corner_group(point, "corner235"))
+                or ("corner180" in reconstructed_groups and point_is_corner_group(point, "corner180"))
+            )
+        )
+        recorded_groups -= reconstructed_groups
+    added = tuple(point for point in reconstructed if point.radarSource not in recorded_groups)
+    return recorded + added
+
+
+def point_is_corner_group(point: Any, group: str) -> bool:
+    source = str(safe_get(point, "radarSource", "frontRadar"))
+    track_id = int(safe_get(point, "trackId", -1))
+    if group == "corner235":
+        return source == group or CORNER_OBJECT_TRACK_ID_OFFSET <= track_id < CORNER_OBJECT_TRACK_ID_OFFSET + CORNER_OBJECT_TRACK_COUNT
+    return source == group or CORNER_OBJECT_180_TRACK_ID_OFFSET <= track_id < CORNER_OBJECT_180_TRACK_ID_OFFSET + CORNER_OBJECT_180_TRACK_COUNT
+
+
+def route_corner_source_or_default(source: str | None) -> str:
+    return source if source in ROUTE_CORNER_SOURCE_CHOICES else ROUTE_CORNER_SOURCE_LIVE
 
 
 def has_nearby_vehicle(
@@ -3416,6 +5064,35 @@ def discover_route_logs(
     if max_segments is not None:
         files = files[:max_segments]
     return files
+
+
+def adjacent_route_log_path(
+    log_path: Path,
+    direction: int,
+    log_kind: str = "rlog",
+) -> Path | None:
+    if direction not in (-1, 1):
+        raise ValueError("direction must be -1 or 1")
+    if log_kind not in LOG_FILENAMES:
+        raise RuntimeError(f"unsupported route log kind: {log_kind}")
+
+    folder = log_path.resolve().parent if log_path.is_file() else log_path.resolve()
+    match = NUMBERED_FOLDER_RE.fullmatch(folder.name)
+    if match is None:
+        return None
+
+    prefix, digits = match.groups()
+    next_index = int(digits) + direction
+    if next_index < 0:
+        return None
+    next_name = f"{prefix}{next_index:0{len(digits)}d}"
+    next_folder = folder.parent / next_name
+    filenames = (LOG_FILENAMES[log_kind], f"{log_kind}.bz2")
+    for filename in filenames:
+        candidate = next_folder / filename
+        if candidate.is_file():
+            return candidate
+    return None
 
 
 def route_search_spec(route_path: Path, start_segment: int | None) -> tuple[Path, int | None, str | None]:
@@ -3565,6 +5242,19 @@ def safe_get(obj: Any, name: str, default: Any = None) -> Any:
         return getattr(obj, name)
     except Exception:
         return default
+
+
+def safe_enum_int(value: Any, names: tuple[str, ...], default: int = 0) -> int:
+    raw = safe_get(value, "raw", value)
+    try:
+        parsed = int(raw)
+    except (TypeError, ValueError):
+        normalized = str(raw or "").replace("_", "").lower()
+        try:
+            parsed = names.index(normalized)
+        except ValueError:
+            return default
+    return parsed if 0 <= parsed < len(names) else default
 
 
 def safe_float(obj: Any, name: str, default: float) -> float:
@@ -3729,4 +5419,3 @@ def lane_color_from_code(code: int) -> tuple[int, int, int] | None:
     if color_code == 2:
         return YELLOW
     return None
-

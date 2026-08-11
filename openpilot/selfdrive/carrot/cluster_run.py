@@ -9,7 +9,7 @@ from pathlib import Path
 
 CARROT_DIR = Path(__file__).resolve().parent
 BUNDLE_DIR = CARROT_DIR / "cluster"
-OPENPILOT_ROOT = CARROT_DIR.parents[1]
+OPENPILOT_ROOT = CARROT_DIR.parents[2]
 
 for path in (OPENPILOT_ROOT, BUNDLE_DIR):
     path_text = str(path)
@@ -83,20 +83,16 @@ def configure_cluster_locale() -> None:
         return
 
 
-def configure_cluster_realtime() -> None:
-    realtime_enabled = os.environ.get("CLUSTER_REALTIME", "0").strip().lower() in ("1", "true", "yes", "on")
-    if not realtime_enabled:
-        return
-
+def configure_cluster_scheduling() -> None:
     try:
         from openpilot.common.realtime import config_realtime_process
 
         cores = _resolved_realtime_cores()
         priority = _resolved_realtime_priority()
         config_realtime_process(cores, priority)
-        print(f"[cluster_run] realtime enabled cores={cores} priority={priority}", flush=True)
+        print(f"[cluster_run] scheduler configured cores={cores} priority={priority}", flush=True)
     except Exception as exc:
-        print(f"[cluster_run] failed to configure realtime process: {exc}", flush=True)
+        print(f"[cluster_run] failed to configure process scheduling: {exc}", flush=True)
 
 
 def main(*, exit_on_error: bool = True) -> None:
@@ -106,7 +102,7 @@ def main(*, exit_on_error: bool = True) -> None:
         args = ["--input", "live", *args]
     sys.argv = [sys.argv[0], *args]
 
-    configure_cluster_realtime()
+    configure_cluster_scheduling()
     from main import main as cluster_main
 
     cluster_main(exit_on_error=exit_on_error)

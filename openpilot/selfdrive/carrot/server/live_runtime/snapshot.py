@@ -82,9 +82,9 @@ def build_live_payload(
   service_alive = _ensure_dict(runtime, "serviceAlive")
   _update_alive_map(sm, service_alive)
   core_alive = _ensure_dict(runtime, "coreServicesAlive")
-  _update_alive_subset(service_alive, common_services(), core_alive)
+  _update_alive_subset(service_alive, tuple(name for name in common_services() if name in service_alive), core_alive)
   optional_alive = _ensure_dict(runtime, "optionalServicesAlive")
-  _update_alive_subset(service_alive, optional_services(), optional_alive)
+  _update_alive_subset(service_alive, tuple(name for name in optional_services() if name in service_alive), optional_alive)
   runtime["activeCoreServices"] = sum(1 for alive in core_alive.values() if alive)
   runtime["activeOptionalServices"] = sum(1 for alive in optional_alive.values() if alive)
   _refill_missing(service_alive, _ensure_list(runtime, "missingServices"))
@@ -92,11 +92,11 @@ def build_live_payload(
   _refill_missing(optional_alive, _ensure_list(runtime, "missingOptionalServices"))
   runtime["snapshotFresh"] = len(runtime["missingCoreServices"]) == 0
 
-  service_names = []
-  for name in list(common_services()) + list(optional_services()):
-    if name in service_names:
-      continue
-    service_names.append(name)
+  try:
+    service_names = list(sm.data.keys())
+  except Exception:
+    service_names = []
+  for name in service_names:
     services_payload[name] = _build_service_payload(sm, name, previous=services_payload.get(name))
   for stale_name in list(services_payload.keys()):
     if stale_name not in service_names:
@@ -163,7 +163,6 @@ def _service(sm: Any, name: str) -> Any:
 _LIVE_PUSH_ONLY_SERVICES = frozenset({
   "modelV2",
   "liveCalibration",
-  "roadCameraState",
   "wideRoadCameraState",
 })
 
@@ -250,6 +249,21 @@ def _limited_items(value: Any, limit: int | None = None) -> list[Any]:
   return items
 
 
+def _first_sample(value: Any) -> float | None:
+  """Read sample [0] of a capnp list field, tolerating scalars and empties."""
+  if value is None:
+    return None
+  direct = safe_float(value)
+  if direct is not None:
+    return direct
+  try:
+    for item in value:
+      return safe_float(item)
+  except Exception:
+    return None
+  return None
+
+
 def _update_xyz_payload(payload: dict[str, Any], source: Any) -> dict[str, Any]:
   _fill_list(_ensure_list(payload, "x"), safe_get(source, "x"), limit=33)
   _fill_list(_ensure_list(payload, "y"), safe_get(source, "y"), limit=33)
@@ -278,10 +292,10 @@ def _sync_leads_payloads(target: list[Any], source: Any, limit: int = 4) -> list
   for idx, lead in enumerate(items):
     payload = target[idx] if idx < len(target) and isinstance(target[idx], dict) else {}
     payload["prob"] = safe_float(safe_get(lead, "prob"))
-    payload["x"] = safe_float(safe_get(lead, "x"))
-    payload["y"] = safe_float(safe_get(lead, "y"))
-    payload["v"] = safe_float(safe_get(lead, "v"))
-    payload["a"] = safe_float(safe_get(lead, "a"))
+    # leadsV3 x/y/v/a are List(Float32) predictions (t = 0..10s), not scalars.
+    # safe_float() on the list yields None, which silently emptied every lead.
+    for name in ("x", "y", "v", "a"):
+      payload[name] = _first_sample(safe_get(lead, name))
     if idx < len(target):
       target[idx] = payload
     else:
@@ -401,11 +415,20 @@ def _build_camera_state(service: Any, previous: dict[str, Any] | None = None) ->
   payload["timestampEof"] = safe_int(safe_get(service, "timestampEof"))
   payload["width"] = safe_int(safe_get(service, "width"))
   payload["height"] = safe_int(safe_get(service, "height"))
+  # Road camera sensor (ar0231 / ox03c10 / os04c10). The web overlay picks the
+  # matching intrinsics from this so OS04C10 units (different focal/resolution)
+  # project correctly instead of using the hardcoded AR0231/OX03C10 default.
+  sensor = safe_get(service, "sensor")
+  payload["sensor"] = str(sensor) if sensor is not None else ""
   return payload
 
 
 def _build_device_state(service: Any, previous: dict[str, Any] | None = None) -> dict[str, Any]:
   p = previous if isinstance(previous, dict) else {}
+  device_type = safe_get(service, "deviceType")
+  # Native onroad selects camera intrinsics from (deviceType, sensor). Keep the
+  # enum name so the web renderer can use the same rule across device families.
+  p["deviceType"] = str(device_type) if device_type is not None else ""
   p["started"] = safe_bool(safe_get(service, "started"))
   p["freeSpacePercent"] = safe_float(safe_get(service, "freeSpacePercent"))
   p["memoryUsagePercent"] = safe_float(safe_get(service, "memoryUsagePercent"))
@@ -425,9 +448,8 @@ def _build_radar_state(service: Any, previous: dict[str, Any] | None = None) -> 
   p["leadTwo"] = _radar_lead(safe_get(service, "leadTwo"))
   p["leadLeft"] = _radar_lead(safe_get(service, "leadLeft"))
   p["leadRight"] = _radar_lead(safe_get(service, "leadRight"))
-  _sync_radar_payloads(_ensure_list(p, "leadsLeft"), safe_get(service, "leadsLeft"), limit=6)
-  _sync_radar_payloads(_ensure_list(p, "leadsCenter"), safe_get(service, "leadsCenter"), limit=6)
-  _sync_radar_payloads(_ensure_list(p, "leadsRight"), safe_get(service, "leadsRight"), limit=6)
+  for name in ("leadsLeft", "leadsCenter", "leadsRight", "leadsLeft2", "leadsRight2", "leadsCutIn"):
+    _sync_radar_payloads(_ensure_list(p, name), safe_get(service, name), limit=6)
   return p
 
 

@@ -41,7 +41,7 @@ function bindDeviceTabEvents(container) {
 }
 
 function bindDeviceToggleRows(container) {
-  container.querySelectorAll(".device-toggle__input").forEach((input) => {
+  container.querySelectorAll(".device-toggle .c-switch__input").forEach((input) => {
     input.addEventListener("change", async (event) => {
       const toggle = event.target.closest(".device-toggle");
       const param = toggle?.dataset.param;
@@ -68,7 +68,7 @@ function bindDeviceToggleRows(container) {
         if (event.target.checked && (param === "JoystickDebugMode" || param === "LongitudinalManeuverMode")) {
           const otherParam = param === "JoystickDebugMode" ? "LongitudinalManeuverMode" : "JoystickDebugMode";
           await setParam(otherParam, 0);
-          const otherToggle = container.querySelector(`.device-toggle[data-param="${otherParam}"] .device-toggle__input`);
+          const otherToggle = container.querySelector(`.device-toggle[data-param="${otherParam}"] .c-switch__input`);
           if (otherToggle) otherToggle.checked = false;
         }
       } catch (err) {
@@ -82,7 +82,8 @@ function bindDeviceToggleRows(container) {
 function bindDevicePersonality(container) {
   const btnPersonality = container.querySelector("#btnDevicePersonality");
   if (!btnPersonality) return;
-  btnPersonality.addEventListener("click", async () => {
+
+  async function cyclePersonality() {
     let current = 1;
     try {
       const values = await bulkGet(["LongitudinalPersonality"]);
@@ -97,7 +98,17 @@ function bindDevicePersonality(container) {
     } catch (err) {
       showAppToast(err.message || getUIText("failed", "Failed"), { tone: "error" });
     }
-  });
+  }
+
+  // Same commit contract as the CarrotPilot tab: this button cycles the
+  // driving personality on a single tap, so a scroll that starts on it must
+  // not change anything.
+  const gesture = window.CarrotUI?.numericStepper?.createGesture;
+  if (!gesture) {
+    console.error("[DeviceTab] commit gesture component is unavailable");
+    return;
+  }
+  gesture(btnPersonality, { onCommit: () => { cyclePersonality(); } });
 }
 
 function bindDeviceLanguage(container) {
@@ -136,7 +147,17 @@ function bindDeviceAction(container, id, endpoint, confirmMessage = "") {
   const button = container.querySelector(`#${id}`);
   if (!button) return;
   button.addEventListener("click", async () => {
-    if (confirmMessage && !confirm(confirmMessage)) return;
+    // The app dialog everywhere else uses. Reboot and power off were the only
+    // actions still on the browser's own confirm(), which cannot be themed or
+    // translated — the most consequential buttons had the most foreign prompt.
+    if (confirmMessage) {
+      const confirmed = await appConfirm(confirmMessage, {
+        title: getUIText("confirm_title", "Confirm"),
+        confirmLabel: getUIText("ok", "OK"),
+        cancelLabel: getUIText("cancel", "Cancel"),
+      });
+      if (!confirmed) return;
+    }
     try {
       await postJson(endpoint, {});
       showAppToast(getUIText("action_triggered", "Action triggered"), { tone: "info" });
@@ -295,7 +316,7 @@ function openDeviceInfoModal(title, html) {
   overlay.className = "training-guide-modal device-info-modal";
   overlay.innerHTML = `
     <div class="training-guide-modal__surface device-info-modal__surface" role="dialog" aria-modal="true" aria-label="${escapeHtml(title)}">
-      <button type="button" class="training-guide-modal__close" data-device-info-close aria-label="${escapeHtml(getUIText("close", "Close"))}">×</button>
+      <button type="button" class="training-guide-modal__close c-close" data-device-info-close aria-label="${escapeHtml(getUIText("close", "Close"))}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17"/></svg></button>
       <div class="device-info-modal__header">${escapeHtml(title)}</div>
       <div class="device-info-modal__body"></div>
     </div>`;
@@ -320,7 +341,7 @@ function openTrainingGuide() {
   overlay.className = "training-guide-modal";
   overlay.innerHTML = `
     <div class="training-guide-modal__surface" role="dialog" aria-modal="true" aria-label="${escapeHtml(getUIText("review_training_guide", "Review Training Guide"))}">
-      <button type="button" class="training-guide-modal__close" data-training-close aria-label="${escapeHtml(getUIText("close", "Close"))}">×</button>
+      <button type="button" class="training-guide-modal__close c-close" data-training-close aria-label="${escapeHtml(getUIText("close", "Close"))}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17"/></svg></button>
       <img class="training-guide-modal__image" alt="" />
       <div class="training-guide-modal__bar">
         <button type="button" class="smallBtn" data-training-prev>${escapeHtml(getUIText("back", "Back"))}</button>

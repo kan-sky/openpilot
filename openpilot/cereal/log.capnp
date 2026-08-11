@@ -142,6 +142,8 @@ struct OnroadEvent @0xc4fa6047f024e718 {
     audioTurn @122;
     autoHold @123;
     autoResumeFailed @124;
+    radarCutin @125;
+    radarStationaryLead @126;
     trafficSignGreen @100;
     trafficSignChanged @101;
     turningLeft @102;
@@ -2446,6 +2448,29 @@ struct Sentinel {
 struct UIDebug {
   cpuTimeMillis @0 :Float32;
   frameTimeMillis @1 :Float32;
+  modelTimeMillis       @2 :Float32;
+  driverStateTimeMillis @3 :Float32;
+  hudTimeMillis         @4 :Float32;
+  alertTimeMillis       @5 :Float32;
+  extrasTimeMillis      @6 :Float32;
+  plotMode              @7 :UInt8;   # ShowPlotMode (~2초 스로틀 캐시, 0=off)
+  recording             @8 :Bool;    # 화면 녹화 중 여부
+  # 상세 프로파일링 필드는 과거 로그와의 호환성을 위해 번호와 타입만 보존한다.
+  modelPathTimeMillisDEPRECATED       @9 :Float32;
+  modelLaneTimeMillisDEPRECATED       @10 :Float32;
+  modelBlindSpotTimeMillisDEPRECATED  @11 :Float32;
+  modelRadarTimeMillisDEPRECATED      @12 :Float32;
+  modelTimingValidDEPRECATED          @13 :Bool;
+  hudHeaderTimeMillisDEPRECATED       @14 :Float32;
+  hudSpeedTimeMillisDEPRECATED        @15 :Float32;
+  hudStatusTimeMillisDEPRECATED       @16 :Float32;
+  hudNavigationTimeMillisDEPRECATED   @17 :Float32;
+  hudButtonTimeMillisDEPRECATED       @18 :Float32;
+  hudPlotTimeMillisDEPRECATED         @19 :Float32;
+  hudAuxTimeMillisDEPRECATED          @20 :Float32;
+  hudTimingValidDEPRECATED            @21 :Bool;
+  modelBlindSpotStateMaskDEPRECATED   @22 :UInt8;
+  modelBlindSpotStateValidDEPRECATED  @23 :Bool;
 }
 
 struct ManagerState {
@@ -2593,6 +2618,7 @@ struct Event {
     boot @60 :Boot;
 
     # ********** openpilot daemon msgs **********
+    gpsNMEA @3 :GPSNMEAData;
     can @5 :List(CanData);
     controlsState @7 :ControlsState;
     selfdriveState @130 :SelfdriveState;
@@ -2617,6 +2643,7 @@ struct Event {
     qcomGnss @31 :QcomGnss;
     gpsLocationExternal @48 :GpsLocationData;
     gpsLocation @21 :GpsLocationData;
+    gnssMeasurements @91 :GnssMeasurements;
     liveParameters @61 :LiveParametersData;
     liveTorqueParameters @94 :LiveTorqueParametersData;
     liveDelay @146 : LiveDelayData;
@@ -2650,6 +2677,7 @@ struct Event {
     # systems stuff
     operatingSystemLog @20 :OperatingSystemLogEntry;
     managerState @78 :ManagerState;
+    uploaderState @79 :UploaderState;
     procLog @33 :ProcLog;
     clocks @35 :Clocks;
     deviceState @6 :DeviceState;
@@ -2686,6 +2714,8 @@ struct Event {
     livestreamRoadEncodeData @120 :EncodeData;
     livestreamWideRoadEncodeData @121 :EncodeData;
     livestreamDriverEncodeData @122 :EncodeData;
+    youtubeRoadEncodeData @152 :EncodeData;
+    youtubeRoadEncodeIdx @153 :EncodeIndex;
 
     # *********** Custom: reserved for forks ***********
 
@@ -2699,8 +2729,8 @@ struct Event {
     # DON'T change the ID (e.g. @107)
     # DON'T change which struct it points to
     carrotMan @107 :Custom.CarrotMan;
-    customReserved1 @108 :Custom.CustomReserved1;
-    customReserved2 @109 :Custom.CustomReserved2;
+    carrotNavi @108 :Custom.CarrotNaviState;
+    carrotNaviMedia @109 :Custom.CarrotNaviMedia;
     customReserved3 @110 :Custom.CustomReserved3;
     customReserved4 @111 :Custom.CustomReserved4;
     customReserved5 @112 :Custom.CustomReserved5;
@@ -2767,8 +2797,5 @@ struct Event {
     accelerometer2DEPRECATED @101 :SensorEventData;
     temperatureSensor2DEPRECATED @123 :SensorEventData;
     driverMonitoringStateDEPRECATED @71 :DriverMonitoringStateDEPRECATED;
-    gpsNMEADEPRECATED @3 :GPSNMEAData;
-    uploaderStateDEPRECATED @79 :UploaderState;
-    gnssMeasurementsDEPRECATED @91 :GnssMeasurements;
   }
 }

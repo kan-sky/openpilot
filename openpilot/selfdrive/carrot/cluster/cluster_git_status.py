@@ -13,6 +13,14 @@ GIT_STATUS_REFRESH_SECONDS = 60.0
 GIT_COMMAND_TIMEOUT_SECONDS = 4.0
 
 
+def drop_git_worker_realtime_priority() -> None:
+    """Keep periodic network/storage checks out of the render thread's FIFO class."""
+    try:
+        os.sched_setscheduler(0, os.SCHED_OTHER, os.sched_param(0))
+    except (AttributeError, OSError, ValueError):
+        pass
+
+
 def find_git_root(start: Path) -> Path | None:
     path = start.resolve()
     candidates = (path, *path.parents)
@@ -61,18 +69,24 @@ class GitBranchStatusProvider:
         start_path: Path,
         refresh_interval_s: float = GIT_STATUS_REFRESH_SECONDS,
         command_timeout_s: float = GIT_COMMAND_TIMEOUT_SECONDS,
+        remote_enabled: bool = True,
     ) -> None:
         self.repo_path = find_git_root(start_path)
         self.refresh_interval_s = max(5.0, float(refresh_interval_s))
         self.command_timeout_s = max(0.5, float(command_timeout_s))
+        self.remote_enabled = bool(remote_enabled)
         initial_branch = read_head_branch(self.repo_path) if self.repo_path is not None else None
-        initial_detail = "확인 중" if self.repo_path is not None else "저장소 없음"
+        initial_detail = "확인 중" if self.repo_path is not None and self.remote_enabled else ""
+        if self.repo_path is None:
+            initial_detail = "저장소 없음"
         self._status = GitBranchStatus(initial_branch or "git", "unknown", initial_detail)
         self._next_refresh = 0.0
         self._lock = threading.Lock()
         self._worker: threading.Thread | None = None
 
     def status(self) -> GitBranchStatus:
+        if not self.remote_enabled:
+            return self._status
         now = time.monotonic()
         with self._lock:
             worker_alive = self._worker is not None and self._worker.is_alive()
@@ -83,6 +97,7 @@ class GitBranchStatusProvider:
             return self._status
 
     def _refresh(self) -> None:
+        drop_git_worker_realtime_priority()
         status = self._read_status()
         with self._lock:
             self._status = status

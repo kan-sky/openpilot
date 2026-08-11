@@ -19,13 +19,15 @@ from openpilot.cereal import messaging
 
 from ..realtime.transports import CameraWsHub, RawWsHub
 from . import features
-from .config import WEB_DIR
+from .config import SELFDRIVE_ASSETS_DIR, WEB_DIR, migrate_legacy_carrot_state
 from .live_runtime.broker import RealtimeBroker
 from .services.auto_update import auto_update_loop
 from .services.git_status import git_status_loop
 from .services.heartbeat import heartbeat_loop
-from .services.params import HAS_PARAMS
+from .services.params import HAS_PARAMS, Params
 from .services.popular_values import start_popular_value_upload
+from .services.settings import get_settings_cached
+from .services.static_assets import create_static_cache_middleware, start_precompress
 
 VISION_DIAG_UPLOAD_MAX_BYTES = 16 * 1024 * 1024
 
@@ -57,20 +59,48 @@ def _do_gc_and_trim() -> None:
     pass
 
 
-async def _malloc_trim_loop():
+async def _malloc_trim_loop(app: web.Application):
   """Periodic gc + malloc_trim to reclaim leaked objects and return C heap.
   Runs via to_thread so the event loop is never blocked."""
   while True:
     await asyncio.sleep(30.0)
+    raw_hub = app.get("realtime_raw_hub")
+    if raw_hub is not None and raw_hub.client_count() > 0:
+      continue
+    params = app.get("params")
+    try:
+      if params is not None and params.get_bool("CarrotVisionActive"):
+        continue
+    except Exception:
+      pass
     await asyncio.to_thread(_do_gc_and_trim)
+
+
+async def _warm_settings_cache() -> None:
+  """Build the /api/settings cache (read + parse the ~100 KB settings file and
+  the menu tree) at startup so the first settings-page open doesn't pay for it
+  on its critical path. Best-effort: the file may not exist yet."""
+  try:
+    await asyncio.to_thread(get_settings_cached)
+  except Exception:
+    pass
 
 
 async def on_startup(app: web.Application) -> None:
   app["http"] = ClientSession()
+  app["params"] = Params() if HAS_PARAMS and Params is not None else None
   app["hb_last"] = {"ok": None, "msg": "not yet", "ts": 0}
-  # Eager broker creation ??single SubMaster via RealtimeBroker
+  # Keep only route metadata plus the server-side engagement safety signal
+  # outside the compact HUD/overlay relay.
   try:
-    broker = RealtimeBroker(repo_flavor="c3")
+    broker = RealtimeBroker(
+      repo_flavor="c3",
+      include_optional=("navInstructionCarrot", "navRoute"),
+      exclude_services=(
+        "carState", "controlsState", "longitudinalPlan",
+        "liveCalibration", "modelV2", "roadCameraState", "deviceState",
+      ),
+    )
     app["realtime_broker"] = broker
     app["realtime_broker_error"] = None
   except Exception as exc:
@@ -87,10 +117,42 @@ async def on_startup(app: web.Application) -> None:
   app["git_status_task"] = asyncio.create_task(git_status_loop())
   app["auto_update_task"] = asyncio.create_task(auto_update_loop())
   app["popular_value_upload_task"] = start_popular_value_upload(app)
-  asyncio.create_task(_malloc_trim_loop())
+  app["malloc_trim_task"] = asyncio.create_task(_malloc_trim_loop(app))
+  app["settings_warm_task"] = asyncio.create_task(_warm_settings_cache())
+  app["precompress_task"] = start_precompress(str(WEB_DIR))
 
 
 async def on_cleanup(app: web.Application) -> None:
+  settings_warm_task = app.get("settings_warm_task")
+  if settings_warm_task:
+    settings_warm_task.cancel()
+    try:
+      await settings_warm_task
+    except asyncio.CancelledError:
+      pass
+    except Exception:
+      pass
+
+  precompress_task = app.get("precompress_task")
+  if precompress_task:
+    precompress_task.cancel()
+    try:
+      await precompress_task
+    except asyncio.CancelledError:
+      pass
+    except Exception:
+      pass
+
+  malloc_trim_task = app.get("malloc_trim_task")
+  if malloc_trim_task:
+    malloc_trim_task.cancel()
+    try:
+      await malloc_trim_task
+    except asyncio.CancelledError:
+      pass
+    except Exception:
+      pass
+
   realtime_camera_hub = app.get("realtime_camera_hub")
   if realtime_camera_hub is not None:
     try:
@@ -151,11 +213,22 @@ async def on_cleanup(app: web.Application) -> None:
 
 
 def make_app() -> web.Application:
-  app = web.Application(middlewares=[log_mw], client_max_size=VISION_DIAG_UPLOAD_MAX_BYTES)
+  # Bring forward user state (web settings, YouTube stream key, favorites) from
+  # the old in-repo location before any service reads it, so upgrading devices
+  # keep their settings instead of seeing defaults once.
+  migrate_legacy_carrot_state()
+  app = web.Application(
+    middlewares=[log_mw, create_static_cache_middleware(str(WEB_DIR))],
+    client_max_size=VISION_DIAG_UPLOAD_MAX_BYTES,
+  )
   app.on_startup.append(on_startup)
   app.on_cleanup.append(on_cleanup)
 
   features.register_all(app)
+
+  # Cluster and web HUDs consume one canonical set of icons/fonts. Register the
+  # shared tree before the web-root fallback so the URL cannot be shadowed.
+  app.router.add_static("/shared-assets/", str(SELFDRIVE_ASSETS_DIR), show_index=False)
 
   # foldered static assets ??must come after explicit routes so /api/...,
   # /ws/..., /download/... win the match.

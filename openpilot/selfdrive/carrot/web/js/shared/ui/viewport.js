@@ -9,7 +9,7 @@
      tall/square = compact chrome, split layout disabled
 
    Keep the CSS media query copies in responsive.css, layout_tokens.css, and
-   settings/device.css in sync with LAYOUT_WIDE_QUERY. */
+   src/features/settings/styles/device.css in sync with LAYOUT_WIDE_QUERY. */
 const LAYOUT_WIDE_QUERY = "(min-aspect-ratio: 13/10), (horizontal-viewport-segments: 2), (vertical-viewport-segments: 2), (min-width: 640px) and (min-height: 650px)";
 const LAYOUT_WIDE_MIN_WIDTH = 640;
 const LAYOUT_WIDE_MIN_HEIGHT = 650;
@@ -49,6 +49,14 @@ function isWideLayout() {
   return width / Math.max(height, 1) >= 1.3 || (width >= LAYOUT_WIDE_MIN_WIDTH && height >= LAYOUT_WIDE_MIN_HEIGHT);
 }
 
+function getLayoutOrientation() {
+  // Keep physical/window orientation separate from the coarse `wide` mode:
+  // large portrait tablets may be wide-capable while portrait-only surfaces
+  // still need to mount into the lower HUD dock.
+  const { width, height } = layoutViewportSize();
+  return width > height ? "landscape" : "portrait";
+}
+
 function computeLayoutMode() {
   if (isWideLayout()) return "wide";
   const { width: w, height: h } = layoutViewportSize();
@@ -62,37 +70,70 @@ window.CarrotLayout = {
   WIDE_QUERY: LAYOUT_WIDE_QUERY,
   isWide: isWideLayout,
   mode: computeLayoutMode,
+  orientation: getLayoutOrientation,
   hasViewportSegments,
   devicePosture: getDevicePostureType,
 };
 
 let appViewportMetricsBound = false;
-const driveHudCardEl = document.getElementById("driveHudCard");
+let appUnobscuredViewportHeight = 0;
+let appKeyboardInset = 0;
 let driveHudLayoutObserversBound = false;
 let driveHudLayoutRaf = 0;
 
 
 function updateAppViewportMetrics() {
   const vv = window.visualViewport;
-  const height = Math.max(320, Math.round(vv?.height || window.innerHeight || 0));
-  const top = Math.max(0, Math.round(vv?.offsetTop || 0));
-  const width = Math.max(320, Math.round(vv?.width || window.innerWidth || 0));
-  document.documentElement.style.setProperty("--app-vv-height", `${height}px`);
-  document.documentElement.style.setProperty("--app-vv-top", `${top}px`);
-  document.documentElement.style.setProperty("--app-vv-width", `${width}px`);
+  const rawHeight = Math.max(320, Math.round(vv?.height || window.innerHeight || 0));
+  const rawTop = Math.max(0, Math.round(vv?.offsetTop || 0));
+  const rawWidth = Math.max(320, Math.round(vv?.width || window.innerWidth || 0));
+
+  // Some Samsung Internet builds expose VirtualKeyboard while also shrinking
+  // the visual viewport. Treat that as a viewport-resize keyboard, not as an
+  // overlay keyboard, otherwise consumers subtract the keyboard twice.
+  const layoutHeight = Math.max(
+    rawHeight,
+    Math.round(document.documentElement?.clientHeight || 0),
+    Math.round(window.innerHeight || 0),
+  );
+  const visualViewportKeyboardHeight = Math.max(0, Math.round(layoutHeight - rawHeight - rawTop));
+  const virtualKeyboardHeight = Math.max(
+    0,
+    Math.round((appVirtualKeyboard?.boundingRect && appVirtualKeyboard.boundingRect.height) || 0),
+  );
 
   // Keyboard-open state, so keyboard-aware surfaces can hug the keyboard when it
   // is up and center when it is not (desktop, keyboard-less, or before focus).
   // VirtualKeyboard bounding rect on Chromium (visualViewport doesn't shrink
   // there); the visualViewport delta elsewhere.
-  let keyboardOpen = false;
-  if (appVirtualKeyboard) {
-    keyboardOpen = Math.round((appVirtualKeyboard.boundingRect && appVirtualKeyboard.boundingRect.height) || 0) > 120;
-  } else if (vv) {
-    keyboardOpen = Math.round((window.innerHeight || 0) - height - top) > 120;
-  }
+  const keyboardHeight = Math.max(virtualKeyboardHeight, visualViewportKeyboardHeight);
+  const keyboardOpen = keyboardHeight > 120;
+  if (!keyboardOpen) appUnobscuredViewportHeight = rawHeight;
+  const viewportShrankForKeyboard = keyboardOpen && (
+    visualViewportKeyboardHeight > 120
+    || (appUnobscuredViewportHeight > 0 && rawHeight < appUnobscuredViewportHeight - 120)
+  );
+  // Only an actual overlay needs an extra bottom inset. A resized viewport has
+  // already reserved the same space in --app-vv-height.
+  appKeyboardInset = appVirtualKeyboard && !viewportShrankForKeyboard ? virtualKeyboardHeight : 0;
   if (keyboardOpen) document.documentElement.dataset.kbOpen = "1";
   else delete document.documentElement.dataset.kbOpen;
+
+  const height = rawHeight;
+  const top = rawTop;
+  const width = rawWidth;
+  document.documentElement.style.setProperty("--app-vv-height", `${height}px`);
+  document.documentElement.style.setProperty("--app-vv-top", `${top}px`);
+  document.documentElement.style.setProperty("--app-vv-width", `${width}px`);
+  if (appVirtualKeyboard) {
+    // Samsung Internet can expose VirtualKeyboard geometry to JS while the CSS
+    // env(keyboard-inset-height) fallback stays stale or incomplete. Promote the
+    // measured geometry into the shared token so dialogs and terminal controls
+    // use the same keyboard inset on Chrome and Samsung.
+    document.documentElement.style.setProperty("--kb-inset", `${appKeyboardInset}px`);
+  } else {
+    document.documentElement.style.removeProperty("--kb-inset");
+  }
 
   const topbarEl = document.querySelector(".topbar");
   let navLeftGap = 0;
@@ -153,6 +194,25 @@ function initVirtualKeyboard() {
 
 const appVirtualKeyboard = initVirtualKeyboard();
 
+function setAppVirtualKeyboardOverlaysContent(enabled) {
+  if (!appVirtualKeyboard) return false;
+  try {
+    appVirtualKeyboard.overlaysContent = !!enabled;
+    if (enabled) document.documentElement.dataset.vk = "1";
+    else delete document.documentElement.dataset.vk;
+    updateAppViewportMetrics();
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+window.CarrotViewport = {
+  ...(window.CarrotViewport || {}),
+  setVirtualKeyboardOverlaysContent: setAppVirtualKeyboardOverlaysContent,
+  updateMetrics: updateAppViewportMetrics,
+};
+
 /* overlaysContent=true also means the browser no longer auto-scrolls a focused
    input above the keyboard (it isn't resizing anything). Dialogs, the terminal
    and the search panel anchor themselves above the keyboard, but plain inline
@@ -168,7 +228,7 @@ function isEditableTarget(el) {
 function ensureFocusedInputVisible(el) {
   if (!appVirtualKeyboard || !isEditableTarget(el)) return;
   if (el.closest(".app-dialog, .page--terminal, .setting-search-panel")) return;
-  const kb = Math.round((appVirtualKeyboard.boundingRect && appVirtualKeyboard.boundingRect.height) || 0);
+  const kb = appKeyboardInset;
   if (kb <= 0) return;
   const rect = el.getBoundingClientRect();
   const visibleBottom = (window.innerHeight || 0) - kb - 24;
@@ -219,8 +279,7 @@ bindAppViewportObservers();
 
 function syncDriveHudLayout() {
   driveHudLayoutRaf = 0;
-  if (!driveHudCardEl || !window.DrivingHud) return;
-  window.DrivingHud.relayout();
+  window.DriveVisionHudContent?.resize?.();
 }
 
 function scheduleDriveHudLayout() {

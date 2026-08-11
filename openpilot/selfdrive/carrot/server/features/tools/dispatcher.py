@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from aiohttp import web
 
-from openpilot.common.hardware import HARDWARE
+from openpilot.system.hardware import HARDWARE
 
 from ...config import PARAMS_BACKUP_PATH
 from ...services.git_state import did_git_pull_update, write_git_pull_time
@@ -690,9 +690,7 @@ async def run_tool_job(job: Dict[str, Any]) -> None:
       import importlib.util
 
       packages = [
-        {"pip": "flask", "import": "flask"},
         {"pip": "shapely", "import": "shapely"},
-        {"pip": "kaitaistruct", "import": "kaitaistruct"},
       ]
       results = []
       installed_any = False
@@ -1168,9 +1166,7 @@ async def dispatch_sync(request: web.Request, body: Dict[str, Any]) -> web.Respo
       import importlib.util
 
       packages = [
-        {"pip": "flask", "import": "flask"},
         {"pip": "shapely", "import": "shapely"},
-        {"pip": "kaitaistruct", "import": "kaitaistruct"},
       ]
 
       results = []

@@ -96,7 +96,7 @@ def smooth_value(val, prev_val, tau, dt=DT_MDL):
   alpha = 1 - np.exp(-dt/tau) if tau > 0 else 1
   return alpha * val + (1 - alpha) * prev_val
 
-def clip_curvature(v_ego, prev_curvature, new_curvature, roll) -> tuple[float, bool]:
+def clip_curvature(v_ego, prev_curvature, new_curvature, roll):
   # This function respects ISO lateral jerk and acceleration limits + a max curvature
   v_ego = max(v_ego, MIN_SPEED)
   max_curvature_rate = MAX_LATERAL_JERK / (v_ego ** 2)  # inexact calculation, check https://github.com/commaai/openpilot/pull/24755
@@ -108,8 +108,9 @@ def clip_curvature(v_ego, prev_curvature, new_curvature, roll) -> tuple[float, b
   # 값이 높으면 조향 권한 증가, 낮으면 조향 권한 감소.
   max_lat_accel_low_speed = params.get_int("MaxLatAccelNoRollLowSpeed") * 0.1
   if max_lat_accel_low_speed <= 0.0:
-    max_lat_accel_low_speed = MAX_LATERAL_ACCEL_NO_ROLL_LOW_SPEED
-  max_lat_accel_low_speed = float(np.clip(max_lat_accel_low_speed, 3.5, 4.5))
+    max_lat_accel_low_speed = MAX_LATERAL_ACCEL_NO_ROLL
+  else:
+    max_lat_accel_low_speed = float(np.clip(max_lat_accel_low_speed, 3.5, 4.5))
 
   roll_compensation = roll * ACCELERATION_DUE_TO_GRAVITY
   max_lateral_accel_no_roll = float(np.interp(v_ego,

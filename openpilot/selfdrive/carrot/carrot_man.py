@@ -1,5 +1,6 @@
 import hashlib
 import errno
+import base64
 import json
 import math
 import os
@@ -17,7 +18,6 @@ from typing import Any, Dict, List, Optional
 from aiohttp import web
 import asyncio
 
-from ftplib import FTP
 from openpilot.cereal import log
 import urllib.request
 import urllib.error
@@ -34,6 +34,15 @@ from openpilot.selfdrive.navd.helpers import Coordinate
 from openpilot.common.constants import CV
 
 from openpilot.selfdrive.carrot.carrot_serv import CarrotServ
+from openpilot.selfdrive.carrot.carrot_navi_control import CarrotNaviControl, parse_carrot_navi_control
+from openpilot.selfdrive.carrot.server.services.web_settings import read_web_settings
+from openpilot.selfdrive.carrot.web_upload import (
+  carrot_logs_web_target,
+  create_web_upload_session_sync,
+  post_tmux_web,
+  tmux_web_target,
+  web_upload_settings,
+)
 
 from openpilot.common.gps import get_gps_location_service
 
@@ -58,7 +67,14 @@ BROADCAST_REMOTE_INTERVAL = 0.2
 BROADCAST_NETWORK_ERROR_RETRY_INTERVAL = 5.0
 BROADCAST_NETWORK_ERROR_LOG_INTERVAL = 30.0
 AUTO_ONROAD_TMUX_DELAY_SECONDS = float(os.environ.get("CARROT_AUTO_ONROAD_TMUX_DELAY_SECONDS", "60"))
+CARROT_CAN_ERROR_TMUX_DELAY_SECONDS = float(os.environ.get("CARROT_CAN_ERROR_TMUX_DELAY_SECONDS", "5"))
 CARROT_EXCEPTION_UPLOAD_RETRY_SECONDS = 60.0
+DISCORD_TMUX_FILE_MAX_BYTES = 8 * 1024 * 1024
+EXCEPTION_DISCORD_WEBHOOK_KEY = b"carrot-exception-v1"
+EXCEPTION_DISCORD_WEBHOOK_OBFUSCATED = (
+  "CxUGAhxOAkocChYTGxsLQE4ZXEwAAhtAA0gHEAwKGwdGXlsfQgdTUEVKXkEcUkpaVEdEWkAkRwMCFzEL"
+  "MF8zS1YzWh8YJlkpVk4EUwQ0ED02IkgXKjMkQzIYIRt/HgUWUTUQWCcaAS1XKhpFUT4cGDBnLiACOx1DXQ=="
+)
 
 
 def limit_route_points(points, max_points=NAVI_ROUTE_MAX_POINTS):
@@ -90,28 +106,50 @@ def reset_carrot_exception_tmux_send_queue() -> None:
     _carrot_exception_tmux_send_queued = False
 
 
-def queue_carrot_exception_tmux_send(context: str = "") -> None:
+def queue_carrot_exception_tmux_send(context: str = "", reason: str = "tmux_send") -> bool:
   global _carrot_exception_tmux_send_queued
 
   with _carrot_exception_tmux_send_lock:
-    if _carrot_exception_tmux_send_queued:
-      return
-
     try:
       params = Params()
       current = params.get("CarrotException")
       if current in (None, "", b""):
         put_nonblocking = getattr(params, "put_nonblocking", None)
         if callable(put_nonblocking):
-          put_nonblocking("CarrotException", "tmux_send")
+          put_nonblocking("CarrotException", reason)
         else:
-          params.put("CarrotException", "tmux_send")
+          params.put("CarrotException", reason)
         _carrot_exception_tmux_send_queued = True
-        print(f"[carrot_man] CarrotException tmux_send queued: {context or 'exception'}")
-      elif current == "tmux_send":
+        print(f"[carrot_man] CarrotException {reason} queued: {context or 'exception'}")
+        return True
+      elif current == reason:
         _carrot_exception_tmux_send_queued = True
+        return True
+      return False
     except Exception as e:
-      print(f"[carrot_man] failed to queue CarrotException tmux_send: {e}")
+      print(f"[carrot_man] failed to queue CarrotException {reason}: {e}")
+      return False
+
+
+def carrot_can_error_send_ready(detected_at: float | None, now: float, is_onroad: bool) -> bool:
+  return is_onroad and detected_at is not None and now - detected_at >= CARROT_CAN_ERROR_TMUX_DELAY_SECONDS
+
+
+def carrot_can_error_sources(car_name: str | bytes | None, car_state_current: bool, car_state,
+                             radar_state_current: bool, radar_state) -> tuple[bool, bool]:
+  if isinstance(car_name, bytes):
+    car_name = car_name.decode("utf-8", errors="ignore")
+  if not car_name or car_name.strip().upper() == "MOCK":
+    return False, False
+
+  car_can_error = car_state_current and (car_state.canTimeout or not car_state.canValid)
+  radar_can_error = radar_state_current and radar_state.radarErrors.canError
+  return car_can_error, radar_can_error
+
+
+def carrot_can_error(car_name: str | bytes | None, car_state_current: bool, car_state,
+                     radar_state_current: bool, radar_state) -> bool:
+  return any(carrot_can_error_sources(car_name, car_state_current, car_state, radar_state_current, radar_state))
 
 ################ CarrotNavi
 ## 국가법령정보센터: 도로설계기준
@@ -268,7 +306,11 @@ class CarrotMan:
     self.params = Params()
     self.params_memory = Params("/dev/shm/params")
     self.gps_location_service = get_gps_location_service(self.params)
-    self.sm = messaging.SubMaster(['deviceState', 'carState', 'controlsState', 'radarState', 'longitudinalPlan', 'modelV2', 'selfdriveState', 'carControl', 'navRouteNavd', self.gps_location_service, 'navInstruction'])
+    self.sm = messaging.SubMaster([
+      'deviceState', 'carState', 'controlsState', 'radarState', 'longitudinalPlan', 'modelV2',
+      'selfdriveState', 'carControl', 'navRouteNavd', self.gps_location_service,
+      'navInstruction', 'carrotNavi',
+    ])
     self.pm = messaging.PubMaster(['carrotMan', "navRoute", "navInstructionCarrot"])
 
     self.carrot_serv = CarrotServ()
@@ -292,6 +334,9 @@ class CarrotMan:
     self.navi_points_start_index = 0
     self.navi_points_active = False
     self.navd_active = False
+    self.carrot_navi_route_session_id = ""
+    self.carrot_navi_route_sequence = -1
+    self.carrot_navi_route_owned = False
 
     self.active_carrot_last = False
 
@@ -360,8 +405,16 @@ class CarrotMan:
     while self.is_running:
       try:
         self.sm.update(0)
-        if self.sm.updated['navRouteNavd']:
+        navd_route_updated = self.sm.updated['navRouteNavd']
+        if navd_route_updated:
           self.send_routes(self.sm['navRouteNavd'].coordinates, True)
+        carrot_navi_service_active = self.sm.alive['carrotNavi'] and self.sm.valid['carrotNavi']
+        if (
+          self.sm.updated['carrotNavi'] or navd_route_updated
+          or (self.carrot_navi_route_session_id and not carrot_navi_service_active)
+        ):
+          carrot_navi = parse_carrot_navi_control(self.sm['carrotNavi']) if carrot_navi_service_active else None
+          self._update_carrot_navi_route(carrot_navi, force=navd_route_updated)
         remote_addr = self.remote_addr
         remote_ip = remote_addr[0] if remote_addr is not None else ""
         vturn_speed = self.carrot_curve_speed(self.sm)
@@ -439,6 +492,49 @@ class CarrotMan:
         queue_carrot_exception_tmux_send("broadcast_version_info")
         time.sleep(1)
 
+
+  def _update_carrot_navi_route(self, navi: CarrotNaviControl | None, force: bool = False):
+    previous_session = self.carrot_navi_route_session_id
+    route_owned = self.carrot_navi_route_owned
+    if navi is None:
+      if not previous_session:
+        return
+      self.carrot_navi_route_session_id = ""
+      self.carrot_navi_route_sequence = -1
+      if force:
+        self.carrot_navi_route_owned = False
+        return
+      if not route_owned:
+        return
+      points = ()
+    else:
+      new_session = navi.session_id != previous_session
+      route = navi.route
+      if not force and not new_session and route.sequence == self.carrot_navi_route_sequence:
+        route_available = route.present and bool(route.polyline)
+        if not route_available or self.navi_points_active or not self.params.get_bool("IsOnroad"):
+          return
+      self.carrot_navi_route_session_id = navi.session_id
+      self.carrot_navi_route_sequence = route.sequence
+      points = route.polyline if route.present else ()
+      if not points and force:
+        self.carrot_navi_route_owned = False
+        return
+      if not points and not route_owned:
+        return
+
+    coords = [
+      {"latitude": latitude, "longitude": longitude}
+      for latitude, longitude in points
+    ]
+    self.navi_points = [(point["longitude"], point["latitude"]) for point in coords]
+    self.navi_points_start_index = 0
+    self.navi_points_active = bool(self.navi_points)
+    self.carrot_navi_route_owned = self.navi_points_active
+    # Keep the existing route consumer alive without asking navd to calculate a
+    # different route from the app's destination.
+    self.navd_active = self.navi_points_active
+    self.send_routes(coords)
 
   def carrot_navi_route(self):
 
@@ -744,59 +840,7 @@ class CarrotMan:
       print(f"TMUX creation error: {e}")
       return False
 
-  def send_tmux(self, ftp_password, tmux_why, send_settings=False):
-    ftp_server = "shind0.synology.me"
-    ftp_port = 8021
-    ftp_username = "carrotpilot"
-    ftp = FTP(timeout=10)
-    try:
-      ftp.connect(ftp_server, ftp_port, timeout=10)
-      ftp.login(ftp_username, ftp_password)
-      car_selected = Params().get("CarName") or "none"
-
-      git_branch = (Params().get("GitBranch") or "unknown").replace("/", "__")
-      try:
-        ftp.mkd(git_branch)
-      except Exception as e:
-        print(f"Directory creation failed: {e}")
-      ftp.cwd(git_branch)
-
-      directory = car_selected + " " + (Params().get("DongleId") or "unknown")
-      current_time = datetime.now().strftime("%Y%m%d-%H%M%S")
-      filename = tmux_why + "-" + current_time + "-" + git_branch + ".txt"
-
-      try:
-        ftp.mkd(directory)
-      except Exception as e:
-        print(f"Directory creation failed: {e}")
-      ftp.cwd(directory)
-
-      with open("/data/media/tmux.log", "rb") as file:
-        ftp.storbinary(f'STOR {filename}', file)
-
-      if send_settings:
-        self.save_toggle_values()
-        try:
-          #with open("/data/backup_params.json", "rb") as file:
-          with open("/data/toggle_values.json", "rb") as file:
-            ftp.storbinary(f'STOR toggles-{current_time}.json', file)
-        except Exception as e:
-          print(f"ftp params sending error...: {e}")
-      return True
-    except Exception as e:
-      print(f"ftp tmux sending error...: {e}")
-      traceback.print_exc()
-      return False
-    finally:
-      try:
-        ftp.quit()
-      except Exception:
-        try:
-          ftp.close()
-        except Exception:
-          pass
-
-  def send_tmux_http(self, tmux_why, send_settings=False):
+  def _tmux_upload_payload(self, tmux_why):
     def get_private_ip_by_iface(name="wlan0"):
       addrs = psutil.net_if_addrs().get(name, [])
 
@@ -814,9 +858,8 @@ class CarrotMan:
       v = Params().get(key) or ""
       return v.decode("utf-8", errors="ignore") if isinstance(v, bytes) else v
 
-    url = "https://tmux.carrotpilot.app/upload"
-
-    payload = {
+    return {
+      "tmux_why"           : tmux_why,
       "car_name"          : _pstr("CarName"),
       "git_branch"        : _pstr("GitBranch"),
       "github_id"         : _pstr("GithubUsername"),
@@ -828,38 +871,195 @@ class CarrotMan:
       "local_ip"          : get_private_ip_by_iface("wlan0"),
     }
 
-    params = {}
-    headers = {}
-    files = []
+  def _post_tmux_target(self, label, url, headers, payload, send_settings=False):
+    settings_path = None
+    if send_settings:
+      self.save_toggle_values()
+      settings_path = "/data/toggle_values.json"
 
+    response = post_tmux_web(
+      url,
+      headers,
+      payload,
+      "/data/media/tmux.log",
+      settings_path,
+      requests.post,
+    )
+    print(f"[carrot_man] {label}: status={response.status_code} {response.text}")
+    return response
+
+  def send_tmux_web(self, tmux_why, send_settings=False):
     try:
-      files.append(("files[0]", ("tmux.log", open("/data/media/tmux.log", "rb"), "text/plain")))
-
-      if send_settings:
-        #self.save_toggle_values()
-        self.save_toggle_values()
-        try:
-          files.append(("files[1]",("toggle_values.json",open("/data/toggle_values.json", "rb"),"application/json")))
-        except Exception as e:
-          print(f"http params file open error...: {e}")
-
-      response = requests.post(
-          url,
-          params=params,
-          headers=headers,
-          data=payload,
-          files=files,
-          timeout=10,
+      try:
+        upload_settings = read_web_settings()
+      except Exception:
+        upload_settings = {}
+      payload = self._tmux_upload_payload(tmux_why)
+      base_url, configured_token = web_upload_settings(upload_settings)
+      session_token = configured_token or create_web_upload_session_sync(
+        base_url, payload, requests.post, "tmux",
       )
-      print(response.status_code, response.text)
-      return response
+      url, headers = tmux_web_target(upload_settings, session_token)
+      return self._post_tmux_target("DSM tmux upload", url, headers, payload, send_settings)
     except Exception as e:
-      print(f"http tmux sending error...: {e}")
+      print(f"web tmux sending error...: {e}")
       traceback.print_exc()
       return None
+
+  def send_tmux_carrot_logs(self, tmux_why, send_settings=False):
+    """Send the independent copy consumed by the Discord carrot_logs forum."""
+    try:
+      payload = self._tmux_upload_payload(tmux_why)
+      url, headers = carrot_logs_web_target()
+      return self._post_tmux_target("carrot_logs upload", url, headers, payload, send_settings)
+    except Exception as e:
+      print(f"carrot_logs tmux sending error...: {e}")
+      traceback.print_exc()
+      return None
+
+  def _param_text(self, key, default=""):
+    try:
+      v = self.params.get(key)
+      if isinstance(v, bytes):
+        v = v.decode("utf-8", errors="replace")
+      v = str(v or "").strip()
+      return v or default
+    except Exception:
+      return default
+
+  def _decode_tmux_discord_webhook_url(self):
+    try:
+      data = base64.b64decode(EXCEPTION_DISCORD_WEBHOOK_OBFUSCATED)
+      decoded = bytes(
+        byte ^ EXCEPTION_DISCORD_WEBHOOK_KEY[index % len(EXCEPTION_DISCORD_WEBHOOK_KEY)]
+        for index, byte in enumerate(data)
+      )
+      return decoded.decode("utf-8").strip()
+    except Exception:
+      return ""
+
+  def _tmux_discord_webhook_url(self):
+    disabled = os.environ.get("CARROT_EXCEPTION_DISCORD_WEBHOOK_DISABLE", "").strip().lower()
+    if disabled in ("1", "true", "yes", "on"):
+      return ""
+
+    for key in ("CARROT_EXCEPTION_DISCORD_WEBHOOK_URL", "CARROT_DISCORD_WEBHOOK_URL", "DISCORD_WEBHOOK_URL"):
+      value = os.environ.get(key, "").strip()
+      if value:
+        return value
+
+    for key in (
+      "CarrotExceptionDiscordWebhookUrl",
+      "CarrotDiscordWebhookUrl",
+      "CarrotDiscordWebhookURL",
+      "DiscordWebhookUrl",
+      "DiscordWebhookURL",
+    ):
+      value = self._param_text(key)
+      if value:
+        return value
+    return self._decode_tmux_discord_webhook_url()
+
+  def _github_repo_url(self):
+    remote = self._param_text("GitRemote")
+    if remote.startswith("git@github.com:"):
+      remote = "https://github.com/" + remote[len("git@github.com:"):]
+    if remote.startswith("https://github.com/") or remote.startswith("http://github.com/"):
+      remote = remote.removesuffix(".git")
+      return remote.replace("http://github.com/", "https://github.com/", 1)
+
+    github_user = self._param_text("GithubUsername")
+    if github_user:
+      return f"https://github.com/{github_user}/openpilot"
+    return "https://github.com/ajouatom/openpilot"
+
+  def _tmux_discord_content(self, tmux_why, web_ok, web_response):
+    branch = self._param_text("GitBranch", "unknown")
+    commit = self._param_text("GitCommit", "unknown")
+    commit_date = self._param_text("GitCommitDate", "unknown")
+    repo_url = self._github_repo_url()
+    commit_text = (
+      f"[{commit[:8]}]({repo_url}/commit/{commit})"
+      if commit and commit != "unknown"
+      else "unknown"
+    )
+    web_status = getattr(web_response, "status_code", None) if web_response is not None else None
+    lines = [
+      "# Carrot Exception",
+      "### Upload",
+      f"- Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+      f"- Reason: {tmux_why}",
+      f"- Web: {'ok' if web_ok else 'failed'}" + (f" ({web_status})" if web_status is not None else ""),
+      "### Device",
+      f"- Car name: {self._param_text('CarName', 'none')}",
+      f"- DongleId: {self._param_text('DongleId', 'unknown')}",
+      f"- Serial: {self._param_text('HardwareSerial', 'unknown')}",
+      f"- GitHub: {repo_url}",
+      f"- Branch: {branch}",
+      f"- Commit: {commit_text} ({commit_date})",
+    ]
+    return "\n".join(lines)[:1900]
+
+  def send_tmux_discord(self, tmux_why, web_ok=False, web_response=None, send_settings=False):
+    url = self._tmux_discord_webhook_url()
+    if not url:
+      return False
+    if not url.startswith(("http://", "https://")):
+      print("[carrot_man] discord tmux skipped: invalid webhook url")
+      return False
+
+    payload = {
+      "username": "Carrot Exception",
+      "content": self._tmux_discord_content(tmux_why, web_ok, web_response),
+      "allowed_mentions": {"parse": []},
+      "flags": 4,
+    }
+
+    tmux_path = "/data/media/tmux.log"
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    branch = self._param_text("GitBranch", "unknown").replace("/", "__")
+    files = []
+    opened_files = []
+    try:
+      if os.path.exists(tmux_path):
+        tmux_size = os.path.getsize(tmux_path)
+        if tmux_size <= DISCORD_TMUX_FILE_MAX_BYTES:
+          tmux_file = open(tmux_path, "rb")
+          opened_files.append(tmux_file)
+          files.append(("files[0]", (f"{tmux_why}-{stamp}-{branch}.txt", tmux_file, "text/plain")))
+        else:
+          with open(tmux_path, "rb") as f:
+            head = f.read(DISCORD_TMUX_FILE_MAX_BYTES // 2)
+            f.seek(max(0, tmux_size - DISCORD_TMUX_FILE_MAX_BYTES // 2))
+            tail = f.read(DISCORD_TMUX_FILE_MAX_BYTES // 2)
+          truncated = head + b"\n\n===== DISCORD TMUX TRUNCATED =====\n\n" + tail
+          files.append(("files[0]", (f"{tmux_why}-{stamp}-{branch}-truncated.txt", truncated, "text/plain")))
+
+      toggle_path = "/data/toggle_values.json"
+      if send_settings and os.path.exists(toggle_path) and os.path.getsize(toggle_path) <= DISCORD_TMUX_FILE_MAX_BYTES:
+        toggle_file = open(toggle_path, "rb")
+        opened_files.append(toggle_file)
+        files.append(("files[1]", (f"toggles-{stamp}.json", toggle_file, "application/json")))
+
+      if files:
+        response = requests.post(
+          url,
+          data={"payload_json": json.dumps(payload, ensure_ascii=False)},
+          files=files,
+          timeout=12,
+        )
+      else:
+        response = requests.post(url, json=payload, timeout=12)
+
+      ok = 200 <= response.status_code < 300
+      print(f"[carrot_man] discord tmux {'sent' if ok else 'failed'}: status={response.status_code} reason={tmux_why}")
+      return ok
+    except Exception as e:
+      print(f"discord tmux sending error...: {e}")
+      traceback.print_exc()
+      return False
     finally:
-      for _, fileinfo in files:
-        fileobj = fileinfo[1]
+      for fileobj in opened_files:
         try:
           fileobj.close()
         except Exception:
@@ -945,6 +1145,7 @@ class CarrotMan:
         return socket, poller
 
     socket, poller = setup_socket()
+    can_sm = messaging.SubMaster(['carState', 'radarState'])
     isOnroadCount = 0
     is_tmux_sent = False
     onroad_start_at = None
@@ -952,6 +1153,10 @@ class CarrotMan:
     onroad_tmux_next_attempt_at = 0.0
     pending_tmux_reason = None
     pending_tmux_next_attempt_at = 0.0
+    can_error_detected_at = None
+    can_error_tmux_requested = False
+    current_onroad_car_state_seen = False
+    current_onroad_radar_state_seen = False
 
     print("#########carrot_cmd_zmq: thread started...")
     while True:
@@ -961,12 +1166,13 @@ class CarrotMan:
 
         if socket in socks and socks[socket] == zmq.POLLIN:
           message = socket.recv(zmq.NOBLOCK)
-          print(f"Received:7710 request: {message}")
           json_obj = json.loads(message.decode())
+          print(f"Received:7710 request keys: {list(json_obj) if isinstance(json_obj, dict) else []}")
         else:
           json_obj = None
 
         if json_obj is None:
+          can_sm.update(0)
           is_onroad = not self.params.get_bool("IsOffroad")
           if is_onroad:
             if onroad_start_at is None:
@@ -975,19 +1181,51 @@ class CarrotMan:
               is_tmux_sent = False
               onroad_tmux_captured = False
               onroad_tmux_next_attempt_at = 0.0
+              can_error_detected_at = None
+              can_error_tmux_requested = False
+              current_onroad_car_state_seen = False
+              current_onroad_radar_state_seen = False
               if AUTO_ONROAD_DIAGNOSTICS:
                 self.show_panda_debug = True
             else:
               isOnroadCount += 1
+              current_onroad_car_state_seen |= can_sm.updated['carState']
+              current_onroad_radar_state_seen |= can_sm.updated['radarState']
           else:
             isOnroadCount = 0
             onroad_start_at = None
             is_tmux_sent = False
             onroad_tmux_captured = False
             onroad_tmux_next_attempt_at = 0.0
+            can_error_detected_at = None
+            can_error_tmux_requested = False
+            current_onroad_car_state_seen = False
+            current_onroad_radar_state_seen = False
 
           network_type = self.sm['deviceState'].networkType # if not force_wifi else NetworkType.wifi
           networkConnected = False if network_type == NetworkType.none else True
+
+          if is_onroad and not can_error_tmux_requested:
+            car_state_current = current_onroad_car_state_seen and can_sm.alive['carState']
+            radar_state_current = current_onroad_radar_state_seen and can_sm.alive['radarState']
+            car_can_error, radar_can_error = carrot_can_error_sources(
+              self.params.get("CarName"), car_state_current, can_sm['carState'],
+              radar_state_current, can_sm['radarState'],
+            )
+            if can_error_detected_at is None and (car_can_error or radar_can_error):
+              can_error_detected_at = now
+              sources = []
+              if car_can_error:
+                sources.append(f"carState(canTimeout={can_sm['carState'].canTimeout}, canValid={can_sm['carState'].canValid})")
+              if radar_can_error:
+                sources.append("radarState(radarErrors.canError=True)")
+              print(f"[carrot_man] current onroad CAN error detected from {', '.join(sources)}; "
+                    f"waiting {CARROT_CAN_ERROR_TMUX_DELAY_SECONDS:g}s before tmux capture")
+
+            if carrot_can_error_send_ready(can_error_detected_at, now, is_onroad):
+              can_error_tmux_requested = queue_carrot_exception_tmux_send(
+                "CAN error observed in current onroad state", reason="can_error",
+              )
 
           if AUTO_ONROAD_DIAGNOSTICS and onroad_start_at is not None and not is_tmux_sent:
             onroad_elapsed = now - onroad_start_at
@@ -1000,16 +1238,27 @@ class CarrotMan:
                 onroad_tmux_next_attempt_at = now + CARROT_EXCEPTION_UPLOAD_RETRY_SECONDS
 
             if onroad_tmux_captured and networkConnected and now >= onroad_tmux_next_attempt_at:
-              ftp_ok = self.send_tmux("Ekdrmsvkdlffjt7710", "onroad", send_settings = True)
-              http_response = self.send_tmux_http("onroad", send_settings = True)
-              http_ok = http_response is not None and getattr(http_response, "ok", False)
-              if ftp_ok or http_ok:
-                print(f"[carrot_man] onroad tmux upload complete: ftp_ok={ftp_ok}, http_ok={http_ok}")
+              web_response = self.send_tmux_web("onroad", send_settings = True)
+              web_ok = web_response is not None and getattr(web_response, "ok", False)
+              carrot_logs_response = self.send_tmux_carrot_logs("onroad", send_settings = True)
+              carrot_logs_ok = carrot_logs_response is not None and getattr(carrot_logs_response, "ok", False)
+              if web_ok or carrot_logs_ok:
+                print(f"[carrot_man] onroad tmux upload complete: web_ok={web_ok}, carrot_logs_ok={carrot_logs_ok}")
                 is_tmux_sent = True
               else:
                 onroad_tmux_next_attempt_at = now + CARROT_EXCEPTION_UPLOAD_RETRY_SECONDS
           carrot_exception = self.params.get("CarrotException")
-          if carrot_exception in ["exception", "log", "tmux_send"] and pending_tmux_reason is None and now >= pending_tmux_next_attempt_at:
+          if not is_onroad and (carrot_exception == "can_error" or pending_tmux_reason == "can_error"):
+            if carrot_exception == "can_error":
+              self.params.put("CarrotException", "")
+            pending_tmux_reason = None
+            pending_tmux_next_attempt_at = 0.0
+            reset_carrot_exception_tmux_send_queue()
+            carrot_exception = None
+            print("[carrot_man] CAN error tmux canceled after going offroad")
+
+          if carrot_exception in ["exception", "log", "tmux_send", "can_error"] \
+              and pending_tmux_reason is None and now >= pending_tmux_next_attempt_at:
             if self.make_tmux_data():
               pending_tmux_reason = carrot_exception
               pending_tmux_next_attempt_at = 0.0
@@ -1019,11 +1268,15 @@ class CarrotMan:
               reset_carrot_exception_tmux_send_queue()
 
           if pending_tmux_reason is not None and networkConnected and now >= pending_tmux_next_attempt_at:
-            ftp_ok = self.send_tmux("Ekdrmsvkdlffjt7710", pending_tmux_reason)
-            http_response = self.send_tmux_http(pending_tmux_reason, send_settings = False)
-            http_ok = http_response is not None and getattr(http_response, "ok", False)
-            if ftp_ok or http_ok:
-              print(f"[carrot_man] tmux upload complete for {pending_tmux_reason}: ftp_ok={ftp_ok}, http_ok={http_ok}")
+            web_response = self.send_tmux_web(pending_tmux_reason, send_settings = False)
+            web_ok = web_response is not None and getattr(web_response, "ok", False)
+            carrot_logs_response = self.send_tmux_carrot_logs(pending_tmux_reason, send_settings = False)
+            carrot_logs_ok = carrot_logs_response is not None and getattr(carrot_logs_response, "ok", False)
+            discord_ok = self.send_tmux_discord(pending_tmux_reason, web_ok, web_response)
+            if web_ok or carrot_logs_ok or discord_ok:
+              print(f"[carrot_man] tmux upload complete for {pending_tmux_reason}: web_ok={web_ok}, carrot_logs_ok={carrot_logs_ok}, discord_ok={discord_ok}")
+              if pending_tmux_reason == "exception":
+                self.params.put_bool("CarrotExceptionSent", True)
               self.params.put("CarrotException", "")
               pending_tmux_reason = None
               pending_tmux_next_attempt_at = 0.0
@@ -1048,11 +1301,13 @@ class CarrotMan:
           socket.send(echo.encode())
         elif 'tmux_send' in json_obj:
           tmux_created = self.make_tmux_data()
-          ftp_ok = self.send_tmux(json_obj['tmux_send'], "tmux_send") if tmux_created else False
-          http_response = self.send_tmux_http("tmux_send") if tmux_created else None
-          http_ok = http_response is not None and getattr(http_response, "ok", False)
-          result = "success" if ftp_ok or http_ok else "failed"
-          echo = json.dumps({"tmux_send": json_obj['tmux_send'], "result": result, "ftp_ok": ftp_ok, "http_ok": http_ok})
+          web_response = self.send_tmux_web("tmux_send") if tmux_created else None
+          web_ok = web_response is not None and getattr(web_response, "ok", False)
+          carrot_logs_response = self.send_tmux_carrot_logs("tmux_send") if tmux_created else None
+          carrot_logs_ok = carrot_logs_response is not None and getattr(carrot_logs_response, "ok", False)
+          discord_ok = self.send_tmux_discord("tmux_send", web_ok, web_response) if tmux_created else False
+          result = "success" if web_ok or carrot_logs_ok or discord_ok else "failed"
+          echo = json.dumps({"tmux_send": True, "result": result, "web_ok": web_ok, "carrot_logs_ok": carrot_logs_ok, "discord_ok": discord_ok})
           socket.send(echo.encode())
       except Exception as e:
         print(f"carrot_cmd_zmq error: {e}")

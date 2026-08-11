@@ -21,20 +21,18 @@ HUD_PARAM = "ClusterHud"
 HUD_DEBUG_PARAM = "ClusterHudDebug"
 HUD_ENCODER_PARAM = "ClusterHudEncoder"
 HUD_LIVE_FPS_PARAM = "ClusterHudLiveFps"
+HUD_ORIENTATION_PARAM = "ClusterHudOrientation"
 HUD_CORE_MODE_PARAM = "ClusterHudCoreMode"
 HUD_PRIORITY_PARAM = "ClusterHudPriority"
 IS_ONROAD_PARAM = "IsOnroad"
 RETRY_INTERVAL_S = 5.0
-HUD_CHECK_INTERVAL_S = 5.0
+HUD_CHECK_INTERVAL_S = 0.1
 USB_FALLBACK_SCAN_INTERVAL_S = 5.0
 USB_OFF_DIM_INTERVAL_S = 30.0
 NETLINK_KOBJECT_UEVENT = 15
 AUTORUN_FPS_ENV = "CLUSTER_AUTORUN_FPS"
 REALTIME_CORES_ENV = "CLUSTER_REALTIME_CORES"
 REALTIME_PRIORITY_ENV = "CLUSTER_REALTIME_PRIORITY"
-AUTORUN_DEFAULT_ENV = {
-    "CLUSTER_REALTIME": "1",
-}
 DEFAULT_REALTIME_CORES = [1, 2, 3, 4]
 DEFAULT_REALTIME_PRIORITY = 10
 CORE_MODE_DEDICATED = 0
@@ -75,15 +73,6 @@ def _ensure_cluster_paths() -> None:
         path_text = str(path)
         if path_text not in sys.path:
             sys.path.insert(0, path_text)
-
-
-def _apply_autorun_defaults() -> None:
-    for key, value in AUTORUN_DEFAULT_ENV.items():
-        os.environ.setdefault(key, value)
-
-
-def _cluster_realtime_enabled() -> bool:
-    return os.environ.get("CLUSTER_REALTIME", "0").strip().lower() in ("1", "true", "yes", "on")
 
 
 def _normalize_core_mode(value: object) -> int:
@@ -161,12 +150,10 @@ def _set_current_process_affinity(cores: list[int]) -> list[int]:
 
 
 def _configure_autorun_affinity() -> None:
-    if not _cluster_realtime_enabled():
-        return
     try:
         cores = _cluster_realtime_cores()
         allowed_cores = _set_current_process_affinity(cores)
-        print(f"[cluster_autorun] affinity enabled cores={allowed_cores or cores}", flush=True)
+        print(f"[cluster_autorun] affinity configured cores={allowed_cores or cores}", flush=True)
     except Exception as exc:
         print(f"[cluster_autorun] failed to set core affinity: {exc}", flush=True)
 
@@ -222,6 +209,15 @@ def _read_live_fps_mode(params: Params) -> int:
         return 0
 
 
+def _read_orientation(params: Params) -> int | None:
+    try:
+        orientation = int(params.get_int(HUD_ORIENTATION_PARAM))
+    except Exception as exc:
+        print(f"[cluster_autorun] failed to read {HUD_ORIENTATION_PARAM}: {exc}", flush=True)
+        return None
+    return orientation if orientation in (0, 2) else None
+
+
 def _read_core_mode(params: Params) -> int:
     try:
         return _normalize_core_mode(params.get_int(HUD_CORE_MODE_PARAM))
@@ -265,13 +261,13 @@ def _cluster_args(
     active_encoder_mode: int,
     core_mode: int,
     priority: int,
+    output_mode: str = "usb",
 ) -> list[str]:
     args = [
         "--input",
         "live",
         "--output",
-        "usb",
-        *_encoder_args(active_encoder_mode),
+        output_mode,
         "--cluster-hud-mode",
         str(hud_mode),
         "--cluster-hud-encoder",
@@ -281,14 +277,24 @@ def _cluster_args(
         "--cluster-hud-priority",
         str(priority),
     ]
+    if output_mode in ("usb", "both"):
+        # Standalone carrot_navi owns TCP 7714; live input consumes its carrotNavi cereal service.
+        args[4:4] = _encoder_args(active_encoder_mode)
     fps = os.environ.get(AUTORUN_FPS_ENV, "").strip()
     if fps:
         args.extend(["--fps", fps])
     return args
 
 
-def _run_cluster_once(hud_mode: int, encoder_mode: int, core_mode: int, priority: int) -> None:
+def _run_cluster_once(
+    hud_mode: int,
+    encoder_mode: int,
+    core_mode: int,
+    priority: int,
+    output_mode: str = "usb",
+) -> None:
     from selfdrive.carrot import cluster_run
+    from cluster_h264_pipeline import H264PipelineInitializationError
 
     def run_cluster_entry() -> None:
         try:
@@ -300,23 +306,33 @@ def _run_cluster_once(hud_mode: int, encoder_mode: int, core_mode: int, priority
 
     previous_argv = sys.argv[:]
     try:
-        sequence = _encoder_sequence(encoder_mode)
+        sequence = _encoder_sequence(encoder_mode) if output_mode in ("usb", "both") else [encoder_mode]
         for index, active_encoder_mode in enumerate(sequence):
-            print(
-                f"[cluster_autorun] starting HUD encoder "
-                f"{ENCODER_NAMES[active_encoder_mode]} "
-                f"(setting={encoder_mode}:{ENCODER_NAMES[encoder_mode]})",
-                flush=True,
-            )
+            if output_mode in ("usb", "both"):
+                print(
+                    f"[cluster_autorun] starting HUD encoder "
+                    f"{ENCODER_NAMES[active_encoder_mode]} "
+                    f"(setting={encoder_mode}:{ENCODER_NAMES[encoder_mode]})",
+                    flush=True,
+                )
+            else:
+                print("[cluster_autorun] starting HUD window fallback", flush=True)
             try:
                 sys.argv = [
                     previous_argv[0],
-                    *_cluster_args(hud_mode, encoder_mode, active_encoder_mode, core_mode, priority),
+                    *_cluster_args(
+                        hud_mode,
+                        encoder_mode,
+                        active_encoder_mode,
+                        core_mode,
+                        priority,
+                        output_mode,
+                    ),
                 ]
                 run_cluster_entry()
                 return
-            except Exception:
-                if encoder_mode != ENCODER_AUTO or index == len(sequence) - 1:
+            except H264PipelineInitializationError:
+                if output_mode not in ("usb", "both") or encoder_mode != ENCODER_AUTO or index == len(sequence) - 1:
                     raise
                 next_encoder_mode = sequence[index + 1]
                 print(
@@ -555,7 +571,6 @@ def _wait_for_hud_output_allowed(params: Params, expected_product_id: int) -> in
 def main() -> None:
     _configure_autorun_locale()
     _ensure_cluster_paths()
-    _apply_autorun_defaults()
     from cluster_usb_display import find_supported_usb_product, product_id_for_hud_mode, product_label
 
     params = Params()
@@ -568,6 +583,7 @@ def main() -> None:
         hud_mode = _read_hud_mode(params)
         encoder_mode = _read_encoder_mode(params)
         live_fps_mode = _read_live_fps_mode(params)
+        orientation = _read_orientation(params)
         expected_product_id = product_id_for_hud_mode(hud_mode)
         if expected_product_id is None:
             print(f"[cluster_autorun] {HUD_PARAM}={hud_mode}; stopping cluster HUD", flush=True)
@@ -580,6 +596,24 @@ def main() -> None:
             continue
 
         if find_supported_usb_product(expected_product_id) is None:
+            if not TICI:
+                print(
+                    f"[cluster_autorun] {product_label(expected_product_id)} not found on PC; "
+                    "starting window-only HUD",
+                    flush=True,
+                )
+                try:
+                    _run_cluster_once(hud_mode, encoder_mode, core_mode, priority, output_mode="window")
+                    continue
+                except Exception as exc:
+                    print(
+                        f"[cluster_autorun] cluster HUD window failed: {exc}; "
+                        f"retrying in {RETRY_INTERVAL_S:.0f}s",
+                        flush=True,
+                    )
+                    traceback.print_exc()
+                    time.sleep(RETRY_INTERVAL_S)
+                    continue
             found_product_id = _wait_for_supported_usb_device(
                 params,
                 expected_product_id,
@@ -596,12 +630,14 @@ def main() -> None:
             next_hud_mode = _read_hud_mode(params)
             next_encoder_mode = _read_encoder_mode(params)
             next_live_fps_mode = _read_live_fps_mode(params)
+            next_orientation = _read_orientation(params)
             next_core_mode = _read_core_mode(params)
             next_priority = _read_priority(params)
             if (
                 next_hud_mode != hud_mode
                 or next_encoder_mode != encoder_mode
                 or next_live_fps_mode != live_fps_mode
+                or (next_orientation is not None and next_orientation != orientation)
                 or next_core_mode != core_mode
                 or next_priority != priority
             ):
@@ -610,6 +646,7 @@ def main() -> None:
                     f"mode {hud_mode}->{next_hud_mode}, "
                     f"encoder {encoder_mode}->{next_encoder_mode}, "
                     f"live_fps {live_fps_mode}->{next_live_fps_mode}, "
+                    f"orientation {orientation}->{next_orientation}, "
                     f"core_mode {core_mode}->{next_core_mode}, "
                     f"priority {priority}->{next_priority}; rechecking",
                     flush=True,

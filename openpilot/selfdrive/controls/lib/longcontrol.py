@@ -57,7 +57,7 @@ class LongControl:
 
     self.params = Params()
     self.readParamCount = 0
-    self.stopping_accel = 0
+    self.stopping_accel = 0.0
     self.j_lead = 0.0
 
     self.use_accel_pid = False
@@ -78,7 +78,6 @@ class LongControl:
     if self.readParamCount >= 100:
       self.readParamCount = 0
       self.stopping_accel = self.params.get_float("StoppingAccel") * 0.01
-
     elif self.readParamCount == 10:
       if len(self.CP.longitudinalTuning.kpBP) == 1 and len(self.CP.longitudinalTuning.kiBP) == 1:
         longitudinalTuningKpV = self.params.get_float("LongTuningKpV") * 0.01
