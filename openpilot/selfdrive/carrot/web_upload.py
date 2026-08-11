@@ -137,7 +137,7 @@ def create_web_upload_session_sync(
   if not 200 <= status < 300 or not (body or {}).get("ok"):
     text = str(getattr(response, "text", "") or "")[:300]
     error = str((body or {}).get("error") or text)[:300]
-    raise RuntimeError(f"upload session HTTP {present}: {error}")
+    raise RuntimeError(f"upload session HTTP {status}: {error}")
   return _session_token(body)
 
 
