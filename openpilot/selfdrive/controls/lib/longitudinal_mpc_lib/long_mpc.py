@@ -313,7 +313,7 @@ class LongitudinalMpc:
 
   def apply_predicted_danger_a_change_cost(self, lead, base_a_change_cost, lead_obstacle, t_follow, comfort_brake, stop_distance):
     self.predicted_danger_margin = 1e3
-    if not lead.status:
+    if not lead.present:
       target_a_change_cost = base_a_change_cost
     else:
       safe_distance = get_safe_obstacle_distance(self.x_sol[:,1], t_follow, comfort_brake, stop_distance)
