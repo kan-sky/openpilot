@@ -6,7 +6,8 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from openpilot.cereal import car, log, messaging
+from openpilot.cereal import log, messaging
+from opendbc.car.structs import car
 from openpilot.common.params import Params
 from openpilot.common.realtime import Priority, config_realtime_process
 from openpilot.common.swaglog import cloudlog

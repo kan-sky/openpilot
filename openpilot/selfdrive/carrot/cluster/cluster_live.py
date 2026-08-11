@@ -203,7 +203,7 @@ class OpenpilotLiveSource:
         if self.params is None:
             return
         try:
-            from openpilot.cereal import car
+            from opendbc.car.structs import car
 
             car_params_bytes = self.params.get("CarParams")
             if car_params_bytes:
@@ -229,7 +229,7 @@ class OpenpilotLiveSource:
         if self.params is None:
             return "fuel"
         try:
-            from openpilot.cereal import car
+            from opendbc.car.structs import car
             from opendbc.car.hyundai.values import HyundaiFlags
 
             car_params_bytes = self.params.get("CarParams")
@@ -246,7 +246,7 @@ class OpenpilotLiveSource:
         if self.params is None:
             return DEFAULT_MAX_LATERAL_ACCEL
         try:
-            from openpilot.cereal import car
+            from opendbc.car.structs import car
 
             car_params_bytes = self.params.get("CarParams")
             if not car_params_bytes:

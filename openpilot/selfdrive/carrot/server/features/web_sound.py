@@ -5,7 +5,8 @@ import time
 
 from aiohttp import WSMsgType, web
 
-from openpilot.cereal import car, messaging
+from openpilot.cereal import messaging
+from opendbc.car.structs import car
 from openpilot.common.params import Params
 from openpilot.selfdrive.car.openpilot_toggle import CruiseMainOpenpilotToggle
 
