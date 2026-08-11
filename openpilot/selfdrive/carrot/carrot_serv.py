@@ -1175,6 +1175,7 @@ class CarrotServ:
 
     self.debugText = ""
     self.update_params()
+    carrot_navi_active = self._update_carrot_navi(sm)
     if sm.alive['carState'] and sm.alive['selfdriveState']:
       CS = sm['carState']
       v_ego = CS.vEgo
