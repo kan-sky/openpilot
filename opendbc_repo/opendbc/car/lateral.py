@@ -236,11 +236,12 @@ def apply_center_deadzone(error, deadzone):
 
 
 def get_friction(lateral_accel_error: float, lateral_accel_deadzone: float, friction_threshold: float,
-                 torque_params: structs.CarParams.LateralTorqueTuning) -> float:
-  # TODO torque params' friction should be in lat accel space, not torque space
+                 torque_params: structs.CarParams.LateralTorqueTuning, friction_compensation: bool) -> float:
   friction_interp = np.interp(
     apply_center_deadzone(lateral_accel_error, lateral_accel_deadzone),
     [-friction_threshold, friction_threshold],
-    [-torque_params.friction * torque_params.latAccelFactor, torque_params.friction * torque_params.latAccelFactor]
+    [-torque_params.friction, torque_params.friction]
   )
-  return float(friction_interp)
+  friction = float(friction_interp) if friction_compensation else 0.0
+  return friction
+
