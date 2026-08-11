@@ -407,32 +407,61 @@ class LongitudinalMpc:
       stop_x = 1000.0
     else:
       v_cruise, stop_x, mode = carrot.v_cruise, carrot.stop_dist, carrot.mode
-      desired_distance = desired_follow_distance(v_ego, lead_v_0, comfort_brake, stop_distance, t_follow)
-      t_follow = carrot.dynamic_t_follow(t_follow, radarstate.leadOne, desired_distance, self.prev_a)
 
-    # To estimate a safe distance from a moving lead, we calculate how much stopping
-    # distance that lead needs as a minimum. We can add that to the current distance
-    # and then treat that as a stopped car/obstacle at this new distance.
-    lead_0_obstacle = lead_xv_0[:,0] + get_stopped_equivalence_factor(lead_xv_0[:,1])
-    lead_1_obstacle = lead_xv_1[:,0] + get_stopped_equivalence_factor(lead_xv_1[:,1])
-    
-    self.desired_distance = desired_follow_distance(v_ego, lead_v_0, comfort_brake, stop_distance, t_follow)
+    lead_d = float(lead_xv_0[0, 0])
+    lead_v = float(lead_xv_0[0, 1])
 
-    self.params[:,0] = ACCEL_MIN if not reset_state else a_ego
-    # negative accel constraint causes problems because negative speed is not allowed
-    self.params[:,1] = max(0.0, self.max_a if not reset_state else a_ego)
+    if not hasattr(self, "stopped_lead_count"):
+      self.stopped_lead_count = 0
+    if not hasattr(self, "stopped_lead_active"):
+      self.stopped_lead_active = False
 
-    # Update in ACC mode or ACC/e2e blend
+    stopped_lead_cond = (radarstate.leadOne.present and 4.0 < lead_d < 30.0 and lead_v < 1.5)
+
+    if stopped_lead_cond:
+      self.stopped_lead_count = min(self.stopped_lead_count + 1, 20)
+    else:
+      self.stopped_lead_count = max(self.stopped_lead_count - 1, 0)
+
+    self.stopped_lead_active = self.stopped_lead_count >= 3
+    # Kans: 앞차가 출발하면 정지차 상태 즉시 해제
+    # 정지 접근 중 오검출 방지를 위해 내 차가 거의 정지한 상태에서만 해제
+    if self.stopped_lead_active and radarstate.leadOne.present and v_ego < 0.5:
+      if lead_v > 0.5 or radarstate.leadOne.vRel > 0.2:
+        self.stopped_lead_count = 0
+        self.stopped_lead_active = False
+
+    # 정지차로 판단되면 lead speed만 0으로 간주하고,
+    # 실제 정차 간격은 StopDistanceCarrot(stop_distance)가 결정하도록 함
+    lead_v_for_follow = np.clip(lead_v_0, 0.0, 0.3) if self.stopped_lead_active else lead_v_0
+
+    desired_distance = desired_follow_distance(v_ego, lead_v_for_follow, comfort_brake, stop_distance, t_follow)
+    t_follow = carrot.dynamic_t_follow(t_follow, radarstate.leadOne, desired_distance, self.prev_a)
+
+    lead_0_obstacle = lead_xv_0[:, 0] + get_stopped_equivalence_factor(
+      np.zeros_like(lead_xv_0[:, 1]) if self.stopped_lead_active else lead_xv_0[:, 1])
+    lead_1_obstacle = lead_xv_1[:, 0] + get_stopped_equivalence_factor(lead_xv_1[:, 1])
+
+    # Kans: 정지차로 판단되면 실제 정지거리가 약간 더 확보되도록, obstacle을 0.5m 가까운 쪽으로 당김
+    if self.stopped_lead_active and stop_distance > 0.0:
+      lead_0_obstacle = np.maximum(0.0, lead_0_obstacle - 0.5)
+
+    stopped_lead_1_active = (
+      radarstate.leadTwo.present and 4.0 < float(lead_xv_1[0, 0]) < 30.0 and
+      float(lead_xv_1[0, 1]) < 1.5)
+
+    if stopped_lead_1_active and stop_distance > 0.0:
+      lead_1_obstacle = np.maximum(0.0, lead_1_obstacle - 0.5)
+
+    self.desired_distance = desired_follow_distance(v_ego, lead_v_for_follow, comfort_brake, stop_distance, t_follow)
+    self.params[:, 0] = ACCEL_MIN if not reset_state else a_ego
+    self.params[:, 1] = max(0.0, self.max_a if not reset_state else a_ego)
+
     if mode == 'acc':
-      #self.params[:,5] = LEAD_DANGER_FACTOR
-      # Fake an obstacle for cruise, this ensures smooth acceleration to set speed
-      # when the leads are no factor.
       v_lower = v_ego + (T_IDXS * self.cruise_min_a * 1.05)
-      # TODO does this make sense when max_a is negative?
       v_upper = v_ego + (T_IDXS * self.max_a * 1.05)
-      v_cruise_clipped = np.clip(v_cruise * np.ones(N+1),
-                                 v_lower,
-                                 v_upper)
+      v_cruise_clipped = np.clip(v_cruise * np.ones(N + 1), v_lower, v_upper)
+
       cruise_obstacle = np.cumsum(T_DIFFS * v_cruise_clipped) + get_safe_obstacle_distance(v_cruise_clipped, t_follow, comfort_brake, stop_distance)
 
       adjust_dist = carrot.trafficStopDistanceAdjust if v_ego > 0.1 else -2.0
@@ -441,7 +470,8 @@ class LongitudinalMpc:
       d_min = np.interp(v_ego, [0.0, 10.0, 15.0, 20.0], [5.0, 45.0, 65.0, 75.0])
       if d_min < stop_x + adjust_dist < cruise_obstacle[0]:
         stop_x = cruise_obstacle[0] - adjust_dist
-      x2 = stop_x * np.ones(N+1) + adjust_dist
+
+      x2 = stop_x * np.ones(N + 1) + adjust_dist
 
       x_obstacles = np.column_stack([lead_0_obstacle, lead_1_obstacle, cruise_obstacle, x2])
       self.source = SOURCES[np.argmin(x_obstacles[0])]
@@ -462,56 +492,55 @@ class LongitudinalMpc:
       #safe_distance = lead_0_obstacle[0] - get_safe_obstacle_distance(v_ego, comfort_brake, stop_distance)
       self.lead_danger_factor = LEAD_DANGER_FACTOR #np.interp(safe_distance, [-30.0, 0.0], [0.9, LEAD_DANGER_FACTOR])
       self.params[:,5] = self.lead_danger_factor
-      
-    elif mode == 'blended':
-      self.params[:,5] = 1.0
 
-      x_obstacles = np.column_stack([lead_0_obstacle,
-                                     lead_1_obstacle])
+    elif mode == 'blended':
+      self.params[:, 5] = 1.0
+
+      x_obstacles = np.column_stack([lead_0_obstacle, lead_1_obstacle])
       cruise_target = T_IDXS * np.clip(v_cruise, v_ego - 2.0, 1e3) + x[0]
+
       xforward = ((v[1:] + v[:-1]) / 2) * (T_IDXS[1:] - T_IDXS[:-1])
       x = np.cumsum(np.insert(xforward, 0, x[0]))
 
       x_and_cruise = np.column_stack([x, cruise_target])
       x = np.min(x_and_cruise, axis=1)
 
-      self.source = 'e2e' if x_and_cruise[1,0] < x_and_cruise[1,1] else 'cruise'
+      self.source = 'e2e' if x_and_cruise[1, 0] < x_and_cruise[1, 1] else 'cruise'
 
     else:
       raise NotImplementedError(f'Planner mode {self.mode} not recognized in planner update')
 
-    self.yref[:,1] = x
-    self.yref[:,2] = v
-    self.yref[:,3] = a
-    self.yref[:,5] = j
+    self.yref[:, 1] = x
+    self.yref[:, 2] = v
+    self.yref[:, 3] = a
+    self.yref[:, 5] = j
+
     for i in range(N):
       self.solver.set(i, "yref", self.yref[i])
+
     self.solver.set(N, "yref", self.yref[N][:COST_E_DIM])
 
-    self.params[:,2] = np.min(x_obstacles, axis=1)
-    self.params[:,3] = np.copy(self.prev_a)
-    self.params[:,4] = t_follow
-    self.params[:,6] = comfort_brake
-    self.params[:,7] = stop_distance
-
+    self.params[:, 2] = np.min(x_obstacles, axis=1)
+    self.params[:, 3] = np.copy(self.prev_a)
+    self.params[:, 4] = t_follow
+    self.params[:, 6] = comfort_brake
+    self.params[:, 7] = stop_distance
     self.t_follow = t_follow
 
     self.run()
     if mode == 'acc':
       self.apply_predicted_danger_a_change_cost(radarstate.leadOne, base_a_change_cost, lead_0_obstacle, t_follow, comfort_brake, stop_distance)
 
-    if (np.any(lead_xv_0[FCW_IDXS,0] - self.x_sol[FCW_IDXS,0] < CRASH_DISTANCE) and
+    if (np.any(lead_xv_0[FCW_IDXS, 0] - self.x_sol[FCW_IDXS, 0] < CRASH_DISTANCE) and
             radarstate.leadOne.modelProb > 0.9):
       self.crash_cnt += 1
     else:
       self.crash_cnt = 0
 
-    # Check if it got within lead comfort range
-    # TODO This should be done cleaner
     if self.mode == 'blended':
-      if any((lead_0_obstacle - get_safe_obstacle_distance(self.x_sol[:,1], t_follow, comfort_brake, stop_distance))- self.x_sol[:,0] < 0.0):
+      if any((lead_0_obstacle - get_safe_obstacle_distance(self.x_sol[:, 1], t_follow, comfort_brake, stop_distance)) - self.x_sol[:, 0] < 0.0):
         self.source = 'lead0'
-      if any((lead_1_obstacle - get_safe_obstacle_distance(self.x_sol[:,1], t_follow, comfort_brake, stop_distance))- self.x_sol[:,0] < 0.0) and \
+      if any((lead_1_obstacle - get_safe_obstacle_distance(self.x_sol[:, 1], t_follow, comfort_brake, stop_distance)) - self.x_sol[:, 0] < 0.0) and \
          (lead_1_obstacle[0] - lead_0_obstacle[0]):
         self.source = 'lead1'
 

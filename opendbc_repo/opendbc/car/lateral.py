@@ -36,6 +36,17 @@ class CurvatureSteeringLimits:
   MAX_LATERAL_JERK: float = MAX_LATERAL_JERK
 
 
+def get_max_curvature_jerk(v_ego: float, steer_step: int) -> float:
+  ts_elapsed = steer_step * DT_CTRL
+  curvature_rate_limit = ISO_LATERAL_JERK / (max(v_ego, 1.0) ** 2)
+  return curvature_rate_limit * ts_elapsed
+
+
+def get_max_curvature_average(v_ego: float) -> tuple[float, float]:
+  max_curvature = MAX_LATERAL_ACCEL_MEB / (max(v_ego, 1.0) ** 2)
+  return -max_curvature, max_curvature
+
+
 def apply_std_curvature_limits(apply_curvature: float, apply_curvature_last: float, v_ego: float, curvature: float,
                                steer_step: int, lat_active: bool, limits: CurvatureSteeringLimits) -> float:
   # ISO lateral jerk limit (rate of curvature change)
