@@ -96,10 +96,10 @@ def test_hardware_h264_decoder_factory_does_not_require_tici_marker(monkeypatch,
 def _import_cluster_autorun(monkeypatch):
   params_module = types.ModuleType("openpilot.common.params")
   params_module.Params = object
-  hardware_module = types.ModuleType("openpilot.system.hardware")
+  hardware_module = types.ModuleType("openpilot.common.hardware")
   hardware_module.TICI = False
   monkeypatch.setitem(sys.modules, "openpilot.common.params", params_module)
-  monkeypatch.setitem(sys.modules, "openpilot.system.hardware", hardware_module)
+  monkeypatch.setitem(sys.modules, "openpilot.common.hardware", hardware_module)
 
   module_name = "openpilot.selfdrive.carrot.cluster_autorun"
   sys.modules.pop(module_name, None)
