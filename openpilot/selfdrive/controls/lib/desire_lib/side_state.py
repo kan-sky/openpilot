@@ -177,7 +177,7 @@ class SideState:
 
   @classmethod
   def _is_corner_radar_object(cls, radar_obj) -> bool:
-    if not bool(getattr(radar_obj, "status", False)):
+    if not bool(getattr(radar_obj, "present", False)):
       return False
     track_id = int(cls._lead_float(radar_obj, "radarTrackId", -1.0))
     return is_corner_track_id(track_id) or is_stable_corner_track_id(track_id)
@@ -185,7 +185,7 @@ class SideState:
   def _bsd_receding_release_ready(self, v_ego: float, radar_objects) -> bool:
     candidates = []
     for radar_obj in radar_objects:
-      if not bool(getattr(radar_obj, "status", False)):
+      if not bool(getattr(radar_obj, "present", False)):
         continue
       track_id = int(self._lead_float(radar_obj, "radarTrackId", -1.0))
       d_rel = self._lead_float(radar_obj, "dRel", 255.0)
@@ -246,7 +246,7 @@ class SideState:
       return default
 
   def _side_lead_is_unsafe(self, v_ego: float, radar_obj) -> bool:
-    if radar_obj is None or not radar_obj.status:
+    if radar_obj is None or not radar_obj.present:
       return False
 
     d_rel = self._lead_float(radar_obj, "dRel", 255.0)
