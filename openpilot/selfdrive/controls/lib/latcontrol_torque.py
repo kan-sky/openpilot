@@ -139,7 +139,7 @@ class LatControlTorque(LatControl):
     self.torque_params.latAccelOffset = latAccelOffset
     self.torque_params.friction = friction
 
-  def update(self, active, CS, VM, params, steer_limited_by_safety, desired_curvature, CC, curvature_limited, model_data=None):
+  def update(self, active, CS, VM, params, steer_limited_by_safety, desired_curvature, CC, curvature_limited, model_data=None, lat_delay=0.0):
     self.frame += 1
     if self.frame % 10 == 0:
       lateralTorqueCustom = self.params.get_int("LateralTorqueCustom")
