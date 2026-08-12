@@ -308,14 +308,21 @@ class CarController(CarControllerBase):
           lead_vrel = CS.lead_vrel
           has_lead = CS.lead_present and (CS.lead_distance is not None) and np.isfinite(CS.lead_distance)
           near_stop_ego = (CS.out.vEgo < 0.3)
+          resume_standstill = CS.out.standstill or CS.out.cruiseState.standstill
           reopen_delay = max(self.resumeDelay_time * 1.5, 0.28)
-          #creep_dt = (self.frame - self.resume_frame) * DT_CTRL if (self.resume_frame != 0) else 999.0
 
           # follow 조건(정지/재출발 구간에서 vRel 흔들림 감안)
           lead_follow_ok = has_lead and (2.0 < lead_drel < 15.0) and (lead_vrel > 0.3)
 
-          # 앞차 출발: 근거리 + vRel 양수 + near stop
-          raw_lead_start = has_lead and (4.0 < lead_drel < 10.0) and (lead_vrel > 0.4) and near_stop_ego
+          # 앞차 출발:
+          # Creep Release는 정지 완료 후에만 허용한다.
+          # 정지 직전 vEgo<0.3 상태에서 오검출로 stopping brake가 풀리는 것을 방지.
+          raw_lead_start = (
+            has_lead and
+            (4.0 < lead_drel < 10.0) and
+            (lead_vrel > 0.4) and
+            resume_standstill
+          )
 
           if raw_lead_start:
             self.lead_start_count = min(self.lead_start_count + 1, 5)
@@ -324,34 +331,42 @@ class CarController(CarControllerBase):
 
           lead_start = self.lead_start_count >= 3
 
-          # Kans: Creep Release Window (starting 없이도 브레이크 먼저 풀기)
-          # resume_frame은 "리쥼윈도우" 의미. 크리핑 시작하면 유지하는 게 핵심.
-
-          # 윈도우 시작: 기존 resume_frame이 0일 때만 새로 연다
-          if auto_resume_enabled and lead_start and (self.resume_frame == 0) and (not CS.out.brakePressed) and (not CS.out.gasPressed) and not auto_hold_block_cruise:
+          # Kans: Creep Release Window
+          # 완전 정지 후 앞차 출발이 확인되면 starting 진입 전 브레이크를 잠시 풀어준다.
+          # resume_frame은 실제 AutoResume까지 이어지는 리쥼윈도우로 유지한다.
+          if (auto_resume_enabled and
+              lead_start and
+              resume_standstill and
+              self.resume_frame == 0 and
+              not CS.out.brakePressed and
+              not CS.out.gasPressed and
+              not auto_hold_block_cruise):
             self.resume_frame = self.frame
-            self.resume_fault_guard = -1  # -1: creep release 단계(브레이크 0)
-            self.last_button_frame = self.frame - int(0.12 / DT_CTRL)  # starting 진입 시 즉시 RES 1회 가능
-          # resume_frame 갱신 후 계산해야 함
-          creep_dt = (self.frame - self.resume_frame) * DT_CTRL if (self.resume_frame != 0) else 999.0
-            
+            self.resume_fault_guard = -1
+            self.last_button_frame = self.frame - int(0.12 / DT_CTRL)
+
+          # resume_frame 갱신 후 계산
+          creep_dt = (self.frame - self.resume_frame) * DT_CTRL if self.resume_frame != 0 else 999.0
+
           if self.resume_fault_guard == -1:
-            # starting/enable이면 creep release 종료(윈도우는 유지)
+            # starting 진입 시 Creep Release 종료.
+            # resume_frame은 RES 동작을 위해 유지한다.
             if starting:
               self.resume_fault_guard = 0
 
-            # vEgo가 이미 올라가면(크리핑 시작) 종료(윈도우 유지)
+            # 실제 차량이 움직이기 시작하면 브레이크 release 단계 종료.
             elif CS.out.vEgo > 0.4:
               self.resume_fault_guard = 0
 
-            # creep release 유지 시간 동안, 앞차가 출발할 때 브레이크를 0으로 풀어준다
-            elif creep_dt < 0.22 and lead_start:
+            # 완전 정지 상태에서 확인된 앞차 출발에 한해서만 브레이크 해제.
+            elif creep_dt < 0.22 and lead_start and resume_standstill:
               self.apply_brake = 0
 
-            # timeout이면 윈도우 종료
+            # Creep Release 시간만 종료.
+            # resume_frame은 여기서 지우지 않고 아래 AutoResume cleanup에서 정리한다.
             else:
               self.resume_fault_guard = 0
-              self.resume_frame = 0
+
 
           # AutoCruise: 크루즈 OFF 상태에서, 메인 활성(activateCruise) 신호가 있을 때
           if auto_cruise_enabled and self._pending_activateCruise and not CS.out.cruiseState.enabled:
