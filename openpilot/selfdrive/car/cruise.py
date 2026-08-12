@@ -320,6 +320,8 @@ class VCruiseCarrot:
       self.v_lead_kph = lead.vLeadK * CV.MS_TO_KPH if lead.present else 0
     if sm.alive['drivingModelData']:
       self.model_v_kph = sm['drivingModelData'].action.desiredVelocity * CV.MS_TO_KPH
+    else:
+      self.model_v_kph = 0
 
     self.v_cruise_kph_last = self.v_cruise_kph
     self.is_metric = is_metric

@@ -1210,8 +1210,7 @@ class CarrotServ:
       self.active_carrot = 0
 
     limit_speed = 200
-    road_limit_valid = not carrot_navi_active or self.carrot_navi_road_limit_valid
-    if self.autoRoadSpeedLimitOffset >= 0 and self.active_carrot>=2 and road_limit_valid:
+    if self.autoRoadSpeedLimitOffset >= 0 and self.active_carrot>=2:
       if self.nRoadLimitSpeed >= 30:
         road_speed_limit_offset = self.autoRoadSpeedLimitOffset
         if not self.is_metric:
@@ -1248,7 +1247,7 @@ class CarrotServ:
       if self.xSpdType == 4 or (self.xSpdType in [100, 101] and self.xSpdDist <= 0):
         sdi_speed = self.xSpdLimit
         self.active_carrot = 4
-    elif CS is not None and CS.speedLimit > 0 and CS.speedLimitDistance > 0:
+    elif CS is not None and CS.speedLimit >= 0 and CS.speedLimitDistance > 0:
       sdi_speed = min(sdi_speed,
                       self.calculate_current_speed(CS.speedLimitDistance,
                                                    CS.speedLimit * self.autoNaviSpeedSafetyFactor,
