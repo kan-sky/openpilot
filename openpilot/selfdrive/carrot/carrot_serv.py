@@ -1247,7 +1247,7 @@ class CarrotServ:
       if self.xSpdType == 4 or (self.xSpdType in [100, 101] and self.xSpdDist <= 0):
         sdi_speed = self.xSpdLimit
         self.active_carrot = 4
-    elif CS is not None and CS.speedLimit >= 0 and CS.speedLimitDistance > 0:
+    elif CS is not None and CS.speedLimit > 0 and CS.speedLimitDistance > 0:
       sdi_speed = min(sdi_speed,
                       self.calculate_current_speed(CS.speedLimitDistance,
                                                    CS.speedLimit * self.autoNaviSpeedSafetyFactor,
