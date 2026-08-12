@@ -44,7 +44,7 @@ export function createRoadOverlayPolicy(options = {}) {
       const leadOne = overlayState?.radarState?.leadOne || {};
       const accel = firstFinite(hudState?.longitudinalPlan?.accels, 0);
       colorIndex = 13;
-      if (leadOne.status) {
+      if (leadOne.present) {
         if (Math.abs(accel) < 0.5) colorIndex = 12;
         else if (accel >= 0.5) colorIndex = 11;
         else colorIndex = 10;
