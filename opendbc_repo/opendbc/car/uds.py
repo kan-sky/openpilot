@@ -1,4 +1,4 @@
-import time
+﻿import time
 import struct
 from collections import deque
 from typing import NamedTuple, cast
@@ -567,9 +567,21 @@ class IsoTpMessage:
       return ISOTP_FRAME_TYPE.FIRST
 
     elif rx_data[0] >> 4 == ISOTP_FRAME_TYPE.CONSECUTIVE:
-      assert not self.rx_done, "isotp - rx: consecutive frame with no active frame"
+      if self.rx_done or self.rx_len == 0:
+        return ISOTP_FRAME_TYPE.UNKNOWN
+
+      expected_idx = (self.rx_idx + 1) & 0xF
+      received_idx = rx_data[0] & 0xF
+
+      if expected_idx != received_idx:
+        carlog.error(
+          f"isotp - rx: invalid consecutive frame index "
+          f"expected={expected_idx} received={received_idx} "
+          f"addr={hex(self._can_client.rx_addr)} data=0x{rx_data.hex()}"
+        )
+        return ISOTP_FRAME_TYPE.UNKNOWN
+
       self.rx_idx += 1
-      assert self.rx_idx & 0xF == rx_data[0] & 0xF, "isotp - rx: invalid consecutive frame index"
       rx_size = self.rx_len - len(self.rx_dat)
       self.rx_dat += rx_data[1:1 + rx_size]
       if self.rx_len == len(self.rx_dat):
