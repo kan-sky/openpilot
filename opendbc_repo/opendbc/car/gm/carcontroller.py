@@ -317,12 +317,7 @@ class CarController(CarControllerBase):
           # 앞차 출발:
           # Creep Release는 정지 완료 후에만 허용한다.
           # 정지 직전 vEgo<0.3 상태에서 오검출로 stopping brake가 풀리는 것을 방지.
-          raw_lead_start = (
-            has_lead and
-            (4.0 < lead_drel < 10.0) and
-            (lead_vrel > 0.4) and
-            resume_standstill
-          )
+          raw_lead_start = (has_lead and (4.0 < lead_drel < 10.0) and (lead_vrel > 0.4) and resume_standstill)
 
           if raw_lead_start:
             self.lead_start_count = min(self.lead_start_count + 1, 5)
@@ -334,13 +329,7 @@ class CarController(CarControllerBase):
           # Kans: Creep Release Window
           # 완전 정지 후 앞차 출발이 확인되면 starting 진입 전 브레이크를 잠시 풀어준다.
           # resume_frame은 실제 AutoResume까지 이어지는 리쥼윈도우로 유지한다.
-          if (auto_resume_enabled and
-              lead_start and
-              resume_standstill and
-              self.resume_frame == 0 and
-              not CS.out.brakePressed and
-              not CS.out.gasPressed and
-              not auto_hold_block_cruise):
+          if (auto_resume_enabled and lead_start and resume_standstill and self.resume_frame == 0 and not CS.out.brakePressed and not CS.out.gasPressed and not auto_hold_block_cruise):
             self.resume_frame = self.frame
             self.resume_fault_guard = -1
             self.last_button_frame = self.frame - int(0.12 / DT_CTRL)
