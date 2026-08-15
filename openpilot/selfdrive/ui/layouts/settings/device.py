@@ -14,7 +14,7 @@ from openpilot.system.ui.lib.multilang import multilang, tr, tr_noop
 from openpilot.system.ui.widgets import Widget, DialogResult
 from openpilot.system.ui.widgets.confirm_dialog import ConfirmDialog, alert_dialog
 from openpilot.system.ui.widgets.html_render import HtmlModal
-from openpilot.system.ui.widgets.list_view import text_item, button_item, dual_button_item
+from openpilot.system.ui.widgets.list_view import text_item, button_item, dual_button_item, single_button_item, triple_button_item # Kans
 from openpilot.system.ui.widgets.option_dialog import MultiOptionDialog
 from openpilot.system.ui.widgets.scroller_tici import Scroller
 
@@ -50,15 +50,16 @@ class DeviceLayout(Widget):
                                         callback=self._reset_calibration_prompt)
     self._reset_calib_btn.set_description_opened_callback(self._update_calib_description)
 
-    self._power_off_btn = dual_button_item(lambda: tr("Reboot"), lambda: tr("Power Off"),
-                                           left_callback=self._reboot_prompt, right_callback=self._power_off_prompt)
-
+    # Kans: triple btn for Pwr Off
+    self._power_off_btn = triple_button_item(lambda: tr("ReCalibration"), lambda: tr("Reboot"), lambda: tr("Power Off"),
+                            left_callback=self._reset_calibration_prompt, mid_callback=self._reboot_prompt, right_callback=self._power_off_prompt)
     items = [
       text_item(lambda: tr("Dongle ID"), self._params.get("DongleId") or (lambda: tr("N/A"))),
       text_item(lambda: tr("Serial"), self._params.get("HardwareSerial") or (lambda: tr("N/A"))),
       self._pair_device_btn,
       button_item(lambda: tr("Cabin Camera"), lambda: tr("PREVIEW"), lambda: tr(DESCRIPTIONS['cabin_camera']),
                   callback=lambda: gui_app.push_widget(CabinCameraDialog()), enabled=ui_state.is_offroad),
+      self._power_off_btn,
       self._reset_calib_btn,
       button_item(lambda: tr("Review Training Guide"), lambda: tr("REVIEW"), lambda: tr(DESCRIPTIONS['review_guide']),
                   self._on_review_training_guide, enabled=ui_state.is_offroad),
@@ -69,7 +70,7 @@ class DeviceLayout(Widget):
     return items
 
   def _offroad_transition(self):
-    self._power_off_btn.action_item.right_button.set_visible(ui_state.is_offroad())
+    self._power_off_btn.action_item.right_button.set_visible(True) # Kans: visible pwr Btn
 
   def show_event(self):
     super().show_event()
@@ -87,7 +88,7 @@ class DeviceLayout(Widget):
       self._select_language_dialog = None
 
     self._select_language_dialog = MultiOptionDialog(tr("Select a language"), multilang.languages, multilang.codes[multilang.language],
-                                                     option_font_weight=FontWeight.UNIFONT, callback=handle_language_selection)
+                                                     option_font_weight=FontWeight.DISPLAY, callback=handle_language_selection)
     gui_app.push_widget(self._select_language_dialog)
 
   def _reset_calibration_prompt(self):
