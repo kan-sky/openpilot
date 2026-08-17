@@ -1,5 +1,6 @@
 import os
 import math
+import importlib  # Kans: CarSelector
 
 from openpilot.cereal import messaging, log
 from openpilot.common.basedir import BASEDIR
@@ -27,6 +28,47 @@ DESCRIPTIONS = {
 }
 
 
+# Kans: CarSelector - Car List Widget (NO MultiOptionDialog)
+class CarListDialog(Widget):
+  def __init__(self, params: Params, title: str, car_names: list[str], cur: str | None):
+    super().__init__()
+    self._params = params
+    self._title = title
+    self._car_names = car_names
+    self._cur = cur
+
+    # 상단 안내(선택된 차량 표시)
+    header = text_item(lambda: tr("Select Your Car"), lambda: (self._cur or tr("None")))
+
+    def make_car_button(name: str):
+      # 현재 선택 강조를 description으로 표시(색상제어 없이 텍스트만)
+      desc = (lambda n=name: tr("Currently selected") if (self._cur == n) else "")
+      return button_item(lambda n=name: n, lambda: tr("SELECT"), description=desc,
+                         callback=lambda n=name: self._select_car(n))
+
+    items = [header] + [make_car_button(n) for n in self._car_names]
+    self._scroller = Scroller(items, line_separator=True, spacing=0)
+
+  def show_event(self):
+    self._scroller.show_event()
+
+  def _render(self, rect):
+    self._scroller.render(rect)
+
+  def _select_car(self, name: str):
+    try:
+      self._params.put("CarSelected3", name)
+    except Exception:
+      cloudlog.exception("failed to save CarSelected3")
+      gui_app.push_widget(alert_dialog(tr("Failed to save selection")))
+      return
+
+    # 차량 목록과 브랜드 목록을 닫고 Device 화면으로 복귀
+    gui_app.pop_widget()
+    gui_app.pop_widget()
+
+
+
 class DeviceLayout(Widget):
   def __init__(self):
     super().__init__()
@@ -46,6 +88,11 @@ class DeviceLayout(Widget):
                                         callback=lambda: gui_app.push_widget(PairingDialog()))
     self._pair_device_btn.set_visible(lambda: not ui_state.prime_state.is_paired())
 
+    # Kans: CarSelector (Dual Button)
+    self._select_car_btn = dual_button_item(lambda: tr("Select Car"), lambda: self._get_selected_car_button_text(),
+      left_callback=self._open_gm_car_list, right_callback=self._delete_selected_car_prompt,
+      description=lambda: self._get_selected_car_label())
+
     self._reset_calib_btn = button_item(lambda: tr("Reset Calibration"), lambda: tr("RESET"), lambda: tr(DESCRIPTIONS['reset_calibration']),
                                         callback=self._reset_calibration_prompt)
     self._reset_calib_btn.set_description_opened_callback(self._update_calib_description)
@@ -56,6 +103,9 @@ class DeviceLayout(Widget):
     items = [
       text_item(lambda: tr("Dongle ID"), self._params.get("DongleId") or (lambda: tr("N/A"))),
       text_item(lambda: tr("Serial"), self._params.get("HardwareSerial") or (lambda: tr("N/A"))),
+
+      # Kans: CarSelector (Dual Button row)
+      self._select_car_btn,
       self._pair_device_btn,
       button_item(lambda: tr("Cabin Camera"), lambda: tr("PREVIEW"), lambda: tr(DESCRIPTIONS['cabin_camera']),
                   callback=lambda: gui_app.push_widget(CabinCameraDialog()), enabled=ui_state.is_offroad),
@@ -65,7 +115,6 @@ class DeviceLayout(Widget):
                   self._on_review_training_guide, enabled=ui_state.is_offroad),
       button_item(lambda: tr("Regulatory"), lambda: tr("VIEW"), callback=self._on_regulatory, enabled=ui_state.is_offroad),
       button_item(lambda: tr("Change Language"), lambda: tr("CHANGE"), callback=self._show_language_dialog),
-      self._power_off_btn,
     ]
     return items
 
@@ -192,3 +241,76 @@ class DeviceLayout(Widget):
     if not self._training_guide:
       self._training_guide = TrainingGuide()
     gui_app.push_widget(self._training_guide)
+
+  # Kans: CarSelector
+  def _get_selected_car_button_text(self) -> str:
+    cur = self._params.get("CarSelected3")
+    if isinstance(cur, (bytes, bytearray)):
+      cur = cur.decode(errors="ignore")
+    cur = (cur or "").strip()
+    if not cur:
+      return tr("Delete Car")
+
+    max_len = 18
+    return cur if len(cur) <= max_len else (cur[:max_len - 1] + "…")
+
+  def _get_selected_car_label(self) -> str:
+    cur = self._params.get("CarSelected3")
+    if isinstance(cur, (bytes, bytearray)):
+      cur = cur.decode(errors="ignore")
+    cur = (cur or "").strip()
+    return (tr("Selected: ") + cur) if cur else tr("Selected: None")
+
+  def _delete_selected_car_prompt(self):
+    cur = self._params.get("CarSelected3")
+    if isinstance(cur, (bytes, bytearray)):
+      cur = cur.decode(errors="ignore")
+
+    if not cur:
+      gui_app.push_widget(alert_dialog(tr("No selection to delete.")))
+      return
+
+    def do_delete(res: DialogResult):
+      if res == DialogResult.CONFIRM:
+        self._params.remove("CarSelected3")
+
+    gui_app.push_widget(ConfirmDialog(tr("Delete current selection?") + f"\n{cur}", tr("Delete"), callback=do_delete))
+  def _open_gm_car_list(self):
+    try:
+      car_names = self._get_gm_car_doc_names()
+      if not car_names:
+        gui_app.push_widget(alert_dialog(tr("No GM car list found.")))
+        return
+
+      cur = self._params.get("CarSelected3")
+      if isinstance(cur, (bytes, bytearray)):
+        cur = cur.decode(errors="ignore")
+      cur = cur or None
+
+      gui_app.push_widget(CarListDialog(self._params, "GM", car_names, cur))
+    except Exception:
+      cloudlog.exception("failed to open GM car list")
+      gui_app.push_widget(alert_dialog(tr("Car selector error")))
+
+  @staticmethod
+  def _get_gm_car_doc_names() -> list[str]:
+    cars: list[str] = []
+    try:
+      mod = importlib.import_module("opendbc.car.gm.values")
+      CAR = getattr(mod, "CAR", None)
+      if CAR is None:
+        return []
+
+      for platform in CAR:
+        try:
+          for doc in platform.config.car_docs:
+            name = getattr(doc, "name", None)
+            if name:
+              cars.append(name)
+        except Exception:
+          continue
+
+    except Exception:
+      cloudlog.exception("failed to load GM car docs")
+
+    return sorted(set(cars))

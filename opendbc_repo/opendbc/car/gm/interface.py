@@ -122,7 +122,7 @@ class CarInterface(CarInterfaceBase):
     return float(self.neural_ff_model.predict(inputs))
 
   def torque_from_lateral_accel(self) -> TorqueFromLateralAccelCallbackType:
-    with open(NEURAL_PARAMS_PATH, encoding="utf-8") as f:
+    with open(NEURAL_PARAMS_PATH) as f:
       neural_ff_cars = json.load(f).keys()
 
     if self.CP.carFingerprint in neural_ff_cars:

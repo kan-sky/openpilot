@@ -60,7 +60,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"IsEngaged", {PERSISTENT, BOOL}},
     {"IsLdwEnabled", {PERSISTENT, BOOL}},
     {"IsLiveStreaming", {CLEAR_ON_MANAGER_START, BOOL}},
-    {"IsMetric", {PERSISTENT, BOOL}},
+    {"IsMetric", {PERSISTENT, BOOL, "1"}},
     {"IsOffroad", {CLEAR_ON_MANAGER_START, BOOL}},
     {"IsRhdDetected", {PERSISTENT, BOOL}},
     {"IsReleaseBranch", {CLEAR_ON_MANAGER_START, BOOL}},
@@ -132,6 +132,9 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"Version", {PERSISTENT, STRING}},
 
     // GM AutoCruise / AutoResume custom parameters
+    {"CarSelected3", {PERSISTENT, STRING}},
+    {"FingerPrints", {PERSISTENT | CLEAR_ON_MANAGER_START, STRING}},
+    {"SupportedCars_gm", {PERSISTENT, STRING}},
     {"AutoCruiseControl", {PERSISTENT, INT, "1"}},
     {"AutoGasTokSpeed", {PERSISTENT, INT, "5"}},
     {"AutoEngage", {PERSISTENT, INT, "2"}},
@@ -143,6 +146,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"CustomSteerDeltaDown", {PERSISTENT, INT, "16"}},
     {"CustomSteerDeltaUpLC", {PERSISTENT, INT, "10"}},
     {"CustomSteerDeltaDownLC", {PERSISTENT, INT, "17"}},
+    {"CarName", {PERSISTENT, STRING}},
     {"EVTable", {PERSISTENT, BOOL, "1"}},
     {"LongPitch", {PERSISTENT, BOOL, "1"}},
     {"CruiseDelay", {PERSISTENT, INT, "12"}},
