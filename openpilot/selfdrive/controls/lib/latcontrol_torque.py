@@ -37,6 +37,7 @@ class LatControlTorque(LatControl):
     super().__init__(CP, CI, dt)
     self.torque_params = CP.lateralTuning.torque.as_builder()
     self.torque_from_lateral_accel = CI.torque_from_lateral_accel()
+    self.set_torque_from_lateral_accel_context = getattr(CI, "set_torque_from_lateral_accel_context", None)
     self.lateral_accel_from_torque = CI.lateral_accel_from_torque()
     self.pid = PIDController([INTERP_SPEEDS, KP_INTERP], KI, rate=1/self.dt)
     self.update_limits()
@@ -91,6 +92,8 @@ class LatControlTorque(LatControl):
 
       freeze_integrator = steer_limited_by_safety or CS.steeringPressed or CS.vEgo < 5
       output_lataccel = self.pid.update(pid_log.error, speed=CS.vEgo, feedforward=ff, freeze_integrator=freeze_integrator)
+      if self.set_torque_from_lateral_accel_context is not None:
+        self.set_torque_from_lateral_accel_context(roll_compensation, CS.vEgo, CS.aEgo)
       output_torque = self.torque_from_lateral_accel(output_lataccel, self.torque_params)
 
       pid_log.active = True

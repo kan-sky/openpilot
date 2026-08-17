@@ -2,6 +2,10 @@ import numpy as np
 from openpilot.common.constants import ACCELERATION_DUE_TO_GRAVITY
 from openpilot.common.realtime import DT_CTRL, DT_MDL
 
+
+# Kans
+from openpilot.common.params import Params
+params = Params()
 MIN_SPEED = 1.0
 CONTROL_N = 17
 CAR_ROTATION_RADIUS = 0.0
@@ -13,6 +17,15 @@ MIN_STABLE_DELAY = 0.3
 MAX_LATERAL_JERK = 5.0  # m/s^3
 MAX_LATERAL_ACCEL_NO_ROLL = 3.0  # m/s^2
 
+# Kans:
+def apply_deadzone(error, deadzone):
+  if error > deadzone:
+    error -= deadzone
+  elif error < - deadzone:
+    error += deadzone
+  else:
+    error = 0.
+  return error
 
 def should_stop(v_ego: float, a_target: float) -> bool:
   return bool(v_ego < 0.3 and a_target < 0.1)

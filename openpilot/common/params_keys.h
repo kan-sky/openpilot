@@ -130,4 +130,22 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"UsbGpuActive", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION | CLEAR_ON_IGNITION_ON, BOOL}},
     {"UsbGpuLoading", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION | CLEAR_ON_IGNITION_ON, BOOL}},
     {"Version", {PERSISTENT, STRING}},
+
+    // GM AutoCruise / AutoResume custom parameters
+    {"AutoCruiseControl", {PERSISTENT, INT, "1"}},
+    {"AutoGasTokSpeed", {PERSISTENT, INT, "5"}},
+    {"AutoEngage", {PERSISTENT, INT, "2"}},
+    {"CruiseSpeedUnit", {PERSISTENT, INT, "5"}},
+    {"CruiseSpeedUnitBasic", {PERSISTENT, INT, "5"}},
+    {"CruiseButtonMode", {PERSISTENT, INT, "2"}},
+    {"CustomSteerMax", {PERSISTENT, INT, "300"}},
+    {"CustomSteerDeltaUp", {PERSISTENT, INT, "14"}},
+    {"CustomSteerDeltaDown", {PERSISTENT, INT, "16"}},
+    {"CustomSteerDeltaUpLC", {PERSISTENT, INT, "10"}},
+    {"CustomSteerDeltaDownLC", {PERSISTENT, INT, "17"}},
+    {"EVTable", {PERSISTENT, BOOL, "1"}},
+    {"LongPitch", {PERSISTENT, BOOL, "1"}},
+    {"CruiseDelay", {PERSISTENT, INT, "12"}},
+    {"ResumeDelay", {PERSISTENT, INT, "6"}},
+    {"AccelForce", {PERSISTENT, INT, "950"}},
 };

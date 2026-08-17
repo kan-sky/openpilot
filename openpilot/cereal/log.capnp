@@ -129,9 +129,41 @@ struct OnroadEvent @0xc4fa6047f024e718 {
     aeb @92;
     userBookmark @95;
     excessiveActuation @96;
+    audioFeedback @127;
+
+    softHold @115;
+    trafficStopping @116;
+    audioPrompt @117;
+    audioRefuse @119;
+    stopStop @120;
+    audioLaneChange @121;
+    audioTurn @122;
+    autoHold @123;
+    autoResumeFailed @124;
+    radarCutin @125;
+    radarStationaryLead @126;
+
+    audio1 @104;
+    audio2 @105;
+    audio3 @106;
+    audio4 @107;
+    audio5 @108;
+    audio6 @109;
+    audio7 @110;
+    audio8 @111;
+    audio9 @112;
+    audio10 @113;
+    audio0 @114;
+    torqueNNLoad @118;
     bigModelLoading @100;
     bigModelFailed @102;
-
+    trafficSignGreen @128;
+    trafficSignChanged @129;
+    turningLeft @130;
+    turningRight @131;
+    lowBattery @132;
+    deviceFalling @133;
+    usbError @134;
     lowBatteryDEPRECATED @40;
     soundsUnavailableDEPRECATED @47;
     deviceFallingDEPRECATED @71;
@@ -145,6 +177,7 @@ enum LongitudinalPersonality {
   aggressive @0;
   standard @1;
   relaxed @2;
+  moreRelaxed @3;
 }
 
 struct InitData {
@@ -277,7 +310,11 @@ struct GPSNMEAData {
   nmea @2 :Text;
 }
 
+# android sensor_event_t
 struct SensorEventData {
+  version @0 :Int32;
+  sensor @1 :Int32;
+  type @2 :Int32;
   timestamp @3 :Int64;
 
   union {
@@ -296,10 +333,7 @@ struct SensorEventData {
 
   struct SensorVec {
     v @0 :List(Float32);
-
-    deprecated :group {
-      status @1 :Int8;
-    }
+    status @1 :Int8;
   }
 
   enum SensorSource {
@@ -317,11 +351,7 @@ struct SensorEventData {
     mmc5603nj @11;
   }
 
-  # formerly based on android sensor_event_t
   deprecated :group {
-    version @0 :Int32;
-    sensor @1 :Int32;
-    type @2 :Int32;
     uncalibrated @10 :Bool;
   }
 }
@@ -735,6 +765,15 @@ struct RadarState @0x9a185389d6fdd05f {
   leadOne @3 :LeadData;
   leadTwo @4 :LeadData;
 
+  leadLeft @18 :LeadData;
+  leadRight @14 :LeadData;
+  leadsCenter @15 : List(LeadData);
+  leadsLeft @16 : List(LeadData);
+  leadsRight @17 : List(LeadData);
+  leadsLeft2 @19 : List(LeadData);
+  leadsRight2 @20 : List(LeadData);
+  leadsCutIn @21 : List(LeadData);
+
   struct LeadData {
     dRel @0 :Float32;  # m from the front bumper of the car
     yRel @1 :Float32;  # m in car frame, left positive
@@ -747,14 +786,13 @@ struct RadarState @0x9a185389d6fdd05f {
     modelProb @13 :Float32;  # vision model lead probability
     radar @14 :Bool;  # true if lead is radar-matched (vs vision-only)
     radarTrackId @15 :Int32 = -1;  # for debugging
-
-    deprecated :group {
-      aRel @3 :Float32;
-      aLead @5 :Float32;
-      dPath @6 :Float32;
-      vLat @7 :Float32;
-      fcw @10 :Bool;
-    }
+    aRel @3 :Float32;
+    aLead @5 :Float32;
+    dPath @6 :Float32;
+    vLat @7 :Float32;
+    fcw @10 :Bool;
+    jLead @16 :Float32;
+    score @17 :Float32;
   }
 
   deprecated :group {
@@ -821,6 +859,7 @@ struct SelfdriveState {
   # configurable driving settings
   experimentalMode @10 :Bool;
   personality @11 :LongitudinalPersonality;
+  distanceTraveled @14 :Float32;
 
   enum AudibleAlert {
     none @0;
@@ -837,7 +876,33 @@ struct SelfdriveState {
     promptDistracted @8;
 
     preAlert @9;
-    complete @10;
+    longEngaged @10;
+    longDisengaged @11;
+    trafficSignGreen @12;
+    trafficSignChanged @13;
+    laneChange @14;
+    stopping @15;
+    autoHold @16;
+    engage2 @17;
+    disengage2 @18;
+    trafficError @19;
+    bsdWarning @20;
+    speedDown @21;
+    stopStop @22;
+    reverseGear @23;
+    audio1 @24;
+    audio2 @25;
+    audio3 @26;
+    audio4 @27;
+    audio5 @28;
+    audio6 @29;
+    audio7 @30;
+    audio8 @31;
+    audio9 @32;
+    audio10 @33;
+    audioTurn @34;
+    nnff @35;
+    complete @36;
   }
 
   enum OpenpilotState @0xdbe58b96d2d1ac61 {
@@ -878,6 +943,8 @@ struct ControlsState @0x97ff69c53601abf1 {
   desiredCurvature @61 :Float32;  # lag adjusted curvatures used by lateral controllers
   forceDecel @51 :Bool;
 
+  activeLaneLine @67 : Bool;
+
   lateralControlState :union {
     pidState @53 :LateralPIDState;
     angleState @58 :LateralAngleState;
@@ -916,6 +983,7 @@ struct ControlsState @0x97ff69c53601abf1 {
     desiredLateralAccel @10 :Float32;
     desiredLateralJerk @11 :Float32;
     version @12 :Int32;
+    nnLog @13 :List(Float32);
    }
 
   struct LateralAngleState {
@@ -1068,6 +1136,7 @@ struct ModelDataV2 {
   roadEdgeStds @14 :List(Float32);
 
   # predicted lead cars
+  leads @11 :List(LeadDataV2DEPRECATED);
   leadsV3 @18 :List(LeadDataV3);
 
   meta @12 :MetaData;
@@ -1077,7 +1146,6 @@ struct ModelDataV2 {
   action @26: Action;
 
   lateralPlannerSolutionDEPRECATED @25: Deprecated.LateralPlannerSolution;
-  leadsDEPRECATED @11 :List(LeadDataV2DEPRECATED);
 
   struct LeadDataV2DEPRECATED {
     prob @0 :Float32; # probability that car is your lead at time t
@@ -1117,7 +1185,16 @@ struct ModelDataV2 {
     hardBrakePredicted @7 :Bool;
     laneChangeState @8 :LaneChangeState;
     laneChangeDirection @9 :LaneChangeDirection;
-
+    laneWidthLeft @10 :Float32;
+    laneWidthRight @11 :Float32;
+    distanceToRoadEdgeLeft @12 :Float32;
+    distanceToRoadEdgeRight @13 :Float32;
+    desire @14 :Desire;
+    laneChangeProb @15 :Float32;
+    desireLog @16 : Text;
+    modelTurnSpeed @17 :Float32;
+    laneChangeAvailableLeft @18 :Bool;
+    laneChangeAvailableRight @19 :Bool;
 
     deprecated :group {
       brakeDisengageProb @2 :Float32;
@@ -1155,6 +1232,7 @@ struct ModelDataV2 {
     desiredCurvature @0 :Float32;
     desiredAcceleration @1 :Float32;
     shouldStop @2 :Bool;
+    desiredVelocity @3 :Float32;
   }
 
   deprecated :group {
@@ -1237,6 +1315,15 @@ struct LongitudinalPlan @0xe00b5b3eba12876c {
   allowThrottle @38: Bool;
   allowBrake @39: Bool;
 
+  xState @40: Int32;
+  trafficState @41: Int32;
+  events @42:List(OnroadEvent);
+  vTargetNow @43: Float32;
+  cruiseTarget @44: Float32;
+  jTargetNow @45: Float32;
+  tFollow @46: Float32;
+  desiredDistance @47: Float32;
+  myDrivingMode @48: Int32;
 
   solverExecutionTime @35 :Float32;
 
@@ -1287,6 +1374,7 @@ struct UiPlan {
 
 struct LateralPlan @0xe1e9318e2ae8b51e {
   modelMonoTime @31 :UInt64;
+  laneWidth @0 :Float32;
   dPathPoints @20 :List(Float32);
 
   mpcSolutionValid @9 :Bool;
@@ -1304,13 +1392,17 @@ struct LateralPlan @0xe1e9318e2ae8b51e {
   solverCost @32 :Float32;
   solverState @33 :SolverState;
 
+  latDebugText @34 :Text;
+
+  position @35 :XYZTData;
+  distances @36 :List(Float32);
+
   struct SolverState {
     x @0 :List(List(Float32));
     u @1 :List(Float32);
   }
 
   deprecated :group {
-    laneWidth @0 :Float32;
     lProb @5 :Float32;
     rProb @7 :Float32;
     dProb @21 :Float32;
@@ -2390,6 +2482,28 @@ struct Sentinel {
 struct UIDebug {
   cpuTimeMillis @0 :Float32;
   frameTimeMillis @1 :Float32;
+  modelTimeMillis       @2 :Float32;
+  driverStateTimeMillis @3 :Float32;
+  hudTimeMillis         @4 :Float32;
+  alertTimeMillis       @5 :Float32;
+  extrasTimeMillis      @6 :Float32;
+  plotMode              @7 :UInt8;   # ShowPlotMode (~2초 스로틀 캐시, 0=off)
+  recording             @8 :Bool;    # 화면 녹화 중 여부
+  modelPathTimeMillisDEPRECATED       @9 :Float32;
+  modelLaneTimeMillisDEPRECATED       @10 :Float32;
+  modelBlindSpotTimeMillisDEPRECATED  @11 :Float32;
+  modelRadarTimeMillisDEPRECATED      @12 :Float32;
+  modelTimingValidDEPRECATED          @13 :Bool;
+  hudHeaderTimeMillisDEPRECATED       @14 :Float32;
+  hudSpeedTimeMillisDEPRECATED        @15 :Float32;
+  hudStatusTimeMillisDEPRECATED       @16 :Float32;
+  hudNavigationTimeMillisDEPRECATED   @17 :Float32;
+  hudButtonTimeMillisDEPRECATED       @18 :Float32;
+  hudPlotTimeMillisDEPRECATED         @19 :Float32;
+  hudAuxTimeMillisDEPRECATED          @20 :Float32;
+  hudTimingValidDEPRECATED            @21 :Bool;
+  modelBlindSpotStateMaskDEPRECATED   @22 :UInt8;
+  modelBlindSpotStateValidDEPRECATED  @23 :Bool;
 }
 
 struct ManagerState {
@@ -2532,6 +2646,7 @@ struct Event {
     boot @60 :Boot;
 
     # ********** openpilot daemon msgs **********
+    gpsNMEA @3 :GPSNMEAData;
     can @5 :List(CanData);
     controlsState @7 :ControlsState;
     selfdriveState @130 :SelfdriveState;
@@ -2556,6 +2671,7 @@ struct Event {
     qcomGnss @31 :QcomGnss;
     gpsLocationExternal @48 :GpsLocationData;
     gpsLocation @21 :GpsLocationData;
+    gnssMeasurements @91 :GnssMeasurements;
     vehicleParameters @61 :VehicleParameters;
     lateralTorqueParameters @94 :LateralTorqueParameters;
     lateralDelay @146 : LateralDelay;
@@ -2589,15 +2705,22 @@ struct Event {
     # systems stuff
     operatingSystemLog @20 :OperatingSystemLogEntry;
     managerState @78 :ManagerState;
+    uploaderState @79 :UploaderState;
     procLog @33 :ProcLog;
     clocks @35 :Clocks;
     deviceState @6 :DeviceState;
-    chestnutState @152 :ChestnutState;
+    chestnutState @150 :ChestnutState;
     logMessage @18 :Text;
     errorLogMessage @85 :Text;
 
     # touch frame
     touch @135 :List(Touch);
+
+    # navigation / carrot navi
+    navInstruction @82 :NavInstruction;
+    navRoute @83 :NavRoute;
+    navThumbnail @84: Thumbnail;
+    mapRenderState @105: MapRenderState;
 
     # UI services
     uiDebug @102 :UIDebug;
@@ -2606,7 +2729,7 @@ struct Event {
     userBookmark @93 :UserBookmark;
     bookmarkButton @148 :UserBookmark;
 
-    lateralManeuverPlan @150 :LateralManeuverPlan;
+    lateralManeuverPlan @149 :LateralManeuverPlan;
 
     # *********** debug ***********
     testJoystick @52 :Joystick;
@@ -2619,21 +2742,23 @@ struct Event {
     livestreamNarrowRoadEncodeData @120 :EncodeData;
     livestreamWideRoadEncodeData @121 :EncodeData;
     livestreamCabinEncodeData @122 :EncodeData;
+    youtubeRoadEncodeData @152:EncodeData;
+    youtubeRoadEncodeIdx @153 :EncodeIndex;
 
     # *********** Custom: reserved for forks ***********
 
     # DO change the name of the field
     # DON'T change anything after the "@"
     customReservedRawData0 @124 :Data;
-    customReservedRawData1 @125 :Data;
-    customReservedRawData2 @126 :Data;
+    navRouteNavd @125 :NavRoute;
+    navInstructionCarrot @126 :NavInstruction;
 
     # DO change the name of the field and struct
     # DON'T change the ID (e.g. @107)
     # DON'T change which struct it points to
-    customReserved0 @107 :Custom.CustomReserved0;
-    customReserved1 @108 :Custom.CustomReserved1;
-    customReserved2 @109 :Custom.CustomReserved2;
+    carrotMan @107 :Custom.CarrotMan;
+    carrotNavi @108 :Custom.CarrotNaviState;
+    carrotNaviMedia @109 :Custom.CarrotNaviMedia;
     customReserved3 @110 :Custom.CustomReserved3;
     customReserved4 @111 :Custom.CustomReserved4;
     customReserved5 @112 :Custom.CustomReserved5;
@@ -2654,7 +2779,6 @@ struct Event {
 
     # *********** legacy + deprecated ***********
     model @9 :Deprecated.ModelData; # TODO: rename modelV2 and mark this as deprecated
-    audioFeedbackDEPRECATED @149 :Deprecated.AudioFeedbackDEPRECATED;
     liveMpcDEPRECATED @36 :Deprecated.LiveMpcData;
     liveLongitudinalMpcDEPRECATED @37 :Deprecated.LiveLongitudinalMpcData;
     liveLocationKalmanDeprecatedDEPRECATED @51 :Deprecated.LiveLocationData;
@@ -2691,7 +2815,7 @@ struct Event {
     pandaStateDEPRECATED @12 :PandaState;
     driverStateDEPRECATED @59 :Deprecated.DriverStateDEPRECATED;
     sensorEventsDEPRECATED @11 :List(SensorEventData);
-    lateralPlanDEPRECATED @64 :LateralPlan;
+    lateralPlan @64 :LateralPlan;
     navModelDEPRECATED @104 :Deprecated.NavModelData;
     uiPlanDEPRECATED @106 :UiPlan;
     liveLocationKalmanDEPRECATED @72 :LiveLocationKalman;
@@ -2701,12 +2825,5 @@ struct Event {
     accelerometer2DEPRECATED @101 :SensorEventData;
     temperatureSensor2DEPRECATED @123 :SensorEventData;
     driverMonitoringStateDEPRECATED @71 :DriverMonitoringStateDEPRECATED;
-    gpsNMEADEPRECATED @3 :GPSNMEAData;
-    uploaderStateDEPRECATED @79 :UploaderState;
-    navInstructionDEPRECATED @82 :NavInstruction;
-    navRouteDEPRECATED @83 :NavRoute;
-    navThumbnailDEPRECATED @84 :Thumbnail;
-    gnssMeasurementsDEPRECATED @91 :GnssMeasurements;
-    mapRenderStateDEPRECATED @105: MapRenderState;
   }
 }
