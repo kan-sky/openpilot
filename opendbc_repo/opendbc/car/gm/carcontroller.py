@@ -3,7 +3,7 @@ from openpilot.common.filter_simple import FirstOrderFilter
 
 import numpy as np
 from opendbc.can import CANPacker
-from opendbc.car import Bus, DT_CTRL, structs, ACCELERATION_DUE_TO_GRAVITY
+from opendbc.car import Bus, DT_CTRL, structs, create_gas_interceptor_command, ACCELERATION_DUE_TO_GRAVITY
 from opendbc.car.lateral import apply_driver_steer_torque_limits
 from opendbc.car.gm import gmcan
 from opendbc.car.common.conversions import Conversions as CV
@@ -21,10 +21,9 @@ CAMERA_CANCEL_DELAY_FRAMES = 10
 MIN_STEER_MSG_INTERVAL_MS = 15
 
 # Constants for pitch compensation
-PITCH_DEADZONE = 0.01
-BRAKE_PITCH_FACTOR_BP = [5., 10.]
-BRAKE_PITCH_FACTOR_V = [0., 1.]
-
+PITCH_DEADZONE = 0.01 # [radians] 0.01 ≈ 1% grade
+BRAKE_PITCH_FACTOR_BP = [5., 10.] # [m/s] smoothly revert to planned accel at low speeds
+BRAKE_PITCH_FACTOR_V = [0., 1.] # [unitless in [0,1]]; don't touch
 
 class CarController(CarControllerBase):
   def __init__(self, dbc_names, CP):
@@ -37,16 +36,15 @@ class CarController(CarControllerBase):
     self.apply_speed = 0
     self.frame = 0
     self.last_steer_frame = 0
-    self.pedal_steady = 0.
-
     self.last_button_frame = 0
     self.cancel_counter = 0
+    self.pedal_steady = 0.
 
     self.lka_steering_cmd_counter = 0
     self.lka_icon_status_last = (False, False)
 
     self.params = CarControllerParams(self.CP)
-    self.params_ = Params()
+    self.params_ = Params() # kans: button spam
 
     self.packer_pt = CANPacker(DBC[self.CP.carFingerprint][Bus.pt])
     self.packer_obj = CANPacker(DBC[self.CP.carFingerprint][Bus.radar])
@@ -54,7 +52,8 @@ class CarController(CarControllerBase):
 
     self.long_pitch = False
     self.use_ev_tables = False
-    self.pitch = FirstOrderFilter(0., 0.09 * 4, DT_CTRL * 4)
+
+    self.pitch = FirstOrderFilter(0., 0.09 * 4, DT_CTRL * 4)  # runs at 25 Hz
     self.accel_g = 0.0
 
     self.steerDeltaUpOrg = self.steerDeltaUp = self.steerDeltaUpLC = self.params.STEER_DELTA_UP
@@ -64,13 +63,13 @@ class CarController(CarControllerBase):
     self.activateCruise_after_brake = False
     self.autoCruise_activate = False
     self.autoCruise_frame = 0
-    self.autoCruise_try_count = 0
+    self.autoCruise_try_count = 0  # 오토크루즈 버튼 재시도 횟수
     self._pending_activateCruise = False
 
     self.resume_activate = False
     self.resume_frame = 0
     self.resume_fault_guard = 0
-    self.lead_start_count = 0
+    self.lead_start_count = 0  # 앞차 출발시도 횟수
 
     self.btn_rc_pt = -1
     self.btn_rc_cam = -1
@@ -155,9 +154,7 @@ class CarController(CarControllerBase):
       self.last_steer_frame = self.frame
       self.apply_torque_last = apply_torque
       idx = self.lka_steering_cmd_counter % 4
-      can_sends.append(gmcan.create_steering_control(
-        self.packer_pt, CanBus.POWERTRAIN, apply_torque, idx, CC.latActive
-      ))
+      can_sends.append(gmcan.create_steering_control(self.packer_pt, CanBus.POWERTRAIN, apply_torque, idx, CC.latActive))
 
     if self.CP.openpilotLongitudinalControl:
       # Gas/regen, brake, AutoHold, AutoCruise, AutoResume, UI - 25Hz
@@ -177,11 +174,11 @@ class CarController(CarControllerBase):
           self.accel_g = ACCELERATION_DUE_TO_GRAVITY * apply_deadzone(self.pitch.x, PITCH_DEADZONE)
           accel += self.accel_g
           brake_accel = actuators.accel + self.accel_g * np.interp(CS.out.vEgo, BRAKE_PITCH_FACTOR_BP, BRAKE_PITCH_FACTOR_V)
-        else:
-          self.accel_g = 0.0
 
         at_full_stop = CC.longActive and CS.out.standstill
         near_stop = CC.longActive and (abs(CS.out.vEgo) < self.params.NEAR_STOP_BRAKE_PHASE)
+        interceptor_gas_cmd = 0
+
         # 언덕감지(accel_g가 클수록 높은 경사)
         if self.accel_g > 0.25:
           self._hill_detected = True
@@ -207,277 +204,275 @@ class CarController(CarControllerBase):
           if stopping:
             self.apply_gas = self.params.INACTIVE_REGEN
 
+        if self.CP.enableGasInterceptor and self.apply_gas > self.params.INACTIVE_REGEN and CS.out.cruiseState.standstill:
+          # "Tap" the accelerator pedal to re-engage ACC
+          interceptor_gas_cmd = self.params.SNG_INTERCEPTOR_GAS
+          self.apply_brake = 0
+          self.apply_gas = self.params.INACTIVE_REGEN
+
         idx = (self.frame // 4) % 4
 
-        friction_brake_bus = CanBus.CHASSIS
-        if self.CP.networkLocation == NetworkLocation.fwdCamera:
-          at_full_stop = at_full_stop and stopping
-          friction_brake_bus = CanBus.POWERTRAIN
-          if self.CP.carFingerprint in SDGM_CAR:
-            friction_brake_bus = CanBus.CAMERA
+        if self.CP.enableGasInterceptor:
+          can_sends.append(create_gas_interceptor_command(self.packer_pt, interceptor_gas_cmd, idx))
+        if self.CP.carFingerprint not in ALT_ACCS:
+          friction_brake_bus = CanBus.CHASSIS
+          # GM Camera exceptions
+          # TODO: can we always check the longControlState?
+          if self.CP.networkLocation == NetworkLocation.fwdCamera:
+            at_full_stop = at_full_stop and stopping
+            friction_brake_bus = CanBus.POWERTRAIN
+            if self.CP.carFingerprint in SDGM_CAR:
+              friction_brake_bus = CanBus.CAMERA
 
-        # AutoHold post-cruise guard
-        if CC.enabled or CS.out.cruiseState.enabled:
-          self.autoHold_cruise_cancel_frame = self.frame
+          # Kans: 크루즈 해제 직후 AutoHold 브레이크 명령 지연(1.5s)
+          if CC.enabled or CS.out.cruiseState.enabled:
+            self.autoHold_cruise_cancel_frame = self.frame
 
-        auto_hold_cruise_cancel_delay = (
-          self.autoHold_cruise_cancel_frame >= 0 and
-          (self.frame - self.autoHold_cruise_cancel_frame) * DT_CTRL < 1.5
-        )
+          auto_hold_cruise_cancel_delay = (
+            self.autoHold_cruise_cancel_frame >= 0 and
+            (self.frame - self.autoHold_cruise_cancel_frame) * DT_CTRL < 1.5
+          )
+          # Kans: AutoHold 조건
+          auto_hold_cmd = (
+            not CC.longActive and
+            not CC.enabled and
+            not CS.out.cruiseState.enabled and
+            CS.autoHold and
+            CS.autoHoldActive and
+            not CS.out.gasPressed and
+            CS.out.gearShifter in ['drive', 'low'] and
+            CS.out.vEgo < 0.05 and
+            not CS.out.regenBraking
+          )
 
-        # AutoHold only when cruise/long are fully inactive
-        auto_hold_cmd = (
-          not auto_hold_cruise_cancel_delay and
-          not CC.longActive and
-          not CC.enabled and
-          not CS.out.cruiseState.enabled and
-          CS.autoHold and
-          CS.autoHoldActive and
-          not CS.out.gasPressed and
-          CS.out.gearShifter in ['drive', 'low'] and
-          CS.out.vEgo < 0.05 and
-          not CS.out.regenBraking
-        )
+          if self.CP.autoResumeSng:
+            resume = actuators.longControlState == LongCtrlState.starting or CC.cruiseControl.resume
+            at_full_stop = at_full_stop and not resume
 
-        if self.CP.autoResumeSng:
-          resume = actuators.longControlState == LongCtrlState.starting or CC.cruiseControl.resume
-          at_full_stop = at_full_stop and not resume
-
-        if CC.cruiseControl.resume and CS.pcm_acc_status == AccState.STANDSTILL:
-          acc_engaged = False if self.CP.carFingerprint in EV_CAR else CC.enabled
-        else:
-          acc_engaged = CC.enabled
-
-        starting = actuators.longControlState == LongCtrlState.starting
-
-        # Keep 2CB ACC state active during AutoResume window
-        auto_resume_window = (
-          auto_resume_enabled and
-          self.resume_frame != 0 and
-          CS.out.vEgo < 3.5 and
-          not CS.out.brakePressed and
-          not CS.out.gasPressed
-        )
-        if auto_resume_window and (starting or CS.out.cruiseState.enabled):
-          acc_engaged = True
-          at_full_stop = False
-
-        # Driver-created AutoHold blocks AutoCruise/AutoResume
-        manual_auto_hold = (
-          CS.autoHold and
-          (CS.autoHoldActive or CS.autoHoldActivated or CS.out.autoHoldActivated) and
-          not CS.out.cruiseState.enabled and
-          not CC.enabled
-        )
-        auto_hold_block_cruise = manual_auto_hold
-
-        if auto_hold_block_cruise:
-          self._pending_activateCruise = False
-          self.autoCruise_activate = False
-          self.autoCruise_frame = 0
-          self.autoCruise_try_count = 0
-          self.resume_frame = 0
-          self.resume_activate = False
-          self.resume_fault_guard = 0
-          self.activateCruise_after_brake = False
-
-        # activateCruise latch from cruise.py/card.py
-        if CS.out.activateCruise > 0 and not auto_hold_block_cruise and not CS.out.brakePressed:
-          self._pending_activateCruise = True
-
-        # AutoResume lead data
-        lead_drel = CS.lead_distance
-        lead_vrel = CS.lead_vrel
-        has_lead = (
-          CS.lead_present and
-          CS.lead_distance is not None and
-          np.isfinite(CS.lead_distance)
-        )
-        resume_standstill = CS.out.standstill or CS.out.cruiseState.standstill
-        reopen_delay = max(self.resumeDelay_time * 1.5, 0.28)
-
-        lead_follow_ok = has_lead and (2.0 < lead_drel < 15.0) and (lead_vrel > 0.3)
-
-        raw_lead_start = (
-          has_lead and
-          (4.0 < lead_drel < 10.0) and
-          (lead_vrel > 0.4) and
-          resume_standstill
-        )
-        if raw_lead_start:
-          self.lead_start_count = min(self.lead_start_count + 1, 5)
-        else:
-          self.lead_start_count = 0
-
-        lead_start = self.lead_start_count >= 3
-
-        # Creep release window
-        if (
-          auto_resume_enabled and
-          lead_start and
-          resume_standstill and
-          self.resume_frame == 0 and
-          not CS.out.brakePressed and
-          not CS.out.gasPressed and
-          not auto_hold_block_cruise
-        ):
-          self.resume_frame = self.frame
-          self.resume_fault_guard = -1
-          self.last_button_frame = self.frame - int(0.12 / DT_CTRL)
-
-        creep_dt = (self.frame - self.resume_frame) * DT_CTRL if self.resume_frame != 0 else 999.0
-
-        if self.resume_fault_guard == -1:
-          if starting:
-            self.resume_fault_guard = 0
-          elif CS.out.vEgo > 0.4:
-            self.resume_fault_guard = 0
-          elif creep_dt < 0.22 and lead_start and resume_standstill:
-            self.apply_brake = 0
+          if CC.cruiseControl.resume and CS.pcm_acc_status == AccState.STANDSTILL:
+            if self.CP.carFingerprint in EV_CAR:
+              acc_engaged = False
+            else:
+              acc_engaged = CC.enabled
           else:
-            self.resume_fault_guard = 0
+            acc_engaged = CC.enabled
 
-        # AutoCruise: up to two button attempts within CruiseDelay
-        if auto_cruise_enabled and self._pending_activateCruise and not CS.out.cruiseState.enabled:
-          if not self.autoCruise_activate:
-            self.autoCruise_activate = True
-            self.autoCruise_frame = self.frame
-            self.autoCruise_try_count = 0
+          # Kans: AutoResume 윈도우 중 2CB ACC state 보정
+          starting = (actuators.longControlState == LongCtrlState.starting)
+          auto_resume_window = (auto_resume_enabled and self.resume_frame != 0 and
+            CS.out.vEgo < 3.5 and
+            not CS.out.brakePressed and
+            not CS.out.gasPressed)
+          if auto_resume_window and (starting or CS.out.cruiseState.enabled):
+            acc_engaged = True
+            at_full_stop = False
 
-          within_window = (self.frame - self.autoCruise_frame) * DT_CTRL <= self.cruiseDelay_time
-
-          if within_window and self.autoCruise_try_count < 2:
-            if (self.frame - self.last_button_frame) * DT_CTRL >= 0.12:
-              btn = CruiseButtons.RES_ACCEL if CS.out.activateCruise == 1 else CruiseButtons.DECEL_SET
-              self.send_btn(CS, can_sends, btn)
-              self.last_button_frame = self.frame
-              self.autoCruise_try_count += 1
-
-          if (not within_window) or self.autoCruise_try_count >= 2 or CS.out.cruiseState.enabled:
+          # AutoHold가 실제 운전자 브레이크 개입으로 만들어진 상태인지
+          manual_auto_hold = (
+            CS.autoHold and
+            (CS.autoHoldActive or CS.autoHoldActivated or CS.out.autoHoldActivated) and
+            not CS.out.cruiseState.enabled and
+            not CC.enabled
+          )
+          # 오토크루즈/오토리쥼 차단은 수동 AutoHold일 때만
+          auto_hold_block_cruise = manual_auto_hold
+          if auto_hold_block_cruise:
+            self._pending_activateCruise = False
             self.autoCruise_activate = False
             self.autoCruise_frame = 0
             self.autoCruise_try_count = 0
-            self._pending_activateCruise = False
 
-        # AutoResume: RES only
-        elif auto_resume_enabled and starting and not manual_auto_hold:
-          if self.resume_frame == 0 or self.resume_activate:
-            self.resume_frame = self.frame
+            self.resume_frame = 0
             self.resume_activate = False
             self.resume_fault_guard = 0
-            self.last_button_frame = self.frame - int(0.12 / DT_CTRL)
             self.activateCruise_after_brake = False
 
-          # one-tick brake before RES, sent through regular brake path below
-          if not self.activateCruise_after_brake:
-            self.apply_brake = max(self.apply_brake, int(self.params.NEAR_STOP_BRAKE_PHASE))
-            self.activateCruise_after_brake = True
+          if CS.out.activateCruise > 0 and not auto_hold_block_cruise and not CS.out.brakePressed:
+            self._pending_activateCruise = True
 
-          resume_ready_standstill = CS.out.standstill or CS.out.cruiseState.standstill
+          # Kans: 리쥼 + 가속펄스
+          # lead from CarState (user fields)
+          lead_drel = CS.lead_distance
+          lead_vrel = CS.lead_vrel
+          has_lead = CS.lead_present and (CS.lead_distance is not None) and np.isfinite(CS.lead_distance)
+          near_stop_ego = (CS.out.vEgo < 0.3)
+          resume_standstill = CS.out.standstill or CS.out.cruiseState.standstill
+          reopen_delay = max(self.resumeDelay_time * 1.5, 0.28)
 
-          if not resume_ready_standstill:
-            self.resume_fault_guard = 0
-            self.resume_activate = False
+          # follow 조건(정지/재출발 구간에서 vRel 흔들림 감안)
+          lead_follow_ok = has_lead and (2.0 < lead_drel < 15.0) and (lead_vrel > 0.3)
 
-          elif self.CP.carFingerprint in SDGM_CAR:
-            if self.resume_fault_guard == 0:
-              self.send_btn(CS, can_sends, CruiseButtons.RES_ACCEL)
-              self.last_button_frame = self.frame
-              self.resume_fault_guard = 1
-            elif self.resume_fault_guard < 2:
-              if (self.frame - self.last_button_frame) * DT_CTRL >= 0.12:
-                self.send_btn(CS, can_sends, CruiseButtons.RES_ACCEL)
-                self.last_button_frame = self.frame
-                self.resume_fault_guard += 1
+          # 앞차 출발:
+          # Creep Release는 정지 완료 후에만 허용한다.
+          # 정지 직전 vEgo<0.3 상태에서 오검출로 stopping brake가 풀리는 것을 방지.
+          raw_lead_start = (has_lead and (4.0 < lead_drel < 10.0) and (lead_vrel > 0.4) and resume_standstill)
 
-            if (self.frame - self.resume_frame) * DT_CTRL >= reopen_delay:
-              self.resume_activate = True
-
+          if raw_lead_start:
+            self.lead_start_count = min(self.lead_start_count + 1, 5)
           else:
-            ready = self.resume_fault_guard == 0 or CS.out.cruiseState.enabled
-            if ready and self.resume_fault_guard < 2:
-              if (self.frame - self.last_button_frame) * DT_CTRL >= 0.12:
-                self.send_btn(CS, can_sends, CruiseButtons.RES_ACCEL)
-                self.last_button_frame = self.frame
-                self.resume_fault_guard += 1
+            self.lead_start_count = 0
 
-            if (self.frame - self.resume_frame) * DT_CTRL >= self.resumeDelay_time:
-              self.resume_activate = True
+          lead_start = self.lead_start_count >= 3
 
-        else:
-          self.activateCruise_after_brake = False
+          # Kans: Creep Release Window
+          # 완전 정지 후 앞차 출발이 확인되면 starting 진입 전 브레이크를 잠시 풀어준다.
+          # resume_frame은 실제 AutoResume까지 이어지는 리쥼윈도우로 유지한다.
+          if (auto_resume_enabled and lead_start and resume_standstill and self.resume_frame == 0 and not CS.out.brakePressed and not CS.out.gasPressed and not auto_hold_block_cruise):
+            self.resume_frame = self.frame
+            self.resume_fault_guard = -1
+            self.last_button_frame = self.frame - int(0.12 / DT_CTRL)
 
-          if auto_resume_enabled:
-            if self.resume_frame > 0 and (self.frame - self.resume_frame) * DT_CTRL > reopen_delay:
-              self.resume_frame = 0
-              self.resume_activate = False
+          # resume_frame 갱신 후 계산
+          creep_dt = (self.frame - self.resume_frame) * DT_CTRL if self.resume_frame != 0 else 999.0
+
+          if self.resume_fault_guard == -1:
+            # starting 진입 시 Creep Release 종료.
+            # resume_frame은 RES 동작을 위해 유지한다.
+            if starting:
               self.resume_fault_guard = 0
 
-          self.autoCruise_try_count = 0
-          self.autoCruise_frame = 0
-          self.autoCruise_activate = False
+            # 실제 차량이 움직이기 시작하면 브레이크 release 단계 종료.
+            elif CS.out.vEgo > 0.4:
+              self.resume_fault_guard = 0
 
-        # AutoResume gas pulse after resume-window updates
-        resume_dt = (self.frame - self.resume_frame) * DT_CTRL if self.resume_frame != 0 else 999.0
-        no_lead_hill_ok = (
-          not has_lead and
-          self.resume_frame != 0 and
-          CS.out.vEgo < 0.5 and
-          resume_dt < 0.35
-        )
-        lead_ok = lead_follow_ok or no_lead_hill_ok
+            # 완전 정지 상태에서 확인된 앞차 출발에 한해서만 브레이크 해제.
+            elif creep_dt < 0.22 and lead_start and resume_standstill:
+              self.apply_brake = 0
 
-        resume_active = (
-          self.resume_frame != 0 and
-          auto_longcontrol and
-          CS.out.vEgo < 3.5 and
-          lead_ok and
-          (starting or CS.out.cruiseState.enabled) and
-          (CS.out.standstill or CS.out.cruiseState.standstill)
-        )
+            # Creep Release 시간만 종료.
+            # resume_frame은 여기서 지우지 않고 아래 AutoResume cleanup에서 정리한다.
+            else:
+              self.resume_fault_guard = 0
 
-        if resume_active:
-          send_gas = max(0, int(max(self.apply_gas, self.accel_force)))
-          at_full_stop = False
-          can_sends.append(gmcan.create_gas_regen_command(
-            self.packer_pt, CanBus.POWERTRAIN, send_gas, idx, acc_engaged, at_full_stop
-          ))
-        else:
-          can_sends.append(gmcan.create_gas_regen_command(
-            self.packer_pt, CanBus.POWERTRAIN, self.apply_gas, idx, acc_engaged, at_full_stop
-          ))
 
-        # Regular brake path + AutoHold override
-        if self.CP.carFingerprint not in ALT_ACCS:
+          # AutoCruise: 크루즈 OFF 상태에서, 메인 활성(activateCruise) 신호가 있을 때
+          if auto_cruise_enabled and self._pending_activateCruise and not CS.out.cruiseState.enabled:
+            # Kans: AutoCruise (0.25초 윈도 안에 최대 2회 버튼 시도)
+            if not self.autoCruise_activate:
+              self.autoCruise_activate = True
+              self.autoCruise_frame = self.frame
+              self.autoCruise_try_count = 0
+
+            if self.autoCruise_activate:
+              within_window = (self.frame - self.autoCruise_frame) * DT_CTRL <= self.cruiseDelay_time  # 예: 0.25초
+
+              if within_window and self.autoCruise_try_count < 2:
+                if (self.frame - self.last_button_frame) * DT_CTRL >= 0.12:
+                  btn = CruiseButtons.RES_ACCEL if CS.out.activateCruise == 1 else CruiseButtons.DECEL_SET
+                  self.send_btn(CS, can_sends, btn)
+                  self.last_button_frame = self.frame
+                  self.autoCruise_try_count += 1
+
+              # 종료 조건: 시간 초과 / 2회 시도 완료 / 크루즈 실제 ON
+              if (not within_window) or (self.autoCruise_try_count >= 2) or CS.out.cruiseState.enabled:
+                self.autoCruise_activate = False
+                self.autoCruise_frame = 0
+                self.autoCruise_try_count = 0
+                self._pending_activateCruise = False
+
+          # Kans: Auto Resume (RES only)
+          elif auto_resume_enabled and actuators.longControlState == LongCtrlState.starting and not manual_auto_hold:
+            if self.resume_frame == 0 or self.resume_activate:
+              self.resume_frame = self.frame
+              self.resume_activate = False
+              self.resume_fault_guard = 0
+              # starting 진입 즉시 1회 RES 가능하도록 버튼 타이머 당김
+              self.last_button_frame = self.frame - int(0.12 / DT_CTRL)
+              self.activateCruise_after_brake = False
+
+            # 브레이크 apply는 1틱만 (정규 브레이크 송신에 실리도록)
+            if not self.activateCruise_after_brake:
+              self.apply_brake = max(self.apply_brake, int(self.params.NEAR_STOP_BRAKE_PHASE))
+              self.activateCruise_after_brake = True
+
+            # starting이어도 standstill 확정 전에는 RES 버튼을 보내지 않음. SoftDisableAlert(Alert) 방지용.
+            resume_ready_standstill = (CS.out.standstill or CS.out.cruiseState.standstill)
+
+            if not resume_ready_standstill:
+              self.resume_fault_guard = 0
+              self.resume_activate = False
+
+            # RES spam
+            elif self.CP.carFingerprint in SDGM_CAR:
+              # SDGM: starting이 짧을 수 있으니, 창이 열리면 1회는 반드시 쏨
+              if self.resume_fault_guard == 0:
+                self.send_btn(CS, can_sends, CruiseButtons.RES_ACCEL)
+                self.last_button_frame = self.frame
+                self.resume_fault_guard = 1
+              # 2회차부터 0.12간격 유지
+              elif self.resume_fault_guard < 2:
+                if (self.frame - self.last_button_frame) * DT_CTRL >= 0.12:
+                  self.send_btn(CS, can_sends, CruiseButtons.RES_ACCEL)
+                  self.last_button_frame = self.frame
+                  self.resume_fault_guard += 1
+              # SDGM: 창 닫기 시간을 너무 길게 끌지 않음(메인 꺼짐/flicker 방지)
+              if (self.frame - self.resume_frame) * DT_CTRL >= reopen_delay:
+                self.resume_activate = True
+            else:
+              # other cars: resumeDelay 이후부터 기존 방식으로
+              ready = (self.resume_fault_guard == 0) or CS.out.cruiseState.enabled
+              if ready and (self.resume_fault_guard < 2):
+                # 버튼 주기 0.12초, 리쥼실패율 가장 낮은 값으로 보임.
+                if (self.frame - self.last_button_frame) * DT_CTRL >= 0.12:
+                  self.send_btn(CS, can_sends, CruiseButtons.RES_ACCEL)
+                  self.last_button_frame = self.frame
+                  self.resume_fault_guard += 1  # 송신횟수 기록
+              # 리쥼버튼 중단까지 지연시간(0.16~0.20)
+              if (self.frame - self.resume_frame) * DT_CTRL >= self.resumeDelay_time:
+                self.resume_activate = True
+
+          else:
+            self.activateCruise_after_brake = False
+            if auto_resume_enabled:  # 오토리쥼이 진행중이면
+              if self.resume_frame > 0 and (self.frame - self.resume_frame) * DT_CTRL > reopen_delay:
+                self.resume_frame = 0
+                self.resume_activate = False
+                self.resume_fault_guard = 0
+            # 오토크루즈 초기화도 여기서(오토크루즈 분기 진입 안 했을 때)
+            self.autoCruise_try_count = 0
+            self.autoCruise_frame = 0
+            self.autoCruise_activate = False
+
+          # RES 로직 이후에 dt/lead_ok/resume_active 계산 (윈도우 갱신 반영)
+          resume_dt = (self.frame - self.resume_frame) * DT_CTRL if (self.resume_frame != 0) else 999.0
+          no_lead_hill_ok = (not has_lead) and (self.resume_frame != 0) and (CS.out.vEgo < 0.5) and (resume_dt < 0.35)
+          lead_ok = lead_follow_ok or no_lead_hill_ok
+
+          # resume_active는 "가스 펄스" 조건 -> starting/크루즈ON 게이트
+          resume_active = (self.resume_frame != 0) and auto_longcontrol and (CS.out.vEgo < 3.5) and lead_ok and (starting or CS.out.cruiseState.enabled) and (CS.out.standstill or CS.out.cruiseState.standstill)
+
+          # 2CB: 실제 가스 송신
+          if resume_active:
+            send_gas = max(0, int(max(self.apply_gas, self.accel_force)))
+            at_full_stop = False
+            can_sends.append(gmcan.create_gas_regen_command(self.packer_pt, CanBus.POWERTRAIN, send_gas, idx, acc_engaged, at_full_stop))
+          else:
+            # GasRegenCmdActive needs to be 1 to avoid cruise faults. It describes the ACC state, not actuation
+            can_sends.append(gmcan.create_gas_regen_command(self.packer_pt, CanBus.POWERTRAIN, self.apply_gas, idx, acc_engaged, at_full_stop))
+
+          # Kans: 정규 브레이크 로직
           self._brk_rc = (self._brk_rc + 1) & 0x3
           brk_idx_base = self._brk_rc
 
           if auto_hold_cmd:
             hold_brake = max(self.apply_brake, self.params.NEAR_STOP_BRAKE_PHASE)
             hold_near_stop = CS.out.vEgo < self.params.NEAR_STOP_BRAKE_PHASE
-            can_sends.append(gmcan.create_friction_brake_command(
-              self.packer_ch, friction_brake_bus, hold_brake,
-              brk_idx_base, False, hold_near_stop, False, self.CP
-            ))
+            can_sends.append(gmcan.create_friction_brake_command(self.packer_ch, friction_brake_bus, hold_brake, brk_idx_base, False, hold_near_stop, False, self.CP))
             CS.autoHoldActivated = True
-            friction_sent_this_tick = True
           else:
+            can_sends.append(gmcan.create_friction_brake_command(self.packer_ch, friction_brake_bus, self.apply_brake, brk_idx_base, CC.enabled, near_stop, at_full_stop, self.CP))
             CS.autoHoldActivated = False
 
-          if not friction_sent_this_tick:
-            can_sends.append(gmcan.create_friction_brake_command(
-              self.packer_ch, friction_brake_bus, self.apply_brake,
-              brk_idx_base, CC.enabled, near_stop, at_full_stop, self.CP
-            ))
-            friction_sent_this_tick = True
+          # Send dashboard UI commands (ACC status)
+          send_fcw = hud_alert == VisualAlert.fcw
+          can_sends.append(gmcan.create_acc_dashboard_command(self.packer_pt, CanBus.POWERTRAIN, CC.enabled,
+                                                              hud_v_cruise * CV.MS_TO_KPH, hud_control, send_fcw))
+      else:
+        # to keep accel steady for logs when not sending gas
+        accel += self.accel_g
 
-        send_fcw = hud_alert == VisualAlert.fcw
-        can_sends.append(gmcan.create_acc_dashboard_command(
-          self.packer_pt, CanBus.POWERTRAIN, CC.enabled,
-          hud_v_cruise * CV.MS_TO_KPH, hud_control, send_fcw
-        ))
-
-      # Latest comma radar / keepalive structure
+      # Radar needs to know current speed and yaw rate (50hz),
+      # and that ADAS is alive (10hz)
       if not self.CP.radarUnavailable:
         tt = self.frame * DT_CTRL
         time_and_headlights_step = 10
@@ -496,17 +491,21 @@ class CarController(CarControllerBase):
         can_sends += gmcan.create_adas_keepalive(CanBus.POWERTRAIN)
 
     else:
+      # While car is braking, cancel button causes ECM to enter a soft disable state with a fault status.
+      # A delayed cancellation allows camera to cancel and avoids a fault when user depresses brake quickly
       self.cancel_counter = self.cancel_counter + 1 if CC.cruiseControl.cancel else 0
 
-      # Do not send CANCEL while AutoCruise is trying to engage.
-      auto_cruise_trying = CS.out.activateCruise > 0 and not CS.out.cruiseState.enabled
+      # 오토크루즈 '진입시도'중엔 CANCEL 송신금지
+      auto_cruise_trying = (CS.out.activateCruise and not CS.out.cruiseState.enabled)
 
+      # Stock longitudinal, integrated at camera
       if (self.frame - self.last_button_frame) * DT_CTRL >= 0.04:
-        if self.cancel_counter > CAMERA_CANCEL_DELAY_FRAMES and not auto_cruise_trying:
+        if self.cancel_counter > CAMERA_CANCEL_DELAY_FRAMES and (not auto_cruise_trying):
           self.last_button_frame = self.frame
           self.send_btn(CS, can_sends, CruiseButtons.CANCEL)
 
     if self.CP.networkLocation == NetworkLocation.fwdCamera:
+      # Silence "Take Steering" alert sent by camera, forward PSCMStatus with HandsOffSWlDetectionStatus=1
       if self.frame % 10 == 0:
         can_sends.append(gmcan.create_pscm_status(self.packer_pt, CanBus.CAMERA, CS.pscm_status))
 
@@ -516,15 +515,28 @@ class CarController(CarControllerBase):
     new_actuators.torqueOutputCan = self.apply_torque_last
     new_actuators.gas = self.apply_gas
     new_actuators.brake = self.apply_brake
-    new_actuators.speed = self.apply_speed
-    new_actuators.steeringAngleDeg = CS.out.steeringAngleDeg
+    new_actuators.speed = self.apply_speed # kans: button spam
+    new_actuators.steeringAngleDeg = CS.out.steeringAngleDeg  # Kans: torqueLimits
 
     self.frame += 1
     return new_actuators, can_sends
 
+  # GM: AutoResume
+  def brake_input(self, brake_force):
+    MAX_BRAKE = 400
+
+    if brake_force > 0.0:
+      raise ValueError("brake_force는 0.0이하라야 됨.")
+
+    scaled = int(-brake_force * 100)
+    return max(0, min(MAX_BRAKE, scaled))
+
   def send_btn(self, CS, can_sends, cruise_btn, bus=None):
     if bus is None:
-      bus = CanBus.CAMERA if self.CP.carFingerprint in CAMERA_ACC_CAR else CanBus.POWERTRAIN
+      if self.CP.carFingerprint in CAMERA_ACC_CAR:
+        bus = CanBus.CAMERA
+      else:
+        bus = CanBus.POWERTRAIN
 
     if bus == CanBus.CAMERA:
       if self.btn_rc_cam < 0:
@@ -538,5 +550,10 @@ class CarController(CarControllerBase):
       rc = self.btn_rc_pt
     else:
       raise ValueError(f"Unsupported bus: {bus}")
-
     can_sends.append(gmcan.create_buttons(self.packer_pt, bus, rc, cruise_btn))
+
+  def brake_strength(self) -> float:
+    if self.CP.carFingerprint in EV_CAR or self.CP.carFingerprint in SDGM_CAR:
+      return 0.4
+    else:
+      return 0.7

@@ -130,7 +130,19 @@ class VCruiseHelper:
         self.button_change_states[b.type.raw] = {"standstill": CS.cruiseState.standstill, "enabled": enabled}
 
   def initialize_v_cruise(self, CS, experimental_mode: bool) -> None:
-    return
+    # initializing is handled by the PCM
+    if self.CP.pcmCruise:
+      return
+
+    initial = V_CRUISE_INITIAL_EXPERIMENTAL_MODE if experimental_mode else V_CRUISE_INITIAL
+
+    if any(b.type in (ButtonType.accelCruise, ButtonType.resumeCruise) for b in CS.buttonEvents) and self.v_cruise_initialized:
+      self.v_cruise_kph = self.v_cruise_kph_last
+    else:
+      self.v_cruise_kph = int(round(np.clip(CS.vEgo * CV.MS_TO_KPH, initial, V_CRUISE_MAX)))
+
+    self.v_cruise_cluster_kph = self.v_cruise_kph
+
 
   def _prepare_buttons(self, CS, v_cruise_kph):
     button_kph = v_cruise_kph

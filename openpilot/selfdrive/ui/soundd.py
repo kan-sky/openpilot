@@ -7,6 +7,7 @@ import wave
 from openpilot.cereal import log, messaging
 from openpilot.common.basedir import BASEDIR
 from openpilot.common.filter_simple import FirstOrderFilter
+from openpilot.common.params import Params
 from openpilot.common.realtime import Ratekeeper
 from openpilot.common.utils import retry
 from openpilot.common.swaglog import cloudlog
@@ -17,7 +18,7 @@ from openpilot.common.hardware import HARDWARE
 SAMPLE_RATE = 48000
 SAMPLE_BUFFER = 4096 # (approx 100ms)
 MAX_VOLUME = 1.0
-MIN_VOLUME = 0.1
+MIN_VOLUME = 0.4
 ALERT_RAMP_TIME = 4 # seconds to ramp to max volume for warningImmediate
 SELFDRIVE_STATE_TIMEOUT = 5 # 5 seconds
 FILTER_DT = 1. / (micd.SAMPLE_RATE / micd.FFT_SAMPLES)
@@ -28,7 +29,7 @@ DB_SCALE = 30 # AMBIENT_DB + DB_SCALE is where MAX_VOLUME is applied
 VOLUME_BASE = 20
 if HARDWARE.get_device_type() == "tizi":
   AMBIENT_DB = 30
-  VOLUME_BASE = 10
+  VOLUME_BASE = 50
 
 AudibleAlert = log.SelfdriveState.AudibleAlert
 
@@ -47,6 +48,7 @@ sound_list: dict[int, tuple[str, int | None, float]] = {
 
   AudibleAlert.warningSoft: ("critical.wav", None, MAX_VOLUME),
   AudibleAlert.warningImmediate: ("dm_critical.wav", None, MAX_VOLUME),
+  AudibleAlert.nnff: ("nnff.wav", 1, MAX_VOLUME),
 }
 
 def check_selfdrive_timeout_alert(sm):

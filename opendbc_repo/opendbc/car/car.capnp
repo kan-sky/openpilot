@@ -475,10 +475,10 @@ struct CarControl {
     leadRadar @15: Int16;
     modelDesire @16: Int16;
     atcDistance @17: Float32;
-    naviSpeedLimit @18: Int16;  # VW MEB cluster: TMAP ´Ü¼ÓÄ«¸Ş¶ó/±¸°£´Ü¼Ó Á¦ÇÑ¼Óµµ (kph, 0=¾øÀ½) -> ACC_Tempolimit + event 5
-    naviEventType @19: Int16;   # VW MEB cluster: 0=¾øÀ½ 1=Ä¿ºê 2=±³Â÷·Î 3=ºĞ±â/Ãâ±¸ 4=·ÎÅÍ¸® 5=º´¸ñ 8=µµ·ÎÁ¦ÇÑÁ¦¾îÁß
-    naviEventSpeed @20: Int16;  # VW MEB cluster: ¸ñÇ¥¼Óµµ kph (Ä¿ºê´Â ºÎÈ£=¹æÇâ: +¿ì/-ÁÂ) -> ACC_Event_Wunschgeschw
-    leadLimiting @21: Bool;     # VW MEB cluster: ¾ÕÂ÷°¡ ¼Óµµ¸¦ Á¦ÇÑ Áß(xState lead) -> ¾ÕÂ÷ ÇÏÀÌ¶óÀÌÆ® ¿ì¼±
+    naviSpeedLimit @18: Int16;  # VW MEB cluster: TMAP ë‹¨ì†ì¹´ë©”ë¼/êµ¬ê°„ë‹¨ì† ì œí•œì†ë„ (kph, 0=ì—†ìŒ) -> ACC_Tempolimit + event 5
+    naviEventType @19: Int16;   # VW MEB cluster: 0=ì—†ìŒ 1=ì»¤ë¸Œ 2=êµì°¨ë¡œ 3=ë¶„ê¸°/ì¶œêµ¬ 4=ë¡œí„°ë¦¬ 5=ë³‘ëª© 8=ë„ë¡œì œí•œì œì–´ì¤‘
+    naviEventSpeed @20: Int16;  # VW MEB cluster: ëª©í‘œì†ë„ kph (ì»¤ë¸ŒëŠ” ë¶€í˜¸=ë°©í–¥: +ìš°/-ì¢Œ) -> ACC_Event_Wunschgeschw
+    leadLimiting @21: Bool;     # VW MEB cluster: ì•ì°¨ê°€ ì†ë„ë¥¼ ì œí•œ ì¤‘(xState lead) -> ì•ì°¨ í•˜ì´ë¼ì´íŠ¸ ìš°ì„ 
 
     # not used with the dash, TODO: separate structs for dash UI and device UI
     audibleAlert @5: AudibleAlert;
@@ -801,9 +801,8 @@ struct CarParams {
     gateway @1;    # Integration at vehicle's CAN gateway
   }
   radarTimeStep @45: Float32 = 0.05;  # time delta between radar updates, 20Hz is very standard
-
+  enableGasInterceptor @2 :Bool;
   deprecated :group {
-    enableGasInterceptor @2 :Bool;
     enableCamera @4 :Bool;
     enableApgs @6 :Bool;
     steerRateCost @33 :Float32;
