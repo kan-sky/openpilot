@@ -252,7 +252,7 @@ class SelfdriveD:
         (CS.regenBraking and (not self.CS_prev.regenBraking or not CS.standstill)):
         self.events.add(EventName.pedalPressed)
 
-      if CS.autoHoldActivated:
+      if CS.autoHoldActive:
         self.events.add(EventName.autoHold)
 
     # Create events for temperature, disk space, and memory
