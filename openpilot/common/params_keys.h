@@ -132,15 +132,18 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"Version", {PERSISTENT, STRING}},
 
     // GM AutoCruise / AutoResume custom parameters
+    {"LongitudinalPersonalityMax", {PERSISTENT, INT, "3"}},
     {"CarSelected3", {PERSISTENT, STRING}},
     {"FingerPrints", {PERSISTENT | CLEAR_ON_MANAGER_START, STRING}},
     {"SupportedCars_gm", {PERSISTENT, STRING}},
     {"AutoCruiseControl", {PERSISTENT, INT, "1"}},
     {"AutoGasTokSpeed", {PERSISTENT, INT, "5"}},
     {"AutoEngage", {PERSISTENT, INT, "2"}},
+    {"CruiseButtonMode", {PERSISTENT, INT, "2"}},
     {"CruiseSpeedUnit", {PERSISTENT, INT, "5"}},
     {"CruiseSpeedUnitBasic", {PERSISTENT, INT, "5"}},
     {"CruiseButtonMode", {PERSISTENT, INT, "2"}},
+    {"MyDrivingMode", {PERSISTENT, INT, "3"}},
     {"CustomSteerMax", {PERSISTENT, INT, "300"}},
     {"CustomSteerDeltaUp", {PERSISTENT, INT, "14"}},
     {"CustomSteerDeltaDown", {PERSISTENT, INT, "16"}},
