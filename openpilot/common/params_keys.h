@@ -139,11 +139,25 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"AutoCruiseControl", {PERSISTENT, INT, "1"}},
     {"AutoGasTokSpeed", {PERSISTENT, INT, "5"}},
     {"AutoEngage", {PERSISTENT, INT, "2"}},
+    {"StoppingAccel", {PERSISTENT, INT, "-42"}},
     {"CruiseButtonMode", {PERSISTENT, INT, "2"}},
     {"CruiseSpeedUnit", {PERSISTENT, INT, "5"}},
     {"CruiseSpeedUnitBasic", {PERSISTENT, INT, "5"}},
-    {"CruiseButtonMode", {PERSISTENT, INT, "2"}},
     {"MyDrivingMode", {PERSISTENT, INT, "3"}},
+    // Longitudinal tuning
+    {"LongTuningKpV", {PERSISTENT, INT, "0"}},
+    {"LongTuningKiV", {PERSISTENT, INT, "0"}},
+    {"LongTuningKf", {PERSISTENT, INT, "100"}},
+    // Lateral torque tuning
+    {"LateralTorqueCustom", {PERSISTENT, BOOL, "1"}},
+    {"LateralTorqueAccelFactor", {PERSISTENT, INT, "2100"}},
+    {"LateralTorqueFriction", {PERSISTENT, INT, "150"}},
+    {"LateralTorqueKpV", {PERSISTENT, INT, "138"}},
+    {"LateralTorqueKiV", {PERSISTENT, INT, "25"}},
+    {"LateralTorqueKf", {PERSISTENT, INT, "89"}},
+    {"LateralTorqueKd", {PERSISTENT, INT, "30"}},
+
+
     {"CustomSteerMax", {PERSISTENT, INT, "300"}},
     {"CustomSteerDeltaUp", {PERSISTENT, INT, "14"}},
     {"CustomSteerDeltaDown", {PERSISTENT, INT, "16"}},

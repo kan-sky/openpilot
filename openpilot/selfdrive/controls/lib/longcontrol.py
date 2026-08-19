@@ -54,36 +54,57 @@ class LongControl:
     self.CP = CP
     self.long_control_state = LongCtrlState.off
     self.pid = PIDController(0.0, (CP.longitudinalTuning.kiBP, CP.longitudinalTuning.kiV),
-                             rate=1 / DT_CTRL)
+                             k_f=CP.longitudinalTuning.kf, rate=1 / DT_CTRL)
     self.last_output_accel = 0.0
+
+    self.params = Params()
+    self.readParamCount = 0
+    self.stopping_accel = CP.stopAccel
 
   def reset(self):
     self.pid.reset()
 
   def update(self, active, CS, a_target, should_stop, accel_limits, radarState):
-    """Update longitudinal control. This updates the state machine and runs a PID loop"""
-    self.pid.neg_limit = accel_limits[0]
-    self.pid.pos_limit = accel_limits[1]
+    self.readParamCount += 1
+    if self.readParamCount >= 100:
+      self.readParamCount = 0
+      self.stopping_accel = self.params.get_float("StoppingAccel") * 0.01
 
-    self.long_control_state = long_control_state_trans(self.CP, active, self.long_control_state, CS.vEgo,
-                                                       should_stop, CS.brakePressed,
-                                                       CS.cruiseState.standstill, radarState)
+    elif self.readParamCount == 10:
+      kp = self.params.get_float("LongTuningKpV") * 0.01
+      ki = self.params.get_float("LongTuningKiV") * 0.001
+      kf = self.params.get_float("LongTuningKf") * 0.01
+
+      self.pid._k_p = ([0.0], [kp])
+      self.pid._k_i = ([0.0], [ki])
+      self.pid._k_f = ([0.0], [kf])
+
+    self.pid.set_limits(accel_limits[1], accel_limits[0])
+
+    self.long_control_state = long_control_state_trans(self.CP, active, self.long_control_state, CS.vEgo, should_stop, CS.brakePressed, CS.cruiseState.standstill, radarState)
+
     if self.long_control_state == LongCtrlState.off:
       self.reset()
       output_accel = 0.0
 
     elif self.long_control_state == LongCtrlState.stopping:
       output_accel = self.last_output_accel
-      if output_accel > self.CP.stopAccel:
+      stop_accel = self.stopping_accel if self.stopping_accel < 0.0 else self.CP.stopAccel
+
+      if output_accel > stop_accel:
         output_accel = min(output_accel, 0.0)
-        # TODO: can we just go straight to stopAccel?
-        output_accel -= 1.0 * DT_CTRL  # m/s^2/s while trying to stop
+        output_accel -= self.CP.stoppingDecelRate * DT_CTRL
+
       self.reset()
 
-    else:  # LongCtrlState.pid
+    elif self.long_control_state == LongCtrlState.starting:
+      output_accel = self.CP.startAccel
+      self.reset()
+
+    else:
       error = a_target - CS.aEgo
-      output_accel = self.pid.update(error, speed=CS.vEgo,
-                                     feedforward=a_target)
+      output_accel = self.pid.update(error, speed=CS.vEgo, feedforward=a_target)
 
     self.last_output_accel = np.clip(output_accel, accel_limits[0], accel_limits[1])
     return self.last_output_accel
+

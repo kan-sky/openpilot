@@ -8,6 +8,7 @@ from openpilot.common.constants import ACCELERATION_DUE_TO_GRAVITY
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.selfdrive.controls.lib.latcontrol import LatControl
 from openpilot.common.pid import PIDController
+from openpilot.common.params import Params
 
 # At higher speeds (25+mph) we can assume:
 # Lateral acceleration achieved by a specific car correlates to
@@ -39,7 +40,7 @@ class LatControlTorque(LatControl):
     self.torque_from_lateral_accel = CI.torque_from_lateral_accel()
     self.set_torque_from_lateral_accel_context = getattr(CI, "set_torque_from_lateral_accel_context", None)
     self.lateral_accel_from_torque = CI.lateral_accel_from_torque()
-    self.pid = PIDController([INTERP_SPEEDS, KP_INTERP], KI, rate=1/self.dt)
+    self.pid = PIDController([INTERP_SPEEDS, KP_INTERP], KI, k_f=self.torque_params.kf, rate=1/self.dt)
     self.update_limits()
     self.steering_angle_deadzone_deg = self.torque_params.steeringAngleDeadzoneDeg
     self.lat_accel_request_buffer_len = int(LAT_ACCEL_REQUEST_BUFFER_SECONDS / self.dt)
@@ -47,7 +48,23 @@ class LatControlTorque(LatControl):
     self.lookahead_frames = int(JERK_LOOKAHEAD_SECONDS / self.dt)
     self.jerk_filter = FirstOrderFilter(0.0, 1 / (2 * np.pi * LP_FILTER_CUTOFF_HZ), self.dt)
 
+    # Live torque tuning
+    self.frame = 0
+    self.params = Params()
+    self.lateralTorqueCustom = self.params.get_bool("LateralTorqueCustom")
+
+    self.latAccelFactor_default = self.torque_params.latAccelFactor
+    self.latAccelOffset_default = self.torque_params.latAccelOffset
+    self.friction_default = self.torque_params.friction
+    self.kp_default = ([*INTERP_SPEEDS], [*KP_INTERP])
+    self.ki_default = ([0.0], [KI])
+    self.kf_default = ([0.0], [self.torque_params.kf])
+    self.kd_default = ([0.0], [0.0])
+
   def update_torque_parameters(self, latAccelFactor, latAccelOffset, friction):
+    if self.lateralTorqueCustom:
+      return
+
     self.torque_params.latAccelFactor = latAccelFactor
     self.torque_params.latAccelOffset = latAccelOffset
     self.torque_params.friction = friction
@@ -58,6 +75,50 @@ class LatControlTorque(LatControl):
                         self.lateral_accel_from_torque(-self.steer_max, self.torque_params))
 
   def update(self, active, CS, VM, params, steer_limited_by_safety, desired_curvature, curvature_limited, lat_delay):
+    self.frame += 1
+    if self.frame % 10 == 0:
+      lateralTorqueCustom = self.params.get_bool("LateralTorqueCustom")
+
+      if lateralTorqueCustom:
+        latAccelFactor = self.params.get_float("LateralTorqueAccelFactor") * 0.001
+        friction = self.params.get_float("LateralTorqueFriction") * 0.001
+        lateralTorqueKp = self.params.get_float("LateralTorqueKpV") * 0.01
+        lateralTorqueKi = self.params.get_float("LateralTorqueKiV") * 0.01
+        lateralTorqueKf = self.params.get_float("LateralTorqueKf") * 0.01
+        lateralTorqueKd = self.params.get_float("LateralTorqueKd") * 0.01
+
+        # Apply custom torque parameters directly.
+        # Do not call update_torque_parameters() here because it is blocked
+        # while LateralTorqueCustom is enabled.
+        self.torque_params.latAccelFactor = latAccelFactor
+        self.torque_params.latAccelOffset = self.latAccelOffset_default
+        self.torque_params.friction = friction
+
+        self.pid._k_p = ([0.0], [lateralTorqueKp])
+        self.pid._k_i = ([0.0], [lateralTorqueKi])
+        self.pid._k_f = ([0.0], [lateralTorqueKf])
+        self.pid._k_d = ([0.0], [lateralTorqueKd])
+
+        self.update_limits()
+
+
+      elif self.lateralTorqueCustom:
+        # Custom torque was turned OFF.
+        # Restore the latest comma defaults directly.
+        self.torque_params.latAccelFactor = self.latAccelFactor_default
+        self.torque_params.latAccelOffset = self.latAccelOffset_default
+        self.torque_params.friction = self.friction_default
+
+        self.pid._k_p = self.kp_default
+        self.pid._k_i = self.ki_default
+        self.pid._k_f = self.kf_default
+        self.pid._k_d = self.kd_default
+
+        self.update_limits()
+        self.pid.reset()
+
+      self.lateralTorqueCustom = lateralTorqueCustom
+
     pid_log = log.ControlsState.LateralTorqueState.new_message()
     pid_log.version = VERSION
     measured_curvature = -VM.calc_curvature(math.radians(CS.steeringAngleDeg - params.angleOffsetDeg), CS.vEgo, params.roll)

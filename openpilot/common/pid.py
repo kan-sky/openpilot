@@ -4,13 +4,15 @@ from collections.abc import Sequence
 Gain = int | float | tuple[Sequence[float], Sequence[float]] | list[list[float]]
 
 class PIDController:
-  def __init__(self, k_p: Gain, k_i: Gain, k_d: Gain = 0., pos_limit=1e308, neg_limit=-1e308, rate=100):
+  def __init__(self, k_p: Gain, k_i: Gain, k_f: Gain = 0., k_d: Gain = 0., pos_limit=1e308, neg_limit=-1e308, rate=100):
     self._k_p = ([0], [k_p]) if isinstance(k_p, (int, float)) else k_p
     self._k_i = ([0], [k_i]) if isinstance(k_i, (int, float)) else k_i
+    self._k_f = ([0], [k_f]) if isinstance(k_f, (int, float)) else k_f
     self._k_d = ([0], [k_d]) if isinstance(k_d, (int, float)) else k_d
 
     self.set_limits(pos_limit, neg_limit)
 
+    self.i_unwind_rate = 0.3 / rate
     self.i_dt = 1.0 / rate
     self.speed = 0.0
 
@@ -23,6 +25,10 @@ class PIDController:
   @property
   def k_i(self):
     return np.interp(self.speed, self._k_i[0], self._k_i[1])
+
+  @property
+  def k_f(self):
+    return np.interp(self.speed, self._k_f[0], self._k_f[1])
 
   @property
   def k_d(self):
@@ -39,13 +45,19 @@ class PIDController:
     self.pos_limit = pos_limit
     self.neg_limit = neg_limit
 
-  def update(self, error, error_rate=0.0, speed=0.0, feedforward=0., freeze_integrator=False):
+  def update(self, error, error_rate=0.0, speed=0.0, override=False, feedforward=0., freeze_integrator=False):
     self.speed = speed
     self.p = self.k_p * float(error)
     self.d = self.k_d * error_rate
-    self.f = feedforward
+    self.f = feedforward * self.k_f
 
-    if not freeze_integrator:
+    if override:
+      if self.i > 0.0:
+        self.i = max(0.0, self.i - self.i_unwind_rate)
+      elif self.i < 0.0:
+        self.i = min(0.0, self.i + self.i_unwind_rate)
+
+    elif not freeze_integrator:
       i = self.i + self.k_i * self.i_dt * error
 
       # Don't allow windup if already clipping
@@ -57,3 +69,4 @@ class PIDController:
     control = self.p + self.i + self.d + self.f
     self.control = np.clip(control, self.neg_limit, self.pos_limit)
     return self.control
+
