@@ -77,11 +77,8 @@ class VCruiseHelper:
     self._gas_tok = False
 
     self._brake_pressed_count = 0
-    self._soft_hold_count = 0
-    self._soft_hold_active = 0
     self._cruise_ready = False
     self._cruise_cancel_state = False
-    self._pause_auto_speed_up = False
     self._activate_cruise = 1
     self._lat_enabled = self.params.get_int("AutoEngage") > 0
     self._v_cruise_kph_at_brake = 0
@@ -95,6 +92,24 @@ class VCruiseHelper:
     self.autoCruiseControl_cancel_timer = 0
     self.autoCruiseControl = 0
     self.autoGasTokSpeed = 0
+
+    # Carrot Navi / cruise state
+    self.xState = 0
+    self.trafficState = 0
+    self.aTarget = 0.0
+    self.nRoadLimitSpeed = 30
+    self.desiredSpeed = 250
+
+    self.carrot_cmd_index_last = 0
+    self.carrot_cmd_index = 0
+    self.carrot_cmd = ""
+    self.carrot_arg = ""
+
+    # AutoResume / lead state
+    self.d_rel = 0.0
+    self.v_rel = 0.0
+    self.v_lead_kph = 0.0
+    self.model_v_kph = 0.0
 
     # activateCruise ON latch
     self._activate_cruise_raw = 0
@@ -191,10 +206,37 @@ class VCruiseHelper:
         self.button_timers[b.type.raw] = 1 if b.pressed else 0
         self.button_change_states[b.type.raw] = {"standstill": CS.cruiseState.standstill, "enabled": enabled}
 
-  def update_v_cruise(self, CS, enabled, is_metric):
+  def update_v_cruise(self, CS, enabled, is_metric, sm=None):
     self._add_log("")
     self.update_params(is_metric)
     self.frame += 1
+
+    # Kans: Carrot Navi / cruise state integration
+
+    if sm is not None and sm.alive['carrotMan'] and sm.valid['carrotMan']:
+      carrot_man = sm['carrotMan']
+      self.nRoadLimitSpeed = carrot_man.nRoadLimitSpeed
+      self.desiredSpeed = carrot_man.desiredSpeed
+      self.carrot_cmd_index = carrot_man.carrotCmdIndex
+      self.carrot_cmd = carrot_man.carrotCmd
+      self.carrot_arg = carrot_man.carrotArg
+
+    if sm is not None and sm.alive['longitudinalPlan']:
+      lp = sm['longitudinalPlan']
+      self.xState = lp.xState
+      self.trafficState = lp.trafficState
+      self.aTarget = lp.aTarget
+
+    if sm is not None and sm.alive['radarState']:
+      lead = sm['radarState'].leadOne
+      self.d_rel = lead.dRel if lead.present else 0.0
+      self.v_rel = lead.vRel if lead.present else 0.0
+      self.v_lead_kph = lead.vLeadK * CV.MS_TO_KPH if lead.present else 0.0
+
+    if sm is not None and sm.alive['drivingModelData']:
+      self.model_v_kph = sm['drivingModelData'].action.desiredVelocity * CV.MS_TO_KPH
+    else:
+      self.model_v_kph = 0.0
 
     if CS.gearShifter != GearShifter.drive:
       self.autoCruiseControl_cancel_timer = int(20 / DT_CTRL)
@@ -328,11 +370,55 @@ class VCruiseHelper:
 
     return button_kph, button_type, self.long_pressed
 
+  def _carrot_command(self, v_cruise_kph, button_type, long_pressed):
+    if self.carrot_cmd_index_last != self.carrot_cmd_index:
+      self.carrot_cmd_index_last = self.carrot_cmd_index
+
+      print(f"Carrot command(cruise.py): {self.carrot_cmd} {self.carrot_arg}")
+
+      if self.carrot_cmd == "CRUISE":
+        if self.carrot_arg == "OFF":
+          self._cruise_control(-2, -1, "Cruise off (carrot command)")
+        elif self.carrot_arg == "ON":
+          self._cruise_control(1, -1, "Cruise on (carrot command)")
+        elif self.carrot_arg == "GO":
+          if button_type == 0:
+            button_type = ButtonType.accelCruise
+            long_pressed = False
+            self._add_log("Cruise accelCruise (carrot command)")
+        elif self.carrot_arg == "STOP":
+          v_cruise_kph = 5
+          self._add_log("Cruise stop (carrot command)")
+
+      elif self.carrot_cmd == "SPEED":
+        if self.carrot_arg == "UP":
+          # Automatic model/road-speed adjustment is intentionally removed.
+          # SPEED UP follows the manual cruise-speed step policy.
+          v_cruise_kph = self._v_cruise_desired(None, v_cruise_kph)
+          self._add_log("Cruise speed up (carrot command)")
+        elif self.carrot_arg == "DOWN":
+          if v_cruise_kph > 20:
+            v_cruise_kph -= 10
+          self._add_log("Cruise speed down (carrot command)")
+        else:
+          try:
+            speed_kph = int(self.carrot_arg)
+          except (TypeError, ValueError):
+            speed_kph = 0
+
+          if 0 < speed_kph < 200:
+            v_cruise_kph = speed_kph
+            self._add_log(f"Cruise speed set to {v_cruise_kph} (carrot command)")
+
+    return v_cruise_kph, button_type, long_pressed
 
   def _update_cruise_buttons(self, CS, enabled, v_cruise_kph):
     button_kph, button_type, long_pressed = self._prepare_buttons(CS, v_cruise_kph)
 
+    v_cruise_kph, button_type, long_pressed = self._carrot_command(v_cruise_kph, button_type, long_pressed)
+
     if button_type in [ButtonType.accelCruise, ButtonType.decelCruise]:
+
       if self.autoCruiseControl_cancel_timer > 0:
         self._add_log(f"AutoCruiseControl cancel timer RESET {button_type}")
         self.autoCruiseControl_cancel_timer = 0
@@ -343,11 +429,7 @@ class VCruiseHelper:
     if not long_pressed:
       if button_type == ButtonType.accelCruise:
         self._lat_enabled = True
-        self._pause_auto_speed_up = False
-
-        if self._soft_hold_active > 0:
-          self._soft_hold_active = 0
-        elif self._v_cruise_kph_at_brake > 0 and v_cruise_kph < self._v_cruise_kph_at_brake:
+        if self._v_cruise_kph_at_brake > 0 and v_cruise_kph < self._v_cruise_kph_at_brake:
           v_cruise_kph = self._v_cruise_kph_at_brake
           self._v_cruise_kph_at_brake = 0
         elif self._cruise_button_mode == 0:
@@ -357,11 +439,8 @@ class VCruiseHelper:
 
       elif button_type == ButtonType.decelCruise:
         self._lat_enabled = True
-        self._pause_auto_speed_up = True
 
-        if self._soft_hold_active > 0:
-          self._cruise_control(-1, -1, "Cruise off, softhold mode (decelCruise)")
-        elif not enabled:
+        if not enabled:
           v_cruise_kph = max(self.v_ego_kph_set, self._cruise_speed_min)
         elif self.v_ego_kph_set > v_cruise_kph + 2 and self._cruise_button_mode in [2, 3]:
           v_cruise_kph = max(self.v_ego_kph_set, self._cruise_speed_min)
@@ -389,7 +468,6 @@ class VCruiseHelper:
         v_cruise_kph = button_kph
         self._v_cruise_kph_at_brake = 0
       elif button_type == ButtonType.decelCruise:
-        self._pause_auto_speed_up = True
         v_cruise_kph = button_kph
         self._v_cruise_kph_at_brake = 0
       elif button_type == ButtonType.gapAdjustCruise:
@@ -401,11 +479,6 @@ class VCruiseHelper:
 
     return self._update_cruise_state(CS, enabled, v_cruise_kph)
 
-  ## desiredSpeed :
-  #   leadCar_distance, leadCar_speed, leadCar_accel,
-  #   v_ego, tbt_distance, tbt_speed,
-  #   nRoadLimitSpeed, vTurnSpeed
-  #   gasPressed, brakePressed, standstill
   def _v_cruise_desired(self, CS, v_cruise_kph):
     if v_cruise_kph < 15:
       return 15
@@ -427,12 +500,10 @@ class VCruiseHelper:
       return
 
     if self.autoCruiseControl == 0 and enable != 0:
-      self._soft_hold_active = 0
       return
 
     if self.autoCruiseControl_cancel_timer > 0 and enable != 0:
       self._add_log(reason + " > timer Canceled")
-      self._soft_hold_active = 0
       return
 
     self._activate_cruise = enable
@@ -457,11 +528,6 @@ class VCruiseHelper:
     else:
       self._activate_cruise_on_latch = 0
 
-    # SoftHold release -> AutoCruise request
-    if not enabled and self._brake_pressed_count == -1 and self._soft_hold_active > 0:
-      self._soft_hold_active = 2
-      self._cruise_control(1, -1, "Cruise on (soft hold)")
-
     # Short gas-tok:
     # - cruise OFF: request AutoCruise and set current speed
     # - cruise ON : raise set speed to next configured unit
@@ -473,12 +539,13 @@ class VCruiseHelper:
       else:
         v_cruise_kph = self._v_cruise_desired(CS, v_cruise_kph)
 
-    if self._gas_pressed_count == 1 or CS.vEgo < 0.1:
-      self._pause_auto_speed_up = False
-      if self._gas_pressed_count == 1 and CS.vEgo < 0.1:
-        self._cruise_control(-1, -1, "Cruise off (gasPressed)")
-    elif self._brake_pressed_count == 1:
-      self._pause_auto_speed_up = True
+    # Driver gas override: after a sustained pedal press, keep the higher
+    # driver-selected speed as the new cruise set speed.
+    if self._gas_pressed_count > self._gas_tok_timer and self.v_ego_kph_set > v_cruise_kph:
+      v_cruise_kph = self.v_ego_kph_set
+
+    if self._gas_pressed_count == 1 and CS.vEgo < 0.1:
+      self._cruise_control(-1, -1, "Cruise off (gasPressed)")
 
     return v_cruise_kph
 
@@ -489,7 +556,6 @@ class VCruiseHelper:
       self._gas_pressed_count_last = self._gas_pressed_count
       self._gas_pressed_value = max(CS.gas, self._gas_pressed_value) if self._gas_pressed_count > 1 else CS.gas
       self._gas_tok = False
-      self._soft_hold_active = 0
 
       if gas_pressed_start and self.disengage_on_accelerator and enabled:
         self._cruise_ready = False
@@ -509,14 +575,7 @@ class VCruiseHelper:
       if self._brake_pressed_count == 1 and self.enabled_last:
         self._v_cruise_kph_at_brake = self.v_cruise_kph
         self._add_log(f"{self.v_cruise_kph} Cruise speed at brake")
-      # 정지 상태에서 일정 시간 이상 브레이크 → soft hold 진입
-      self._soft_hold_count = self._soft_hold_count + 1 if CS.vEgo < 0.1 and CS.gearShifter == GearShifter.drive else 0
-      if self.autoCruiseControl == 0 or self.CP.pcmCruise:
-        self._soft_hold_active = 0
-      else:
-        self._soft_hold_active = 1 if self._soft_hold_count > 60 else 0
     else:
-      self._soft_hold_count = 0
       self._brake_pressed_count = min(-1, self._brake_pressed_count - 1)
 
   # Kans:

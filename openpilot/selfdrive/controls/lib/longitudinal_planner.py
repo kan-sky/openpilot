@@ -27,14 +27,22 @@ MIN_ALLOW_THROTTLE_SPEED = 2.5
 _A_TOTAL_MAX_V = [1.7, 3.2]
 _A_TOTAL_MAX_BP = [20., 40.]
 
+
 def get_max_accel(v_ego):
   return np.interp(v_ego, A_CRUISE_MAX_BP, A_CRUISE_MAX_VALS)
 
-def get_coast_accel(pitch):
-  return np.sin(pitch) * -5.65 - 0.3  # fitted from data using xx/projects/allow_throttle/compute_coast_accel.py
 
-def get_cruise_accel(e2e, v_cruise, v_ego, a_cruise_prev, angle_steers, CP, dt, accel_coast, allow_throttle):
-  max_accel = ACCEL_MAX if e2e else get_max_accel(v_ego)
+def get_coast_accel(pitch):
+  return np.sin(pitch) * -5.65 - 0.3
+
+
+def get_cruise_accel(e2e, v_cruise, v_ego, a_cruise_prev, angle_steers, CP, dt, accel_coast, allow_throttle, max_accel_override=None):
+  if e2e:
+    max_accel = ACCEL_MAX
+  elif max_accel_override is not None:
+    max_accel = float(max_accel_override)
+  else:
+    max_accel = get_max_accel(v_ego)
 
   if not e2e:
     a_total_max = np.interp(v_ego, _A_TOTAL_MAX_BP, _A_TOTAL_MAX_V)
@@ -72,7 +80,16 @@ class LongitudinalPlanner:
     self.a_desired_trajectory = np.zeros(CONTROL_N)
     self.j_desired_trajectory = np.zeros(CONTROL_N)
 
-  def update(self, sm):
+    # Carrot publish state. Keep a native fallback when CarrotPlanner is unavailable.
+    self.v_cruise_kph = 0.0
+
+  @staticmethod
+  def _enum_value(value, default=0):
+    if value is None:
+      return default
+    return int(getattr(value, "value", value))
+
+  def update(self, sm, carrot=None):
     if len(sm['carControl'].orientationNED) == 3:
       accel_coast = get_coast_accel(sm['carControl'].orientationNED[1])
     else:
@@ -80,15 +97,27 @@ class LongitudinalPlanner:
 
     v_ego = sm['carState'].vEgo
     v_cruise_kph = min(sm['carState'].vCruise, V_CRUISE_MAX)
-    v_cruise = v_cruise_kph * CV.KPH_TO_MS
+    planner_mode = 'blended' if sm['selfdriveState'].experimentalMode else 'acc'
+
+    # tizi native fallback: without CarrotPlanner, keep the stock cruise target.
+    if carrot is not None:
+      self.v_cruise_kph = carrot.update(sm, v_cruise_kph, planner_mode)
+    else:
+      self.v_cruise_kph = v_cruise_kph
+    v_cruise = self.v_cruise_kph * CV.KPH_TO_MS
+
+    # CarrotPlanner can additionally reduce the target for traffic-stop/model stop state.
+    carrot_v_cruise = getattr(carrot, "v_cruise", -1.0) if carrot is not None else -1.0
+    if carrot_v_cruise >= 0.0:
+      v_cruise = min(v_cruise, carrot_v_cruise)
+
     if sm['controlsState'].forceDecel:
       v_cruise = 0.0
 
     long_control_off = sm['controlsState'].longControlState == LongCtrlState.off
 
-    # Reset current state when not engaged, or user is controlling the speed
+    # Reset current state when not engaged, or user is controlling the speed.
     reset_state = long_control_off if self.CP.openpilotLongitudinalControl else not sm['selfdriveState'].enabled
-    # PCM cruise speed may be updated a few cycles later, check if initialized
     v_cruise_initialized = sm['carState'].vCruise != V_CRUISE_UNSET
     reset_state = reset_state or not v_cruise_initialized
 
@@ -102,38 +131,39 @@ class LongitudinalPlanner:
       self.v_desired_filter.x = v_ego
       self.a_desired = np.clip(sm['carState'].aEgo, ACCEL_MIN, ACCEL_MAX)
 
-    # Prevent divergence, smooth in current v_ego
     self.v_desired_filter.x = max(0.0, self.v_desired_filter.update(v_ego))
 
-    # No change cost when user is controlling the speed, or when standstill
     prev_accel_constraint = not (reset_state or sm['carState'].standstill)
 
-    self.mpc.set_weights(prev_accel_constraint, personality=sm['selfdriveState'].personality)
+    # tizi LongitudinalMpc already supports these Carrot arguments with native fallbacks.
+    jerk_factor = getattr(carrot, "jerk_factor_apply", None) if carrot is not None else None
+    a_change_cost_starting = getattr(carrot, "aChangeCostStarting", 0.0) if carrot is not None else 0.0
+    self.mpc.set_weights(prev_accel_constraint, personality=sm['selfdriveState'].personality,
+                         jerk_factor=jerk_factor, a_change_cost_starting=a_change_cost_starting)
     self.mpc.set_cur_state(self.v_desired_filter.x, self.a_desired)
-    self.mpc.update(sm['radarState'], personality=sm['selfdriveState'].personality)
+    self.mpc.update(sm['radarState'], personality=sm['selfdriveState'].personality, carrot=carrot)
 
     self.v_desired_trajectory = np.interp(CONTROL_N_T_IDX, T_IDXS_MPC, self.mpc.v_solution)
     self.a_desired_trajectory = np.interp(CONTROL_N_T_IDX, T_IDXS_MPC, self.mpc.a_solution)
     self.j_desired_trajectory = np.interp(CONTROL_N_T_IDX, T_IDXS_MPC[:-1], self.mpc.j_solution)
 
-    # TODO counter is only needed because radar is glitchy, remove once radar is gone
     self.fcw = self.mpc.crash_cnt > 2 and not sm['carState'].standstill
     if self.fcw:
       cloudlog.info("FCW triggered")
 
-    # Save starting point for next iteration
     a_prev = self.a_desired
 
-    action_t =  self.CP.longitudinalActuatorDelay + DT_MDL
+    action_t = self.CP.longitudinalActuatorDelay + DT_MDL
     output_a_target_mpc = get_accel_from_plan(self.v_desired_trajectory, self.a_desired_trajectory, CONTROL_N_T_IDX,
                                               action_t=action_t)
     output_should_stop_mpc = should_stop(v_ego, output_a_target_mpc)
     output_a_target_e2e = sm['modelV2'].action.desiredAcceleration
     output_should_stop_e2e = sm['modelV2'].action.shouldStop
 
+    carrot_max_accel = carrot.get_carrot_accel(v_ego) if carrot is not None and hasattr(carrot, "get_carrot_accel") else None
     self.a_cruise = get_cruise_accel(sm['selfdriveState'].experimentalMode, v_cruise, v_ego,
                                      self.a_cruise, steer_angle_without_offset, self.CP, self.dt,
-                                     accel_coast, self.allow_throttle)
+                                     accel_coast, self.allow_throttle, max_accel_override=carrot_max_accel)
     cruise_should_stop = should_stop(v_ego, self.a_cruise)
 
     candidates = [(output_a_target_mpc, self.mpc.source, output_should_stop_mpc),
@@ -142,13 +172,13 @@ class LongitudinalPlanner:
       candidates.append((output_a_target_e2e, LongitudinalPlanSource.e2e, output_should_stop_e2e))
 
     output_a_target, self.mpc.source, _ = min(candidates, key=lambda c: c[0])
-    self.output_should_stop = any(should_stop for _, _, should_stop in candidates)
+    self.output_should_stop = any(stop for _, _, stop in candidates)
     self.output_a_target = np.clip(output_a_target, ACCEL_MIN, ACCEL_MAX)
 
     self.a_desired = float(self.output_a_target)
     self.v_desired_filter.x = self.v_desired_filter.x + self.dt * (self.output_a_target + a_prev) / 2.0
 
-  def publish(self, sm, pm):
+  def publish(self, sm, pm, carrot=None):
     plan_send = messaging.new_message('longitudinalPlan')
 
     plan_send.valid = sm.all_checks()
@@ -170,5 +200,15 @@ class LongitudinalPlanner:
     longitudinalPlan.shouldStop = bool(self.output_should_stop)
     longitudinalPlan.allowBrake = True
     longitudinalPlan.allowThrottle = bool(self.allow_throttle)
+
+    # Carrot state feedback for cruise.py. All fields exist in tizi cereal,
+    # but values fall back safely when CarrotPlanner/MPC custom state is absent.
+    longitudinalPlan.xState = self._enum_value(getattr(carrot, "xState", None), 0) if carrot is not None else 0
+    longitudinalPlan.trafficState = self._enum_value(getattr(carrot, "trafficState", None), 0) if carrot is not None else 0
+    longitudinalPlan.cruiseTarget = float(self.v_cruise_kph)
+    longitudinalPlan.tFollow = float(getattr(self.mpc, "t_follow", 0.0))
+    longitudinalPlan.desiredDistance = float(getattr(self.mpc, "desired_distance", 0.0))
+    longitudinalPlan.events = carrot.events.to_msg() if carrot is not None and hasattr(carrot, "events") else []
+    longitudinalPlan.myDrivingMode = self._enum_value(getattr(carrot, "myDrivingMode", None), 0) if carrot is not None else 0
 
     pm.send('longitudinalPlan', plan_send)

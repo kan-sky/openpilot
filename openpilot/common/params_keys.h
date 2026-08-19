@@ -133,6 +133,10 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
 
     // GM AutoCruise / AutoResume custom parameters
     {"LongitudinalPersonalityMax", {PERSISTENT, INT, "3"}},
+    {"NetworkAddress", {CLEAR_ON_MANAGER_START, STRING}},
+    {"CarrotNaviDebug", {CLEAR_ON_MANAGER_START, STRING} },
+    {"CarrotNaviImage", {CLEAR_ON_MANAGER_START, STRING} },
+    {"TrafficLight", {CLEAR_ON_MANAGER_START, STRING} },
     {"CarSelected3", {PERSISTENT, STRING}},
     {"FingerPrints", {PERSISTENT | CLEAR_ON_MANAGER_START, STRING}},
     {"SupportedCars_gm", {PERSISTENT, STRING}},
@@ -169,4 +173,46 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"CruiseDelay", {PERSISTENT, INT, "12"}},
     {"ResumeDelay", {PERSISTENT, INT, "6"}},
     {"AccelForce", {PERSISTENT, INT, "950"}},
+    // Tmap parameters
+    // Carrot longitudinal / navigation
+    {"CruiseEcoControl", {PERSISTENT, INT, "0"}},
+
+    {"AutoCurveSpeedLowerLimit", {PERSISTENT, INT, "30"}},
+    {"AutoCurveSpeedFactor", {PERSISTENT, INT, "110"}},
+
+    {"AutoTurnControl", {PERSISTENT, INT, "2"}},
+    {"AutoTurnControlSpeedTurn", {PERSISTENT, INT, "85"}},
+    {"AutoTurnControlTurnEnd", {PERSISTENT, INT, "10"}},
+    {"AutoTurnMapChange", {PERSISTENT, INT, "0"}},
+
+    {"AutoNaviCountDownMode", {PERSISTENT, INT, "2"}},
+    {"AutoRoadSpeedLimitOffset", {PERSISTENT, INT, "-1"}},
+    {"TurnSpeedControlMode", {PERSISTENT, INT, "2"}},
+    {"MapTurnSpeedFactor", {PERSISTENT, INT, "90"}},
+
+    {"StopDistanceCarrot", {PERSISTENT, INT, "550"}},
+    {"JLeadFactor3", {PERSISTENT, INT, "40"}},
+
+    {"MyDrivingModeAuto", {PERSISTENT, INT, "0"}},
+    {"TrafficLightDetectMode", {PERSISTENT, INT, "2"}},
+
+    {"CruiseMaxVals0", {PERSISTENT, INT, "160"}},
+    {"CruiseMaxVals1", {PERSISTENT, INT, "170"}},
+    {"CruiseMaxVals2", {PERSISTENT, INT, "100"}},
+    {"CruiseMaxVals3", {PERSISTENT, INT, "70"}},
+    {"CruiseMaxVals4", {PERSISTENT, INT, "55"}},
+    {"CruiseMaxVals5", {PERSISTENT, INT, "45"}},
+    {"CruiseMaxVals6", {PERSISTENT, INT, "30"}},
+
+    {"AChangeCostStarting", {PERSISTENT, INT, "10"}},
+    {"TrafficStopDistanceAdjust", {PERSISTENT, INT, "-80"}},
+    {"AutoNaviSpeedCtrlEnd", {PERSISTENT, INT, "10"}},
+    {"AutoNaviSpeedCtrlMode", {PERSISTENT, INT, "2"}},
+    {"AutoNaviSpeedBumpTime", {PERSISTENT, INT, "4"}},
+    {"AutoNaviSpeedBumpSpeed", {PERSISTENT, INT, "25"}},
+    {"AutoNaviSpeedDecelRate", {PERSISTENT, INT, "100"}},
+    {"CarrotException", {CLEAR_ON_MANAGER_START, STRING}},
+    {"AutoNaviSpeedSafetyFactor", {PERSISTENT, INT, "95"}},
+    {"NavDestination", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION, STRING}},
+    {"NavDestinationWaypoints", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION, STRING}},
 };

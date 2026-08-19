@@ -167,7 +167,7 @@ class CarController(CarControllerBase):
         self.accel_force = self.params_.get_int("AccelForce")
         auto_longcontrol = auto_cruise_enabled or auto_resume_enabled
 
-        stopping = actuators.longControlState == LongCtrlState.stopping or CS.out.softHoldActive > 0
+        stopping = actuators.longControlState == LongCtrlState.stopping
 
         if self.long_pitch and len(CC.orientationNED) > 1:
           self.pitch.update(CC.orientationNED[1])
