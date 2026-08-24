@@ -30,18 +30,24 @@ def long_control_state_trans(CP, active, long_control_state, v_ego,
         long_control_state = LongCtrlState.pid
 
     elif long_control_state == LongCtrlState.stopping:
-      if starting_condition and CP.startingState:
-        long_control_state = LongCtrlState.starting
-      elif starting_condition:
-        long_control_state = LongCtrlState.pid
+      if starting_condition:
+        if CP.startingState:
+          long_control_state = LongCtrlState.starting
+        else:
+          long_control_state = LongCtrlState.pid
 
-    elif long_control_state in (LongCtrlState.starting, LongCtrlState.pid):
+    elif long_control_state == LongCtrlState.starting:
       if should_stop:
         long_control_state = LongCtrlState.stopping
       elif v_ego > CP.vEgoStarting:
         long_control_state = LongCtrlState.pid
 
+    elif long_control_state == LongCtrlState.pid:
+      if should_stop:
+        long_control_state = LongCtrlState.stopping
+
   return long_control_state
+
 
 class LongControl:
   def __init__(self, CP):
@@ -50,6 +56,8 @@ class LongControl:
     self.pid = PIDController(0.0, (CP.longitudinalTuning.kiBP, CP.longitudinalTuning.kiV),
                              k_f=CP.longitudinalTuning.kf, rate=1 / DT_CTRL)
     self.last_output_accel = 0.0
+    # Kans: debug
+    self.debug_stop = False
 
     self.params = Params()
     self.readParamCount = 0
@@ -58,21 +66,15 @@ class LongControl:
     self.pid.reset()
 
   def update(self, active, CS, a_target, should_stop, accel_limits):
-    self.readParamCount += 1
-    if self.readParamCount >= 100:
-      self.readParamCount = 0
-    elif self.readParamCount == 10:
-      kp = self.params.get_float("LongTuningKpV") * 0.01
-      ki = self.params.get_float("LongTuningKiV") * 0.001
-      kf = self.params.get_float("LongTuningKf") * 0.01
+    self.pid.neg_limit = accel_limits[0]
+    self.pid.pos_limit = accel_limits[1]
+    # Kans: debug
+    if not self.debug_stop and CS.vEgo < 5.0 and a_target < -0.1:
+      self.debug_stop = True
+      print(f"\n========== LONG STOP DEBUG START ==========", flush=True)
 
-      self.pid._k_p = ([0.0], [kp])
-      self.pid._k_i = ([0.0], [ki])
-      self.pid._k_f = ([0.0], [kf])
-
-    self.pid.set_limits(accel_limits[1], accel_limits[0])
-
-    self.long_control_state = long_control_state_trans(self.CP, active, self.long_control_state, CS.vEgo, should_stop, CS.brakePressed, CS.cruiseState.standstill)
+    self.long_control_state = long_control_state_trans(self.CP, active, self.long_control_state, CS.vEgo, should_stop,
+                                                       CS.brakePressed, CS.cruiseState.standstill)
 
     if self.long_control_state == LongCtrlState.off:
       self.reset()
@@ -80,20 +82,26 @@ class LongControl:
 
     elif self.long_control_state == LongCtrlState.stopping:
       output_accel = self.last_output_accel
+
       if output_accel > self.CP.stopAccel:
         output_accel = min(output_accel, 0.0)
-        output_accel -= self.CP.stoppingDecelRate * DT_CTRL
-
-      self.reset()
-
-    elif self.long_control_state == LongCtrlState.starting:
-      output_accel = self.CP.startAccel
+        # TODO: can we just go straight to stopAccel?
+        output_accel -= 1.0 * DT_CTRL  # m/s^2/s while trying to stop
       self.reset()
 
     else:
       error = a_target - CS.aEgo
-      output_accel = self.pid.update(error, speed=CS.vEgo, feedforward=a_target)
+      output_accel = self.pid.update(error, speed=CS.vEgo,
+                                     feedforward=a_target)
 
     self.last_output_accel = np.clip(output_accel, accel_limits[0], accel_limits[1])
+    if self.debug_stop:
+      print(f"vEgo={CS.vEgo:.3f} aTarget={a_target:.3f} shouldStop={should_stop} longCtrlState={self.long_control_state} outputAccel={self.last_output_accel:.3f}", flush=True)
+      if CS.vEgo < 0.05:
+        print(f"========== LONG STOP DEBUG END ==========\n", flush=True)
+        self.debug_stop = False
+ 
     return self.last_output_accel
+
+
 
