@@ -12,12 +12,10 @@ LongCtrlState = car.CarControl.Actuators.LongControlState
 
 
 def long_control_state_trans(CP, active, long_control_state, v_ego,
-                             should_stop, brake_pressed, cruise_standstill, radarState):
-  stopping_condition = should_stop
+                             should_stop, brake_pressed, cruise_standstill):
   starting_condition = (not should_stop and
                         not cruise_standstill and
                         not brake_pressed)
-  started_condition = v_ego > CP.vEgoStarting
 
   if not active:
     long_control_state = LongCtrlState.off
@@ -38,13 +36,9 @@ def long_control_state_trans(CP, active, long_control_state, v_ego,
         long_control_state = LongCtrlState.pid
 
     elif long_control_state in (LongCtrlState.starting, LongCtrlState.pid):
-      if stopping_condition:
-        leadOne = radarState.leadOne
-        lead_starting = (leadOne.present and leadOne.vLead > 0.3 and leadOne.vRel > 0.3 and v_ego < 0.3)
-
-        if not (long_control_state == LongCtrlState.starting and lead_starting):
-          long_control_state = LongCtrlState.stopping
-      elif started_condition:
+      if should_stop:
+        long_control_state = LongCtrlState.stopping
+      elif v_ego > CP.vEgoStarting:
         long_control_state = LongCtrlState.pid
 
   return long_control_state
@@ -59,17 +53,14 @@ class LongControl:
 
     self.params = Params()
     self.readParamCount = 0
-    self.stopping_accel = CP.stopAccel
 
   def reset(self):
     self.pid.reset()
 
-  def update(self, active, CS, a_target, should_stop, accel_limits, radarState):
+  def update(self, active, CS, a_target, should_stop, accel_limits):
     self.readParamCount += 1
     if self.readParamCount >= 100:
       self.readParamCount = 0
-      self.stopping_accel = self.params.get_float("StoppingAccel") * 0.01
-
     elif self.readParamCount == 10:
       kp = self.params.get_float("LongTuningKpV") * 0.01
       ki = self.params.get_float("LongTuningKiV") * 0.001
@@ -81,7 +72,7 @@ class LongControl:
 
     self.pid.set_limits(accel_limits[1], accel_limits[0])
 
-    self.long_control_state = long_control_state_trans(self.CP, active, self.long_control_state, CS.vEgo, should_stop, CS.brakePressed, CS.cruiseState.standstill, radarState)
+    self.long_control_state = long_control_state_trans(self.CP, active, self.long_control_state, CS.vEgo, should_stop, CS.brakePressed, CS.cruiseState.standstill)
 
     if self.long_control_state == LongCtrlState.off:
       self.reset()
@@ -89,9 +80,7 @@ class LongControl:
 
     elif self.long_control_state == LongCtrlState.stopping:
       output_accel = self.last_output_accel
-      stop_accel = self.stopping_accel if self.stopping_accel < 0.0 else self.CP.stopAccel
-
-      if output_accel > stop_accel:
+      if output_accel > self.CP.stopAccel:
         output_accel = min(output_accel, 0.0)
         output_accel -= self.CP.stoppingDecelRate * DT_CTRL
 

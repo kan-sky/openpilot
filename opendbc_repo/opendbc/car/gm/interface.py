@@ -231,18 +231,22 @@ class CarInterface(CarInterfaceBase):
     ret.lateralTuning.pid.kiBP, ret.lateralTuning.pid.kpBP = [[0.], [0.]]
     ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.2], [0.00]]
     ret.lateralTuning.pid.kf = 0.00004   # full torque for 20 deg at 80mph means 0.00007818594
-    ret.steerActuatorDelay = 0.1  # Default delay, not measured yet
+    ret.steerActuatorDelay = 0.3  # Default delay, not measured yet
 
     ret.steerLimitTimer = 0.4
-    ret.longitudinalActuatorDelay = 0.5  # large delay to initially start braking
+    ret.longitudinalActuatorDelay = 0.3  # large delay to initially start braking
 
     if candidate == CAR.CHEVROLET_VOLT:
       ret.steerActuatorDelay = 0.3
-      ret.lateralTuning.pid.kpBP = [0., 40.]
-      ret.lateralTuning.pid.kpV = [0., 0.17]
-      ret.lateralTuning.pid.kiBP = [0.]
-      ret.lateralTuning.pid.kiV = [0.]
-      ret.lateralTuning.pid.kf = 1.  # get_steer_feedforward_volt()
+      ret.longitudinalTuning.kpBP = [0.]
+      ret.longitudinalTuning.kpV = [1.0]
+      ret.longitudinalTuning.kiBP = [0.]
+      ret.longitudinalTuning.kiV = [.35]
+      ret.longitudinalTuning.kf = 1.0
+      ret.stoppingDecelRate = 1.0 # brake_travel/s while trying to stop
+      ret.vEgoStopping = 0.5 # 정지상태로 판단하는 속도(값이 작을수록 정지시작은 늦어질 수 있지만 출발조건을 빠르게 해줄 수 있음)
+      ret.vEgoStarting = 0.3 # 출발상태로 판단하는 속도(값이 클수록 더 높은 속도까지 내주어서 출발가속이 강해질 수 있음)
+      ret.stopAccel = -2.0
       ret.startingState = True
       ret.startAccel = 1.0
       ret.autoResumeSng = True
