@@ -1,4 +1,4 @@
-import numpy as np
+﻿import numpy as np
 from opendbc.car.structs import car
 from openpilot.common.realtime import DT_CTRL
 from openpilot.selfdrive.controls.lib.drive_helpers import CONTROL_N
@@ -12,9 +12,11 @@ LongCtrlState = car.CarControl.Actuators.LongControlState
 
 
 def long_control_state_trans(CP, active, long_control_state, v_ego,
-                             should_stop, brake_pressed, cruise_standstill, radarState):
-  stopping_condition = should_stop or cruise_standstill
-  starting_condition = not stopping_condition and not brake_pressed
+                             should_stop, brake_pressed, car_standstill, cruise_standstill, radarState):
+  # Kans: 실제 차량 또는 ACC가 정지상태이면 stopping 우선. starting은 AutoResume를 위해 유지.
+  stopping_condition = should_stop or car_standstill or cruise_standstill
+  starting_condition = (not stopping_condition and
+                        not brake_pressed)
   started_condition = v_ego > CP.vEgoStarting
 
   if not active:
@@ -30,24 +32,18 @@ def long_control_state_trans(CP, active, long_control_state, v_ego,
         long_control_state = LongCtrlState.pid
 
     elif long_control_state == LongCtrlState.stopping:
-      if starting_condition:
-        if CP.startingState:
-          long_control_state = LongCtrlState.starting
-        else:
-          long_control_state = LongCtrlState.pid
+      if starting_condition and CP.startingState:
+        long_control_state = LongCtrlState.starting
+      elif starting_condition:
+        long_control_state = LongCtrlState.pid
 
-    elif long_control_state == LongCtrlState.starting:
+    elif long_control_state in (LongCtrlState.starting, LongCtrlState.pid):
       if stopping_condition:
         long_control_state = LongCtrlState.stopping
       elif started_condition:
         long_control_state = LongCtrlState.pid
 
-    elif long_control_state == LongCtrlState.pid:
-      if stopping_condition:
-        long_control_state = LongCtrlState.stopping
-
   return long_control_state
-
 
 class LongControl:
   def __init__(self, CP):
@@ -81,7 +77,7 @@ class LongControl:
 
     self.pid.set_limits(accel_limits[1], accel_limits[0])
 
-    self.long_control_state = long_control_state_trans(self.CP, active, self.long_control_state, CS.vEgo, should_stop, CS.brakePressed, CS.cruiseState.standstill, radarState)
+    self.long_control_state = long_control_state_trans(self.CP, active, self.long_control_state, CS.vEgo, should_stop, CS.brakePressed, CS.standstill, CS.cruiseState.standstill, radarState)
 
     if self.long_control_state == LongCtrlState.off:
       self.reset()
@@ -107,4 +103,3 @@ class LongControl:
 
     self.last_output_accel = np.clip(output_accel, accel_limits[0], accel_limits[1])
     return self.last_output_accel
-
