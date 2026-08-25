@@ -170,6 +170,8 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"CarName", {PERSISTENT, STRING}},
     {"EVTable", {PERSISTENT, BOOL, "1"}},
     {"LongPitch", {PERSISTENT, BOOL, "1"}},
+    {"CustomSR", {PERSISTENT, INT, "0"}},
+    {"SteerRatioRate", {PERSISTENT, INT, "100"}},
     {"CruiseDelay", {PERSISTENT, INT, "12"}},
     {"ResumeDelay", {PERSISTENT, INT, "6"}},
     {"AccelForce", {PERSISTENT, INT, "950"}},

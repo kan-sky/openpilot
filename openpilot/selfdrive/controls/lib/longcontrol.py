@@ -12,19 +12,17 @@ LongCtrlState = car.CarControl.Actuators.LongControlState
 
 
 def long_control_state_trans(CP, active, long_control_state, v_ego,
-                             should_stop, brake_pressed, car_standstill, cruise_standstill, radarState):
-  # Kans: 실제 차량 또는 ACC가 정지상태이면 stopping 우선. starting은 AutoResume를 위해 유지.
-  stopping_condition = should_stop or car_standstill or cruise_standstill
-  starting_condition = (not stopping_condition and
+                             should_stop, brake_pressed, cruise_standstill):
+  starting_condition = (not should_stop and
+                        not cruise_standstill and
                         not brake_pressed)
-  started_condition = v_ego > CP.vEgoStarting
 
   if not active:
     long_control_state = LongCtrlState.off
 
   else:
     if long_control_state == LongCtrlState.off:
-      if stopping_condition:
+      if not starting_condition:
         long_control_state = LongCtrlState.stopping
       elif CP.startingState:
         long_control_state = LongCtrlState.starting
@@ -32,16 +30,21 @@ def long_control_state_trans(CP, active, long_control_state, v_ego,
         long_control_state = LongCtrlState.pid
 
     elif long_control_state == LongCtrlState.stopping:
-      if starting_condition and CP.startingState:
-        long_control_state = LongCtrlState.starting
-      elif starting_condition:
+      if starting_condition:
+        if CP.startingState:
+          long_control_state = LongCtrlState.starting
+        else:
+          long_control_state = LongCtrlState.pid
+
+    elif long_control_state == LongCtrlState.starting:
+      if should_stop:
+        long_control_state = LongCtrlState.stopping
+      elif v_ego > CP.vEgoStarting:
         long_control_state = LongCtrlState.pid
 
-    elif long_control_state in (LongCtrlState.starting, LongCtrlState.pid):
-      if stopping_condition:
+    elif long_control_state == LongCtrlState.pid:
+      if should_stop:
         long_control_state = LongCtrlState.stopping
-      elif started_condition:
-        long_control_state = LongCtrlState.pid
 
   return long_control_state
 
@@ -77,7 +80,8 @@ class LongControl:
 
     self.pid.set_limits(accel_limits[1], accel_limits[0])
 
-    self.long_control_state = long_control_state_trans(self.CP, active, self.long_control_state, CS.vEgo, should_stop, CS.brakePressed, CS.standstill, CS.cruiseState.standstill, radarState)
+    self.long_control_state = long_control_state_trans(self.CP, active, self.long_control_state, CS.vEgo, should_stop,
+                                                       CS.brakePressed, CS.cruiseState.standstill)
 
     if self.long_control_state == LongCtrlState.off:
       self.reset()
