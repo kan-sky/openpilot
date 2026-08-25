@@ -63,7 +63,7 @@ class LongControl:
   def reset(self):
     self.pid.reset()
 
-  def update(self, active, CS, a_target, should_stop, accel_limits, radarState):
+  def update(self, active, CS, a_target, should_stop, accel_limits):
     self.readParamCount += 1
     if self.readParamCount >= 100:
       self.readParamCount = 0
