@@ -95,6 +95,12 @@ class VCruiseHelper:
     self.autoCruiseControl_cancel_timer = 0
     self.autoCruiseControl = 0
     self.autoGasTokSpeed = 0
+    # Carrot traffic-light state
+    self.xState = 0
+    self.xState_last = 0
+    self.trafficState = 0
+    self.trafficState_last = 0
+    self.aTarget = 0.0
 
     # activateCruise ON latch
     self._activate_cruise_raw = 0
@@ -191,10 +197,18 @@ class VCruiseHelper:
         self.button_timers[b.type.raw] = 1 if b.pressed else 0
         self.button_change_states[b.type.raw] = {"standstill": CS.cruiseState.standstill, "enabled": enabled}
 
-  def update_v_cruise(self, CS, enabled, is_metric):
+  def update_v_cruise(self, CS, enabled, is_metric, sm=None):
     self._add_log("")
     self.update_params(is_metric)
     self.frame += 1
+    # Kans: receive traffic-light state from longitudinal planner.
+    self.xState_last = self.xState
+    self.trafficState_last = self.trafficState
+    if sm is not None and sm.alive['longitudinalPlan']:
+      lp = sm['longitudinalPlan']
+      self.xState = lp.xState
+      self.trafficState = lp.trafficState
+      self.aTarget = lp.aTarget
 
     if CS.gearShifter != GearShifter.drive:
       self.autoCruiseControl_cancel_timer = int(20 / DT_CTRL)
@@ -456,6 +470,12 @@ class VCruiseHelper:
       self._activate_cruise_on_latch = 1
     else:
       self._activate_cruise_on_latch = 0
+
+    # Kans: traffic-light stop released.
+    # e2eStop(3) / e2eStopped(5) -> e2eCruise(2) means Carrot released the stop target.
+    traffic_start = self.xState_last in [3, 5] and self.xState == 2
+    if traffic_start and not enabled and not CS.brakePressed and CS.gearShifter == GearShifter.drive:
+      self._cruise_control(1, -1, "Cruise on (traffic green)")
 
     # SoftHold release -> AutoCruise request
     if not enabled and self._brake_pressed_count == -1 and self._soft_hold_active > 0:

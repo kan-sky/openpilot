@@ -11,7 +11,7 @@ from openpilot.selfdrive.modeld.constants import ModelConstants
 from openpilot.selfdrive.controls.lib.longcontrol import LongCtrlState
 from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import LongitudinalMpc, LongitudinalPlanSource
 from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import T_IDXS as T_IDXS_MPC
-from openpilot.selfdrive.controls.lib.drive_helpers import CONTROL_N, get_accel_from_plan, should_stop
+from openpilot.selfdrive.controls.lib.drive_helpers import CONTROL_N, get_accel_from_plan, should_stop, should_stop_from_plan
 from openpilot.selfdrive.car.cruise import V_CRUISE_MAX, V_CRUISE_UNSET
 from openpilot.common.swaglog import cloudlog
 
@@ -72,7 +72,16 @@ class LongitudinalPlanner:
     self.a_desired_trajectory = np.zeros(CONTROL_N)
     self.j_desired_trajectory = np.zeros(CONTROL_N)
 
-  def update(self, sm):
+    # Carrot publish state. Keep a native fallback when CarrotPlanner is unavailable.
+    self.v_cruise_kph = 0.0
+
+  @staticmethod
+  def _enum_value(value, default=0):
+    if value is None:
+      return default
+    return int(getattr(value, "value", value))
+
+  def update(self, sm, carrot=None):
     if len(sm['carControl'].orientationNED) == 3:
       accel_coast = get_coast_accel(sm['carControl'].orientationNED[1])
     else:
@@ -80,7 +89,24 @@ class LongitudinalPlanner:
 
     v_ego = sm['carState'].vEgo
     v_cruise_kph = min(sm['carState'].vCruise, V_CRUISE_MAX)
+
+    # Kans: Carrot can only lower the native tz cruise target.
+    # Keep tz lead/MPC stopping and Auto Resume logic untouched.
+    if carrot is not None:
+      planner_mode = 'blended' if sm['selfdriveState'].experimentalMode else 'acc'
+      carrot_target_kph = carrot.update(sm, v_cruise_kph, planner_mode)
+      if carrot_target_kph >= 0.0:
+        v_cruise_kph = min(v_cruise_kph, carrot_target_kph)
+
+    self.v_cruise_kph = v_cruise_kph
     v_cruise = v_cruise_kph * CV.KPH_TO_MS
+
+    # Kans: traffic-light stop target calculated inside CarrotPlanner.
+    # Apply only as a lower cruise target; do not feed Carrot into tz MPC.
+    carrot_v_cruise = getattr(carrot, 'v_cruise', -1.0) if carrot is not None else -1.0
+    if carrot_v_cruise >= 0.0:
+      v_cruise = min(v_cruise, carrot_v_cruise)
+
     if sm['controlsState'].forceDecel:
       v_cruise = 0.0
 
@@ -131,6 +157,10 @@ class LongitudinalPlanner:
     output_a_target_e2e = sm['modelV2'].action.desiredAcceleration
     output_should_stop_e2e = sm['modelV2'].action.shouldStop
 
+    # Kans: enter stopping state earlier only for a close stopped lead.
+    lead_one = sm['radarState'].leadOne
+    lead_should_stop_early = (lead_one.present and lead_one.dRel < 8.0 and lead_one.vLead < 0.5 and v_ego < 0.7)
+
     self.a_cruise = get_cruise_accel(sm['selfdriveState'].experimentalMode, v_cruise, v_ego,
                                      self.a_cruise, steer_angle_without_offset, self.CP, self.dt,
                                      accel_coast, self.allow_throttle)
@@ -142,16 +172,26 @@ class LongitudinalPlanner:
       candidates.append((output_a_target_e2e, LongitudinalPlanSource.e2e, output_should_stop_e2e))
 
     output_a_target, self.mpc.source, _ = min(candidates, key=lambda c: c[0])
-    self.output_should_stop = any(should_stop for _, _, should_stop in candidates)
-    self.output_a_target = np.clip(output_a_target, ACCEL_MIN, ACCEL_MAX)
 
+    # Kans: Carrot traffic-light stop uses cruise target for approach deceleration.
+    # Enter LongControl stopping only near standstill.
+    carrot_should_stop = (
+      carrot is not None and
+      self._enum_value(getattr(carrot, "xState", None), 0) in [3, 5] and
+      v_ego < 0.8
+    )
+
+    self.output_should_stop = any(should_stop for _, _, should_stop in candidates) or lead_should_stop_early or carrot_should_stop
+    self.output_a_target = np.clip(output_a_target, ACCEL_MIN, ACCEL_MAX)
     self.a_desired = float(self.output_a_target)
     self.v_desired_filter.x = self.v_desired_filter.x + self.dt * (self.output_a_target + a_prev) / 2.0
 
-  def publish(self, sm, pm):
+  def publish(self, sm, pm, carrot=None):
     plan_send = messaging.new_message('longitudinalPlan')
 
-    plan_send.valid = sm.all_checks()
+    # carrotMan is optional for plan validity. Native tz services remain required.
+    plan_send.valid = sm.all_checks(service_list=['carControl', 'carState', 'controlsState', 'vehicleParameters',
+                                                  'radarState', 'modelV2', 'selfdriveState'])
 
     longitudinalPlan = plan_send.longitudinalPlan
     longitudinalPlan.modelMonoTime = sm.logMonoTime['modelV2']
@@ -171,4 +211,10 @@ class LongitudinalPlanner:
     longitudinalPlan.allowBrake = True
     longitudinalPlan.allowThrottle = bool(self.allow_throttle)
 
+    # Kans: Carrot traffic-light state feedback for cruise.py.
+    longitudinalPlan.xState = self._enum_value(getattr(carrot, "xState", None), 0) if carrot is not None else 0
+    longitudinalPlan.trafficState = self._enum_value(getattr(carrot, "trafficState", None), 0) if carrot is not None else 0
+    longitudinalPlan.cruiseTarget = float(self.v_cruise_kph)
+
     pm.send('longitudinalPlan', plan_send)
+

@@ -81,6 +81,14 @@ _services: dict[str, tuple] = {
   "wideRoadEncodeData": (False, 20., None, QueueSize.BIG),
   "qNarrowRoadEncodeData": (False, 20., None, QueueSize.BIG),
 
+  # navigation / Carrot Navi
+  "navInstruction": (True, 1., 10),
+  "navRoute": (True, 0.),
+  "navRouteNavd": (True, 0.),
+  "navInstructionCarrot": (True, 1., 10),
+  "carrotMan": (True, 0.),
+  "carrotNavi": (True, 2.),
+
   # debug
   "uiDebug": (True, 0., 1),
   "testJoystick": (True, 0.),
