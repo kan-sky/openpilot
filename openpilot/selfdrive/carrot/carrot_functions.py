@@ -7,6 +7,7 @@ import numpy as np
 from openpilot.common.realtime import DT_MDL
 from openpilot.common.constants import CV
 from openpilot.common.filter_simple import MyMovingAverage
+from openpilot.selfdrive.carrot.traffic_stop import is_traffic_stop_entry_allowed
 from openpilot.selfdrive.selfdrived.events import Events
 
 EventName = log.OnroadEvent.EventName
@@ -82,6 +83,7 @@ class CarrotPlanner:
     self.comfortBrake = 2.4
     self.comfort_brake = self.comfortBrake
 
+    self.soft_hold_active = 0
     self.events = Events()
     self.myDrivingMode = DrivingMode(self.params.get_int("MyDrivingMode"))
     self.myDrivingMode_last = self.myDrivingMode
@@ -187,17 +189,13 @@ class CarrotPlanner:
     v_ego_kph = v_ego * CV.MS_TO_KPH
     model_v = self.vFilter.process(v[-1])
     startSign = model_v > 5.0 or model_v > (v[0] + 2)
-    # 정지(빨간불) 후보
-    if v_ego_kph < 1.0:
-      # 거의 정지 상태: 교차로 부근에서 신호가 30m 안에 있고
-      # 모델이 좌우 +-5미터내에서 속도가 조금 있어도 적신호로 본다.
-      stopSign = model_x < 30.0 and model_v < 10.0 and (abs(y[-1]) < 5.0)
 
+    if v_ego_kph < 1.0:
+      stopSign = model_x < 20.0 and model_v < 10.0
     elif v_ego_kph < 82.0:
-      # 속도에 따른 정지선탐지 거리(120~160m)
-      stopSign = (model_x < d_rel - 2.5 and
-                  model_x < np.interp(v[0] * 3.6, [30, 60, 80], [90, 120.0, 140]) and
-                  ((model_v < 2.2) or (model_v < v[0] * 0.6)) and
+      stopSign = (model_x < d_rel - 3.0 and
+                  model_x < np.interp(v[0] * 3.6, [60, 80], [120.0, 150]) and
+                  ((model_v < 3.0) or (model_v < v[0] * 0.7)) and
                   abs(y[-1]) < 5.0)
       # 정상 주행 중 감속하는 경우(카메라 감속 등)에는 오감지가 많음.
       # 회생 감속으로 v_cruise가 0인 경우에는 신호를 감지하도록 함.
@@ -248,9 +246,12 @@ class CarrotPlanner:
         trigger_start = False
       self.trafficState_carrot = carrot_man.trafficState
 
-      if trigger_start and self.xState in [XState.e2eStop, XState.e2eStopped]:
-        self.xState = XState.e2eCruise
-        self.traffic_starting_count = 10.0 / DT_MDL
+      if trigger_start:
+        if self.soft_hold_active > 0:
+          self.add_event(EventName.trafficSignChanged)
+        elif self.xState in [XState.e2eStop, XState.e2eStopped]:
+          self.xState = XState.e2eCruise
+          self.traffic_starting_count = 10.0 / DT_MDL
 
       self.activeCarrot = carrot_man.activeCarrot
       self.xDistToTurn = carrot_man.xDistToTurn
@@ -299,6 +300,7 @@ class CarrotPlanner:
     radarstate = sm['radarState']
     model = sm['modelV2']
 
+    self.soft_hold_active = sm['carState'].softHoldActive
 
     self.comfort_brake = self.comfortBrake
 
@@ -355,20 +357,18 @@ class CarrotPlanner:
     #self.check_model_stopping(v, v_ego, self.xStop, y)
     self.check_model_stopping(v_cruise, v, v_ego, a_ego, x[-1], y, radarstate.leadOne.dRel if lead_detected else 1000)
 
-    # Kans: Carrot red keeps an already detected signal stop active.
-    if self.trafficState_carrot == 1 and self.xState in [XState.e2eStop, XState.e2eStopped]:
-      self.trafficState = TrafficState.red
-
     if self.myDrivingMode == DrivingMode.High or self.trafficLightDetectMode == 0:
-      self.trafficState = TrafficState.off
-    if abs(carstate.steeringAngleDeg) > 20:
       self.trafficState = TrafficState.off
 
     #self.update_user_control()
     if carstate.gasPressed or carstate.brakePressed:
       self.user_stop_distance = -1
 
-    if self.xState == XState.e2eStopped:  #Kans: 정지차 뒤(혹은, 빨간불에) 완전 정지중
+    if self.soft_hold_active > 0:
+      self.xState = XState.e2eStopped
+      if trafficState_last in [TrafficState.off, TrafficState.red] and self.trafficState == TrafficState.green:
+        self.add_event(EventName.trafficSignChanged)
+    elif self.xState == XState.e2eStopped:  #Kans: 정지차 뒤(혹은, 빨간불에) 완전 정지중
       if carstate.gasPressed:
         self.xState = XState.e2eCruise #XState.e2ePrepare
       elif lead_detected and (radarstate.leadOne.dRel - stop_model_x_raw) < 2.0:
@@ -393,15 +393,17 @@ class CarrotPlanner:
           self.add_event(EventName.trafficSignGreen)
           self.xState = XState.e2eCruise
         else:
-          self.comfort_brake = self.comfortBrake
+          self.comfort_brake = self.comfortBrake * 0.9
           #self.comfort_brake = COMFORT_BRAKE
           self.trafficStopAdjustRatio = np.interp(v_ego_kph, [0, 100], [1.0, 0.7])
           # 속도가 높을수록 먼 정지거리 추정값을 줄여 보정함.
           stop_dist = stop_model_x_rl * np.interp(stop_model_x_rl, [0, 50], [1.0, self.trafficStopAdjustRatio])
           # Kans: 신호정지선을 기준으로 정지 위치를 앞/뒤로 보정
           stop_dist = max(0.0, stop_dist - self.trafficStopDistanceAdjust)
-          # Kans: 신호정지 목표거리 항상 갱신
-          self.actual_stop_distance = stop_dist
+          # Kans: 신호정지 목표거리 갱신. 정지선 근접(10m 이내)에서는 추정치 흔들림에 의한
+          # 지터를 막기 위해 갱신을 멈추고 마지막 값을 유지한다.
+          if stop_dist > 10.0:
+            self.actual_stop_distance = stop_dist
           stop_model_x = 0
           self.fakeCruiseDistance = 0 if self.actual_stop_distance > 10.0 else 10.0
           if v_ego < 0.3:  #Kans: 거의멈추면 정지상태로 전환
@@ -424,7 +426,7 @@ class CarrotPlanner:
       if lead_detected:
         self.xState = XState.lead
       # Kans: 신호를 보고 xState를 바꿈. 빨간불이면 e2eStop으로(정지상태로 전이)
-      elif self.trafficState == TrafficState.red and abs(carstate.steeringAngleDeg) < 30 and self.traffic_starting_count == 0:
+      elif self.trafficState == TrafficState.red and is_traffic_stop_entry_allowed(carstate.steeringAngleDeg) and self.traffic_starting_count == 0:
         self.add_event(EventName.trafficStopping)
         self.xState = XState.e2eStop
         # Kans: 실제 빨간불 정지거리에서 신호정지거리만큼 빼서 미리 정지하게 함.
