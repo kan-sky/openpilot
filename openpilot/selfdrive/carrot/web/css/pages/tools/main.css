@@ -1,4 +1,4 @@
-﻿@media (max-width: 640px), (aspect-ratio < 13/10) and (max-width: 639px), (aspect-ratio < 13/10) and (max-height: 649px) {
+@media (max-width: 640px), (aspect-ratio < 13/10) and (max-width: 639px), (aspect-ratio < 13/10) and (max-height: 649px) {
   .app-dialog--web-settings .app-dialog__sheet {
     --web-settings-sheet-width: 420px;
     --web-settings-sheet-height: clamp(440px, 72dvh, 560px);

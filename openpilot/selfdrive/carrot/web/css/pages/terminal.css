@@ -1,4 +1,4 @@
-﻿.page--terminal {
+.page--terminal {
   --terminal-bottom-gap: calc(var(--nav-bar-height) + env(safe-area-inset-bottom, 0px));
   --terminal-form-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
   --terminal-inline: max(var(--sp-lg), calc((100vw - var(--content-max-width)) / 2));

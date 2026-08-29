@@ -1,4 +1,4 @@
-﻿.app-dialog--settings-diff .app-dialog__sheet {
+.app-dialog--settings-diff .app-dialog__sheet {
   width: min(calc(100vw - 24px), 520px);
   max-height: min(calc(100dvh - 24px), 680px);
   overflow: hidden;
