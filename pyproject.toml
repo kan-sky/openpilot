@@ -42,6 +42,9 @@ dependencies = [
   # joystickd
   "inputs",
 
+  # carrot web dashboard (carrot_server)
+  "aiohttp",
+
   # these should be removed
   "pyzmq",
   "sentry-sdk",

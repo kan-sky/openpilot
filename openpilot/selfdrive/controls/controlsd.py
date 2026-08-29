@@ -214,8 +214,10 @@ class Controls:
     cs.upAccelCmd = float(self.LoC.pid.p)
     cs.uiAccelCmd = float(self.LoC.pid.i)
     cs.ufAccelCmd = float(self.LoC.pid.f)
-    cs.forceDecel = bool(self.sm['driverMonitoringState'].noResponseForceDecel or
-                         (self.sm['selfdriveState'].state == State.softDisabling))
+    cs.forceDecel = False
+    if self.params.get_int("DisableDM") == 0:
+      cs.forceDecel = bool(self.sm['driverMonitoringState'].noResponseForceDecel or
+                           (self.sm['selfdriveState'].state == State.softDisabling))
 
     # trigger the car's stock driver monitoring escalation
     CC.driverMonitoringEscalation = cs.forceDecel
