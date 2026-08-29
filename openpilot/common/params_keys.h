@@ -199,6 +199,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"CruiseMaxVals4", {PERSISTENT, INT, "55"}},
     {"CruiseMaxVals5", {PERSISTENT, INT, "45"}},
     {"CruiseMaxVals6", {PERSISTENT, INT, "30"}},
+    {"SoftwareMenu", {PERSISTENT, INT, "1"}},
     {"SoundVolumeAdjust", {PERSISTENT, INT, "100"}},
     {"SoundVolumeAdjustEngage", {PERSISTENT, INT, "80"}},
     {"SoundLanguageSetting", {PERSISTENT, STRING, "auto"}},

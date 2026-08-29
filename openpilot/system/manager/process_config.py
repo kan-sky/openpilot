@@ -61,6 +61,8 @@ def only_offroad(started: bool, params: Params, CP: car.CarParams) -> bool:
 def livestream(started: bool, params: Params, CP: car.CarParams) -> bool:
   return params.get_bool("IsLiveStreaming")
 
+def enable_updated(started: bool, params: Params, CP: car.CarParams) -> bool:
+  return not started and params.get_bool("SoftwareMenu")
 def or_(*fns):
   return lambda *args: operator.or_(*(fn(*args) for fn in fns))
 
@@ -117,7 +119,7 @@ procs = [
   PythonProcess("hardwared", "openpilot.system.hardware.hardwared", always_run),
   PythonProcess("modem", "openpilot.common.hardware.comma.modem", always_run, enabled=COMMA_HARDWARE),
   PythonProcess("tombstoned", "openpilot.system.tombstoned", always_run, enabled=not PC),
-  PythonProcess("updated", "openpilot.system.updated.updated", only_offroad, enabled=not PC),
+  PythonProcess("updated", "openpilot.system.updated.updated", enable_updated, enabled=not PC),
   #PythonProcess("uploader", "openpilot.system.loggerd.uploader", always_run),
 
   # debug procs
