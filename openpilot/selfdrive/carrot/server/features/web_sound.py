@@ -8,7 +8,11 @@ from aiohttp import WSMsgType, web
 from openpilot.cereal import messaging
 from opendbc.car.structs import car
 from openpilot.common.params import Params
-from openpilot.selfdrive.car.openpilot_toggle import CruiseMainOpenpilotToggle
+
+try:
+  from openpilot.selfdrive.car.openpilot_toggle import CruiseMainOpenpilotToggle
+except Exception:
+  CruiseMainOpenpilotToggle = None
 
 
 AudibleAlert = car.CarControl.HUDControl.AudibleAlert
@@ -69,7 +73,7 @@ def _sound_directory(params: Params) -> str:
 
 def _is_tizi() -> bool:
   try:
-    from openpilot.system.hardware import HARDWARE
+    from openpilot.common.hardware import HARDWARE
     return HARDWARE.get_device_type() == "tizi"
   except Exception:
     return False
@@ -78,7 +82,7 @@ def _is_tizi() -> bool:
 async def _send_sound_states(ws: web.WebSocketResponse) -> None:
   sm = messaging.SubMaster(["selfdriveState", "carrotMan", "carState"])
   params = Params()
-  cruise_main_toggle = CruiseMainOpenpilotToggle(ButtonType.mainCruise)
+  cruise_main_toggle = CruiseMainOpenpilotToggle(ButtonType.mainCruise) if CruiseMainOpenpilotToggle is not None else None
   last_signature = None
   prompt_sequence = 0
   sequence = 0
@@ -116,7 +120,7 @@ async def _send_sound_states(ws: web.WebSocketResponse) -> None:
       emitted_countdown = countdown
 
     button_events = sm["carState"].buttonEvents if _message_valid(sm, "carState") else ()
-    if cruise_main_toggle.update(button_events, enabled, now=now):
+    if cruise_main_toggle is not None and cruise_main_toggle.update(button_events, enabled, now=now):
       prompt_sequence += 1
       alert = _enum_raw(AudibleAlert.prompt)
 
