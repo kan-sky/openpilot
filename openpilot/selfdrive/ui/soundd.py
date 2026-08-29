@@ -164,6 +164,10 @@ class Soundd:
     data_out[:frames, 0] = self.get_sound_data(frames)
 
   def update_alert(self, new_alert):
+    if new_alert != AudibleAlert.none and new_alert not in self.loaded_sounds:
+      cloudlog.error(f"soundd received unsupported alert {new_alert}")
+      new_alert = AudibleAlert.none
+
     current_alert_played_once = self.current_alert == AudibleAlert.none or self.current_sound_frame >= len(self.loaded_sounds[self.current_alert])
     # let looping sounds finish the current loop instead of cutting off mid tone
     if new_alert == AudibleAlert.none and self.current_alert != AudibleAlert.none and sound_list[self.current_alert][1] is None:
