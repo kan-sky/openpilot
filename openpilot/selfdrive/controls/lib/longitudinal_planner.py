@@ -216,5 +216,11 @@ class LongitudinalPlanner:
     longitudinalPlan.trafficState = self._enum_value(getattr(carrot, "trafficState", None), 0) if carrot is not None else 0
     longitudinalPlan.cruiseTarget = float(self.v_cruise_kph)
 
+    # Carrot alerts (trafficStopping/trafficSignGreen/...) never reach the UI/sound
+    # pipeline on their own - selfdrived only merges car_events. Cross the process
+    # boundary here so selfdrived can fold them into its own Events().
+    if carrot is not None:
+      longitudinalPlan.events = carrot.events.to_msg()
+
     pm.send('longitudinalPlan', plan_send)
 

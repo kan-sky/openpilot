@@ -246,6 +246,11 @@ class SelfdriveD:
       car_events = self.car_events.update(CS, self.CS_prev, self.sm['carControl']).to_msg()
       self.events.add_from_msg(car_events)
 
+      # Carrot alerts (trafficStopping/trafficSignGreen/...) come from plannerd,
+      # crossing the process boundary via longitudinalPlan.events.
+      if self.sm.alive['longitudinalPlan']:
+        self.events.add_from_msg(self.sm['longitudinalPlan'].events)
+
       if self.CP.notCar:
         # wait for everything to init first
         if self.sm.frame > int(2. / DT_CTRL) and self.initialized:
