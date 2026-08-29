@@ -50,6 +50,10 @@ dependencies = [
   # carrot web dashboard (carrot_server)
   "aiohttp",
 
+  # carrot navi (carrot_man)
+  "psutil",
+  "shapely",
+
   # these should be removed
   "pyzmq",
   "sentry-sdk",
