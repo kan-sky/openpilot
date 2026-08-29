@@ -63,6 +63,7 @@ dependencies = [
 
   # ui
   "comma-deps-raylib",
+  "cffi",  # system/ui/lib/application.py; needed explicitly for the standalone updater bundle
 ]
 
 [project.optional-dependencies]
