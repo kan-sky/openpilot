@@ -34,6 +34,11 @@ dependencies = [
   "comma-deps-json11",
   "comma-deps-git-lfs",
   "comma-deps-gcc-arm-none-eabi",
+  "comma-deps-ncurses",
+  "comma-deps-bzip2",
+  "comma-deps-catch2",
+  "comma-deps-libusb",
+  "comma-deps-bootstrap-icons",
 
   # athena
   "PyJWT[crypto]",
