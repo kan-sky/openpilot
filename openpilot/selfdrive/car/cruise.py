@@ -67,7 +67,7 @@ class VCruiseHelper:
     self._cruise_speed_min, self._cruise_speed_max = 5, 161
     self._cruise_speed_unit = 5
     self._cruise_speed_unit_basic = 5
-    self._cruise_button_mode = 2
+    self._cruise_button_mode = 3
     self.disengage_on_accelerator = self.params.get_bool("DisengageOnAccelerator")
 
     self._gas_pressed_count = 0
@@ -86,6 +86,10 @@ class VCruiseHelper:
     self._lat_enabled = self.params.get_int("AutoEngage") > 0
     self._v_cruise_kph_at_brake = 0
     self.cruise_state_available_last = False
+
+    self.d_rel = 0
+    self.v_rel = 0
+    self.cruiseOnDist = 7.0
 
     self._cancel_timer = 0
     self._log_timer = 0
@@ -137,6 +141,7 @@ class VCruiseHelper:
 
       self._cruise_button_mode = self.params.get_int("CruiseButtonMode")
       self.disengage_on_accelerator = self.params.get_bool("DisengageOnAccelerator")
+      self.cruiseOnDist = self.params.get_float("CruiseOnDist") * 0.01
   def _update_v_cruise_non_pcm(self, CS, enabled, is_metric):
     # handle button presses. TODO: this should be in state_control, but a decelCruise press
     # would have the effect of both enabling and changing speed is checked after the state transition
@@ -209,6 +214,10 @@ class VCruiseHelper:
       self.xState = lp.xState
       self.trafficState = lp.trafficState
       self.aTarget = lp.aTarget
+    if sm is not None and sm.alive['radarState']:
+      lead = sm['radarState'].leadOne
+      self.d_rel = lead.dRel if lead.present else 0
+      self.v_rel = lead.vRel if lead.present else 0
 
     if CS.gearShifter != GearShifter.drive:
       self.autoCruiseControl_cancel_timer = int(20 / DT_CTRL)
@@ -464,6 +473,18 @@ class VCruiseHelper:
     self._add_log(reason)
 
 
+  def _check_safe_stop(self, CS, safe_distance=3):
+    v_ego = CS.vEgo
+    decel_rate = 1.5
+    d_stop_ego = (v_ego ** 2) / (2 * decel_rate)
+    d_stop_rel = (self.v_rel ** 2) / (2 * decel_rate)
+
+    d_final = self.d_rel - d_stop_ego - d_stop_rel
+
+    if d_final >= safe_distance:
+      return True, d_final
+    return False, d_final
+
   def _update_cruise_state(self, CS, enabled, v_cruise_kph):
     # activateCruise ON latch timer
     if self._activate_cruise_on_timer > 0:
@@ -493,6 +514,17 @@ class VCruiseHelper:
         v_cruise_kph = max(v_cruise_kph, self.v_ego_kph_set)
       else:
         v_cruise_kph = self._v_cruise_desired(CS, v_cruise_kph)
+
+    # Coasting toward a lead car with cruise off: engage before it gets unsafe.
+    if (not enabled and self._gas_pressed_count < 0 and self._brake_pressed_count < 0 and
+        self.d_rel > 0 and CS.vEgo > 0.02):
+      safe_state, safe_dist = self._check_safe_stop(CS, 4)
+      if abs(CS.steeringAngleDeg) > 70:
+        pass
+      elif not safe_state:
+        self._cruise_control(1, -1, "Cruise on (fcw)")
+      elif self.d_rel < self.cruiseOnDist:
+        self._cruise_control(1, 0, "Cruise on (fcw dist)")
 
     if self._gas_pressed_count == 1 or CS.vEgo < 0.1:
       self._pause_auto_speed_up = False
