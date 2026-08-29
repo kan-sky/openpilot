@@ -258,6 +258,9 @@ class SelfdriveD:
         (CS.regenBraking and (not self.CS_prev.regenBraking or not CS.standstill)):
         self.events.add(EventName.pedalPressed)
 
+      if CS.latEnabled != self.CS_prev.latEnabled:
+        self.events.add(EventName.audioPrompt)
+
       if CS.autoHoldActivated:
         self.events.add(EventName.autoHold)
 

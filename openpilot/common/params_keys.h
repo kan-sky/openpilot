@@ -177,6 +177,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"AccelForce", {PERSISTENT, INT, "950"}},
     // navigation / Carrot Navi
     {"CruiseEcoControl", {PERSISTENT, INT, "0"}},
+    {"AlwaysLateral", {PERSISTENT, INT, "1"} },
     {"AutoCurveSpeedLowerLimit", {PERSISTENT, INT, "30"}},
     {"AutoCurveSpeedFactor", {PERSISTENT, INT, "110"}},
     {"AutoTurnControl", {PERSISTENT, INT, "2"}},

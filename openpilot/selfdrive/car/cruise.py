@@ -411,7 +411,8 @@ class VCruiseHelper:
       elif button_type == ButtonType.cancel:
         self._cruise_cancel_state = True
         self._lat_enabled = False
-        self._add_log("Lateral disabled")
+        #self._add_log("Lateral disabled")
+        self._add_log("Lateral " + "enabled" if self._lat_enabled else "disabled")
 
     return self._update_cruise_state(CS, enabled, v_cruise_kph)
 

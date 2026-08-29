@@ -99,9 +99,14 @@ class Controls:
     CC = car.CarControl.new_message()
     CC.enabled = self.sm['selfdriveState'].enabled
 
+    # carrot
+    gear = car.CarState.GearShifter
+    driving_gear = CS.gearShifter not in (gear.neutral, gear.park, gear.reverse, gear.unknown)
+    lateral_enabled = driving_gear and self.params.get_bool("AlwaysLateral")
     # Check which actuators can be enabled
     standstill = abs(CS.vEgo) <= max(self.CP.minSteerSpeed, 0.3) or CS.standstill
-    CC.latActive = self.sm['selfdriveState'].active and not CS.steerFaultTemporary and not CS.steerFaultPermanent and \
+    CC.latActive = ((self.sm['selfdriveState'].active or lateral_enabled) and CS.latEnabled and \
+                   not CS.steerFaultTemporary and not CS.steerFaultPermanent and \
                    (not standstill or self.CP.steerAtStandstill)
     CC.longActive = CC.enabled and not any(e.overrideLongitudinal for e in self.sm['onroadEvents']) and self.CP.openpilotLongitudinalControl
 
