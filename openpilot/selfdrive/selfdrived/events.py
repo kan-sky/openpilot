@@ -1036,7 +1036,7 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
       "AutoHold Activated.",
       "",
       AlertStatus.normal, AlertSize.small,
-      Priority.LOW, VisualAlert.none, AudibleAlert.engage, 2.),
+      Priority.LOW, VisualAlert.none, AudibleAlert.autoHold, 2.),
   },
 }
 
