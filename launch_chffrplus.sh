@@ -3,7 +3,7 @@
 if [ ! -f "./boot_finish" ]; then
   mount -o rw,remount /system
   chmod 755 ./restart.sh
-
+  chmod 755 ./selfdrive/apilot.py
 
   if [ ! -f "/data/params/d/DongleId" ]; then
     echo -n "UnregisteredDevice" > /data/params/d/DongleId
