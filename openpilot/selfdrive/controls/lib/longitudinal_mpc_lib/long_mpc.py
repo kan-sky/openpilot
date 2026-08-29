@@ -84,6 +84,15 @@ def get_stopped_equivalence_factor(v_lead):
 def get_safe_obstacle_distance(v_ego, t_follow):
   return (v_ego**2) / (2 * COMFORT_BRAKE) + t_follow * v_ego + STOP_DISTANCE
 
+def get_carrot_float(carrot, name, default):
+  if carrot is None:
+    return float(default)
+  try:
+    value = float(getattr(carrot, name, default))
+    return value if np.isfinite(value) else float(default)
+  except (TypeError, ValueError):
+    return float(default)
+
 def gen_long_model():
   model = AcadosModel()
   model.name = MODEL_NAME
@@ -307,7 +316,8 @@ class LongitudinalMpc:
     lead_xv = self.extrapolate_lead(x_lead, v_lead, a_lead, a_lead_tau)
     return lead_xv
 
-  def update(self, radarstate, personality=log.LongitudinalPersonality.standard):
+  def update(self, radarstate, personality=log.LongitudinalPersonality.standard, carrot=None):
+    v_ego = self.x0[1]
     t_follow = get_T_FOLLOW(personality)
 
     lead_xv_0 = self.process_lead(radarstate.leadOne)
@@ -319,8 +329,28 @@ class LongitudinalMpc:
     lead_0_obstacle = lead_xv_0[:,0] + get_stopped_equivalence_factor(lead_xv_0[:,1])
     lead_1_obstacle = lead_xv_1[:,0] + get_stopped_equivalence_factor(lead_xv_1[:,1])
 
-    x_obstacles = np.column_stack([lead_0_obstacle, lead_1_obstacle])
-    self.source = MPC_SOURCES[np.argmin(x_obstacles[0])]
+    stop_x = get_carrot_float(carrot, "stop_dist", 1000.0)
+    x_state_raw = getattr(carrot, "xState", None) if carrot is not None else None
+    x_state = int(getattr(x_state_raw, "value", x_state_raw)) if x_state_raw is not None else -1
+
+    # Kans: Carrot traffic-light stop.
+    # e2eStop=3, e2eStopped=5
+    use_carrot_stop = carrot is not None and x_state in [3, 5] and 0.0 <= stop_x < 300.0
+
+    if use_carrot_stop:
+      traffic_stop_obstacle = stop_x * np.ones(N + 1)
+      x_obstacles = np.column_stack([lead_0_obstacle, lead_1_obstacle, traffic_stop_obstacle])
+
+      source_idx = int(np.argmin(x_obstacles[0]))
+      if source_idx == 0:
+        self.source = LongitudinalPlanSource.lead0
+      elif source_idx == 1:
+        self.source = LongitudinalPlanSource.lead1
+      else:
+        self.source = LongitudinalPlanSource.cruise
+    else:
+      x_obstacles = np.column_stack([lead_0_obstacle, lead_1_obstacle])
+      self.source = MPC_SOURCES[np.argmin(x_obstacles[0])]
 
     self.yref[:,:] = 0.0
     for i in range(N):

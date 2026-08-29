@@ -189,13 +189,17 @@ class CarrotPlanner:
     v_ego_kph = v_ego * CV.MS_TO_KPH
     model_v = self.vFilter.process(v[-1])
     startSign = model_v > 5.0 or model_v > (v[0] + 2)
-
+    # 정지(빨간불) 후보
     if v_ego_kph < 1.0:
-      stopSign = model_x < 20.0 and model_v < 10.0
+      # 거의 정지 상태: 교차로 부근에서 신호가 30m 안에 있고
+      # 모델이 좌우 +-5미터내에서 속도가 조금 있어도 적신호로 본다.
+      stopSign = model_x < 30.0 and model_v < 10.0 and (abs(y[-1]) < 5.0)
+
     elif v_ego_kph < 82.0:
-      stopSign = (model_x < d_rel - 3.0 and
-                  model_x < np.interp(v[0] * 3.6, [60, 80], [120.0, 150]) and
-                  ((model_v < 3.0) or (model_v < v[0] * 0.7)) and
+      # 속도에 따른 정지선탐지 거리(120~160m)
+      stopSign = (model_x < d_rel - 2.5 and
+                  model_x < np.interp(v[0] * 3.6, [30, 60, 80], [90, 120.0, 140]) and
+                  ((model_v < 2.2) or (model_v < v[0] * 0.6)) and
                   abs(y[-1]) < 5.0)
       # 정상 주행 중 감속하는 경우(카메라 감속 등)에는 오감지가 많음.
       # 회생 감속으로 v_cruise가 0인 경우에는 신호를 감지하도록 함.
@@ -204,21 +208,6 @@ class CarrotPlanner:
     else:
       stopSign = False
 
-    # self.stopSignCount = (
-    #   self.stopSignCount + 1
-    #   if (
-    #     stopSign
-    #     and (
-    #       model_x > get_safe_obstacle_distance(
-    #         v_ego,
-    #         t_follow=0,
-    #         comfort_brake=COMFORT_BRAKE,
-    #         stop_distance=-1.0,
-    #       )
-    #     )
-    #   )
-    #   else 0
-    # )
     self.stopSignCount = self.stopSignCount + 1 if stopSign else 0
     self.startSignCount = self.startSignCount + 1 if startSign and not stopSign else 0
 
