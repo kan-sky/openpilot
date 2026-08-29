@@ -206,6 +206,7 @@ class Car:
 
     # GM AutoCruise: keep only the activateCruise latch output.
     CS.activateCruise = self.v_cruise_helper.get_activate_cruise()
+    CS.latEnabled = self.v_cruise_helper._lat_enabled
 
     # OPGM variables
     if any(be.type in (ButtonType.accelCruise, ButtonType.resumeCruise) for be in CS.buttonEvents):
