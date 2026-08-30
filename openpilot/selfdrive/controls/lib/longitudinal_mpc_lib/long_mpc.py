@@ -330,7 +330,7 @@ class LongitudinalMpc:
     lead_xv = self.extrapolate_lead(x_lead, v_lead, a_lead, a_lead_tau)
     return lead_xv
 
-  def update(self, radarstate, personality=log.LongitudinalPersonality.standard):
+  def update(self, radarstate, personality=log.LongitudinalPersonality.standard, carrot=None):
     self._update_t_follow_gaps()
     t_follow = get_T_FOLLOW(personality, self.t_follow_gaps)
 
@@ -345,6 +345,23 @@ class LongitudinalMpc:
 
     x_obstacles = np.column_stack([lead_0_obstacle, lead_1_obstacle])
     self.source = MPC_SOURCES[np.argmin(x_obstacles[0])]
+
+    if carrot is not None:
+      # Kans: carrot's traffic-light stop point as a third MPC obstacle, on
+      # top of the two leads above - no new acados param, just another
+      # column into the same np.min() that already picks the closer of
+      # lead0/lead1. carrot.stop_dist self-gates to ~1000 (irrelevant)
+      # whenever XState isn't e2eStop/e2eStopped (carrot_functions.py), so
+      # no extra state check is needed here. Clamped against the real lead
+      # car's own safe-following distance so a short/wrong stop-line
+      # estimate can never pull the target closer than the lead-following
+      # formula already allows - an earlier attempt at this skipped that
+      # clamp and made the car creep up dangerously close behind a lead
+      # (worse on hills, where it fully closed the gap).
+      x2 = float(carrot.stop_dist) * np.ones(N + 1)
+      if radarstate.leadOne.present:
+        x2 = np.maximum(x2, lead_0_obstacle)
+      x_obstacles = np.column_stack([x_obstacles, x2])
 
     self.yref[:,:] = 0.0
     for i in range(N):
