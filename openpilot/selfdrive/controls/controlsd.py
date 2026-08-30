@@ -134,7 +134,10 @@ class Controls:
     else:
       new_desired_curvature = model_v2.action.desiredCurvature if CC.latActive else self.curvature
     self.desired_curvature, curvature_limited = clip_curvature(CS.vEgo, self.desired_curvature, new_desired_curvature, lp.roll)
-    lat_delay = self.sm["lateralDelay"].lateralDelay + LAT_SMOOTH_SECONDS
+    steer_actuator_delay = self.params.get_float("SteerActuatorDelay") * 0.01
+    if steer_actuator_delay == 0.0:
+      steer_actuator_delay = self.sm["lateralDelay"].lateralDelay
+    lat_delay = steer_actuator_delay + LAT_SMOOTH_SECONDS
 
     actuators.curvature = self.desired_curvature
     steer, lateral_output, lac_log = self.LaC.update(CC.latActive, CS, self.VM, lp,

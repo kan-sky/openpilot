@@ -221,4 +221,10 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"AutoNaviSpeedSafetyFactor", {PERSISTENT, INT, "95"}},
     {"NavDestination", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION, STRING}},
     {"NavDestinationWaypoints", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION, STRING}},
+    {"AutoGasSyncSpeed", {PERSISTENT, INT, "1"}},
+    {"SteerActuatorDelay", {PERSISTENT, INT, "0"}},
+    {"TFollowGap1", {PERSISTENT, INT, "110"}},
+    {"TFollowGap2", {PERSISTENT, INT, "120"}},
+    {"TFollowGap3", {PERSISTENT, INT, "140"}},
+    {"TFollowGap4", {PERSISTENT, INT, "160"}},
 };

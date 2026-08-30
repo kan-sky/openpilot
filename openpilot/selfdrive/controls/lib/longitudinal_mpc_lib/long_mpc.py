@@ -4,6 +4,7 @@ import time
 import numpy as np
 from openpilot.cereal import log
 from opendbc.car.interfaces import ACCEL_MIN, ACCEL_MAX
+from openpilot.common.params import Params
 from openpilot.common.realtime import DT_MDL
 from openpilot.common.swaglog import cloudlog
 # WARNING: imports outside of constants will not trigger a rebuild
@@ -58,7 +59,9 @@ STOP_DISTANCE = 7.5  # stock 6.0; raised since observed stop gap tracked ~1.5-2m
 MIN_X_LEAD_FACTOR = 0.5
 
 def get_jerk_factor(personality=log.LongitudinalPersonality.standard):
-  if personality==log.LongitudinalPersonality.relaxed:
+  if personality==log.LongitudinalPersonality.moreRelaxed:
+    return 1.0
+  elif personality==log.LongitudinalPersonality.relaxed:
     return 1.0
   elif personality==log.LongitudinalPersonality.standard:
     return 1.0
@@ -68,13 +71,19 @@ def get_jerk_factor(personality=log.LongitudinalPersonality.standard):
     raise NotImplementedError("Longitudinal personality not supported")
 
 
-def get_T_FOLLOW(personality=log.LongitudinalPersonality.standard):
-  if personality==log.LongitudinalPersonality.relaxed:
-    return 1.75
+# Kans: gap 1-4 (TFollowGap1..4 params) map onto the four LongitudinalPersonality
+# tiers, aggressive (shortest) through moreRelaxed (longest) - same ordering as
+# carrot-wip. t_follow_gaps defaults to the old hardcoded tz values so behavior
+# is unchanged until LongitudinalMpc starts feeding live param values in.
+def get_T_FOLLOW(personality=log.LongitudinalPersonality.standard, t_follow_gaps=(1.25, 1.45, 1.75, 1.75)):
+  if personality==log.LongitudinalPersonality.aggressive:
+    return t_follow_gaps[0]
   elif personality==log.LongitudinalPersonality.standard:
-    return 1.45
-  elif personality==log.LongitudinalPersonality.aggressive:
-    return 1.25
+    return t_follow_gaps[1]
+  elif personality==log.LongitudinalPersonality.relaxed:
+    return t_follow_gaps[2]
+  elif personality==log.LongitudinalPersonality.moreRelaxed:
+    return t_follow_gaps[3]
   else:
     raise NotImplementedError("Longitudinal personality not supported")
 
@@ -218,6 +227,20 @@ class LongitudinalMpc:
     self.reset()
     self.source = LongitudinalPlanSource.cruise
 
+    self.params_op = Params()
+    self._tfollow_param_frame = 0
+    self.t_follow_gaps = (1.25, 1.45, 1.75, 1.75)
+
+  def _update_t_follow_gaps(self):
+    self._tfollow_param_frame += 1
+    if self._tfollow_param_frame % 100 == 0:
+      self.t_follow_gaps = (
+        self.params_op.get_float("TFollowGap1") / 100.,
+        self.params_op.get_float("TFollowGap2") / 100.,
+        self.params_op.get_float("TFollowGap3") / 100.,
+        self.params_op.get_float("TFollowGap4") / 100.,
+      )
+
   def reset(self):
     self.solver.reset()
 
@@ -308,7 +331,8 @@ class LongitudinalMpc:
     return lead_xv
 
   def update(self, radarstate, personality=log.LongitudinalPersonality.standard):
-    t_follow = get_T_FOLLOW(personality)
+    self._update_t_follow_gaps()
+    t_follow = get_T_FOLLOW(personality, self.t_follow_gaps)
 
     lead_xv_0 = self.process_lead(radarstate.leadOne)
     lead_xv_1 = self.process_lead(radarstate.leadTwo)
