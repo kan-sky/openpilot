@@ -7,7 +7,7 @@ from opendbc.car import Bus, DT_CTRL, structs, create_gas_interceptor_command, A
 from opendbc.car.lateral import apply_driver_steer_torque_limits
 from opendbc.car.gm import gmcan
 from opendbc.car.common.conversions import Conversions as CV
-from opendbc.car.gm.values import DBC, CanBus, CarControllerParams, CruiseButtons, AccState, EV_CAR, SDGM_CAR, ALT_ACCS, CAMERA_ACC_CAR
+from opendbc.car.gm.values import DBC, CanBus, CarControllerParams, CruiseButtons, EV_CAR, SDGM_CAR, ALT_ACCS, CAMERA_ACC_CAR
 from opendbc.car.interfaces import CarControllerBase
 from openpilot.selfdrive.controls.lib.drive_helpers import apply_deadzone
 
@@ -255,20 +255,15 @@ class CarController(CarControllerBase):
             resume = actuators.longControlState == LongCtrlState.starting or CC.cruiseControl.resume
             at_full_stop = at_full_stop and not resume
 
-          if CC.cruiseControl.resume and CS.pcm_acc_status == AccState.STANDSTILL:
-            # Kans: stock comma forces GasRegenCmdActive=0 here for EV_CAR because
-            # 2018+ Volts had native auto-resume-from-stop removed by GM, so the
-            # car has no real auto-resume to signal into. Our own AutoResume
-            # (RES_ACCEL button spam) now provides that from software, so once
-            # it's enabled we no longer need this override - and per the comment
-            # on create_gas_regen_command below, sending 0 here is itself a known
-            # way to trip a cruise fault.
-            if self.CP.carFingerprint in EV_CAR and not auto_resume_enabled:
-              acc_engaged = False
-            else:
-              acc_engaged = CC.enabled
-          else:
-            acc_engaged = CC.enabled
+          # Kans: stock comma forced GasRegenCmdActive=0 here for EV_CAR (resume
+          # from standstill) because 2018+ Volts had native auto-resume-from-stop
+          # removed by GM. Every other EV_CAR either has no auto-resume at all
+          # (unaffected by this flag either way) or, for the Volt, gets it back
+          # from our own AutoResume (RES_ACCEL button spam). And per the comment
+          # on create_gas_regen_command below, sending 0 here is itself a known
+          # way to trip a cruise fault - so there's no case left where the
+          # EV_CAR override actually helps.
+          acc_engaged = CC.enabled
 
           # Kans: AutoResume 윈도우 중 2CB ACC state 보정
           starting = (actuators.longControlState == LongCtrlState.starting)
