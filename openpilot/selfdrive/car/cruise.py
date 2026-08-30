@@ -390,10 +390,14 @@ class VCruiseHelper:
           v_cruise_kph = max(self.v_ego_kph_set, self._cruise_speed_min)
         elif self.v_ego_kph_set > v_cruise_kph + 2 and self._cruise_button_mode in [2, 3]:
           v_cruise_kph = max(self.v_ego_kph_set, self._cruise_speed_min)
-        elif self._cruise_button_mode in [0, 1]:
+        else:
+          # Kans: modes 2/3 had no fallback here, so a short decelCruise press
+          # while cruising steadily at/near the set speed (the common case -
+          # neither the softhold, disengaged, nor "going faster than set
+          # speed" branches above apply) did nothing at all. button_kph is
+          # already computed with the correct per-mode unit (SPEED_DOWN_UNIT
+          # in _prepare_buttons), same as accelCruise's button_kph for mode 0.
           v_cruise_kph = button_kph
-        elif self.v_ego_kph_set > self._cruise_speed_min and v_cruise_kph > self.v_ego_kph_set:
-          v_cruise_kph = self.v_ego_kph_set
 
         self._v_cruise_kph_at_brake = 0
 
