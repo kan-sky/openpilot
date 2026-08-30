@@ -154,7 +154,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"CruiseOnDist", {PERSISTENT, INT, "700"}},
     {"MyDrivingMode", {PERSISTENT, INT, "3"}},
     // Longitudinal tuning
-    {"LongTuningKpV", {PERSISTENT, INT, "105"}},
+    {"LongTuningKpV", {PERSISTENT, INT, "0"}},
     {"LongTuningKiV", {PERSISTENT, INT, "0"}},
     {"LongTuningKf", {PERSISTENT, INT, "100"}},
     // Lateral torque tuning
