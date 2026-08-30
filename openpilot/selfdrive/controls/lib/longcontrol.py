@@ -66,6 +66,29 @@ class LongControl:
     self.pid.reset()
 
   def update(self, active, CS, a_target, should_stop, accel_limits):
+    # Kans: live long-tuning override (LongTuningKpV/KiV/Kf UI sliders). 0
+    # (default) means "leave the existing gain alone" - kp is 0.0 here by
+    # design (see __init__) and ki/kf are the car-specific
+    # CP.longitudinalTuning values, so a value of 0 changes nothing versus
+    # today. Only overrides a gain that's currently a single scalar point,
+    # so a multi-breakpoint car tuning table is never collapsed.
+    self.readParamCount += 1
+    if self.readParamCount >= 100:
+      self.readParamCount = 0
+    elif self.readParamCount == 10:
+      if len(self.pid._k_p[0]) == 1:
+        kp_v = self.params.get_float("LongTuningKpV") * 0.01
+        if kp_v > 0:
+          self.pid._k_p = (self.pid._k_p[0], [kp_v])
+      if len(self.pid._k_i[0]) == 1:
+        ki_v = self.params.get_float("LongTuningKiV") * 0.001
+        if ki_v > 0:
+          self.pid._k_i = (self.pid._k_i[0], [ki_v])
+      if len(self.pid._k_f[0]) == 1:
+        kf = self.params.get_float("LongTuningKf") * 0.01
+        if kf > 0:
+          self.pid._k_f = (self.pid._k_f[0], [kf])
+
     self.pid.neg_limit = accel_limits[0]
     self.pid.pos_limit = accel_limits[1]
     # Kans: debug
