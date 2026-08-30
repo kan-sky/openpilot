@@ -7,6 +7,7 @@ from opendbc.car import Bus, create_button_events, structs
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.interfaces import CarStateBase
 from opendbc.car.gm.values import DBC, AccState, CruiseButtons, STEER_THRESHOLD, CAR, GMFlags, CAMERA_ACC_CAR, EV_CAR, SDGM_CAR, ALT_ACCS
+from opendbc.car.carlog import carlog
 import openpilot.cereal.messaging as messaging
 import time
 
@@ -62,6 +63,7 @@ class CarState(CarStateBase):
 
     # Kans: accFault delay
     self.startup_time = time.monotonic()
+    self._acc_faulted_last = False
 
     # Kans: TPMS
     self.KPA_TO_PSI = 0.1450377377
@@ -240,6 +242,16 @@ class CarState(CarStateBase):
     ret.accFaulted = ((cruise_faulted and not startup_fault_ignore) or friction_brake_unavailable)
     if self.CP.carFingerprint in CAR.CHEVROLET_TRAILBLAZER:
       ret.accFaulted = False
+
+    # Kans: diagnostic - log which condition actually tripped accFaulted, since
+    # "Cruise Fault: Restart the Car" doesn't say why on screen.
+    if ret.accFaulted and not self._acc_faulted_last:
+      carlog.warning(
+        f"GM accFaulted rising edge: cruise_faulted={cruise_faulted} "
+        f"friction_brake_unavailable={friction_brake_unavailable} "
+        f"startup_fault_ignore={startup_fault_ignore}"
+      )
+    self._acc_faulted_last = ret.accFaulted
 
     ret.cruiseState.enabled = pt_cp.vl["AcceleratorPedal2"]["CruiseState"] != AccState.OFF
     ret.cruiseState.standstill = pt_cp.vl["AcceleratorPedal2"]["CruiseState"] == AccState.STANDSTILL
