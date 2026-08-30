@@ -389,26 +389,28 @@ class CarrotPlanner:
       elif lead_detected and (radarstate.leadOne.dRel - stop_model_x_raw) < 2.0:
         self.xState = XState.lead
       else:
-        if self.trafficState == TrafficState.green:  # Kans: 파란불로 뱌뀌면 크루징.
-          self.add_event(EventName.trafficSignGreen)
-          self.xState = XState.e2eCruise
-        else:
-          self.comfort_brake = self.comfortBrake * 0.9
-          #self.comfort_brake = COMFORT_BRAKE
-          self.trafficStopAdjustRatio = np.interp(v_ego_kph, [0, 100], [1.0, 0.7])
-          # 속도가 높을수록 먼 정지거리 추정값을 줄여 보정함.
-          stop_dist = stop_model_x_rl * np.interp(stop_model_x_rl, [0, 50], [1.0, self.trafficStopAdjustRatio])
-          # Kans: 신호정지선을 기준으로 정지 위치를 앞/뒤로 보정
-          stop_dist = max(0.0, stop_dist - self.trafficStopDistanceAdjust)
-          # Kans: 신호정지 목표거리 갱신. 정지선 근접(10m 이내)에서는 추정치 흔들림에 의한
-          # 지터를 막기 위해 갱신을 멈추고 마지막 값을 유지한다.
-          if stop_dist > 10.0:
-            self.actual_stop_distance = stop_dist
-          stop_model_x = 0
-          self.fakeCruiseDistance = 0 if self.actual_stop_distance > 10.0 else 10.0
-          if v_ego < 0.3:  #Kans: 거의멈추면 정지상태로 전환
-            self.stopping_count = 0.5 / DT_MDL
-            self.xState = XState.e2eStopped
+        # Kans: don't bail out to cruise on a mid-approach green flicker -
+        # check_model_stopping()'s green detection (0.2s of "startSign") is easy
+        # to false-trigger as the car closes in on the stop line, and releasing
+        # the brake here mid-stop reads as "slows down then suddenly accelerates
+        # through the intersection". Always finish the stop; only re-evaluate
+        # green once actually stopped (XState.e2eStopped).
+        self.comfort_brake = self.comfortBrake * 0.9
+        #self.comfort_brake = COMFORT_BRAKE
+        self.trafficStopAdjustRatio = np.interp(v_ego_kph, [0, 100], [1.0, 0.7])
+        # 속도가 높을수록 먼 정지거리 추정값을 줄여 보정함.
+        stop_dist = stop_model_x_rl * np.interp(stop_model_x_rl, [0, 50], [1.0, self.trafficStopAdjustRatio])
+        # Kans: 신호정지선을 기준으로 정지 위치를 앞/뒤로 보정
+        stop_dist = max(0.0, stop_dist - self.trafficStopDistanceAdjust)
+        # Kans: 신호정지 목표거리 갱신. 정지선 근접(10m 이내)에서는 추정치 흔들림에 의한
+        # 지터를 막기 위해 갱신을 멈추고 마지막 값을 유지한다.
+        if stop_dist > 10.0:
+          self.actual_stop_distance = stop_dist
+        stop_model_x = 0
+        self.fakeCruiseDistance = 0 if self.actual_stop_distance > 10.0 else 10.0
+        if v_ego < 0.3:  #Kans: 거의멈추면 정지상태로 전환
+          self.stopping_count = 0.5 / DT_MDL
+          self.xState = XState.e2eStopped
     elif self.xState == XState.e2ePrepare:
       if lead_detected:
         self.xState = XState.lead
