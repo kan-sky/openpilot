@@ -71,12 +71,6 @@ class CarController(CarControllerBase):
     self.resume_fault_guard = 0
     self.lead_start_count = 0  # 앞차 출발시도 횟수
 
-    # Kans: cruise-enabled rising-edge tracking, to avoid AutoResume sending a
-    # redundant RES_ACCEL right after cruise was just (re-)engaged - by the
-    # driver manually or by AutoCruise - which can trip a GM PCM cruise fault.
-    self._cruise_enabled_last = False
-    self._cruise_enabled_since_frame = 0
-
     self.btn_rc_pt = -1
     self.btn_rc_cam = -1
     self._brk_rc = -1
@@ -295,15 +289,6 @@ class CarController(CarControllerBase):
             self.resume_fault_guard = 0
             self.activateCruise_after_brake = False
 
-          # Kans: cruise-enabled rising edge (manual RESUME press, or AutoCruise
-          # just landed it) - used to hold off AutoResume's own RES_ACCEL for a
-          # short window so it never doubles up right behind a fresh engage.
-          if CS.out.cruiseState.enabled and not self._cruise_enabled_last:
-            self._cruise_enabled_since_frame = self.frame
-          self._cruise_enabled_last = CS.out.cruiseState.enabled
-          cruise_freshly_enabled = (CS.out.cruiseState.enabled and
-                                    (self.frame - self._cruise_enabled_since_frame) * DT_CTRL < 3.0)
-
           if CS.out.activateCruise > 0 and not auto_hold_block_cruise and not CS.out.brakePressed:
             self._pending_activateCruise = True
 
@@ -388,12 +373,8 @@ class CarController(CarControllerBase):
                 self._pending_activateCruise = False
 
           # Kans: Auto Resume (RES only)
-          # Kans: skip while cruise was only just (re-)enabled - sending a RES_ACCEL
-          # right behind a fresh engage (manual RESUME press or AutoCruise) can
-          # trip a GM PCM cruise_faulted state a few seconds later. Doesn't affect
-          # the normal case (stuck at standstill, cruise enabled well before this).
           elif (auto_resume_enabled and actuators.longControlState == LongCtrlState.starting and
-                not manual_auto_hold and not cruise_freshly_enabled):
+                not manual_auto_hold):
             if self.resume_frame == 0 or self.resume_activate:
               self.resume_frame = self.frame
               self.resume_activate = False
