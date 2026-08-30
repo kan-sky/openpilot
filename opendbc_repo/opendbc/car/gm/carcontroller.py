@@ -256,7 +256,14 @@ class CarController(CarControllerBase):
             at_full_stop = at_full_stop and not resume
 
           if CC.cruiseControl.resume and CS.pcm_acc_status == AccState.STANDSTILL:
-            if self.CP.carFingerprint in EV_CAR:
+            # Kans: stock comma forces GasRegenCmdActive=0 here for EV_CAR because
+            # 2018+ Volts had native auto-resume-from-stop removed by GM, so the
+            # car has no real auto-resume to signal into. Our own AutoResume
+            # (RES_ACCEL button spam) now provides that from software, so once
+            # it's enabled we no longer need this override - and per the comment
+            # on create_gas_regen_command below, sending 0 here is itself a known
+            # way to trip a cruise fault.
+            if self.CP.carFingerprint in EV_CAR and not auto_resume_enabled:
               acc_engaged = False
             else:
               acc_engaged = CC.enabled
