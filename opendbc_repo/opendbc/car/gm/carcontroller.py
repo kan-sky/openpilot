@@ -371,11 +371,7 @@ class CarController(CarControllerBase):
                 self._pending_activateCruise = False
 
           # Kans: Auto Resume (RES only)
-          # Kans: skip entirely if cruise is already enabled (e.g. the driver just
-          # manually pressed RESUME) - sending a redundant RES_ACCEL to an already-
-          # active GM ACC can trip a PCM cruise_faulted state a few seconds later.
-          elif (auto_resume_enabled and actuators.longControlState == LongCtrlState.starting and
-                not manual_auto_hold and not CS.out.cruiseState.enabled):
+          elif auto_resume_enabled and actuators.longControlState == LongCtrlState.starting and not manual_auto_hold:
             if self.resume_frame == 0 or self.resume_activate:
               self.resume_frame = self.frame
               self.resume_activate = False
