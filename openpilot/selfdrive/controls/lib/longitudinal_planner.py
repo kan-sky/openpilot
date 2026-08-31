@@ -75,6 +75,13 @@ class LongitudinalPlanner:
     # Carrot publish state. Keep a native fallback when CarrotPlanner is unavailable.
     self.v_cruise_kph = 0.0
 
+    # Kans: grace period after leaving LongCtrlState.stopping, so
+    # lead_should_stop_early doesn't immediately re-trigger a stop right as
+    # we're resuming from a standstill (ego and a just-departing lead are
+    # both still slow/close in that first moment by definition).
+    self._long_control_state_last = LongCtrlState.off
+    self._resume_grace_frames = 0
+
   @staticmethod
   def _enum_value(value, default=0):
     if value is None:
@@ -113,7 +120,14 @@ class LongitudinalPlanner:
     if sm['controlsState'].forceDecel:
       v_cruise = 0.0
 
-    long_control_off = sm['controlsState'].longControlState == LongCtrlState.off
+    current_long_control_state = sm['controlsState'].longControlState
+    if self._long_control_state_last == LongCtrlState.stopping and current_long_control_state != LongCtrlState.stopping:
+      self._resume_grace_frames = int(2.0 / self.dt)
+    elif self._resume_grace_frames > 0:
+      self._resume_grace_frames -= 1
+    self._long_control_state_last = current_long_control_state
+
+    long_control_off = current_long_control_state == LongCtrlState.off
 
     # Reset current state when not engaged, or user is controlling the speed
     reset_state = long_control_off if self.CP.openpilotLongitudinalControl else not sm['selfdriveState'].enabled
@@ -160,9 +174,13 @@ class LongitudinalPlanner:
     output_a_target_e2e = sm['modelV2'].action.desiredAcceleration
     output_should_stop_e2e = sm['modelV2'].action.shouldStop
 
-    # Kans: enter stopping state earlier only for a close stopped lead.
+    # Kans: enter stopping state earlier only for a close stopped lead - but
+    # not during the resume grace period, or this immediately re-triggers a
+    # stop right as we're pulling away from a standstill (both ego and a
+    # just-departing lead are still slow/close in that first moment).
     lead_one = sm['radarState'].leadOne
-    lead_should_stop_early = (lead_one.present and lead_one.dRel < 8.0 and lead_one.vLead < 0.5 and v_ego < 0.7)
+    lead_should_stop_early = (self._resume_grace_frames == 0 and
+                              lead_one.present and lead_one.dRel < 8.0 and lead_one.vLead < 0.5 and v_ego < 0.7)
 
     self.a_cruise = get_cruise_accel(sm['selfdriveState'].experimentalMode, v_cruise, v_ego,
                                      self.a_cruise, steer_angle_without_offset, self.CP, self.dt,
