@@ -231,4 +231,5 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"DynamicTFollowLC", {PERSISTENT, INT, "100"}},
     {"TFollowDecelBoost", {PERSISTENT, INT, "10"}},
     {"EnableSpeedTF", {PERSISTENT, INT, "0"}},
+    {"LatSuspendAngleDeg", {PERSISTENT, INT, "300"}},
 };
