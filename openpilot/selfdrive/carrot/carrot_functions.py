@@ -94,6 +94,18 @@ class CarrotPlanner:
     self.drivingModeDetector = DrivingModeDetector()
     self.mySafeFactor = 1.0
 
+    self.tFollowGap1 = 1.1
+    self.tFollowGap2 = 1.3
+    self.tFollowGap3 = 1.45
+    self.tFollowGap4 = 1.6
+
+    self.dynamicTFollow = 0.0
+    self.dynamicTFollowLC = 0.0
+    self.enableSpeedTF = 0
+    self.tFollowDecelBoost = 0.0
+    self._tf_decel_extra = 0.0
+    self.personality = 1
+
     self.cruiseMaxVals0 = 1.6
     self.cruiseMaxVals1 = 1.6
     self.cruiseMaxVals2 = 1.2
@@ -143,6 +155,15 @@ class CarrotPlanner:
     if self.params_count == 10:
       self.myHighModeFactor = 1.2 #float(self.params.get_int("MyHighModeFactor")) / 100.
       self.trafficLightDetectMode = self.params.get_int("TrafficLightDetectMode") # 0: None, 1:Stop, 2:Stop&Go
+    elif self.params_count == 20:
+      self.tFollowGap1 = self.params.get_float("TFollowGap1") / 100.
+      self.tFollowGap2 = self.params.get_float("TFollowGap2") / 100.
+      self.tFollowGap3 = self.params.get_float("TFollowGap3") / 100.
+      self.tFollowGap4 = self.params.get_float("TFollowGap4") / 100.
+      self.dynamicTFollow = self.params.get_float("DynamicTFollow") / 100.
+      self.dynamicTFollowLC = self.params.get_float("DynamicTFollowLC") / 100.
+      self.enableSpeedTF = self.params.get_int("EnableSpeedTF")
+      self.tFollowDecelBoost = self.params.get_float("TFollowDecelBoost") / 100.
     elif self.params_count == 30:
       self.cruiseMaxVals0 = self.params.get_float("CruiseMaxVals0") / 100.
       self.cruiseMaxVals1 = self.params.get_float("CruiseMaxVals1") / 100.
@@ -191,11 +212,14 @@ class CarrotPlanner:
     startSign = model_v > 5.0 or model_v > (v[0] + 2)
 
     if v_ego_kph < 1.0:
-      stopSign = model_x < 20.0 and model_v < 10.0
+      # 거의 정지 상태: 교차로 부근에서 신호가 30m 안에 있고
+      # 모델이 좌우 +-5미터내에서 속도가 조금 있어도 적신호로 본다.
+      stopSign = model_x < 30.0 and model_v < 10.0 and (abs(y[-1]) < 5.0)
     elif v_ego_kph < 82.0:
-      stopSign = (model_x < d_rel - 3.0 and
-                  model_x < np.interp(v[0] * 3.6, [60, 80], [120.0, 150]) and
-                  ((model_v < 3.0) or (model_v < v[0] * 0.7)) and
+      # 속도에 따른 정지선탐지 거리(120~160m)
+      stopSign = (model_x < d_rel - 2.5 and
+                  model_x < np.interp(v[0] * 3.6, [30, 60, 80], [90, 120.0, 140]) and
+                  ((model_v < 2.2) or (model_v < v[0] * 0.6)) and
                   abs(y[-1]) < 5.0)
       # 정상 주행 중 감속하는 경우(카메라 감속 등)에는 오감지가 많음.
       # 회생 감속으로 v_cruise가 0인 경우에는 신호를 감지하도록 함.
@@ -249,13 +273,7 @@ class CarrotPlanner:
       if trigger_start:
         if self.soft_hold_active > 0:
           self.add_event(EventName.trafficSignChanged)
-        elif self.xState == XState.e2eStopped:
-          # Kans: only release a stop that's actually complete. Releasing while
-          # still XState.e2eStop (approaching, not yet stopped) based on this
-          # nav-based trafficState let the car accelerate through the
-          # intersection instead of stopping at the line - the vision-based
-          # check_model_stopping() path had the same bug and was fixed the
-          # same way.
+        elif self.xState in [XState.e2eStop, XState.e2eStopped]:
           self.xState = XState.e2eCruise
           self.traffic_starting_count = 10.0 / DT_MDL
 
@@ -395,28 +413,24 @@ class CarrotPlanner:
       elif lead_detected and (radarstate.leadOne.dRel - stop_model_x_raw) < 2.0:
         self.xState = XState.lead
       else:
-        # Kans: don't bail out to cruise on a mid-approach green flicker -
-        # check_model_stopping()'s green detection (0.2s of "startSign") is easy
-        # to false-trigger as the car closes in on the stop line, and releasing
-        # the brake here mid-stop reads as "slows down then suddenly accelerates
-        # through the intersection". Always finish the stop; only re-evaluate
-        # green once actually stopped (XState.e2eStopped).
-        self.comfort_brake = self.comfortBrake * 0.9
-        #self.comfort_brake = COMFORT_BRAKE
-        self.trafficStopAdjustRatio = np.interp(v_ego_kph, [0, 100], [1.0, 0.7])
-        # 속도가 높을수록 먼 정지거리 추정값을 줄여 보정함.
-        stop_dist = stop_model_x_rl * np.interp(stop_model_x_rl, [0, 50], [1.0, self.trafficStopAdjustRatio])
-        # Kans: 신호정지선을 기준으로 정지 위치를 앞/뒤로 보정
-        stop_dist = max(0.0, stop_dist - self.trafficStopDistanceAdjust)
-        # Kans: 신호정지 목표거리 갱신. 정지선 근접(10m 이내)에서는 추정치 흔들림에 의한
-        # 지터를 막기 위해 갱신을 멈추고 마지막 값을 유지한다.
-        if stop_dist > 10.0:
+        if self.trafficState == TrafficState.green:
+          self.add_event(EventName.trafficSignGreen)
+          self.xState = XState.e2eCruise
+        else:
+          self.comfort_brake = self.comfortBrake
+          #self.comfort_brake = COMFORT_BRAKE
+          self.trafficStopAdjustRatio = np.interp(v_ego_kph, [0, 100], [1.0, 0.7])
+          # 속도가 높을수록 먼 정지거리 추정값을 줄여 보정함.
+          stop_dist = stop_model_x_rl * np.interp(stop_model_x_rl, [0, 50], [1.0, self.trafficStopAdjustRatio])
+          # Kans: 신호정지선을 기준으로 정지 위치를 앞/뒤로 보정
+          stop_dist = max(0.0, stop_dist - self.trafficStopDistanceAdjust)
+          # Kans: 신호정지 목표거리 항상 갱신
           self.actual_stop_distance = stop_dist
-        stop_model_x = 0
-        self.fakeCruiseDistance = 0 if self.actual_stop_distance > 10.0 else 10.0
-        if v_ego < 0.3:  #Kans: 거의멈추면 정지상태로 전환
-          self.stopping_count = 0.5 / DT_MDL
-          self.xState = XState.e2eStopped
+          stop_model_x = 0
+          self.fakeCruiseDistance = 0 if self.actual_stop_distance > 10.0 else 10.0
+          if v_ego < 0.3:
+            self.stopping_count = 0.5 / DT_MDL
+            self.xState = XState.e2eStopped
     elif self.xState == XState.e2ePrepare:
       if lead_detected:
         self.xState = XState.lead

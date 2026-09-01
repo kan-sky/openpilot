@@ -227,4 +227,8 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"TFollowGap2", {PERSISTENT, INT, "120"}},
     {"TFollowGap3", {PERSISTENT, INT, "140"}},
     {"TFollowGap4", {PERSISTENT, INT, "160"}},
+    {"DynamicTFollow", {PERSISTENT, INT, "2"}},
+    {"DynamicTFollowLC", {PERSISTENT, INT, "100"}},
+    {"TFollowDecelBoost", {PERSISTENT, INT, "10"}},
+    {"EnableSpeedTF", {PERSISTENT, INT, "0"}},
 };
