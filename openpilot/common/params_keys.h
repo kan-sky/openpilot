@@ -157,6 +157,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"LongTuningKpV", {PERSISTENT, INT, "0"}},
     {"LongTuningKiV", {PERSISTENT, INT, "0"}},
     {"LongTuningKf", {PERSISTENT, INT, "100"}},
+    {"LongActuatorDelay", {PERSISTENT, INT, "20"}},
     // Lateral torque tuning
     {"LateralTorqueCustom", {PERSISTENT, BOOL, "1"}},
     {"LateralTorqueAccelFactor", {PERSISTENT, INT, "2100"}},
