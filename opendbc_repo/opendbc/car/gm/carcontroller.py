@@ -7,7 +7,7 @@ from opendbc.car import Bus, DT_CTRL, structs, create_gas_interceptor_command, A
 from opendbc.car.lateral import apply_driver_steer_torque_limits
 from opendbc.car.gm import gmcan
 from opendbc.car.common.conversions import Conversions as CV
-from opendbc.car.gm.values import DBC, CanBus, CarControllerParams, CruiseButtons, EV_CAR, SDGM_CAR, ALT_ACCS, CAMERA_ACC_CAR
+from opendbc.car.gm.values import DBC, AccState, CanBus, CarControllerParams, CruiseButtons, EV_CAR, SDGM_CAR, ALT_ACCS, CAMERA_ACC_CAR
 from opendbc.car.interfaces import CarControllerBase
 from openpilot.selfdrive.controls.lib.drive_helpers import apply_deadzone
 
