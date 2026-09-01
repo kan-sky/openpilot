@@ -12,10 +12,18 @@ LongCtrlState = car.CarControl.Actuators.LongControlState
 
 
 def long_control_state_trans(CP, active, long_control_state, v_ego,
-                             should_stop, brake_pressed, cruise_standstill):
+                             should_stop, brake_pressed, cruise_standstill, a_ego, stopping_accel, radarState):
+  # Kans (carrot-wip): starting/pid -> stopping isn't unconditional on
+  # should_stop alone - a stray should_stop flicker right as v_ego clears
+  # vEgoStarting (the "twitch then stuck until manual RESUME" bug) no longer
+  # snaps straight back to stopping unless aEgo hasn't actually started
+  # dropping yet, or a lead is genuinely close (fcw_stop). starting->stopping
+  # stays unconditional either way - only pid's reentry gets the debounce.
+  stopping_condition = should_stop
   starting_condition = (not should_stop and
                         not cruise_standstill and
                         not brake_pressed)
+  started_condition = v_ego > CP.vEgoStarting
 
   if not active:
     long_control_state = LongCtrlState.off
@@ -36,15 +44,17 @@ def long_control_state_trans(CP, active, long_control_state, v_ego,
         else:
           long_control_state = LongCtrlState.pid
 
-    elif long_control_state == LongCtrlState.starting:
-      if should_stop:
-        long_control_state = LongCtrlState.stopping
-      elif v_ego > CP.vEgoStarting:
+    elif long_control_state in [LongCtrlState.starting, LongCtrlState.pid]:
+      if stopping_condition:
+        stopping_accel = stopping_accel if stopping_accel < 0.0 else -0.5
+        leadOne = radarState.leadOne
+        fcw_stop = leadOne.present and leadOne.dRel < 4.0
+        if a_ego > stopping_accel or fcw_stop:
+          long_control_state = LongCtrlState.stopping
+        if long_control_state == LongCtrlState.starting:
+          long_control_state = LongCtrlState.stopping
+      elif started_condition:
         long_control_state = LongCtrlState.pid
-
-    elif long_control_state == LongCtrlState.pid:
-      if should_stop:
-        long_control_state = LongCtrlState.stopping
 
   return long_control_state
 
@@ -70,7 +80,7 @@ class LongControl:
   def reset(self):
     self.pid.reset()
 
-  def update(self, active, CS, long_plan, accel_limits, t_since_plan):
+  def update(self, active, CS, long_plan, accel_limits, t_since_plan, radarState):
     soft_hold_active = CS.softHoldActive > 0
     a_target_ff = long_plan.aTarget
     v_target_now = long_plan.vTargetNow
@@ -96,7 +106,7 @@ class LongControl:
 
     self.long_control_state = long_control_state_trans(self.CP, active, self.long_control_state, CS.vEgo,
                                                        should_stop, CS.brakePressed,
-                                                       CS.cruiseState.standstill)
+                                                       CS.cruiseState.standstill, CS.aEgo, self.stopping_accel, radarState)
     if active and soft_hold_active:
       self.long_control_state = LongCtrlState.stopping
 
