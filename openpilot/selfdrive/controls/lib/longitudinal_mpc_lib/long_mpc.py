@@ -474,6 +474,30 @@ class LongitudinalMpc:
       x_obstacles = np.column_stack([lead_0_obstacle, lead_1_obstacle, cruise_obstacle, x2])
       self.source = SOURCES[np.argmin(x_obstacles[0])]
 
+      # Kans: debug - stop-distance investigation (7m too far report). Edge-triggered:
+      # arms when v_ego passes above _DEBUG_STOPDIST_REARM, fires up to twice per
+      # approach while v_ego stays below _DEBUG_STOPDIST_TRIGGER, then disarms.
+      _DEBUG_STOPDIST_TRIGGER = 5.0
+      _DEBUG_STOPDIST_REARM = 8.0
+      if not hasattr(self, "_debug_stopdist_armed"):
+        self._debug_stopdist_armed = True
+        self._debug_stopdist_count = 0
+      if v_ego > _DEBUG_STOPDIST_REARM:
+        self._debug_stopdist_armed = True
+        self._debug_stopdist_count = 0
+      elif self._debug_stopdist_armed and v_ego < _DEBUG_STOPDIST_TRIGGER and self._debug_stopdist_count < 2:
+        self._debug_stopdist_count += 1
+        if self._debug_stopdist_count >= 2:
+          self._debug_stopdist_armed = False
+        binding_names = ['lead0', 'lead1', 'cruise', 'trafficstop']
+        binding_idx = int(np.argmin(x_obstacles[0]))
+        print(f"[long_mpc stop-dist] vEgo={v_ego:.2f} binding={binding_names[binding_idx]} "
+              f"carrotStopDist={carrot.stop_dist:.2f} stopX(clamped)={stop_x:.2f} adjustDist={adjust_dist:.2f} "
+              f"dMin={d_min:.2f} cruiseObstacle0={cruise_obstacle[0]:.2f} lead0Obstacle0={lead_0_obstacle[0]:.2f} "
+              f"x2_0={x2[0]:.2f} finalObstacle0={x_obstacles[0][binding_idx]:.2f} "
+              f"comfortBrake={comfort_brake:.2f} stopDistance={stop_distance:.2f} carrotMode={mode} "
+              f"leadPresent={radarstate.leadOne.present} leadDRel={radarstate.leadOne.dRel:.1f}", flush=True)
+
       if v_cruise == 0 and self.source == 'cruise':
         self.params[:,0] = - carrot.autoNaviSpeedDecelRate
       #elif self.source in ['cruise', 'e2e']:
