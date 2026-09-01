@@ -81,7 +81,7 @@ class Track:
     self._vLead_filt = 0.0
     self._vLead_filt_init = False
 
-  def update(self, d_rel: float, y_rel: float, v_rel: float, v_lead: float):
+  def update(self, d_rel: float, y_rel: float, v_rel: float, v_lead: float, radar_reaction_factor: float = 1.0):
     prev_dRel = self.dRel
     prev_yRel = self.yRel
     prev_vLead = self.vLead
@@ -112,9 +112,13 @@ class Track:
     self.vLeadK = float(self.kf.x[SPEED][0])
     self.aLeadK = float(self.kf.x[ACCEL][0])
 
-    # Learn if constant acceleration
-    if abs(self.aLeadK) < 0.5:
-      self.aLeadTau.x = _LEAD_ACCEL_TAU
+    # Learn if constant acceleration. Kans (devel): RadarReactionFactor scales
+    # both the threshold and the learned time constant - tz has no separate
+    # aLead/jLead (only the Kalman-filtered aLeadK), so this uses aLeadK in
+    # place of devel's aLead and drops the jLead check devel adds on top.
+    a_lead_threshold = 0.5 * radar_reaction_factor
+    if abs(self.aLeadK) < a_lead_threshold:
+      self.aLeadTau.x = _LEAD_ACCEL_TAU * radar_reaction_factor
     else:
       self.aLeadTau.update(0.0)
 
@@ -340,8 +344,19 @@ class RadarD:
 
     self.ready = False
 
+    # Kans (devel): RadarReactionFactor - scales the lead-acceleration
+    # learning threshold/time-constant (see Track.update()). Default 0.2
+    # matches devel's declared param default (20 -> *0.01).
+    self.params = Params()
+    self._param_frame = 0
+    self.radar_reaction_factor = 0.2
+
   def update(self, sm: messaging.SubMaster, rr: car.RadarData):
     self.ready = sm.seen['modelV2']
+
+    self._param_frame += 1
+    if self._param_frame % 100 == 0:
+      self.radar_reaction_factor = self.params.get_float("RadarReactionFactor") * 0.01
 
     if sm.recv_frame['carState'] != self.last_v_ego_frame:
       self.v_ego = sm['carState'].vEgo
@@ -365,7 +380,7 @@ class RadarD:
       # create the track if it doesn't exist or it's a new track
       if ids not in self.tracks:
         self.tracks[ids] = Track(ids, v_lead, self.kalman_params)
-      self.tracks[ids].update(rpt[0], rpt[1], rpt[2], v_lead)
+      self.tracks[ids].update(rpt[0], rpt[1], rpt[2], v_lead, self.radar_reaction_factor)
 
     # *** publish radarState ***
     self.radar_state_valid = sm.all_checks()

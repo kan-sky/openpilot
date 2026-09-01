@@ -234,4 +234,5 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"TFollowDecelBoost", {PERSISTENT, INT, "10"}},
     {"EnableSpeedTF", {PERSISTENT, INT, "0"}},
     {"LatSuspendAngleDeg", {PERSISTENT, INT, "300"}},
+    {"RadarReactionFactor", {PERSISTENT, INT, "20"}},
 };
