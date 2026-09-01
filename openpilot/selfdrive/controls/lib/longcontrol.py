@@ -12,13 +12,17 @@ LongCtrlState = car.CarControl.Actuators.LongControlState
 
 
 def long_control_state_trans(CP, active, long_control_state, v_ego,
-                             should_stop, brake_pressed, cruise_standstill, a_ego, stopping_accel, radarState):
-  # Kans (carrot-wip): starting/pid -> stopping isn't unconditional on
-  # should_stop alone - a stray should_stop flicker right as v_ego clears
-  # vEgoStarting (the "twitch then stuck until manual RESUME" bug) no longer
-  # snaps straight back to stopping unless aEgo hasn't actually started
-  # dropping yet, or a lead is genuinely close (fcw_stop). starting->stopping
-  # stays unconditional either way - only pid's reentry gets the debounce.
+                             should_stop, brake_pressed, cruise_standstill):
+  # Kans: reverted to the plain/comma-stock unconditional transition (no
+  # a_ego/fcw_stop reentry debounce). That debounce was restored earlier to
+  # chase the "twitch then stuck until manual RESUME" bug, but has a known
+  # history of also causing "doesn't stop behind lead car" (why it was
+  # dropped once before, pre-tz) and is now suspected of causing a new
+  # 3-stage stutter near stops (pid<->stopping toggling as should_stop
+  # flickers near threshold). The twitch/stuck bug may have actually been
+  # fully explained by the separate AccState import crash in
+  # opendbc/car/gm/carcontroller.py (fixed independently) - testing without
+  # this debounce to see if it's still needed at all.
   stopping_condition = should_stop
   starting_condition = (not should_stop and
                         not cruise_standstill and
@@ -46,18 +50,7 @@ def long_control_state_trans(CP, active, long_control_state, v_ego,
 
     elif long_control_state in [LongCtrlState.starting, LongCtrlState.pid]:
       if stopping_condition:
-        prev_state = long_control_state
-        stopping_accel = stopping_accel if stopping_accel < 0.0 else -0.5
-        leadOne = radarState.leadOne
-        fcw_stop = leadOne.present and leadOne.dRel < 4.0
-        if a_ego > stopping_accel or fcw_stop:
-          long_control_state = LongCtrlState.stopping
-        if long_control_state == LongCtrlState.starting:
-          long_control_state = LongCtrlState.stopping
-        # Kans: debug - see LongControl.update()'s debug_stop comment.
-        print(f"[longcontrol pid-debounce] prevState={prev_state} -> {long_control_state} "
-              f"aEgo={a_ego:.3f} stoppingAccel={stopping_accel:.3f} fcwStop={fcw_stop} "
-              f"leadPresent={leadOne.present} leadDRel={leadOne.dRel:.1f}", flush=True)
+        long_control_state = LongCtrlState.stopping
       elif started_condition:
         long_control_state = LongCtrlState.pid
 
@@ -85,7 +78,7 @@ class LongControl:
   def reset(self):
     self.pid.reset()
 
-  def update(self, active, CS, long_plan, accel_limits, t_since_plan, radarState):
+  def update(self, active, CS, long_plan, accel_limits, t_since_plan):
     soft_hold_active = CS.softHoldActive > 0
     a_target_ff = long_plan.aTarget
     v_target_now = long_plan.vTargetNow
@@ -111,7 +104,7 @@ class LongControl:
 
     self.long_control_state = long_control_state_trans(self.CP, active, self.long_control_state, CS.vEgo,
                                                        should_stop, CS.brakePressed,
-                                                       CS.cruiseState.standstill, CS.aEgo, self.stopping_accel, radarState)
+                                                       CS.cruiseState.standstill)
     if active and soft_hold_active:
       self.long_control_state = LongCtrlState.stopping
 
