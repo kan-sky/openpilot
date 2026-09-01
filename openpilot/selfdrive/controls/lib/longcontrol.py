@@ -62,6 +62,13 @@ class LongControl:
     self.params = Params()
     self.readParamCount = 0
 
+    # Kans: should_stop() is v_ego<0.3 and a_target<0.1 - right after
+    # leaving stopping, v_ego is still under that for a moment and a_target
+    # can briefly dip under 0.1 before it settles, which was enough to snap
+    # straight back into stopping (car resumes then immediately re-stops).
+    # Ignore should_stop for a brief window right after leaving stopping.
+    self._leave_stopping_grace_frames = 0
+
   def reset(self):
     self.pid.reset()
 
@@ -83,8 +90,16 @@ class LongControl:
       self.debug_stop = True
       print(f"\n========== LONG STOP DEBUG START ==========", flush=True)
 
-    self.long_control_state = long_control_state_trans(self.CP, active, self.long_control_state, CS.vEgo, should_stop,
+    prev_long_control_state = self.long_control_state
+    effective_should_stop = should_stop and self._leave_stopping_grace_frames == 0
+    if self._leave_stopping_grace_frames > 0:
+      self._leave_stopping_grace_frames -= 1
+
+    self.long_control_state = long_control_state_trans(self.CP, active, self.long_control_state, CS.vEgo, effective_should_stop,
                                                        CS.brakePressed, CS.cruiseState.standstill)
+
+    if prev_long_control_state == LongCtrlState.stopping and self.long_control_state != LongCtrlState.stopping:
+      self._leave_stopping_grace_frames = int(0.5 / DT_CTRL)
 
     if self.long_control_state == LongCtrlState.off:
       self.reset()
