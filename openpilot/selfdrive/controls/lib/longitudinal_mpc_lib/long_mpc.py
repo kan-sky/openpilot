@@ -491,11 +491,12 @@ class LongitudinalMpc:
           self._debug_stopdist_armed = False
         binding_names = ['lead0', 'lead1', 'cruise', 'trafficstop']
         binding_idx = int(np.argmin(x_obstacles[0]))
-        print(f"[long_mpc stop-dist] vEgo={v_ego:.2f} binding={binding_names[binding_idx]} "
+        print(f"[long_mpc stop-dist] vEgo={v_ego:.2f} vCruise={v_cruise:.2f} binding={binding_names[binding_idx]} "
               f"carrotStopDist={carrot.stop_dist:.2f} stopX(clamped)={stop_x:.2f} adjustDist={adjust_dist:.2f} "
               f"dMin={d_min:.2f} cruiseObstacle0={cruise_obstacle[0]:.2f} lead0Obstacle0={lead_0_obstacle[0]:.2f} "
               f"x2_0={x2[0]:.2f} finalObstacle0={x_obstacles[0][binding_idx]:.2f} "
               f"comfortBrake={comfort_brake:.2f} stopDistance={stop_distance:.2f} carrotMode={mode} "
+              f"xState={carrot.xState} trafficState={carrot.trafficState} softHold={carrot.soft_hold_active} "
               f"leadPresent={radarstate.leadOne.present} leadDRel={radarstate.leadOne.dRel:.1f}", flush=True)
 
       if v_cruise == 0 and self.source == 'cruise':
