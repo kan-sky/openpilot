@@ -383,12 +383,6 @@ class CarrotPlanner:
         if self.trafficState == TrafficState.green and not self.carrot_stay_stop and not carstate.leftBlinker and self.trafficLightDetectMode != 1:
           #self.xState = XState.e2ePrepare
           self.xState = XState.e2eCruise  # 실험모드를 거치지 않고 바로 출발.
-          # Kans: same re-entry guard the other two release paths (gas-press
-          # escape from e2eStop, carrot_man trigger_start) already get -
-          # without it, a departure right at low speed/close to the stop
-          # line could get misread as a fresh red-light approach and
-          # re-trigger e2eStop almost immediately after "출발합니다" fires.
-          self.traffic_starting_count = 10.0 / DT_MDL
           self.add_event(EventName.trafficSignGreen)
       self.stopping_count = max(0, self.stopping_count - 1)
       v_cruise = 0
