@@ -90,11 +90,8 @@ class LongitudinalPlanner:
     v_ego = sm['carState'].vEgo
     v_cruise_kph = min(sm['carState'].vCruise, V_CRUISE_MAX)
 
-    # Kans: Carrot lowers the native tz cruise target here, and separately
-    # (see self.mpc.update below) contributes its traffic-stop distance as a
-    # third MPC obstacle alongside the two leads - clamped there against the
-    # real lead car's safe-following distance so it can't override Auto
-    # Resume / lead-following behavior.
+    # Kans: Carrot can only lower the native tz cruise target.
+    # Keep tz lead/MPC stopping and Auto Resume logic untouched.
     if carrot is not None:
       planner_mode = 'blended' if sm['selfdriveState'].experimentalMode else 'acc'
       carrot_target_kph = carrot.update(sm, v_cruise_kph, planner_mode)
@@ -139,7 +136,7 @@ class LongitudinalPlanner:
 
     self.mpc.set_weights(prev_accel_constraint, personality=sm['selfdriveState'].personality)
     self.mpc.set_cur_state(self.v_desired_filter.x, self.a_desired)
-    self.mpc.update(sm['radarState'], personality=sm['selfdriveState'].personality, carrot=carrot)
+    self.mpc.update(sm['radarState'], personality=sm['selfdriveState'].personality)
 
     self.v_desired_trajectory = np.interp(CONTROL_N_T_IDX, T_IDXS_MPC, self.mpc.v_solution)
     self.a_desired_trajectory = np.interp(CONTROL_N_T_IDX, T_IDXS_MPC, self.mpc.a_solution)
