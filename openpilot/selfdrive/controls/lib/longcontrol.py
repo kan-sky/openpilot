@@ -46,6 +46,7 @@ def long_control_state_trans(CP, active, long_control_state, v_ego,
 
     elif long_control_state in [LongCtrlState.starting, LongCtrlState.pid]:
       if stopping_condition:
+        prev_state = long_control_state
         stopping_accel = stopping_accel if stopping_accel < 0.0 else -0.5
         leadOne = radarState.leadOne
         fcw_stop = leadOne.present and leadOne.dRel < 4.0
@@ -53,6 +54,10 @@ def long_control_state_trans(CP, active, long_control_state, v_ego,
           long_control_state = LongCtrlState.stopping
         if long_control_state == LongCtrlState.starting:
           long_control_state = LongCtrlState.stopping
+        # Kans: debug - see LongControl.update()'s debug_stop comment.
+        print(f"[longcontrol pid-debounce] prevState={prev_state} -> {long_control_state} "
+              f"aEgo={a_ego:.3f} stoppingAccel={stopping_accel:.3f} fcwStop={fcw_stop} "
+              f"leadPresent={leadOne.present} leadDRel={leadOne.dRel:.1f}", flush=True)
       elif started_condition:
         long_control_state = LongCtrlState.pid
 
