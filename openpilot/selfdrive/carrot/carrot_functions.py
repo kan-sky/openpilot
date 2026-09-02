@@ -140,6 +140,12 @@ class CarrotPlanner:
     self.atcType = ""
     self.atc_active = False
 
+    # Kans: debug - carrot_man.desiredSpeed flicker investigation (v_cruise
+    # unstable while stopped, suspected GM ACC fault trigger)
+    self.carrotManDesiredSpeed = 250
+    self.carrotManDesiredSource = "none"
+    self.carrotManAlive = False
+
     self._stop_x_rl = None
     self.last_event_time = 0.0
 
@@ -393,8 +399,11 @@ class CarrotPlanner:
 
   def _update_carrot_man(self, sm, v_ego_kph, v_cruise_kph):
     atc_active = False
+    self.carrotManAlive = sm.alive['carrotMan']
     if sm.alive['carrotMan']:
       carrot_man = sm['carrotMan']
+      self.carrotManDesiredSpeed = carrot_man.desiredSpeed
+      self.carrotManDesiredSource = str(carrot_man.desiredSource)
       atc_turn_left = carrot_man.atcType in ["turn left", "atc left"]
       trigger_start = self.carrot_stay_stop = False
       if atc_turn_left or sm['carState'].leftBlinker:

@@ -271,7 +271,9 @@ class LongitudinalPlanner:
             f"rawCarStateVCruise={sm['carState'].vCruise:.2f} rawVCruiseKph={v_cruise_kph:.2f} "
             f"plannerVCruiseKph={self.v_cruise_kph:.2f} plannerVCruiseMs={v_cruise:.2f} "
             f"leadPresent={sm['radarState'].leadOne.present} leadDRel={sm['radarState'].leadOne.dRel:.1f} "
-            f"leadVLead={sm['radarState'].leadOne.vLead:.2f}", flush=True)
+            f"leadVLead={sm['radarState'].leadOne.vLead:.2f} "
+            f"carrotManAlive={carrot.carrotManAlive} carrotManDesiredSpeed={carrot.carrotManDesiredSpeed:.1f} "
+            f"carrotManDesiredSource={carrot.carrotManDesiredSource}", flush=True)
 
       if v_ego > 2.0:
         self.debug_stop_moving_frames += 1
