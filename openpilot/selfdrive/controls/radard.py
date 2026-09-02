@@ -351,6 +351,11 @@ class RadarD:
     self._param_frame = 0
     self.radar_reaction_factor = 0.2
 
+    # Kans: debug - suspected cut-in-like deceleration investigation. Edge-triggered
+    # on leadOne's selected *radar* track changing identity, so it prints once per
+    # switch instead of every frame.
+    self._debug_prev_lead_id: int | None = None
+
   def update(self, sm: messaging.SubMaster, rr: car.RadarData):
     self.ready = sm.seen['modelV2']
 
@@ -404,6 +409,17 @@ class RadarD:
 
       self.radar_state.leadOne = get_lead(self.v_ego, self.ready, self.tracks, leads_v3[0], model_v_ego, self.lead_prob_filters[0].x, low_speed_override=True, sticky=True)
       self.radar_state.leadTwo = get_lead(self.v_ego, self.ready, self.tracks, leads_v3[1], model_v_ego, self.lead_prob_filters[1].x, low_speed_override=False, sticky=False)
+
+      lead_one = self.radar_state.leadOne
+      new_lead_id = lead_one.radarTrackId if (lead_one.present and lead_one.radar) else None
+      if new_lead_id is not None and new_lead_id != self._debug_prev_lead_id:
+        t = self.tracks.get(new_lead_id)
+        print(f"[radard lead-switch] prevId={self._debug_prev_lead_id} -> newId={new_lead_id} "
+              f"dRel={lead_one.dRel:.1f} yRel={lead_one.yRel:.1f} vLead={lead_one.vLead:.1f} "
+              f"vRel={lead_one.vRel:.1f} vEgo={self.v_ego:.1f} "
+              f"selectedCount={t.selected_count if t else -1} "
+              f"isStoppedCarCount={t.is_stopped_car_count if t else -1}", flush=True)
+      self._debug_prev_lead_id = new_lead_id
 
   def publish(self, pm: messaging.PubMaster):
     assert self.radar_state is not None

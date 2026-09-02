@@ -96,6 +96,16 @@ class LongitudinalPlanner:
 
     self.params = Params()
 
+    # Kans: debug - re-added to chase the "twitches then immediately
+    # re-stops, stuck until manual RESUME" bug. Starts logging on any
+    # deceleration toward a stop, keeps logging every frame through the
+    # stop and any restart attempts, stops once v_ego has been solidly
+    # moving for a bit (or after a timeout so a stuck session can't log
+    # forever).
+    self.debug_stop = False
+    self.debug_stop_moving_frames = 0
+    self.debug_stop_frame_count = 0
+
   @staticmethod
   def parse_model(model_msg):
     if (len(model_msg.position.x) == ModelConstants.IDX_N and
@@ -242,6 +252,37 @@ class LongitudinalPlanner:
     self.output_a_target = output_a_target
     self.output_v_target_now = output_v_target_now
     self.output_j_target_now = self.j_desired_trajectory[0]
+
+    # Kans: debug - see comment in __init__.
+    if not self.debug_stop and v_ego < 5.0 and output_a_target < -0.1:
+      self.debug_stop = True
+      self.debug_stop_moving_frames = 0
+      self.debug_stop_frame_count = 0
+      print("\n========== LONG STOP DEBUG START ==========", flush=True)
+
+    if self.debug_stop:
+      self.debug_stop_frame_count += 1
+      print(f"vEgo={v_ego:.3f} aTarget={output_a_target:.3f} vTargetNow={output_v_target_now:.3f} "
+            f"shouldStop={self.output_should_stop} longCtrlState={sm['controlsState'].longControlState} "
+            f"mpcMode={self.mpc.mode} mpcSource={self.mpc.source} "
+            f"xState={carrot.xState} trafficState={carrot.trafficState} "
+            f"stopDist={carrot.stop_dist:.1f} carrotVCruise={carrot.v_cruise:.2f} carrotMode={carrot.mode} "
+            f"softHold={carrot.soft_hold_active} "
+            f"rawCarStateVCruise={sm['carState'].vCruise:.2f} rawVCruiseKph={v_cruise_kph:.2f} "
+            f"plannerVCruiseKph={self.v_cruise_kph:.2f} plannerVCruiseMs={v_cruise:.2f} "
+            f"leadPresent={sm['radarState'].leadOne.present} leadDRel={sm['radarState'].leadOne.dRel:.1f} "
+            f"leadVLead={sm['radarState'].leadOne.vLead:.2f} "
+            f"carrotManAlive={carrot.carrotManAlive} carrotManDesiredSpeed={carrot.carrotManDesiredSpeed:.1f} "
+            f"carrotManDesiredSource={carrot.carrotManDesiredSource}", flush=True)
+
+      if v_ego > 2.0:
+        self.debug_stop_moving_frames += 1
+      else:
+        self.debug_stop_moving_frames = 0
+
+      if self.debug_stop_moving_frames > int(2.0 / self.dt) or self.debug_stop_frame_count > int(20.0 / self.dt):
+        print("========== LONG STOP DEBUG END ==========\n", flush=True)
+        self.debug_stop = False
 
   def publish(self, sm, pm, carrot):
     plan_send = messaging.new_message('longitudinalPlan')
