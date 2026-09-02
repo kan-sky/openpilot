@@ -267,7 +267,11 @@ class LongitudinalPlanner:
             f"mpcMode={self.mpc.mode} mpcSource={self.mpc.source} "
             f"xState={carrot.xState} trafficState={carrot.trafficState} "
             f"stopDist={carrot.stop_dist:.1f} carrotVCruise={carrot.v_cruise:.2f} carrotMode={carrot.mode} "
-            f"softHold={carrot.soft_hold_active}", flush=True)
+            f"softHold={carrot.soft_hold_active} "
+            f"rawCarStateVCruise={sm['carState'].vCruise:.2f} rawVCruiseKph={v_cruise_kph:.2f} "
+            f"plannerVCruiseKph={self.v_cruise_kph:.2f} plannerVCruiseMs={v_cruise:.2f} "
+            f"leadPresent={sm['radarState'].leadOne.present} leadDRel={sm['radarState'].leadOne.dRel:.1f} "
+            f"leadVLead={sm['radarState'].leadOne.vLead:.2f}", flush=True)
 
       if v_ego > 2.0:
         self.debug_stop_moving_frames += 1
