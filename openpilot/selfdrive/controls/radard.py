@@ -25,14 +25,26 @@ V_EGO_STATIONARY = 4.   # no stationary object flag below this speed
 
 RADAR_TO_CAMERA = 1.52  # RADAR is ~ 1.5m ahead from center of mesh frame
 
-# Kans: sticky lead selection (ported from devel, dPath/in_lane_prob-dependent
-# drift checks dropped - those come from ajouatom's lane_planner2.py, which
-# this fork is deliberately moving away from). A previously-selected track
-# keeps being reported as the lead for up to STICKY_SELECTED_COUNT_MAX frames
-# even when this frame's vision match fails, protected instead by
+# Kans: sticky lead selection (ported from devel). A previously-selected
+# track keeps being reported as the lead for up to STICKY_SELECTED_COUNT_MAX
+# frames even when this frame's vision match fails, protected by
 # track_discontinuous() resetting selected_count on any large dRel/yRel/vLead
-# jump.
+# jump. dPath/in_lane_prob (below) were later ported back in from carrot-wip
+# for the match tie-break and sticky drift guard - these come straight from
+# modelV2 (laneLines/position), not from ajouatom's lane_planner2.py, which
+# this fork is still deliberately moving away from (the actual cut-in-
+# detection system stays excluded).
 STICKY_SELECTED_COUNT_MAX = int(2.0 / DT_MDL)
+
+# Kans (carrot-wip): lateral drift guard for a sticky-selected track - dPath
+# here is against the EGO'S PLANNED PATH (md.position), not lane lines, and
+# is unrelated to ajouatom's lane_planner2.py/cut-in system. If a sticky
+# track wanders further than this off the ego path it's probably drifted
+# onto an adjacent-lane/wrong object, so its sticky status gets dropped.
+STICKY_MAX_DPATH = 0.8
+STICKY_FAR_DREL = 60.0
+STICKY_MAX_DPATH_FAR = 1.2
+STICKY_PATH_Y_STD_GAIN = 0.5
 
 
 class KalmanParams:
@@ -76,12 +88,23 @@ class Track:
     self.selected_count = 0
     self.is_stopped_car_count = 0
 
+    # Kans (carrot-wip): dPath/in_lane_prob (from md.laneLines, for the
+    # match_vision_to_track tie-break) and sticky_dPath (from md.position,
+    # the ego path, for the sticky drift guard). Neither is lane_planner2-
+    # dependent - both come straight from modelV2.
+    self.dPath = 0.0
+    self.in_lane_prob = 1.0
+    self.lane_half_width = 1.85
+    self.sticky_dPath = 0.0
+    self.sticky_path_y_std = 0.0
+
     # Kans: vlead_for_matching() noise-suppression state (devel)
     self._vLead_last = 0.0
     self._vLead_filt = 0.0
     self._vLead_filt_init = False
 
-  def update(self, d_rel: float, y_rel: float, v_rel: float, v_lead: float, radar_reaction_factor: float = 1.0):
+  def update(self, d_rel: float, y_rel: float, v_rel: float, v_lead: float, radar_reaction_factor: float = 1.0,
+             md=None):
     prev_dRel = self.dRel
     prev_yRel = self.yRel
     prev_vLead = self.vLead
@@ -105,6 +128,16 @@ class Track:
       self.is_stopped_car_count = 0
       self._vLead_filt_init = False
 
+    # Kans (carrot-wip): refresh dPath/in_lane_prob for matching, and drop
+    # sticky status if a sticky track has drifted off the ego path.
+    if md is not None:
+      self.d_path(md)
+      if self.selected_count > 0:
+        self.sticky_dPath, self.sticky_path_y_std = self.path_d_path(md)
+        if abs(self.sticky_dPath) > self.sticky_dpath_limit():
+          self.selected_count = 0
+          self.is_stopped_car_count = 0
+
     # computed velocity and accelerations
     if self.cnt > 0:
       self.kf.update(self.vLead)
@@ -123,6 +156,40 @@ class Track:
       self.aLeadTau.update(0.0)
 
     self.cnt += 1
+
+  def d_path(self, md):
+    # Kans (carrot-wip): dPath/in_lane_prob against the lane lines model
+    # gives us directly (md.laneLines), independent of lane_planner2.py.
+    if len(md.laneLines) < 3 or len(md.laneLines[1].x) < 2:
+      return
+    lane_xs = md.laneLines[1].x
+    left_ys = md.laneLines[1].y
+    right_ys = md.laneLines[2].y
+
+    left_lane_y = np.interp(self.dRel, lane_xs, left_ys)
+    right_lane_y = np.interp(self.dRel, lane_xs, right_ys)
+    center_y = (left_lane_y + right_lane_y) / 2.0
+    lane_half_width = max(0.1, abs(right_lane_y - left_lane_y) / 2.0)
+    dist_from_center = self.yRel + center_y
+
+    self.dPath = float(dist_from_center)
+    self.in_lane_prob = float(max(0.0, 1.0 - (abs(dist_from_center) / lane_half_width)))
+    self.lane_half_width = float(lane_half_width)
+
+  def path_d_path(self, md) -> tuple[float, float]:
+    # Kans (carrot-wip): dPath against the ego's own planned path
+    # (md.position), used only for the sticky drift guard.
+    if len(md.position.x) < 2:
+      return self.dPath, 0.0
+    path_y = float(np.interp(self.dRel, md.position.x, md.position.y))
+    path_y_std = float(np.interp(self.dRel, md.position.x, md.position.yStd)) if len(md.position.yStd) else 0.0
+    return float(self.yRel + path_y), path_y_std
+
+  def sticky_dpath_limit(self) -> float:
+    if self.dRel < STICKY_FAR_DREL:
+      return STICKY_MAX_DPATH
+    return float(np.clip(STICKY_MAX_DPATH + STICKY_PATH_Y_STD_GAIN * self.sticky_path_y_std,
+                         STICKY_MAX_DPATH, STICKY_MAX_DPATH_FAR))
 
   def vlead_for_matching(self, dv_max: float = 4.0, alpha: float = 0.35) -> float:
     # Kans (devel): spike-clamp + IIR-smooth vLead for matching-score use only
@@ -177,14 +244,14 @@ def laplacian_pdf(x: float, mu: float, b: float):
 
 def match_vision_to_track(v_ego: float, lead: capnp._DynamicStructReader, lead_prob: float,
                           tracks: dict[int, Track], update_counters: bool = True):
-  # Kans (devel, dPath/in_lane_prob-dependent gates dropped - see
-  # STICKY_SELECTED_COUNT_MAX comment above): distance/velocity/lateral
-  # "sane" gates, a moving-bias tolerance on vel_sane so a lead that's just
-  # started moving from a stop isn't rejected by raw-vLead noise, a
-  # graduated lead_prob acceptance floor for an already-selected track, and
-  # a dedicated "stopped-car-like" match policy (case B) that needs ~1s of
-  # consistent evidence before promoting a track that fails the strict
-  # velocity gate but passes distance/wide-y.
+  # Kans (devel): distance/velocity/lateral "sane" gates, a moving-bias
+  # tolerance on vel_sane so a lead that's just started moving from a stop
+  # isn't rejected by raw-vLead noise, a graduated lead_prob acceptance
+  # floor for an already-selected track, and a dedicated "stopped-car-like"
+  # match policy (case B) that needs ~1s of consistent evidence before
+  # promoting a track that fails the strict velocity gate but passes
+  # distance/wide-y. Case A also has a carrot-wip in-lane tie-break - see
+  # STICKY_SELECTED_COUNT_MAX comment above for the dPath/in_lane_prob note.
   if not tracks:
     return None
 
@@ -240,8 +307,19 @@ def match_vision_to_track(v_ego: float, lead: capnp._DynamicStructReader, lead_p
 
   best_track = None
   if first_track is not None and first_score >= 1e-4:
-    # A) normal match
-    if dist_sane(first_track) and vel_sane(first_track) and y_sane(first_track):
+    # A) normal match. Kans (carrot-wip): if a closer, in-lane second_track
+    # is also plausible, prefer it over first_track's raw score - this stops
+    # frame-to-frame flip-flopping between two similarly-scored tracks (e.g.
+    # a stopped lead vs. a track just behind it) from bouncing the selected
+    # lead (and therefore the MPC's obstacle source) back and forth.
+    select_second_track = (
+      second_track is not None and dist_sane(first_track) and vel_sane(first_track) and
+      vel_sane(second_track) and second_track.in_lane_prob > 0.3 and second_track.cnt > 5 and
+      offset_vision_dist * 0.5 < second_track.dRel < first_track.dRel
+    )
+    if select_second_track:
+      best_track = second_track
+    elif dist_sane(first_track) and vel_sane(first_track) and y_sane(first_track):
       if lead_prob > 0.5:
         best_track = first_track
       elif lead_prob > 0.4 and first_track.selected_count > 0:
@@ -291,7 +369,16 @@ def get_sticky_track(tracks: dict[int, Track]) -> Track | None:
   # Kans (devel): keep reporting a previously-selected track as the lead
   # even when this frame's vision match fails, as long as it's still being
   # measured and hasn't been reset by a track_discontinuous() jump.
-  sticky_tracks = [t for t in tracks.values() if t.cnt > 2 and t.selected_count > 0 and 1.0 < t.dRel < 150.0]
+  # Kans (carrot-wip): also drop sticky status here for a track that's
+  # drifted off the ego path since its last update() (see sticky_dPath).
+  sticky_tracks = []
+  for t in tracks.values():
+    if t.selected_count > 0 and abs(t.sticky_dPath) > t.sticky_dpath_limit():
+      t.selected_count = 0
+      t.is_stopped_car_count = 0
+      continue
+    if t.cnt > 2 and t.selected_count > 0 and 1.0 < t.dRel < 150.0:
+      sticky_tracks.append(t)
   if not sticky_tracks:
     return None
   return max(sticky_tracks, key=lambda t: (t.selected_count, -t.dRel))
@@ -385,7 +472,8 @@ class RadarD:
       # create the track if it doesn't exist or it's a new track
       if ids not in self.tracks:
         self.tracks[ids] = Track(ids, v_lead, self.kalman_params)
-      self.tracks[ids].update(rpt[0], rpt[1], rpt[2], v_lead, self.radar_reaction_factor)
+      self.tracks[ids].update(rpt[0], rpt[1], rpt[2], v_lead, self.radar_reaction_factor,
+                              md=sm['modelV2'] if self.ready else None)
 
     # *** publish radarState ***
     self.radar_state_valid = sm.all_checks()
