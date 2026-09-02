@@ -99,6 +99,7 @@ class VCruiseHelper:
     self.autoCruiseControl_cancel_timer = 0
     self.autoCruiseControl = 0
     self.autoGasTokSpeed = 0
+    self.autoGasSyncSpeed = 0
     # Carrot traffic-light state
     self.xState = 0
     self.xState_last = 0
@@ -133,6 +134,7 @@ class VCruiseHelper:
     if self.frame % 10 == 0:
       self.autoCruiseControl = self.params.get_int("AutoCruiseControl")
       self.autoGasTokSpeed = self.params.get_int("AutoGasTokSpeed") * unit_factor
+      self.autoGasSyncSpeed = self.params.get_int("AutoGasSyncSpeed")
 
       cruise_speed_unit = self.params.get_int("CruiseSpeedUnit")
       cruise_speed_unit_basic = self.params.get_int("CruiseSpeedUnitBasic")
@@ -518,6 +520,13 @@ class VCruiseHelper:
         v_cruise_kph = max(v_cruise_kph, self.v_ego_kph_set)
       else:
         v_cruise_kph = self._v_cruise_desired(CS, v_cruise_kph)
+
+    # Gas held past the tok threshold (a real hold, not a quick tap): if the
+    # driver has accelerated past the set cruise speed, sync v_cruise up to
+    # it so releasing the pedal doesn't suddenly brake back down.
+    if (self._gas_pressed_count > self._gas_tok_timer and self.autoGasSyncSpeed and
+        self.v_ego_kph_set > v_cruise_kph):
+      v_cruise_kph = self.v_ego_kph_set
 
     # Coasting toward a lead car with cruise off: engage before it gets unsafe.
     if (not enabled and self._gas_pressed_count < 0 and self._brake_pressed_count < 0 and

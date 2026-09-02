@@ -25,6 +25,15 @@ V_EGO_STATIONARY = 4.   # no stationary object flag below this speed
 
 RADAR_TO_CAMERA = 1.52  # RADAR is ~ 1.5m ahead from center of mesh frame
 
+# Kans: sticky lead selection (ported from devel, dPath/in_lane_prob-dependent
+# drift checks dropped - those come from ajouatom's lane_planner2.py, which
+# this fork is deliberately moving away from). A previously-selected track
+# keeps being reported as the lead for up to STICKY_SELECTED_COUNT_MAX frames
+# even when this frame's vision match fails, protected instead by
+# track_discontinuous() resetting selected_count on any large dRel/yRel/vLead
+# jump.
+STICKY_SELECTED_COUNT_MAX = int(2.0 / DT_MDL)
+
 
 class KalmanParams:
   def __init__(self, dt: float):
@@ -58,12 +67,43 @@ class Track:
     self.K_K = kalman_params.K
     self.kf = KF1D([[v_lead], [0.0]], self.K_A, self.K_C, self.K_K)
 
+    self.dRel = 0.0
+    self.yRel = 0.0
+    self.vRel = 0.0
+    self.vLead = v_lead
+
+    # Kans: sticky-selection state (devel)
+    self.selected_count = 0
+    self.is_stopped_car_count = 0
+
+    # Kans: vlead_for_matching() noise-suppression state (devel)
+    self._vLead_last = 0.0
+    self._vLead_filt = 0.0
+    self._vLead_filt_init = False
+
   def update(self, d_rel: float, y_rel: float, v_rel: float, v_lead: float):
+    prev_dRel = self.dRel
+    prev_yRel = self.yRel
+    prev_vLead = self.vLead
+
     # relative values, copy
     self.dRel = d_rel   # LONG_DIST
     self.yRel = y_rel   # -LAT_DIST
     self.vRel = v_rel   # REL_SPEED
     self.vLead = v_lead
+
+    # Kans: reset sticky-selection state on a large frame-to-frame jump, so a
+    # track-ID reuse/glitch can't be mistaken for a continuously-tracked lead.
+    track_discontinuous = self.cnt > 0 and (
+      abs(self.dRel - prev_dRel) > 5.0 or
+      abs(self.yRel - prev_yRel) > 2.0 or
+      abs(self.vLead - prev_vLead) > 7.0
+    )
+    if track_discontinuous:
+      self.cnt = 0
+      self.selected_count = 0
+      self.is_stopped_car_count = 0
+      self._vLead_filt_init = False
 
     # computed velocity and accelerations
     if self.cnt > 0:
@@ -79,6 +119,27 @@ class Track:
       self.aLeadTau.update(0.0)
 
     self.cnt += 1
+
+  def vlead_for_matching(self, dv_max: float = 4.0, alpha: float = 0.35) -> float:
+    # Kans (devel): spike-clamp + IIR-smooth vLead for matching-score use only
+    # (published vLead/vLeadK are untouched). If cnt < 2: raw vLead.
+    v = float(self.vLead)
+
+    if self.cnt < 2:
+      return v
+
+    if not self._vLead_filt_init:
+      self._vLead_last = v
+      self._vLead_filt = v
+      self._vLead_filt_init = True
+      return v
+
+    v_last = self._vLead_last
+    self._vLead_last = v
+
+    v_clamped = float(np.clip(v, v_last - dv_max, v_last + dv_max))
+    self._vLead_filt = alpha * v_clamped + (1.0 - alpha) * self._vLead_filt
+    return float(self._vLead_filt)
 
   def get_RadarState(self, model_prob: float = 0.0):
     return {
@@ -110,27 +171,99 @@ def laplacian_pdf(x: float, mu: float, b: float):
   return math.exp(-abs(x-mu)/b)
 
 
-def match_vision_to_track(v_ego: float, lead: capnp._DynamicStructReader, tracks: dict[int, Track]):
-  offset_vision_dist = lead.x[0] - RADAR_TO_CAMERA
-
-  def prob(c):
-    prob_d = laplacian_pdf(c.dRel, offset_vision_dist, lead.xStd[0])
-    prob_y = laplacian_pdf(c.yRel, -lead.y[0], lead.yStd[0])
-    prob_v = laplacian_pdf(c.vRel + v_ego, lead.v[0], lead.vStd[0])
-
-    # This isn't exactly right, but it's a good heuristic
-    return prob_d * prob_y * prob_v
-
-  track = max(tracks.values(), key=prob)
-
-  # if no 'sane' match is found return -1
-  # stationary radar points can be false positives
-  dist_sane = abs(track.dRel - offset_vision_dist) < max([(offset_vision_dist)*.25, 5.0])
-  vel_sane = (abs(track.vRel + v_ego - lead.v[0]) < 10) or (v_ego + track.vRel > 3)
-  if dist_sane and vel_sane:
-    return track
-  else:
+def match_vision_to_track(v_ego: float, lead: capnp._DynamicStructReader, lead_prob: float,
+                          tracks: dict[int, Track], update_counters: bool = True):
+  # Kans (devel, dPath/in_lane_prob-dependent gates dropped - see
+  # STICKY_SELECTED_COUNT_MAX comment above): distance/velocity/lateral
+  # "sane" gates, a moving-bias tolerance on vel_sane so a lead that's just
+  # started moving from a stop isn't rejected by raw-vLead noise, a
+  # graduated lead_prob acceptance floor for an already-selected track, and
+  # a dedicated "stopped-car-like" match policy (case B) that needs ~1s of
+  # consistent evidence before promoting a track that fails the strict
+  # velocity gate but passes distance/wide-y.
+  if not tracks:
     return None
+
+  offset_vision_dist = float(lead.x[0] - RADAR_TO_CAMERA)
+
+  max_vision_dist = max(offset_vision_dist * 1.25, 5.0)
+  min_vision_dist = max(offset_vision_dist * 0.80, 1.0)
+  max_vision_dist_wide = max(offset_vision_dist * 1.45, 5.0)
+  min_vision_dist_wide = 1.5
+
+  vel_tol = float(max(lead.v[0] * np.interp(lead_prob, [0.8, 0.98], [0.3, 0.5]), 5.0))
+  vel_guard = max(vel_tol * 3.0, 20.0)
+
+  def dist_sane(t: Track, wide: bool = False) -> bool:
+    if wide:
+      return min_vision_dist_wide < t.dRel < max_vision_dist_wide
+    return min_vision_dist < t.dRel < max_vision_dist
+
+  def y_sane(t: Track, wide: bool = False) -> bool:
+    lim = 4.0 if wide else 2.0
+    return abs(t.yRel + float(lead.y[0])) < lim
+
+  def vel_sane(t: Track) -> bool:
+    v_vis = float(lead.v[0])
+    v_trk = float(t.vLead)
+    dv = abs(v_trk - v_vis)
+    if dv < vel_tol:
+      return True
+    # moving-bias: allow more mismatch once the track is actually moving,
+    # within a guardrail, so a lead that's just resumed from a stop isn't
+    # rejected by a noisy instantaneous vLead reading.
+    moving = v_trk > 3.0
+    if not moving:
+      return False
+    return dv <= vel_guard
+
+  def score(t: Track) -> float:
+    pd = laplacian_pdf(float(t.dRel), offset_vision_dist, float(lead.xStd[0]))
+    py = laplacian_pdf(float(t.yRel), -float(lead.y[0]), float(lead.yStd[0]))
+    pv = laplacian_pdf(t.vlead_for_matching(), float(lead.v[0]), float(lead.vStd[0]))
+    return pd * py * pv
+
+  first_track, second_track = None, None
+  first_score, second_score = -1e18, -1e18
+  for t in tracks.values():
+    s = score(t)
+    t.score = s
+    if s > first_score:
+      second_track, second_score = first_track, first_score
+      first_track, first_score = t, s
+    elif s > second_score:
+      second_track, second_score = t, s
+
+  best_track = None
+  if first_track is not None and first_score >= 1e-4:
+    # A) normal match
+    if dist_sane(first_track) and vel_sane(first_track) and y_sane(first_track):
+      if lead_prob > 0.5:
+        best_track = first_track
+      elif lead_prob > 0.4 and first_track.selected_count > 0:
+        best_track = first_track
+
+    # B) stopped-car-like (only if not chosen yet)
+    if best_track is None and dist_sane(first_track) and y_sane(first_track, wide=True):
+      if (second_track is not None and second_score > 1e-5 and
+          dist_sane(second_track) and y_sane(second_track) and vel_sane(second_track)):
+        best_track = second_track
+      elif first_track.selected_count > 0:
+        best_track = first_track
+      else:
+        first_track.is_stopped_car_count += 2
+        if first_track.is_stopped_car_count > int(1.0 / DT_MDL):
+          best_track = first_track
+
+  if update_counters:
+    for t in tracks.values():
+      if t is best_track:
+        t.selected_count = min(t.selected_count + 1, STICKY_SELECTED_COUNT_MAX)
+      elif best_track is not None:
+        t.selected_count = 0
+        t.is_stopped_car_count = max(0, t.is_stopped_car_count - 1)
+
+  return best_track
 
 
 def get_RadarState_from_vision(lead_msg: capnp._DynamicStructReader, v_ego: float, model_v_ego: float, lead_prob: float):
@@ -150,13 +283,29 @@ def get_RadarState_from_vision(lead_msg: capnp._DynamicStructReader, v_ego: floa
   }
 
 
+def get_sticky_track(tracks: dict[int, Track]) -> Track | None:
+  # Kans (devel): keep reporting a previously-selected track as the lead
+  # even when this frame's vision match fails, as long as it's still being
+  # measured and hasn't been reset by a track_discontinuous() jump.
+  sticky_tracks = [t for t in tracks.values() if t.cnt > 2 and t.selected_count > 0 and 1.0 < t.dRel < 150.0]
+  if not sticky_tracks:
+    return None
+  return max(sticky_tracks, key=lambda t: (t.selected_count, -t.dRel))
+
+
 def get_lead(v_ego: float, ready: bool, tracks: dict[int, Track], lead_msg: capnp._DynamicStructReader,
-             model_v_ego: float, lead_prob: float, low_speed_override: bool = True) -> dict[str, Any]:
+             model_v_ego: float, lead_prob: float, low_speed_override: bool = True,
+             sticky: bool = False) -> dict[str, Any]:
   # Determine leads, this is where the essential logic happens
-  if len(tracks) > 0 and ready and lead_prob > .5:
-    track = match_vision_to_track(v_ego, lead_msg, tracks)
+  if len(tracks) > 0 and ready and lead_prob > .4:
+    track = match_vision_to_track(v_ego, lead_msg, lead_prob, tracks, update_counters=sticky)
   else:
     track = None
+
+  if track is None and sticky:
+    track = get_sticky_track(tracks)
+    if track is not None:
+      track.selected_count = min(track.selected_count + 1, STICKY_SELECTED_COUNT_MAX)
 
   lead_dict = {'present': False}
   if track is not None:
@@ -238,8 +387,8 @@ class RadarD:
         else:
           self.lead_prob_filters[i].update(lead_prob)
 
-      self.radar_state.leadOne = get_lead(self.v_ego, self.ready, self.tracks, leads_v3[0], model_v_ego, self.lead_prob_filters[0].x, low_speed_override=True)
-      self.radar_state.leadTwo = get_lead(self.v_ego, self.ready, self.tracks, leads_v3[1], model_v_ego, self.lead_prob_filters[1].x, low_speed_override=False)
+      self.radar_state.leadOne = get_lead(self.v_ego, self.ready, self.tracks, leads_v3[0], model_v_ego, self.lead_prob_filters[0].x, low_speed_override=True, sticky=True)
+      self.radar_state.leadTwo = get_lead(self.v_ego, self.ready, self.tracks, leads_v3[1], model_v_ego, self.lead_prob_filters[1].x, low_speed_override=False, sticky=False)
 
   def publish(self, pm: messaging.PubMaster):
     assert self.radar_state is not None
