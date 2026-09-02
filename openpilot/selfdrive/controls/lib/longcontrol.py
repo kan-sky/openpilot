@@ -13,9 +13,21 @@ LongCtrlState = car.CarControl.Actuators.LongControlState
 
 def long_control_state_trans(CP, active, long_control_state, v_ego,
                              should_stop, brake_pressed, cruise_standstill):
+  # Kans: reverted to the plain/comma-stock unconditional transition (no
+  # a_ego/fcw_stop reentry debounce). That debounce was restored earlier to
+  # chase the "twitch then stuck until manual RESUME" bug, but has a known
+  # history of also causing "doesn't stop behind lead car" (why it was
+  # dropped once before, pre-tz) and is now suspected of causing a new
+  # 3-stage stutter near stops (pid<->stopping toggling as should_stop
+  # flickers near threshold). The twitch/stuck bug may have actually been
+  # fully explained by the separate AccState import crash in
+  # opendbc/car/gm/carcontroller.py (fixed independently) - testing without
+  # this debounce to see if it's still needed at all.
+  stopping_condition = should_stop
   starting_condition = (not should_stop and
                         not cruise_standstill and
                         not brake_pressed)
+  started_condition = v_ego > CP.vEgoStarting
 
   if not active:
     long_control_state = LongCtrlState.off
@@ -36,15 +48,11 @@ def long_control_state_trans(CP, active, long_control_state, v_ego,
         else:
           long_control_state = LongCtrlState.pid
 
-    elif long_control_state == LongCtrlState.starting:
-      if should_stop:
+    elif long_control_state in [LongCtrlState.starting, LongCtrlState.pid]:
+      if stopping_condition:
         long_control_state = LongCtrlState.stopping
-      elif v_ego > CP.vEgoStarting:
+      elif started_condition:
         long_control_state = LongCtrlState.pid
-
-    elif long_control_state == LongCtrlState.pid:
-      if should_stop:
-        long_control_state = LongCtrlState.stopping
 
   return long_control_state
 
