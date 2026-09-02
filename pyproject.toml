@@ -63,6 +63,10 @@ dependencies = [
 
   # ui
   "comma-deps-raylib",
+  "cffi",  # system/ui/lib/application.py; needed explicitly for the standalone updater bundle
+  "pyserial",  # tici/lpa.py (eSIM), pulled in by the standalone updater bundle's hardware import chain
+  "pillow",  # system/ui/lib/emoji.py
+  "qrcode",  # system/ui onboarding/pairing QR screens
 ]
 
 [project.optional-dependencies]

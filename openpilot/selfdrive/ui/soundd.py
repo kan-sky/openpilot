@@ -49,11 +49,19 @@ sound_list: dict[int, tuple[str, int | None, float]] = {
   AudibleAlert.warningSoft: ("critical.wav", None, MAX_VOLUME),
   AudibleAlert.warningImmediate: ("dm_critical.wav", None, MAX_VOLUME),
   #AudibleAlert.nnff: ("nnff.wav", 1, MAX_VOLUME),
-
-  AudibleAlert.stopping: ("stopping.wav", 1, MAX_VOLUME),
   AudibleAlert.trafficSignGreen: ("traffic_sign_green.wav", 1, MAX_VOLUME),
   AudibleAlert.trafficSignChanged: ("traffic_sign_changed.wav", 1, MAX_VOLUME),
+  AudibleAlert.stopping: ("audio_stopping.wav", 1, MAX_VOLUME),
+  AudibleAlert.autoHold: ("audio_auto_hold.wav", 1, MAX_VOLUME),
 }
+def check_selfdrive_timeout_alert(sm):
+  ss_missing = time.monotonic() - sm.recv_time['selfdriveState']
+
+  if ss_missing > SELFDRIVE_STATE_TIMEOUT:
+    if sm['selfdriveState'].enabled and (ss_missing - SELFDRIVE_STATE_TIMEOUT) < 10:
+      return True
+
+  return False
 
 def linear_resample(samples, original_rate, new_rate):
   if original_rate == new_rate:
@@ -81,14 +89,7 @@ def linear_resample(samples, original_rate, new_rate):
   return resampled
 
 
-def check_selfdrive_timeout_alert(sm):
-  ss_missing = time.monotonic() - sm.recv_time['selfdriveState']
 
-  if ss_missing > SELFDRIVE_STATE_TIMEOUT:
-    if sm['selfdriveState'].enabled and (ss_missing - SELFDRIVE_STATE_TIMEOUT) < 10:
-      return True
-
-  return False
 
 
 class Soundd:
@@ -164,6 +165,10 @@ class Soundd:
     data_out[:frames, 0] = self.get_sound_data(frames)
 
   def update_alert(self, new_alert):
+    if new_alert != AudibleAlert.none and new_alert not in self.loaded_sounds:
+      cloudlog.error(f"soundd received unsupported alert {new_alert}")
+      new_alert = AudibleAlert.none
+
     current_alert_played_once = self.current_alert == AudibleAlert.none or self.current_sound_frame >= len(self.loaded_sounds[self.current_alert])
     # let looping sounds finish the current loop instead of cutting off mid tone
     if new_alert == AudibleAlert.none and self.current_alert != AudibleAlert.none and sound_list[self.current_alert][1] is None:
