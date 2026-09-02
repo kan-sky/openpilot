@@ -729,7 +729,19 @@ class CarrotMan:
   def vturn_speed(self, CS, sm):
     target_lat_a = 1.9
     model_data = sm["modelV2"]
-    v_ego = max(CS.vEgo, 0.1)
+
+    # Kans: max_curve divides by v_ego**2 below - near a stop, the old 0.1
+    # m/s floor made that denominator tiny (0.01), so ordinary noise in
+    # orientation_rate/model velocity got hugely amplified into a wildly
+    # swinging turn_speed (observed flickering ~120-200kph while stopped,
+    # which flips carrot_serv.py's model-turn-speed candidate in and out of
+    # the desiredSpeed min() and made v_cruise itself flicker while stopped -
+    # suspected trigger for GM ACC faults while stopped behind a lead).
+    # Curve-speed limiting isn't physically meaningful this close to a stop
+    # anyway, so bail out to "no limit" instead of computing a noisy value.
+    if CS.vEgo < 2.0:
+      return 250.0
+    v_ego = CS.vEgo
 
     orientation_rate = np.asarray(model_data.orientationRate.z, dtype=float) * self.autoCurveSpeedFactor
     velocity = np.asarray(model_data.velocity.x, dtype=float)
