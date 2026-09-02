@@ -249,7 +249,13 @@ class CarrotPlanner:
       if trigger_start:
         if self.soft_hold_active > 0:
           self.add_event(EventName.trafficSignChanged)
-        elif self.xState in [XState.e2eStop, XState.e2eStopped]:
+        elif self.xState == XState.e2eStopped:
+          # Kans: only release a stop that's actually complete. Releasing while
+          # still XState.e2eStop (approaching, not yet stopped) based on this
+          # nav-based trafficState let the car accelerate through the
+          # intersection instead of stopping at the line - the vision-based
+          # check_model_stopping() path had the same bug and was fixed the
+          # same way.
           self.xState = XState.e2eCruise
           self.traffic_starting_count = 10.0 / DT_MDL
 
