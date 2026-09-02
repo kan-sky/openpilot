@@ -66,6 +66,16 @@ class LongControl:
     self.pid.reset()
 
   def update(self, active, CS, a_target, should_stop, accel_limits):
+    self.readParamCount += 1
+    if self.readParamCount >= 100:
+      self.readParamCount = 0
+    elif self.readParamCount == 10:
+      longitudinalTuningKpV = self.params.get_float("LongTuningKpV") * 0.01
+      longitudinalTuningKiV = self.params.get_float("LongTuningKiV") * 0.001
+      self.pid._k_p = (self.CP.longitudinalTuning.kpBP, [longitudinalTuningKpV])
+      self.pid._k_i = (self.CP.longitudinalTuning.kiBP, [longitudinalTuningKiV])
+      self.pid._k_f = ([0], [self.params.get_float("LongTuningKf") * 0.01])
+
     self.pid.neg_limit = accel_limits[0]
     self.pid.pos_limit = accel_limits[1]
     # Kans: debug
