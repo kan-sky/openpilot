@@ -404,7 +404,6 @@
           "zh": "雷达",
           "params": [
             "EnableRadarTracks",
-            "EnableCornerRadar",
             "CarrotRadarMode",
             "CarrotRadarCutInSensitivity"
           ]
@@ -2555,22 +2554,6 @@
       "cdescr": "-2: 强制仅视觉(忽略雷达,用于测试)\n0: 正常使用雷达轨迹(默认)\n注: Volt没有SCC/角雷达/切入检测功能,devel的-1~3区分在此无效。\n注: 检测到雷达CAN故障时会自动强制切换为仅视觉,与此设置无关。",
       "min": -2,
       "max": 0,
-      "default": 0,
-      "unit": 1
-    },
-    {
-      "group": "레이더설정",
-      "name": "EnableCornerRadar",
-      "title": "코너레이더 사용(0)",
-      "descr": "1:코너레이더활성화,2:끼어드는 차량 검출",
-      "egroup": "RADAR",
-      "etitle": "Enable Corner radar(0)",
-      "edescr": "1:Enable Corner radar, 2: Cutin Detection for CCNC car",
-      "cgroup": "雷达设置",
-      "ctitle": "开启角雷达 (0)",
-      "cdescr": "1: 开启角雷达, 2: CCNC 车辆的切入检测",
-      "min": 0,
-      "max": 2,
       "default": 0,
       "unit": 1
     },
