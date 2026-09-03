@@ -287,6 +287,7 @@ def cutin_entry_rejection_reason(
   tuning: dict[str, Any],
   fast_lane_entry: bool = False,
   radar_inward_speed: float | None = None,
+  max_d_rel: float | None = None,
 ) -> str | None:
   # Kans: devel's `corner_track` param is a misnomer even there - it's fed
   # self._is_active_cutin_track(t), i.e. "is this classified as a cut-in
@@ -301,7 +302,8 @@ def cutin_entry_rejection_reason(
     return "behind-lead"
   if track_count < min_track_age:
     return "track-age"
-  if not (tuning["enter_min_x"] < d_rel < tuning["enter_max_x"] and v_lead > 4.0):
+  enter_max_x = tuning["enter_max_x"] if max_d_rel is None else min(tuning["enter_max_x"], max_d_rel)
+  if not (tuning["enter_min_x"] < d_rel < enter_max_x and v_lead > 4.0):
     return "range-speed"
   if abs(d_path) < tuning["enter_min_abs_dpath"]:
     return "already-center"

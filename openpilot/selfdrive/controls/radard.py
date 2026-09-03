@@ -70,11 +70,13 @@ STICKY_PATH_Y_STD_GAIN = 0.5
 # have, so tz only implements this one threshold.
 VISION_ONLY_RADAR_TRACK_MODE = -2
 
-# Kans (devel): front-radar cut-in detection constants. Corner-radar/SCC
-# variants of these (CORNER_*, SIDE_CORNER_*) are dropped - see
-# lib/cutin_helpers.py's module docstring for why.
-CUTIN_STICKY_FRAMES = int(0.7 / DT_MDL)
-CUTIN_OUTPUT_HOLD_FRAMES = max(1, int(round(0.5 / DT_MDL)))
+# Kans (devel-0721, preferred over the later no-suffix snapshot per the
+# user - that one predates the carrot/ integration and drifted looser on
+# these specific values): front-radar cut-in detection constants.
+# Corner-radar/SCC variants of these (CORNER_*, SIDE_CORNER_*) are dropped -
+# see lib/cutin_helpers.py's module docstring for why.
+CUTIN_STICKY_FRAMES = int(0.5 / DT_MDL)
+CUTIN_OUTPUT_HOLD_FRAMES = max(1, int(round(0.25 / DT_MDL)))
 CUTIN_OUTPUT_HOLD_DREL_M = 3.0
 CUTIN_OUTPUT_HOLD_YREL_M = 1.0
 CUTIN_OUTPUT_HOLD_VREL_MPS = 2.0
@@ -82,6 +84,10 @@ CUTIN_KEEP_FUTURE_IN_LANE_PROB = 0.12
 CUTIN_KEEP_MAX_DPATH_FUTURE = 1.6
 CUTIN_KEEP_MAX_MOVING_AWAY = 0.3
 CUTIN_PROMOTE_DREL_MARGIN = 1.0
+# Kans (devel-0721): caps how far out a front cut-in can still be entered/
+# published - 0721 applies this to the front path too (the version I
+# initially ported only used it for corner radar).
+VISION_CUTIN_WIDE_MAX_DREL = 45.0
 CUTIN_YAW_COMP_GAIN = 0.6
 CUTIN_YAW_COMP_MAX_DREL = 50.0
 CUTIN_YAW_COMP_MAX_YAW_RATE = 0.35
@@ -674,6 +680,7 @@ class RadarD:
         t.cutin_radar_inward_speed, v_rel=t.vRel,
       ),
       radar_inward_speed=t.cutin_radar_inward_speed,
+      max_d_rel=VISION_CUTIN_WIDE_MAX_DREL,
     )
     return reason is None
 
@@ -682,7 +689,9 @@ class RadarD:
       return False
     if not self._cutin_is_closer_or_matches_lead_one(t):
       return False
-    if not (0.8 < t.dRel < 55.0 and t.vLead > 2.0):
+    # Kans (devel-0721): 25.0 here, not the 55.0 the earlier no-suffix
+    # snapshot had - 0721 keeps a confirmed front cut-in only out to 25m.
+    if not (0.8 < t.dRel < 25.0 and t.vLead > 2.0):
       return False
     moving_away = abs(t.dPath_future) - abs(t.dPath)
     if moving_away > CUTIN_KEEP_MAX_MOVING_AWAY:
@@ -690,10 +699,13 @@ class RadarD:
     return t.in_lane_prob_future > CUTIN_KEEP_FUTURE_IN_LANE_PROB or abs(t.dPath_future) < CUTIN_KEEP_MAX_DPATH_FUTURE
 
   def _update_cutin_sticky(self, t: Track) -> bool:
+    # Kans (devel-0721): the earlier no-suffix snapshot let `keeping` alone
+    # re-arm `entering` for the front path too, so a confirmed track stayed
+    # confirmed as long as the looser keep-gate held. 0721 reserves that
+    # shortcut for side-corner tracks only (which the Volt doesn't have) -
+    # a front track must keep re-passing the stricter enter-gate.
     entering = self._is_cutin_enter_candidate(t)
     keeping = t.cut_in_count > 0 and self._is_cutin_keep_candidate(t)
-    if keeping:
-      entering = True
     confirm_frames = cutin_confirmation_frames(self.front_cutin_confirm_frames, t.dRel, t.dPath_inward_speed, self.v_ego)
     t.cut_in_count, t.cut_in_start_abs_dpath = update_cutin_confirmation(
       t.cut_in_count, t.cut_in_start_abs_dpath, t.dPath, t.dRel, entering, keeping,
@@ -884,9 +896,13 @@ class RadarD:
       self.radar_state.leadsCutIn = cutin_list
       if self.front_cutin_enabled and cutin_list:
         lead_one = self.radar_state.leadOne
+        # Kans (devel-0721): same VISION_CUTIN_WIDE_MAX_DREL cap as the entry
+        # gate, so a track that could never have entered can't be published
+        # as leadTwo either just because it's still confirmed from closer in.
+        max_cutin_d_rel = min(self.cutin_enter_max_x, VISION_CUTIN_WIDE_MAX_DREL)
         eligible = [
           c for c in cutin_list
-          if self.cutin_enter_min_x < c['dRel'] < self.cutin_enter_max_x and c['vLead'] > 4.0
+          if self.cutin_enter_min_x < c['dRel'] < max_cutin_d_rel and c['vLead'] > 4.0
           and not (lead_one.present and lead_one.radar and int(lead_one.radarTrackId) == int(c['radarTrackId']))
         ]
         if eligible:
