@@ -247,18 +247,17 @@ class CarInterface(CarInterfaceBase):
       ret.startAccel = 1.0
       ret.autoResumeSng = True
       # Kans: without this, Volt falls through to the generic ASCM/OBD-II
-      # branch above (kiBP=[5.,35.], kiV=[2.4,1.5]) - comma's own current
-      # upstream value for this GM category, confirmed unchanged on
-      # devel-staging, but a 2-breakpoint speed-dependent curve that can't
-      # be represented by carrot's single live-tunable LongTuningKiV slider
-      # (which is why every carrot car interface collapses to a single
-      # breakpoint - that's the point of the live-tuning UI, not a mistake).
-      # kpV stays 0, matching comma's own GM convention (comma never sets a
-      # longitudinal P-term for GM). kiV=.35 is carrot-wip-0721's
-      # road-tested Volt value, kept nonzero per the user: entering the
-      # stopping phase with zero I lagged noticeably later than with this
-      # value. Both are single-breakpoint so LongTuningKpV/KiV can still
-      # retune them live without a code change.
+      # branch above (kiV=[0.0] as of the kiBP/kiV single-breakpoint
+      # simplification applied fork-wide - comma's own upstream default for
+      # this category is a 2-breakpoint kiV=[2.4,1.5], but that shape can't
+      # be represented by carrot's single live-tunable LongTuningKiV slider,
+      # so every carrot car interface here now collapses to a single
+      # breakpoint on purpose). kpV stays 0, matching comma's own GM
+      # convention (comma never sets a longitudinal P-term for GM). kiV=.35
+      # is carrot-wip-0721's road-tested Volt value, kept nonzero per the
+      # user: entering the stopping phase with zero I lagged noticeably
+      # later than with this value. Both are single-breakpoint so
+      # LongTuningKpV/KiV can still retune them live without a code change.
       ret.longitudinalTuning.kpBP = [0.]
       ret.longitudinalTuning.kpV = [0.]
       ret.longitudinalTuning.kiBP = [0.]
