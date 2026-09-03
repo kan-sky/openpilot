@@ -365,57 +365,6 @@ def get_RadarState_from_vision(lead_msg: capnp._DynamicStructReader, v_ego: floa
   }
 
 
-def get_sticky_track(tracks: dict[int, Track]) -> Track | None:
-  # Kans (devel): keep reporting a previously-selected track as the lead
-  # even when this frame's vision match fails, as long as it's still being
-  # measured and hasn't been reset by a track_discontinuous() jump.
-  # Kans (carrot-wip): also drop sticky status here for a track that's
-  # drifted off the ego path since its last update() (see sticky_dPath).
-  sticky_tracks = []
-  for t in tracks.values():
-    if t.selected_count > 0 and abs(t.sticky_dPath) > t.sticky_dpath_limit():
-      t.selected_count = 0
-      t.is_stopped_car_count = 0
-      continue
-    if t.cnt > 2 and t.selected_count > 0 and 1.0 < t.dRel < 150.0:
-      sticky_tracks.append(t)
-  if not sticky_tracks:
-    return None
-  return max(sticky_tracks, key=lambda t: (t.selected_count, -t.dRel))
-
-
-def get_lead(v_ego: float, ready: bool, tracks: dict[int, Track], lead_msg: capnp._DynamicStructReader,
-             model_v_ego: float, lead_prob: float, low_speed_override: bool = True,
-             sticky: bool = False) -> dict[str, Any]:
-  # Determine leads, this is where the essential logic happens
-  if len(tracks) > 0 and ready and lead_prob > .4:
-    track = match_vision_to_track(v_ego, lead_msg, lead_prob, tracks, update_counters=sticky)
-  else:
-    track = None
-
-  if track is None and sticky:
-    track = get_sticky_track(tracks)
-    if track is not None:
-      track.selected_count = min(track.selected_count + 1, STICKY_SELECTED_COUNT_MAX)
-
-  lead_dict = {'present': False}
-  if track is not None:
-    lead_dict = track.get_RadarState(lead_prob)
-  elif (track is None) and ready and (lead_prob > .5):
-    lead_dict = get_RadarState_from_vision(lead_msg, v_ego, model_v_ego, lead_prob)
-
-  if low_speed_override:
-    low_speed_tracks = [c for c in tracks.values() if c.potential_low_speed_lead(v_ego)]
-    if len(low_speed_tracks) > 0:
-      closest_track = min(low_speed_tracks, key=lambda c: c.dRel)
-
-      # Only choose new track if it is actually closer than the previous one
-      if (not lead_dict['present']) or (closest_track.dRel < lead_dict['dRel']):
-        lead_dict = closest_track.get_RadarState()
-
-  return lead_dict
-
-
 class RadarD:
   def __init__(self, delay: float = 0.0):
     self.tracks: dict[int, Track] = {}
@@ -442,6 +391,57 @@ class RadarD:
     # on leadOne's selected *radar* track changing identity, so it prints once per
     # switch instead of every frame.
     self._debug_prev_lead_id: int | None = None
+
+  def get_sticky_track(self, tracks: dict[int, Track]) -> Track | None:
+    # Kans (devel): keep reporting a previously-selected track as the lead
+    # even when this frame's vision match fails, as long as it's still being
+    # measured and hasn't been reset by a track_discontinuous() jump.
+    # Kans (carrot-wip): also drop sticky status here for a track that's
+    # drifted off the ego path since its last update() (see sticky_dPath).
+    sticky_tracks = []
+    for t in tracks.values():
+      if t.selected_count > 0 and abs(t.sticky_dPath) > t.sticky_dpath_limit():
+        t.selected_count = 0
+        t.is_stopped_car_count = 0
+        continue
+      if t.cnt > 2 and t.selected_count > 0 and 1.0 < t.dRel < 150.0:
+        sticky_tracks.append(t)
+    if not sticky_tracks:
+      return None
+    return max(sticky_tracks, key=lambda t: (t.selected_count, -t.dRel))
+
+  def get_lead(self, tracks: dict[int, Track], lead_msg: capnp._DynamicStructReader,
+               model_v_ego: float, lead_prob: float, low_speed_override: bool = True,
+               sticky: bool = False) -> dict[str, Any]:
+    # Determine leads, this is where the essential logic happens
+    v_ego = self.v_ego
+    ready = self.ready
+    if len(tracks) > 0 and ready and lead_prob > .4:
+      track = match_vision_to_track(v_ego, lead_msg, lead_prob, tracks, update_counters=sticky)
+    else:
+      track = None
+
+    if track is None and sticky:
+      track = self.get_sticky_track(tracks)
+      if track is not None:
+        track.selected_count = min(track.selected_count + 1, STICKY_SELECTED_COUNT_MAX)
+
+    lead_dict = {'present': False}
+    if track is not None:
+      lead_dict = track.get_RadarState(lead_prob)
+    elif (track is None) and ready and (lead_prob > .5):
+      lead_dict = get_RadarState_from_vision(lead_msg, v_ego, model_v_ego, lead_prob)
+
+    if low_speed_override:
+      low_speed_tracks = [c for c in tracks.values() if c.potential_low_speed_lead(v_ego)]
+      if len(low_speed_tracks) > 0:
+        closest_track = min(low_speed_tracks, key=lambda c: c.dRel)
+
+        # Only choose new track if it is actually closer than the previous one
+        if (not lead_dict['present']) or (closest_track.dRel < lead_dict['dRel']):
+          lead_dict = closest_track.get_RadarState()
+
+    return lead_dict
 
   def update(self, sm: messaging.SubMaster, rr: car.RadarData):
     self.ready = sm.seen['modelV2']
@@ -495,8 +495,8 @@ class RadarD:
         else:
           self.lead_prob_filters[i].update(lead_prob)
 
-      self.radar_state.leadOne = get_lead(self.v_ego, self.ready, self.tracks, leads_v3[0], model_v_ego, self.lead_prob_filters[0].x, low_speed_override=True, sticky=True)
-      self.radar_state.leadTwo = get_lead(self.v_ego, self.ready, self.tracks, leads_v3[1], model_v_ego, self.lead_prob_filters[1].x, low_speed_override=False, sticky=False)
+      self.radar_state.leadOne = self.get_lead(self.tracks, leads_v3[0], model_v_ego, self.lead_prob_filters[0].x, low_speed_override=True, sticky=True)
+      self.radar_state.leadTwo = self.get_lead(self.tracks, leads_v3[1], model_v_ego, self.lead_prob_filters[1].x, low_speed_override=False, sticky=False)
 
       lead_one = self.radar_state.leadOne
       new_lead_id = lead_one.radarTrackId if (lead_one.present and lead_one.radar) else None
