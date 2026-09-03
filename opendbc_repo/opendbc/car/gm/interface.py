@@ -245,18 +245,21 @@ class CarInterface(CarInterfaceBase):
       ret.startingState = True
       ret.startAccel = 1.0
       ret.autoResumeSng = True
-      # Kans (carrot-wip-0721): without this, Volt falls through to the
-      # generic ASCM/OBD-II branch above (kiBP=[5.,35.], kiV=[2.4,1.5], a
-      # 2-breakpoint schedule tuned for other GM cars, not the Volt - and
-      # its 2-element kiBP/kpBP also silently blocks longcontrol.py's
-      # LongTuningKpV/KiV live-override guard, which requires exactly one
-      # breakpoint each). Single-breakpoint kpV/kiV here restores both a
-      # Volt-appropriate PI tune (P-term present so error gets corrected
-      # early instead of only after the integral winds up - the likely
-      # cause of a 3-4 stage stutter approaching a stop) and the live
-      # LongTuningKpV/KiV sliders actually taking effect again.
+      # Kans: without this, Volt falls through to the generic ASCM/OBD-II
+      # branch above (kiBP=[5.,35.], kiV=[2.4,1.5]) - comma's own current
+      # upstream value for this GM category, confirmed unchanged on
+      # devel-staging, but a 2-breakpoint speed-dependent curve that can't
+      # be represented by carrot's single live-tunable LongTuningKiV slider
+      # (which is why every carrot car interface collapses to a single
+      # breakpoint - that's the point of the live-tuning UI, not a mistake).
+      # kpV stays 0, matching comma's own GM convention (comma never sets a
+      # longitudinal P-term for GM). kiV=.35 is carrot-wip-0721's
+      # road-tested Volt value, kept nonzero per the user: entering the
+      # stopping phase with zero I lagged noticeably later than with this
+      # value. Both are single-breakpoint so LongTuningKpV/KiV can still
+      # retune them live without a code change.
       ret.longitudinalTuning.kpBP = [0.]
-      ret.longitudinalTuning.kpV = [1.0]
+      ret.longitudinalTuning.kpV = [0.]
       ret.longitudinalTuning.kiBP = [0.]
       ret.longitudinalTuning.kiV = [.35]
       ret.longitudinalTuning.kf = 1.0
