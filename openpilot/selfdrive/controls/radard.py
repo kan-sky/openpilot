@@ -46,6 +46,14 @@ STICKY_FAR_DREL = 60.0
 STICKY_MAX_DPATH_FAR = 1.2
 STICKY_PATH_Y_STD_GAIN = 0.5
 
+# Kans (devel): EnableRadarTracks <= this forces vision-only mode (radar
+# tracks cleared and ignored every frame). A real radar CAN fault
+# (rr.errors.canError/radarFault) forces the same mode automatically,
+# regardless of the param. devel's other EnableRadarTracks values (-1/1/2/3)
+# select between SCC-radar/cut-in/corner-radar sources the Volt doesn't
+# have, so tz only implements this one threshold.
+VISION_ONLY_RADAR_TRACK_MODE = -2
+
 
 class KalmanParams:
   def __init__(self, dt: float):
@@ -386,6 +394,7 @@ class RadarD:
     self.params = Params()
     self._param_frame = 0
     self.radar_reaction_factor = 0.2
+    self.enable_radar_tracks = 0
 
     # Kans: debug - suspected cut-in-like deceleration investigation. Edge-triggered
     # on leadOne's selected *radar* track changing identity, so it prints once per
@@ -449,31 +458,41 @@ class RadarD:
     self._param_frame += 1
     if self._param_frame % 100 == 0:
       self.radar_reaction_factor = self.params.get_float("RadarReactionFactor") * 0.01
+      self.enable_radar_tracks = self.params.get_int("EnableRadarTracks")
 
     if sm.recv_frame['carState'] != self.last_v_ego_frame:
       self.v_ego = sm['carState'].vEgo
       self.v_ego_hist.append(self.v_ego)
       self.last_v_ego_frame = sm.recv_frame['carState']
 
-    ar_pts = {pt.trackId: [pt.dRel, pt.yRel, pt.vRel] for pt in rr.points}
+    # Kans (devel): a real radar CAN fault, or EnableRadarTracks forced all
+    # the way down, means we don't trust any radar output this frame - drop
+    # every track and let get_lead() fall through to the vision-only path.
+    radar_faulted = bool(rr.errors.canError or rr.errors.radarFault)
+    vision_only_mode = self.enable_radar_tracks <= VISION_ONLY_RADAR_TRACK_MODE or radar_faulted
 
-    # *** remove missing points from meta data ***
-    for ids in list(self.tracks.keys()):
-      if ids not in ar_pts:
-        self.tracks.pop(ids, None)
+    if vision_only_mode:
+      self.tracks.clear()
+    else:
+      ar_pts = {pt.trackId: [pt.dRel, pt.yRel, pt.vRel] for pt in rr.points}
 
-    # *** compute the tracks ***
-    for ids in ar_pts:
-      rpt = ar_pts[ids]
+      # *** remove missing points from meta data ***
+      for ids in list(self.tracks.keys()):
+        if ids not in ar_pts:
+          self.tracks.pop(ids, None)
 
-      # align v_ego by a fixed time to align it with the radar measurement
-      v_lead = rpt[2] + self.v_ego_hist[0]
+      # *** compute the tracks ***
+      for ids in ar_pts:
+        rpt = ar_pts[ids]
 
-      # create the track if it doesn't exist or it's a new track
-      if ids not in self.tracks:
-        self.tracks[ids] = Track(ids, v_lead, self.kalman_params)
-      self.tracks[ids].update(rpt[0], rpt[1], rpt[2], v_lead, self.radar_reaction_factor,
-                              md=sm['modelV2'] if self.ready else None)
+        # align v_ego by a fixed time to align it with the radar measurement
+        v_lead = rpt[2] + self.v_ego_hist[0]
+
+        # create the track if it doesn't exist or it's a new track
+        if ids not in self.tracks:
+          self.tracks[ids] = Track(ids, v_lead, self.kalman_params)
+        self.tracks[ids].update(rpt[0], rpt[1], rpt[2], v_lead, self.radar_reaction_factor,
+                                md=sm['modelV2'] if self.ready else None)
 
     # *** publish radarState ***
     self.radar_state_valid = sm.all_checks()
