@@ -245,6 +245,21 @@ class CarInterface(CarInterfaceBase):
       ret.startingState = True
       ret.startAccel = 1.0
       ret.autoResumeSng = True
+      # Kans (carrot-wip-0721): without this, Volt falls through to the
+      # generic ASCM/OBD-II branch above (kiBP=[5.,35.], kiV=[2.4,1.5], a
+      # 2-breakpoint schedule tuned for other GM cars, not the Volt - and
+      # its 2-element kiBP/kpBP also silently blocks longcontrol.py's
+      # LongTuningKpV/KiV live-override guard, which requires exactly one
+      # breakpoint each). Single-breakpoint kpV/kiV here restores both a
+      # Volt-appropriate PI tune (P-term present so error gets corrected
+      # early instead of only after the integral winds up - the likely
+      # cause of a 3-4 stage stutter approaching a stop) and the live
+      # LongTuningKpV/KiV sliders actually taking effect again.
+      ret.longitudinalTuning.kpBP = [0.]
+      ret.longitudinalTuning.kpV = [1.0]
+      ret.longitudinalTuning.kiBP = [0.]
+      ret.longitudinalTuning.kiV = [.35]
+      ret.longitudinalTuning.kf = 1.0
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
 
     elif candidate == CAR.GMC_ACADIA:

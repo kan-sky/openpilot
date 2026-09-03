@@ -154,8 +154,17 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"CruiseOnDist", {PERSISTENT, INT, "700"}},
     {"MyDrivingMode", {PERSISTENT, INT, "3"}},
     // Longitudinal tuning
-    {"LongTuningKpV", {PERSISTENT, INT, "0"}},
-    {"LongTuningKiV", {PERSISTENT, INT, "0"}},
+    // Kans: defaults now match the Volt-specific longitudinalTuning restored
+    // in opendbc/car/gm/interface.py (kpV=1.0, kiV=.35) - this live override
+    // unconditionally replaces those values once its guard passes (which it
+    // only does for a single-breakpoint kpBP/kiBP, true again for the Volt),
+    // so the UI default has to agree with interface.py or it silently wins.
+    // A PERSISTENT param already saved as 0 on a device won't pick up this
+    // new default on its own - see project memory for why kpV/kiV defaulted
+    // to 0 for a while (an unrelated hunting bug, root-caused to the old
+    // 1.05 kpV default, not to interface.py's static value).
+    {"LongTuningKpV", {PERSISTENT, INT, "100"}},
+    {"LongTuningKiV", {PERSISTENT, INT, "350"}},
     {"LongTuningKf", {PERSISTENT, INT, "100"}},
     {"LongActuatorDelay", {PERSISTENT, INT, "20"}},
     {"VEgoStopping", {PERSISTENT, INT, "30"}},
