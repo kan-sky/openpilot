@@ -166,7 +166,8 @@ class CarInterface(CarInterfaceBase):
     else:
       ret.transmissionType = TransmissionType.automatic
 
-    ret.longitudinalTuning.kiBP = [5., 35.]
+    ret.longitudinalTuning.kpBP = [0.]
+    ret.longitudinalTuning.kiBP = [0.]
 
     if candidate in (CAMERA_ACC_CAR | SDGM_CAR | ASCM_INT):
       ret.alphaLongitudinalAvailable = candidate not in (ASCM_INT | SDGM_CAR)
@@ -195,7 +196,7 @@ class CarInterface(CarInterfaceBase):
         ret.safetyConfigs[0].safetyParam |= GMSafetyFlags.HW_CAM.value
 
       # Tuning for experimental long
-      ret.longitudinalTuning.kiV = [2.0, 1.5]
+      ret.longitudinalTuning.kiV = [1.7]
 
       if alpha_long:
         ret.pcmCruise = False
@@ -219,7 +220,7 @@ class CarInterface(CarInterfaceBase):
       ret.minSteerSpeed = (6.7 if useEVTables else 7) * CV.MPH_TO_MS
 
       # Tuning
-      ret.longitudinalTuning.kiV = [2.4, 1.5]
+      ret.longitudinalTuning.kiV = [0.0]
 
     # These cars have been put into dashcam only due to both a lack of users and test coverage.
     # These cars likely still work fine. Once a user confirms each car works and a test route is
