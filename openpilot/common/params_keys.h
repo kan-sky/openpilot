@@ -236,4 +236,6 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"LatSuspendAngleDeg", {PERSISTENT, INT, "300"}},
     {"RadarReactionFactor", {PERSISTENT, INT, "20"}},
     {"EnableRadarTracks", {PERSISTENT, INT, "0"}},
+    {"CarrotRadarMode", {PERSISTENT, INT, "0"}},
+    {"CarrotRadarCutInSensitivity", {PERSISTENT, INT, "3"}},
 };

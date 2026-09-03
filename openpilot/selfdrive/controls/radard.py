@@ -12,6 +12,22 @@ from openpilot.common.params import Params
 from openpilot.common.realtime import DT_MDL, Priority, config_realtime_process
 from openpilot.common.swaglog import cloudlog
 from openpilot.common.simple_kalman import KF1D
+from openpilot.selfdrive.controls.lib.cutin_helpers import (
+  FRONT_CUTIN_MIN_CONFIRM_S,
+  associate_cutin_tracks,
+  combine_cutin_future_projection,
+  cutin_confirmation_frames,
+  cutin_entry_rejection_reason,
+  cutin_min_track_age_frames,
+  cutin_tuning_from_sensitivity,
+  effective_cutin_inward_speed,
+  is_cutin_track_discontinuous,
+  is_fast_cutin_entry,
+  is_front_radar_cutin_candidate,
+  new_cutin_position_history,
+  update_cutin_confirmation,
+  update_lane_relative_motion,
+)
 
 
 # Default lead acceleration decay set to 50% at 1s
@@ -53,6 +69,28 @@ STICKY_PATH_Y_STD_GAIN = 0.5
 # select between SCC-radar/cut-in/corner-radar sources the Volt doesn't
 # have, so tz only implements this one threshold.
 VISION_ONLY_RADAR_TRACK_MODE = -2
+
+# Kans (devel): front-radar cut-in detection constants. Corner-radar/SCC
+# variants of these (CORNER_*, SIDE_CORNER_*) are dropped - see
+# lib/cutin_helpers.py's module docstring for why.
+CUTIN_STICKY_FRAMES = int(0.7 / DT_MDL)
+CUTIN_OUTPUT_HOLD_FRAMES = max(1, int(round(0.5 / DT_MDL)))
+CUTIN_OUTPUT_HOLD_DREL_M = 3.0
+CUTIN_OUTPUT_HOLD_YREL_M = 1.0
+CUTIN_OUTPUT_HOLD_VREL_MPS = 2.0
+CUTIN_KEEP_FUTURE_IN_LANE_PROB = 0.12
+CUTIN_KEEP_MAX_DPATH_FUTURE = 1.6
+CUTIN_KEEP_MAX_MOVING_AWAY = 0.3
+CUTIN_PROMOTE_DREL_MARGIN = 1.0
+CUTIN_YAW_COMP_GAIN = 0.6
+CUTIN_YAW_COMP_MAX_DREL = 50.0
+CUTIN_YAW_COMP_MAX_YAW_RATE = 0.35
+CUTIN_YAW_COMP_MAX_YVREL_CORRECTION = 1.5
+CUTIN_YAW_COMP_MAX_VREL_CORRECTION = 0.6
+
+
+def clamp(x: float, lo: float, hi: float) -> float:
+  return float(np.clip(x, lo, hi))
 
 
 class KalmanParams:
@@ -106,16 +144,53 @@ class Track:
     self.sticky_dPath = 0.0
     self.sticky_path_y_std = 0.0
 
+    # Kans (devel): front-radar cut-in state. dRel_future/yRel_future are the
+    # yaw-compensated position projected radar_lat_factor seconds ahead;
+    # dPath_future/in_lane_prob_future are d_path() applied to that
+    # projection. dPath_rate/dPath_inward_speed are the lane-relative-motion
+    # estimate computed only while this track is an active cut-in candidate.
+    self.cut_in_count = 0
+    self.cutin_cnt = 0
+    self.cut_in_start_abs_dpath = 0.0
+    self.dRel_future = 0.0
+    self.yRel_future = 0.0
+    self.dPath_future = 0.0
+    self.in_lane_prob_future = 0.0
+    self.dPath_rate = 0.0
+    self.dPath_inward_speed = 0.0
+    self._cutin_position_history = new_cutin_position_history(DT_MDL)
+    self.cutin_radar_inward_speed = 0.0
+
     # Kans: vlead_for_matching() noise-suppression state (devel)
     self._vLead_last = 0.0
     self._vLead_filt = 0.0
     self._vLead_filt_init = False
 
+  def inherit_cutin_state(self, source: 'Track') -> None:
+    # Kans (devel): when associate_cutin_tracks() detects that this frame's
+    # track at a new radar ID is really the same physical object as a track
+    # from last frame (GM reassigns sequential IDs, so a momentary ID churn
+    # would otherwise reset cut-in confirmation progress to zero), copy the
+    # old track's cut-in state onto the new one.
+    self.dRel = source.dRel
+    self.yRel = source.yRel
+    self.vRel = source.vRel
+    self.vLead = source.vLead
+    self.cnt = source.cnt
+    self.cut_in_count = source.cut_in_count
+    self.cutin_cnt = source.cutin_cnt
+    self.cut_in_start_abs_dpath = source.cut_in_start_abs_dpath
+    self._cutin_position_history.clear()
+    self._cutin_position_history.extend(source._cutin_position_history)
+    self.cutin_radar_inward_speed = source.cutin_radar_inward_speed
+
   def update(self, d_rel: float, y_rel: float, v_rel: float, v_lead: float, radar_reaction_factor: float = 1.0,
-             md=None):
+             md=None, radar_lat_factor: float = 0.0, yaw_rate: float = 0.0, is_cutin_track: bool = False,
+             v_ego: float = 0.0):
     prev_dRel = self.dRel
     prev_yRel = self.yRel
     prev_vLead = self.vLead
+    was_measured = self.cnt > 0
 
     # relative values, copy
     self.dRel = d_rel   # LONG_DIST
@@ -125,21 +200,70 @@ class Track:
 
     # Kans: reset sticky-selection state on a large frame-to-frame jump, so a
     # track-ID reuse/glitch can't be mistaken for a continuously-tracked lead.
-    track_discontinuous = self.cnt > 0 and (
-      abs(self.dRel - prev_dRel) > 5.0 or
-      abs(self.yRel - prev_yRel) > 2.0 or
-      abs(self.vLead - prev_vLead) > 7.0
+    # Kans (devel): while this track is an active cut-in candidate, use the
+    # tighter cutin-specific discontinuity thresholds instead - precision
+    # matters more there since cut-in confirmation tracks lateral motion.
+    track_discontinuous = (
+      is_cutin_track_discontinuous(was_measured, prev_dRel, prev_yRel, prev_vLead, self.dRel, self.yRel, self.vLead)
+      if is_cutin_track else
+      was_measured and (
+        abs(self.dRel - prev_dRel) > 5.0 or
+        abs(self.yRel - prev_yRel) > 2.0 or
+        abs(self.vLead - prev_vLead) > 7.0
+      )
     )
     if track_discontinuous:
       self.cnt = 0
       self.selected_count = 0
       self.is_stopped_car_count = 0
+      self.cut_in_count = 0
+      self.cutin_cnt = 0
+      self.cut_in_start_abs_dpath = 0.0
+      self._cutin_position_history.clear()
       self._vLead_filt_init = False
+
+    if is_cutin_track:
+      self.cutin_cnt += 1
+    else:
+      self.cut_in_count = 0
+      self.cutin_cnt = 0
+      self.cut_in_start_abs_dpath = 0.0
+
+    # Kans (devel): yaw-compensated future position, used by the lane-
+    # relative-motion cut-in projection below.
+    v_rel_future, yv_rel_future = self.yaw_compensated_velocities(yaw_rate)
+    self.dRel_future = self.dRel + v_rel_future * radar_lat_factor
+    self.yRel_future = self.yRel + yv_rel_future * radar_lat_factor
 
     # Kans (carrot-wip): refresh dPath/in_lane_prob for matching, and drop
     # sticky status if a sticky track has drifted off the ego path.
     if md is not None:
       self.d_path(md)
+
+      # Kans (devel): while an active cut-in candidate, estimate lane-
+      # relative rate of motion and project it forward to decide whether
+      # this track is moving into our lane.
+      if is_cutin_track and radar_lat_factor > 0.0:
+        self.cutin_radar_inward_speed = max(0.0, -math.copysign(1.0, self.dPath) * yv_rel_future)
+        self.dPath_rate, self.dPath_inward_speed = update_lane_relative_motion(
+          self._cutin_position_history, self.dRel, self.yRel,
+          md.laneLines[1].x, md.laneLines[1].y, md.laneLines[2].y,
+          True, track_discontinuous, DT_MDL,
+        )
+        self.dPath_future, self.in_lane_prob_future = combine_cutin_future_projection(
+          self.dPath, self.dPath_rate, radar_lat_factor, self.lane_half_width,
+          self.dPath_future, self.in_lane_prob_future, self.cutin_radar_inward_speed,
+        )
+        self.dPath_inward_speed = effective_cutin_inward_speed(
+          self.dRel, v_ego=v_ego, temporal_inward_speed=self.dPath_inward_speed,
+          d_path=self.dPath, projected_d_path=self.dPath_future, horizon_s=radar_lat_factor,
+        )
+      else:
+        self._cutin_position_history.clear()
+        self.dPath_rate = 0.0
+        self.dPath_inward_speed = 0.0
+        self.cutin_radar_inward_speed = 0.0
+
       if self.selected_count > 0:
         self.sticky_dPath, self.sticky_path_y_std = self.path_d_path(md)
         if abs(self.sticky_dPath) > self.sticky_dpath_limit():
@@ -168,21 +292,44 @@ class Track:
   def d_path(self, md):
     # Kans (carrot-wip): dPath/in_lane_prob against the lane lines model
     # gives us directly (md.laneLines), independent of lane_planner2.py.
+    # Kans (devel): also computes the same against the yaw-compensated
+    # future position (dRel_future/yRel_future) for cut-in projection.
     if len(md.laneLines) < 3 or len(md.laneLines[1].x) < 2:
       return
     lane_xs = md.laneLines[1].x
     left_ys = md.laneLines[1].y
     right_ys = md.laneLines[2].y
 
-    left_lane_y = np.interp(self.dRel, lane_xs, left_ys)
-    right_lane_y = np.interp(self.dRel, lane_xs, right_ys)
-    center_y = (left_lane_y + right_lane_y) / 2.0
-    lane_half_width = max(0.1, abs(right_lane_y - left_lane_y) / 2.0)
-    dist_from_center = self.yRel + center_y
+    def d_path_interp(d_rel, y_rel):
+      left_lane_y = np.interp(d_rel, lane_xs, left_ys)
+      right_lane_y = np.interp(d_rel, lane_xs, right_ys)
+      center_y = (left_lane_y + right_lane_y) / 2.0
+      lane_half_width = max(0.1, abs(right_lane_y - left_lane_y) / 2.0)
+      dist_from_center = y_rel + center_y
+      in_lane_prob = max(0.0, 1.0 - (abs(dist_from_center) / lane_half_width))
+      return dist_from_center, in_lane_prob, lane_half_width
 
-    self.dPath = float(dist_from_center)
-    self.in_lane_prob = float(max(0.0, 1.0 - (abs(dist_from_center) / lane_half_width)))
-    self.lane_half_width = float(lane_half_width)
+    self.dPath, self.in_lane_prob, self.lane_half_width = d_path_interp(self.dRel, self.yRel)
+    self.dPath_future, self.in_lane_prob_future, _ = d_path_interp(self.dRel_future, self.yRel_future)
+
+  def yaw_compensated_velocities(self, yaw_rate: float) -> tuple[float, float]:
+    # Kans (devel): a curved ego path creates apparent lateral velocity in
+    # the ego frame (yaw_rate * dRel). Remove it before cut-in projection so
+    # adjacent-lane objects on curves aren't classified as moving into our
+    # lane. GM never reports a per-target yaw-relative velocity (yvRel is
+    # always 0 from opendbc/car/gm/radar_interface.py), so 0.0 stands in for
+    # devel's raw yvLead field here.
+    yaw_rate = clamp(float(yaw_rate), -CUTIN_YAW_COMP_MAX_YAW_RATE, CUTIN_YAW_COMP_MAX_YAW_RATE)
+    d_rel_for_comp = clamp(self.dRel, 0.0, CUTIN_YAW_COMP_MAX_DREL)
+    yv_rel_corr = clamp(
+      -yaw_rate * d_rel_for_comp * CUTIN_YAW_COMP_GAIN,
+      -CUTIN_YAW_COMP_MAX_YVREL_CORRECTION, CUTIN_YAW_COMP_MAX_YVREL_CORRECTION,
+    )
+    v_rel_corr = clamp(
+      yaw_rate * self.yRel * CUTIN_YAW_COMP_GAIN,
+      -CUTIN_YAW_COMP_MAX_VREL_CORRECTION, CUTIN_YAW_COMP_MAX_VREL_CORRECTION,
+    )
+    return float(self.vRel + v_rel_corr), float(yv_rel_corr)
 
   def path_d_path(self, md) -> tuple[float, float]:
     # Kans (carrot-wip): dPath against the ego's own planned path
@@ -396,10 +543,35 @@ class RadarD:
     self.radar_reaction_factor = 0.2
     self.enable_radar_tracks = 0
 
+    # Kans (devel): front-radar cut-in detection, ported without the
+    # corner-radar/SCC-fallback machinery devel also has (Volt has neither).
+    # Gated on CarrotRadarMode (default off - opt-in) instead of devel's
+    # car_brand=="hyundai" check; CarrotRadarCutInSensitivity (0-5, UI) gives
+    # a live-adjustable dial instead of devel's fixed sensitivity=50.
+    self.front_cutin_enabled = False
+    self.lane_line_available = False
+    self.radar_lat_factor = 0.0
+    self.cutin_yaw_rate = 0.0
+    self.cutin_yaw_rate_filter = FirstOrderFilter(0.0, 0.20, DT_MDL)
+    self.cutin_sensitivity = 50.0
+    self.cutin_tuning = cutin_tuning_from_sensitivity(self.cutin_sensitivity)
+    self.cutin_confirm_frames = max(1, int(round(self.cutin_tuning["confirm_s"] / DT_MDL)))
+    self.front_cutin_confirm_frames = max(self.cutin_confirm_frames, int(round(FRONT_CUTIN_MIN_CONFIRM_S / DT_MDL)))
+    self.cutin_min_track_age = max(1, int(round(self.cutin_tuning["min_track_age_s"] / DT_MDL)))
+    self.cutin_enter_min_x = self.cutin_tuning["enter_min_x"]
+    self.cutin_enter_max_x = self.cutin_tuning["enter_max_x"]
+    self.cutin_output_hold_count = 0
+    self.cutin_output_hold_reference: tuple[float, float, float] | None = None
+
     # Kans: debug - suspected cut-in-like deceleration investigation. Edge-triggered
     # on leadOne's selected *radar* track changing identity, so it prints once per
     # switch instead of every frame.
     self._debug_prev_lead_id: int | None = None
+
+    # Kans: debug - front-radar cut-in detection verification. Edge-triggered
+    # on a track newly reaching confirmed status, so it prints once per
+    # cut-in event instead of every frame it stays confirmed.
+    self._debug_prev_cutin_ids: set[int] = set()
 
   def get_sticky_track(self, tracks: dict[int, Track]) -> Track | None:
     # Kans (devel): keep reporting a previously-selected track as the lead
@@ -452,6 +624,155 @@ class RadarD:
 
     return lead_dict
 
+  # ---- front-radar cut-in detection (Kans, devel - corner/SCC pieces dropped) ----
+
+  def _is_front_cutin_track(self, t: Track) -> bool:
+    return is_front_radar_cutin_candidate(t.identifier, t.dRel, t.yRel)
+
+  def _cutin_yaw_rate_from_state(self, sm: messaging.SubMaster) -> float:
+    # Kans: devel prefers sm['livePose'].angularVelocityDevice.z when valid,
+    # falling back to modelV2.orientationRate.z[0]. tz doesn't subscribe to
+    # livePose here, so this always uses the modelV2 fallback - devel's own
+    # fallback path, just without the optional upgrade.
+    yaw_rate = 0.0
+    if len(sm['modelV2'].orientationRate.z):
+      yaw_rate = float(sm['modelV2'].orientationRate.z[0])
+    yaw_rate = clamp(yaw_rate, -CUTIN_YAW_COMP_MAX_YAW_RATE, CUTIN_YAW_COMP_MAX_YAW_RATE)
+    return float(self.cutin_yaw_rate_filter.update(yaw_rate))
+
+  def _track_is_closer_than_lead_one(self, t: Track) -> bool:
+    lead_one = self.radar_state.leadOne
+    if not lead_one.present:
+      return True
+    return t.dRel + CUTIN_PROMOTE_DREL_MARGIN < lead_one.dRel
+
+  def _cutin_is_closer_or_matches_lead_one(self, t: Track) -> bool:
+    if self._track_is_closer_than_lead_one(t):
+      return True
+    lead_one = self.radar_state.leadOne
+    return bool(lead_one.present and lead_one.radar and int(lead_one.radarTrackId) == t.identifier)
+
+  def _is_cutin_enter_candidate(self, t: Track) -> bool:
+    min_track_age = cutin_min_track_age_frames(self.cutin_min_track_age, t.dRel, t.dPath_inward_speed, self.v_ego)
+    reason = cutin_entry_rejection_reason(
+      enabled=self.front_cutin_enabled,
+      lane_line_available=self.lane_line_available,
+      is_cutin_candidate=self._is_front_cutin_track(t),
+      closer_or_matching=self._cutin_is_closer_or_matches_lead_one(t),
+      track_count=t.cutin_cnt,
+      min_track_age=min_track_age,
+      d_rel=t.dRel,
+      v_lead=t.vLead,
+      d_path=t.dPath,
+      d_path_future=t.dPath_future,
+      in_lane_prob=t.in_lane_prob,
+      in_lane_prob_future=t.in_lane_prob_future,
+      inward_speed=t.dPath_inward_speed,
+      tuning=self.cutin_tuning,
+      fast_lane_entry=is_fast_cutin_entry(
+        t.dRel, self.v_ego, t.dPath, t.lane_half_width, t.dPath_inward_speed,
+        t.cutin_radar_inward_speed, v_rel=t.vRel,
+      ),
+      radar_inward_speed=t.cutin_radar_inward_speed,
+    )
+    return reason is None
+
+  def _is_cutin_keep_candidate(self, t: Track) -> bool:
+    if not self.front_cutin_enabled or not self._is_front_cutin_track(t):
+      return False
+    if not self._cutin_is_closer_or_matches_lead_one(t):
+      return False
+    if not (0.8 < t.dRel < 55.0 and t.vLead > 2.0):
+      return False
+    moving_away = abs(t.dPath_future) - abs(t.dPath)
+    if moving_away > CUTIN_KEEP_MAX_MOVING_AWAY:
+      return False
+    return t.in_lane_prob_future > CUTIN_KEEP_FUTURE_IN_LANE_PROB or abs(t.dPath_future) < CUTIN_KEEP_MAX_DPATH_FUTURE
+
+  def _update_cutin_sticky(self, t: Track) -> bool:
+    entering = self._is_cutin_enter_candidate(t)
+    keeping = t.cut_in_count > 0 and self._is_cutin_keep_candidate(t)
+    if keeping:
+      entering = True
+    confirm_frames = cutin_confirmation_frames(self.front_cutin_confirm_frames, t.dRel, t.dPath_inward_speed, self.v_ego)
+    t.cut_in_count, t.cut_in_start_abs_dpath = update_cutin_confirmation(
+      t.cut_in_count, t.cut_in_start_abs_dpath, t.dPath, t.dRel, entering, keeping,
+      confirm_frames, CUTIN_STICKY_FRAMES, self.cutin_tuning["enter_min_progress"], self.v_ego,
+    )
+    return t.cut_in_count >= confirm_frames
+
+  def _apply_cutin_output_hold(self, cutin_list: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    # Kans (devel): once a cut-in lead disappears (e.g. a brief miss), keep
+    # publishing it for up to CUTIN_OUTPUT_HOLD_FRAMES more frames by
+    # re-matching any still-active cut-in track near its last known position,
+    # so a momentary detection gap doesn't yank leadTwo back and forth.
+    if cutin_list:
+      nearest = min(cutin_list, key=lambda lead: float(lead['dRel']))
+      self.cutin_output_hold_reference = (float(nearest['dRel']), float(nearest['yRel']), float(nearest['vRel']))
+      self.cutin_output_hold_count = CUTIN_OUTPUT_HOLD_FRAMES
+      return cutin_list
+
+    reference = self.cutin_output_hold_reference
+    if self.cutin_output_hold_count <= 0 or reference is None:
+      self.cutin_output_hold_reference = None
+      return cutin_list
+
+    d_rel, y_rel, v_rel = reference
+    matches = [
+      t for t in self.tracks.values()
+      if self._is_front_cutin_track(t)
+      and abs(t.dRel - d_rel) <= CUTIN_OUTPUT_HOLD_DREL_M
+      and abs(t.yRel - y_rel) <= CUTIN_OUTPUT_HOLD_YREL_M
+      and abs(t.vRel - v_rel) <= CUTIN_OUTPUT_HOLD_VREL_MPS
+    ]
+    if not matches:
+      self.cutin_output_hold_count = 0
+      self.cutin_output_hold_reference = None
+      return cutin_list
+
+    track = min(
+      matches,
+      key=lambda c: abs(c.dRel - d_rel) + abs(c.yRel - y_rel) + 0.5 * abs(c.vRel - v_rel),
+    )
+    lead = track.get_RadarState(0)
+    lead['modelProb'] = 0.03
+    self.cutin_output_hold_reference = (track.dRel, track.yRel, track.vRel)
+    self.cutin_output_hold_count -= 1
+    if self.cutin_output_hold_count == 0:
+      self.cutin_output_hold_reference = None
+    return [lead]
+
+  def compute_cutin_list(self) -> list[dict[str, Any]]:
+    # Kans: tz has no compute_leads()-style orchestrator (that's a much
+    # bigger devel structure this fork doesn't have), so this is a new,
+    # narrower entry point: advance every track's cut-in confirmation state
+    # once per frame (this has to run every frame regardless of whether a
+    # track ends up confirmed, since it's a stateful counter) and collect the
+    # ones that are currently confirmed.
+    if not self.front_cutin_enabled:
+      self.cutin_output_hold_reference = None
+      self.cutin_output_hold_count = 0
+      self._debug_prev_cutin_ids = set()
+      return []
+    cutin_list = []
+    confirmed_ids = set()
+    for t in self.tracks.values():
+      if self._update_cutin_sticky(t):
+        lead = t.get_RadarState(0)
+        lead['modelProb'] = 0.03
+        cutin_list.append(lead)
+        confirmed_ids.add(t.identifier)
+
+    new_ids = confirmed_ids - self._debug_prev_cutin_ids
+    for t in self.tracks.values():
+      if t.identifier in new_ids:
+        print(f"[radard cutin] confirmed trackId={t.identifier} dRel={t.dRel:.1f} yRel={t.yRel:.1f} "
+              f"vLead={t.vLead:.1f} dPath={t.dPath:.2f} inwardSpeed={t.dPath_inward_speed:.2f} "
+              f"vEgo={self.v_ego:.1f} sensitivity={self.cutin_sensitivity:.0f}", flush=True)
+    self._debug_prev_cutin_ids = confirmed_ids
+
+    return self._apply_cutin_output_hold(cutin_list)
+
   def update(self, sm: messaging.SubMaster, rr: car.RadarData):
     self.ready = sm.seen['modelV2']
 
@@ -459,11 +780,25 @@ class RadarD:
     if self._param_frame % 100 == 0:
       self.radar_reaction_factor = self.params.get_float("RadarReactionFactor") * 0.01
       self.enable_radar_tracks = self.params.get_int("EnableRadarTracks")
+      self.front_cutin_enabled = self.params.get_int("CarrotRadarMode") > 0
+      cutin_sensitivity_ui = self.params.get_int("CarrotRadarCutInSensitivity")
+      self.cutin_sensitivity = float(np.interp(cutin_sensitivity_ui, [0, 1, 2, 3, 4, 5], [0, 15, 30, 50, 70, 90]))
+      self.cutin_tuning = cutin_tuning_from_sensitivity(self.cutin_sensitivity)
+      self.cutin_confirm_frames = max(1, int(round(self.cutin_tuning["confirm_s"] / DT_MDL)))
+      self.front_cutin_confirm_frames = max(self.cutin_confirm_frames, int(round(FRONT_CUTIN_MIN_CONFIRM_S / DT_MDL)))
+      self.cutin_min_track_age = max(1, int(round(self.cutin_tuning["min_track_age_s"] / DT_MDL)))
+      self.cutin_enter_min_x = self.cutin_tuning["enter_min_x"]
+      self.cutin_enter_max_x = self.cutin_tuning["enter_max_x"]
 
     if sm.recv_frame['carState'] != self.last_v_ego_frame:
       self.v_ego = sm['carState'].vEgo
       self.v_ego_hist.append(self.v_ego)
       self.last_v_ego_frame = sm.recv_frame['carState']
+
+    md = sm['modelV2']
+    self.lane_line_available = len(md.laneLineProbs) > 2 and md.laneLineProbs[1] > 0.5 and md.laneLineProbs[2] > 0.5
+    self.radar_lat_factor = self.cutin_tuning["horizon_s"] if self.front_cutin_enabled else 0.0
+    self.cutin_yaw_rate = self._cutin_yaw_rate_from_state(sm) if self.front_cutin_enabled else 0.0
 
     # Kans (devel): a real radar CAN fault, or EnableRadarTracks forced all
     # the way down, means we don't trust any radar output this frame - drop
@@ -475,6 +810,23 @@ class RadarD:
       self.tracks.clear()
     else:
       ar_pts = {pt.trackId: [pt.dRel, pt.yRel, pt.vRel] for pt in rr.points}
+
+      # Kans (devel): snapshot which currently-tracked objects are active
+      # cut-in candidates before this frame's pruning/creation, then
+      # associate them with this frame's candidate points by position so a
+      # radar-ID reassignment doesn't reset cut-in confirmation progress.
+      previous_cutin_tracks: dict[int, Track] = {}
+      cutin_associations: dict[int, int] = {}
+      if self.front_cutin_enabled:
+        previous_cutin_tracks = {
+          tid: t for tid, t in self.tracks.items() if self._is_front_cutin_track(t)
+        }
+        previous_cutin_positions = {tid: (t.dRel, t.yRel, t.vRel) for tid, t in previous_cutin_tracks.items()}
+        current_cutin_points = {
+          tid: (float(rpt[0]), float(rpt[1]), float(rpt[2]))
+          for tid, rpt in ar_pts.items() if is_front_radar_cutin_candidate(tid, rpt[0], rpt[1])
+        }
+        cutin_associations = associate_cutin_tracks(previous_cutin_positions, current_cutin_points)
 
       # *** remove missing points from meta data ***
       for ids in list(self.tracks.keys()):
@@ -491,8 +843,15 @@ class RadarD:
         # create the track if it doesn't exist or it's a new track
         if ids not in self.tracks:
           self.tracks[ids] = Track(ids, v_lead, self.kalman_params)
+          source_id = cutin_associations.get(ids)
+          if source_id is not None and source_id != ids and source_id in previous_cutin_tracks:
+            self.tracks[ids].inherit_cutin_state(previous_cutin_tracks[source_id])
+
+        is_cutin_track = self.front_cutin_enabled and is_front_radar_cutin_candidate(ids, rpt[0], rpt[1])
         self.tracks[ids].update(rpt[0], rpt[1], rpt[2], v_lead, self.radar_reaction_factor,
-                                md=sm['modelV2'] if self.ready else None)
+                                md=md if self.ready else None, radar_lat_factor=self.radar_lat_factor,
+                                yaw_rate=self.cutin_yaw_rate if is_cutin_track else 0.0,
+                                is_cutin_track=is_cutin_track, v_ego=self.v_ego)
 
     # *** publish radarState ***
     self.radar_state_valid = sm.all_checks()
@@ -516,6 +875,22 @@ class RadarD:
 
       self.radar_state.leadOne = self.get_lead(self.tracks, leads_v3[0], model_v_ego, self.lead_prob_filters[0].x, low_speed_override=True, sticky=True)
       self.radar_state.leadTwo = self.get_lead(self.tracks, leads_v3[1], model_v_ego, self.lead_prob_filters[1].x, low_speed_override=False, sticky=False)
+
+      # Kans (devel): confirmed cut-in candidates are published in full via
+      # leadsCutIn, and the nearest eligible one (not already leadOne) takes
+      # priority over the plain vision-matched leadTwo above - this is how a
+      # detected cut-in actually reaches longitudinal control.
+      cutin_list = self.compute_cutin_list()
+      self.radar_state.leadsCutIn = cutin_list
+      if self.front_cutin_enabled and cutin_list:
+        lead_one = self.radar_state.leadOne
+        eligible = [
+          c for c in cutin_list
+          if self.cutin_enter_min_x < c['dRel'] < self.cutin_enter_max_x and c['vLead'] > 4.0
+          and not (lead_one.present and lead_one.radar and int(lead_one.radarTrackId) == int(c['radarTrackId']))
+        ]
+        if eligible:
+          self.radar_state.leadTwo = min(eligible, key=lambda c: c['dRel'])
 
       lead_one = self.radar_state.leadOne
       new_lead_id = lead_one.radarTrackId if (lead_one.present and lead_one.radar) else None
