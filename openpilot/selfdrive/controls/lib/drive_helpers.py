@@ -68,7 +68,15 @@ def get_accel_from_plan(speeds, accels, t_idxs, action_t=DT_MDL, vEgoStopping=0.
     a_target = 2 * (v_target - v_target_now) / action_t - a_target_now
     v_target_1sec = np.interp(action_t + 1.0, t_idxs, speeds)
 
-    should_stop = (v_target < vEgoStopping and v_target_1sec < vEgoStopping)
+    # Kans: comma stock's should_stop() (see below, used only in modeld's e2e path)
+    # gates on actual v_ego + a_target<0.1 - reactive to real state. This 'acc'-mode
+    # path instead only checked the MPC's own *predicted* v_target/v_target_1sec,
+    # with no accel condition - a comfort-tapered MPC solution can predict a
+    # near-zero speed well before the car is actually close to the target distance,
+    # locking into LongCtrlState.stopping (which abandons distance tracking) early
+    # and stopping short of the intended follow/stop-line distance. Add comma
+    # stock's a_target<0.1 as an extra condition to narrow that gap.
+    should_stop = (v_target < vEgoStopping and v_target_1sec < vEgoStopping and a_target < 0.1)
 
   else:
     v_target_now = 0.0
