@@ -521,7 +521,9 @@ class CarrotMan:
     return buffer
 
   def carrot_man_thread(self):
-    # Legacy UDP input (7706). Disabled by default so carrotNavi cereal remains authoritative.
+    # Legacy JSON UDP input (7706): nRoadLimitSpeed/nSdiType/nSdiDist/nTBTDist/nTBTTurnType
+    # from a nav-bridge app (e.g. KakaoNavi bridges) -> carrot_serv.update(). Started as a
+    # daemon thread in main(); harmless no-op for users who don't run a bridge app.
     while self.is_running:
       try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
@@ -1297,6 +1299,12 @@ def main():
 
   # tizi: current TMAP protocol-v2 server runs in the separate carrot_navi process.
   # Keep devel legacy KISA/TCP/UDP handlers available, but do not start duplicate Navi HTTP/aiohttp services here.
+  # Kans: carrot_man_thread (7706 JSON UDP: nRoadLimitSpeed/nSdiType/nSdiDist/nTBTDist/
+  # nTBTTurnType) feeds carrot_serv.update(), the same state consumed by the existing
+  # camera/nav speed-control engine (xSpdType/xSpdDist/xDistToTurn) - it just was never
+  # started here. devel runs it as the blocking main-loop call; tz's main loop is
+  # already carrot_man.run(), so start this as a daemon thread like the others instead.
+  threading.Thread(target=carrot_man.carrot_man_thread, daemon=True).start()
   threading.Thread(target=carrot_man.kisa_app_thread, daemon=True).start()
   threading.Thread(target=carrot_man.carrot_navi_thread, daemon=True).start()
 
