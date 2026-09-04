@@ -244,7 +244,11 @@ class CarInterface(CarInterfaceBase):
       ret.vEgoStarting = 0.3 # 출발상태로 판단하는 속도(값이 클수록 더 높은 속도까지 내주어서 출발가속이 강해질 수 있음)
       ret.stopAccel = -2.0
       ret.startingState = True
-      ret.startAccel = 1.0
+      # Kans: bumped from 1.0 back up toward the user's previously road-tested
+      # value (up to 1.9) for a firmer launch pulse out of LongCtrlState.starting.
+      # Still clipped by accel_limits downstream in longcontrol.py, so this is
+      # a ceiling, not a guaranteed output.
+      ret.startAccel = 1.9
       ret.autoResumeSng = True
       # Kans: without this, Volt falls through to the generic ASCM/OBD-II
       # branch above (kiV=[0.0] as of the kiBP/kiV single-breakpoint
