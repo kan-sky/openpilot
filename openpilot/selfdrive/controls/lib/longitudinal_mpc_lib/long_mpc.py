@@ -440,7 +440,17 @@ class LongitudinalMpc:
       x_obstacles = np.column_stack([lead_0_obstacle, lead_1_obstacle, cruise_obstacle, x2])
       binding_idx = int(np.argmin(x_obstacles[0]))
       self.source = SOURCES[binding_idx]
+      # Kans: cruise_obstacle[0] structurally floors at stop_distance as v_ego->0
+      # (its cumulative-distance term collapses to 0 at t=0 since v_cruise_clipped[0]
+      # is clamped to v_ego itself, leaving only + stop_distance) - unlike
+      # lead0/lead1/trafficstop, which floor near 0. Without normalizing this out,
+      # a should_stop distance gate can never pass while 'cruise' is binding (the
+      # car sits fully stopped in LongCtrlState.pid forever, e.g. when a lead is
+      # just beyond stop_distance and cruise wins argmin at the tail of the
+      # approach). Subtract that floor so all sources read "how much closer to go".
       self.final_obstacle_distance = float(x_obstacles[0][binding_idx])
+      if binding_idx == 2:  # 'cruise'
+        self.final_obstacle_distance -= stop_distance
 
       # Kans: debug - ATC/cruise vs lead0 binding-source investigation. A close lead
       # (<20m) that loses argmin to 'cruise' means the MPC re-targets the ATC/cruise
