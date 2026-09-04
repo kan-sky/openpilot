@@ -411,52 +411,13 @@ class LongitudinalMpc:
     else:
       v_cruise, stop_x, mode = carrot.v_cruise, carrot.stop_dist, carrot.mode
 
-    lead_d = float(lead_xv_0[0, 0])
-    lead_v = float(lead_xv_0[0, 1])
-
-    if not hasattr(self, "stopped_lead_count"):
-      self.stopped_lead_count = 0
-    if not hasattr(self, "stopped_lead_active"):
-      self.stopped_lead_active = False
-
-    stopped_lead_cond = (radarstate.leadOne.present and 4.0 < lead_d < 30.0 and lead_v < 1.5)
-
-    if stopped_lead_cond:
-      self.stopped_lead_count = min(self.stopped_lead_count + 1, 20)
-    else:
-      self.stopped_lead_count = max(self.stopped_lead_count - 1, 0)
-
-    self.stopped_lead_active = self.stopped_lead_count >= 3
-    # Kans: 앞차가 출발하면 정지차 상태 즉시 해제
-    # 정지 접근 중 오검출 방지를 위해 내 차가 거의 정지한 상태에서만 해제
-    if self.stopped_lead_active and radarstate.leadOne.present and v_ego < 0.5:
-      if lead_v > 0.5 or radarstate.leadOne.vRel > 0.2:
-        self.stopped_lead_count = 0
-        self.stopped_lead_active = False
-
-    # 정지차로 판단되면 lead speed만 0으로 간주하고,
-    # 실제 정차 간격은 StopDistanceCarrot(stop_distance)가 결정하도록 함
-    lead_v_for_follow = np.clip(lead_v_0, 0.0, 0.3) if self.stopped_lead_active else lead_v_0
-
-    desired_distance = desired_follow_distance(v_ego, lead_v_for_follow, comfort_brake, stop_distance, t_follow)
+    desired_distance = desired_follow_distance(v_ego, lead_v_0, comfort_brake, stop_distance, t_follow)
     t_follow = carrot.dynamic_t_follow(t_follow, radarstate.leadOne, desired_distance, self.prev_a)
 
-    lead_0_obstacle = lead_xv_0[:, 0] + get_stopped_equivalence_factor(
-      np.zeros_like(lead_xv_0[:, 1]) if self.stopped_lead_active else lead_xv_0[:, 1])
+    lead_0_obstacle = lead_xv_0[:, 0] + get_stopped_equivalence_factor(lead_xv_0[:, 1])
     lead_1_obstacle = lead_xv_1[:, 0] + get_stopped_equivalence_factor(lead_xv_1[:, 1])
 
-    # Kans: 정지차로 판단되면 실제 정지거리가 약간 더 확보되도록, obstacle을 0.5m 가까운 쪽으로 당김
-    if self.stopped_lead_active and stop_distance > 0.0:
-      lead_0_obstacle = np.maximum(0.0, lead_0_obstacle - 0.5)
-
-    stopped_lead_1_active = (
-      radarstate.leadTwo.present and 4.0 < float(lead_xv_1[0, 0]) < 30.0 and
-      float(lead_xv_1[0, 1]) < 1.5)
-
-    if stopped_lead_1_active and stop_distance > 0.0:
-      lead_1_obstacle = np.maximum(0.0, lead_1_obstacle - 0.5)
-
-    self.desired_distance = desired_follow_distance(v_ego, lead_v_for_follow, comfort_brake, stop_distance, t_follow)
+    self.desired_distance = desired_distance
     self.params[:, 0] = ACCEL_MIN if not reset_state else a_ego
     self.params[:, 1] = max(0.0, self.max_a if not reset_state else a_ego)
 
@@ -494,7 +455,7 @@ class LongitudinalMpc:
               f"vCruise={v_cruise:.2f} leadDRel={radarstate.leadOne.dRel:.1f} leadVRel={radarstate.leadOne.vRel:.2f} "
               f"lead0Obstacle0={lead_0_obstacle[0]:.2f} cruiseObstacle0={cruise_obstacle[0]:.2f} "
               f"tFollow={t_follow:.2f} comfortBrake={comfort_brake:.2f} desiredDistance={self.desired_distance:.2f} "
-              f"stopDistance={stop_distance:.2f} stoppedLeadActive={self.stopped_lead_active}", flush=True)
+              f"stopDistance={stop_distance:.2f}", flush=True)
       self._debug_prev_mpc_source = self.source
 
       # Kans: debug - stop-distance investigation (7m too far report). Edge-triggered:

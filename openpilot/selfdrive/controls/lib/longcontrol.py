@@ -60,8 +60,13 @@ class LongControl:
   def __init__(self, CP):
     self.CP = CP
     self.long_control_state = LongCtrlState.off
-    self.pid = PIDController((CP.longitudinalTuning.kpBP, CP.longitudinalTuning.kpV),
-                             (CP.longitudinalTuning.kiBP, CP.longitudinalTuning.kiV),
+    # Kans: kp is always 0 for this fork (matches comma stock's GM convention -
+    # comma never sets a longitudinal P-term for GM), so pass it as a plain float
+    # like comma stock does, instead of the CP.longitudinalTuning.kpBP/kpV
+    # BP-interpolated pair (still resolves to 0.0 either way - the live
+    # LongTuningKpV override below reads CP.longitudinalTuning.kpBP directly and
+    # is unaffected by this).
+    self.pid = PIDController(0.0, (CP.longitudinalTuning.kiBP, CP.longitudinalTuning.kiV),
                              k_f=CP.longitudinalTuning.kf, rate=1 / DT_CTRL)
     self.last_output_accel = 0.0
 
@@ -71,15 +76,10 @@ class LongControl:
     self.stopping_accel = 0.0
     self.j_lead = 0.0
 
-    self.use_accel_pid = False
-    if CP.brand == "toyota":
-      self.use_accel_pid = True
-
   def reset(self):
     self.pid.reset()
 
   def update(self, active, CS, long_plan, accel_limits, t_since_plan):
-    soft_hold_active = CS.softHoldActive > 0
     a_target_ff = long_plan.aTarget
     v_target_now = long_plan.vTargetNow
     j_target_now = long_plan.jTargetNow
@@ -105,8 +105,6 @@ class LongControl:
     self.long_control_state = long_control_state_trans(self.CP, active, self.long_control_state, CS.vEgo,
                                                        should_stop, CS.brakePressed,
                                                        CS.cruiseState.standstill)
-    if active and soft_hold_active:
-      self.long_control_state = LongCtrlState.stopping
 
     if self.long_control_state == LongCtrlState.off:
       self.reset()
@@ -114,9 +112,6 @@ class LongControl:
 
     elif self.long_control_state == LongCtrlState.stopping:
       output_accel = self.last_output_accel
-
-      if soft_hold_active:
-        output_accel = self.CP.stopAccel
 
       stopAccel = self.stopping_accel if self.stopping_accel < 0.0 else self.CP.stopAccel
       if output_accel > stopAccel:
@@ -129,10 +124,7 @@ class LongControl:
       self.reset()
 
     else:  # LongCtrlState.pid
-      if self.use_accel_pid:
-        error = a_target_ff - CS.aEgo
-      else:
-        error = v_target_now - CS.vEgo
+      error = v_target_now - CS.vEgo
       output_accel = self.pid.update(error, speed=CS.vEgo,
                                      feedforward=a_target_ff)
 
