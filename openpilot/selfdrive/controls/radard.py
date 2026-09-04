@@ -574,6 +574,13 @@ class RadarD:
     # switch instead of every frame.
     self._debug_prev_lead_id: int | None = None
 
+    # Kans: debug - suspected leadTwo instability while stopped/close to a
+    # single lead (leadTwo has no sticky debounce, unlike leadOne, so a
+    # vision-second-lead match can flicker onto a ghost/multipath return of
+    # the same car and swap which obstacle long_mpc binds to). Edge-triggered
+    # on leadTwo's selected radar track identity changing.
+    self._debug_prev_lead2_id: int | None = None
+
     # Kans: debug - front-radar cut-in detection verification. Edge-triggered
     # on a track newly reaching confirmed status, so it prints once per
     # cut-in event instead of every frame it stays confirmed.
@@ -918,6 +925,15 @@ class RadarD:
               f"selectedCount={t.selected_count if t else -1} "
               f"isStoppedCarCount={t.is_stopped_car_count if t else -1}", flush=True)
       self._debug_prev_lead_id = new_lead_id
+
+      lead_two = self.radar_state.leadTwo
+      new_lead2_id = lead_two.radarTrackId if (lead_two.present and lead_two.radar) else None
+      if new_lead2_id is not None and new_lead2_id != self._debug_prev_lead2_id:
+        print(f"[radard lead2-switch] prevId={self._debug_prev_lead2_id} -> newId={new_lead2_id} "
+              f"dRel={lead_two.dRel:.1f} yRel={lead_two.yRel:.1f} vLead={lead_two.vLead:.1f} "
+              f"vEgo={self.v_ego:.1f} leadOneId={new_lead_id} "
+              f"leadOneDRel={lead_one.dRel:.1f}", flush=True)
+      self._debug_prev_lead2_id = new_lead2_id
 
   def publish(self, pm: messaging.PubMaster):
     assert self.radar_state is not None
