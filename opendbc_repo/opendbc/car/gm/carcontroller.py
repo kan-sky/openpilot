@@ -32,6 +32,11 @@ class CarController(CarControllerBase):
     self.apply_torque_last = 0
     self.apply_gas = 0
     self.apply_brake = 0
+    # Kans: diagnostic - the near_stop+stopping branch below snaps apply_brake
+    # straight to a fixed value instead of ramping into it, which could read as
+    # an implausible brake-command jump to the GM ACC stack and correlate with
+    # the accFaulted-right-after-stopping pattern. Edge-triggered on entry.
+    self._near_stop_snap_active = False
     # kans: button spam
     self.apply_speed = 0
     self.frame = 0
@@ -189,10 +194,17 @@ class CarController(CarControllerBase):
         if not CC.longActive:
           self.apply_gas = self.params.INACTIVE_REGEN
           self.apply_brake = 0
+          self._near_stop_snap_active = False
         elif near_stop and stopping and not CC.cruiseControl.resume:
+          prev_apply_brake = self.apply_brake
           self.apply_gas = self.params.INACTIVE_REGEN
           self.apply_brake = int(min(-100 * self.CP.stopAccel, self.params.MAX_BRAKE))
+          if not self._near_stop_snap_active:
+            self._near_stop_snap_active = True
+            print(f"[carcontroller near-stop-snap] vEgo={CS.out.vEgo:.2f} prevApplyBrake={prev_apply_brake} "
+                  f"-> snapApplyBrake={self.apply_brake} pcmAccStatus={CS.pcm_acc_status}", flush=True)
         else:
+          self._near_stop_snap_active = False
           if self.CP.carFingerprint in EV_CAR and self.use_ev_tables:
             self.params.update_ev_gas_brake_threshold(CS.out.vEgo)
             self.apply_gas = int(round(np.interp(accel if self.long_pitch else actuators.accel, self.params.EV_GAS_LOOKUP_BP, self.params.GAS_LOOKUP_V)))
