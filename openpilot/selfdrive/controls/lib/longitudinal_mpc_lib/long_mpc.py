@@ -474,6 +474,22 @@ class LongitudinalMpc:
       x_obstacles = np.column_stack([lead_0_obstacle, lead_1_obstacle, cruise_obstacle, x2])
       self.source = SOURCES[np.argmin(x_obstacles[0])]
 
+      # Kans: debug - ATC/cruise vs lead0 binding-source investigation. A close lead
+      # (<20m) that loses argmin to 'cruise' means the MPC re-targets the ATC/cruise
+      # speed instead of the lead's position, which can show up as a brief
+      # re-acceleration ("가다서다") while approaching a slow/stopped lead during a
+      # turn. Edge-triggered on self.source changing while a lead this close is present.
+      if not hasattr(self, "_debug_prev_mpc_source"):
+        self._debug_prev_mpc_source = None
+      if (radarstate.leadOne.present and radarstate.leadOne.dRel < 20.0 and
+          self.source != self._debug_prev_mpc_source):
+        print(f"[long_mpc source-switch] {self._debug_prev_mpc_source} -> {self.source} vEgo={v_ego:.2f} "
+              f"vCruise={v_cruise:.2f} leadDRel={radarstate.leadOne.dRel:.1f} leadVRel={radarstate.leadOne.vRel:.2f} "
+              f"lead0Obstacle0={lead_0_obstacle[0]:.2f} cruiseObstacle0={cruise_obstacle[0]:.2f} "
+              f"tFollow={t_follow:.2f} comfortBrake={comfort_brake:.2f} desiredDistance={self.desired_distance:.2f} "
+              f"stopDistance={stop_distance:.2f} stoppedLeadActive={self.stopped_lead_active}", flush=True)
+      self._debug_prev_mpc_source = self.source
+
       # Kans: debug - stop-distance investigation (7m too far report). Edge-triggered:
       # arms when v_ego passes above _DEBUG_STOPDIST_REARM, fires up to twice per
       # approach while v_ego stays below _DEBUG_STOPDIST_TRIGGER, then disarms.
