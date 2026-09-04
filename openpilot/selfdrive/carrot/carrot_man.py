@@ -1,3 +1,4 @@
+import asyncio
 import errno
 import json
 import math
@@ -15,6 +16,7 @@ import ipaddress
 import numpy as np
 import psutil
 import zmq
+from aiohttp import web
 
 from openpilot.cereal import log
 import openpilot.cereal.messaging as messaging
@@ -1261,6 +1263,99 @@ class CarrotMan:
           pass
         self.remote_addr = None
 
+  def carrot_navi_http_thread(self):
+    # Kans (carrot-wip-0721): the constants (NAVI_HTTP_PORT/NAVI_HTTP_MAX_BODY_SIZE)
+    # and _dispatch_obj() this feeds were already present in tz, but these four
+    # methods themselves and the thread start below were missing - the HTTP POST
+    # path (used by some Android nav-bridge apps instead of the raw TCP-7712
+    # socket) was never actually reachable. Nothing else needed porting.
+    while True:
+      try:
+        asyncio.run(self.carrot_navi_http_server(self.carrot_navi_http_port))
+      except Exception as e:
+        print(f"navi http server error: {e}")
+        traceback.print_exc()
+        queue_carrot_exception_tmux_send("navi http server")
+        time.sleep(2)
+
+  async def carrot_http_post(self, request: web.Request):
+    tmap_version = request.match_info.get("tmap_version", "")
+
+    try:
+      peer = request.transport.get_extra_info("peername")
+    except Exception:
+      peer = None
+
+    try:
+      raw_body = (await request.text()).strip()
+      if not raw_body:
+        raise ValueError("empty body")
+      obj = json.loads(raw_body)
+    except Exception as e:
+      print(f"[HTTP] json parse error: {e}")
+      return web.json_response({
+        "ok": False,
+        "error": f"invalid json: {e}"
+      }, status=400)
+
+    if isinstance(obj, dict):
+      obj["_tmap_version"] = tmap_version
+    if isinstance(peer, tuple) and len(peer) >= 1 and peer[0]:
+      self.remote_addr = (peer[0], self.broadcast_port)
+
+    try:
+      self._dispatch_obj(obj)
+      return web.json_response({
+        "ok": True,
+        "tmap_version": tmap_version
+      })
+    except Exception as e:
+      print(f"[HTTP] dispatch error: {e}")
+      traceback.print_exc()
+      queue_carrot_exception_tmux_send("navi http dispatch")
+      return web.json_response({
+        "ok": False,
+        "error": str(e),
+        "tmap_version": tmap_version
+      }, status=500)
+
+  async def carrot_http_health(self, request: web.Request):
+    with self._navi_event_lock:
+      last_event = self._last_navi_event
+      by_type = dict(self._last_navi_event_by_type)
+
+    last_summary = None
+    if last_event is not None:
+      last_summary = {
+        "receivedAt": last_event["receivedAt"],
+        "eventTimeMs": last_event["eventTimeMs"],
+        "summary": last_event.get("summary", {}),
+      }
+
+    return web.json_response({
+      "ok": True,
+      "service": "carrot_navi_http",
+      "lastEvent": last_summary,
+      "receivedTypes": sorted(by_type.keys()),
+    })
+
+  async def carrot_navi_http_server(self, port: int = NAVI_HTTP_PORT):
+    app = web.Application(client_max_size=NAVI_HTTP_MAX_BODY_SIZE)
+
+    app.router.add_post("/api/navi/{tmap_version}", self.carrot_http_post)
+    app.router.add_get("/health", self.carrot_http_health)
+
+    runner = web.AppRunner(app, access_log=None)
+    await runner.setup()
+
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+
+    print("HTTP server listening", port)
+
+    while True:
+      await asyncio.sleep(3600)
+
   def run(self):
     rk = Ratekeeper(20, print_delay_threshold=None)
 
@@ -1297,8 +1392,10 @@ def main():
   carrot_man = CarrotMan()
   print(f"CarrotMan {carrot_man}")
 
-  # tizi: current TMAP protocol-v2 server runs in the separate carrot_navi process.
-  # Keep devel legacy KISA/TCP/UDP handlers available, but do not start duplicate Navi HTTP/aiohttp services here.
+  # tizi: current TMAP protocol-v2 discovery/WebSocket runs in the separate carrot_navi
+  # process, but that process is TMAP-specific and has no rgdata/nRoadLimitSpeed handling
+  # of its own - it does not overlap with the legacy nav-bridge input paths below, so
+  # starting these here isn't a duplicate.
   # Kans: carrot_man_thread (7706 JSON UDP: nRoadLimitSpeed/nSdiType/nSdiDist/nTBTDist/
   # nTBTTurnType) feeds carrot_serv.update(), the same state consumed by the existing
   # camera/nav speed-control engine (xSpdType/xSpdDist/xDistToTurn) - it just was never
@@ -1307,6 +1404,7 @@ def main():
   threading.Thread(target=carrot_man.carrot_man_thread, daemon=True).start()
   threading.Thread(target=carrot_man.kisa_app_thread, daemon=True).start()
   threading.Thread(target=carrot_man.carrot_navi_thread, daemon=True).start()
+  threading.Thread(target=carrot_man.carrot_navi_http_thread, daemon=True).start()
 
   while True:
     try:
