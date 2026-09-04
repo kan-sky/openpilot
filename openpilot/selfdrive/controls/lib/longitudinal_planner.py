@@ -235,7 +235,8 @@ class LongitudinalPlanner:
     action_t = longitudinalActuatorDelay + DT_MDL
 
     output_a_target_mpc, output_should_stop_mpc, output_v_target_mpc, _ = get_accel_from_plan(self.v_desired_trajectory, self.a_desired_trajectory, CONTROL_N_T_IDX,
-                                                                        action_t=action_t, vEgoStopping=v_ego_stopping)
+                                                                        action_t=action_t, vEgoStopping=v_ego_stopping,
+                                                                        remaining_distance=self.mpc.final_obstacle_distance)
     output_a_target_e2e = sm['modelV2'].action.desiredAcceleration
     output_should_stop_e2e = sm['modelV2'].action.shouldStop
     output_v_target_now_e2e = sm['modelV2'].action.desiredVelocity
@@ -264,7 +265,7 @@ class LongitudinalPlanner:
       self.debug_stop_frame_count += 1
       print(f"vEgo={v_ego:.3f} aTarget={output_a_target:.3f} vTargetNow={output_v_target_now:.3f} "
             f"shouldStop={self.output_should_stop} longCtrlState={sm['controlsState'].longControlState} "
-            f"mpcMode={self.mpc.mode} mpcSource={self.mpc.source} "
+            f"mpcMode={self.mpc.mode} mpcSource={self.mpc.source} finalObstacleDist={self.mpc.final_obstacle_distance:.2f} "
             f"xState={carrot.xState} trafficState={carrot.trafficState} "
             f"stopDist={carrot.stop_dist:.1f} carrotVCruise={carrot.v_cruise:.2f} carrotMode={carrot.mode} "
             f"softHold={carrot.soft_hold_active} "

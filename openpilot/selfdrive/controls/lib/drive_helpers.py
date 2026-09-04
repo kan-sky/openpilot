@@ -55,7 +55,15 @@ def clip_curvature(v_ego, prev_curvature, new_curvature, roll) -> tuple[float, b
   return float(new_curvature), limited_accel or limited_max_curv
 
 
-def get_accel_from_plan(speeds, accels, t_idxs, action_t=DT_MDL, vEgoStopping=0.3):
+# Kans: how close (m) the MPC's currently-binding obstacle (lead0/lead1/cruise/
+# trafficstop - whichever long_mpc.py picked via argmin) must be before should_stop
+# is allowed to latch, on top of the speed/accel conditions below. The obstacle
+# distance already nets out the desired follow gap / stop-line offset, so ~0 means
+# "already at the intended stopping point" - this stays generous enough to absorb
+# MPC solve noise while still ruling out latching 5-10m early.
+REMAINING_DISTANCE_GATE = 2.5
+
+def get_accel_from_plan(speeds, accels, t_idxs, action_t=DT_MDL, vEgoStopping=0.3, remaining_distance=1000.0):
   if len(speeds) == len(t_idxs):
     v_target_now = speeds[0]
     a_target_now = accels[0]
@@ -71,12 +79,14 @@ def get_accel_from_plan(speeds, accels, t_idxs, action_t=DT_MDL, vEgoStopping=0.
     # Kans: comma stock's should_stop() (see below, used only in modeld's e2e path)
     # gates on actual v_ego + a_target<0.1 - reactive to real state. This 'acc'-mode
     # path instead only checked the MPC's own *predicted* v_target/v_target_1sec,
-    # with no accel condition - a comfort-tapered MPC solution can predict a
-    # near-zero speed well before the car is actually close to the target distance,
-    # locking into LongCtrlState.stopping (which abandons distance tracking) early
-    # and stopping short of the intended follow/stop-line distance. Add comma
-    # stock's a_target<0.1 as an extra condition to narrow that gap.
-    should_stop = (v_target < vEgoStopping and v_target_1sec < vEgoStopping and a_target < 0.1)
+    # with no accel or distance condition - a comfort-tapered MPC solution can
+    # predict a near-zero speed well before the car is actually close to the target
+    # distance, locking into LongCtrlState.stopping (which abandons distance
+    # tracking) early and stopping short of the intended follow/stop-line distance.
+    # Add comma stock's a_target<0.1 plus an explicit remaining-distance gate to
+    # narrow that gap for both lead-follow and traffic-stop-line approaches.
+    should_stop = (v_target < vEgoStopping and v_target_1sec < vEgoStopping and a_target < 0.1
+                   and remaining_distance < REMAINING_DISTANCE_GATE)
 
   else:
     v_target_now = 0.0

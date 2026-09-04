@@ -400,6 +400,11 @@ class LongitudinalMpc:
     mode = self.mode
     comfort_brake = carrot.comfort_brake
     stop_distance = carrot.stop_distance
+    # Kans: distance remaining to whichever obstacle is currently binding (lead0/
+    # lead1/cruise/trafficstop), read by longitudinal_planner.py to gate should_stop
+    # on actual proximity, not just the MPC's predicted speed. 1000.0 (no gate) unless
+    # overwritten below in 'acc' mode.
+    self.final_obstacle_distance = 1000.0
 
     if mode == 'blended':
       stop_x = 1000.0
@@ -472,7 +477,9 @@ class LongitudinalMpc:
       x2 = stop_x * np.ones(N + 1) + adjust_dist
 
       x_obstacles = np.column_stack([lead_0_obstacle, lead_1_obstacle, cruise_obstacle, x2])
-      self.source = SOURCES[np.argmin(x_obstacles[0])]
+      binding_idx = int(np.argmin(x_obstacles[0]))
+      self.source = SOURCES[binding_idx]
+      self.final_obstacle_distance = float(x_obstacles[0][binding_idx])
 
       # Kans: debug - ATC/cruise vs lead0 binding-source investigation. A close lead
       # (<20m) that loses argmin to 'cruise' means the MPC re-targets the ATC/cruise
