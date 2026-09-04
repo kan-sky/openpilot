@@ -167,6 +167,13 @@ class CarController(CarControllerBase):
         friction_sent_this_tick = False
         self.cruiseDelay_time = self.params_.get_float("CruiseDelay") * 0.01
         self.resumeDelay_time = self.params_.get_float("ResumeDelay") * 0.01
+        # Kans: mirror longcontrol.py's own stopAccel resolution (live StoppingAccel
+        # param overrides CP.stopAccel when configured/negative) - the near-stop snap
+        # below used to read CP.stopAccel directly, ignoring this live override, so a
+        # user-tuned gentler stop (e.g. -0.55) never actually reduced the snapped
+        # apply_brake, which stayed at the CP.stopAccel-derived value (Volt: -2.0 -> 200).
+        stopping_accel_param = self.params_.get_float("StoppingAccel") * 0.01
+        self.stopAccel_eff = stopping_accel_param if stopping_accel_param < 0.0 else self.CP.stopAccel
         auto_cruise_enabled = self.params_.get_int("AutoCruiseControl") > 0
         auto_resume_enabled = self.params_.get_int("AutoEngage") == 2
         self.accel_force = self.params_.get_int("AccelForce")
@@ -198,11 +205,12 @@ class CarController(CarControllerBase):
         elif near_stop and stopping and not CC.cruiseControl.resume:
           prev_apply_brake = self.apply_brake
           self.apply_gas = self.params.INACTIVE_REGEN
-          self.apply_brake = int(min(-100 * self.CP.stopAccel, self.params.MAX_BRAKE))
+          self.apply_brake = int(min(-100 * self.stopAccel_eff, self.params.MAX_BRAKE))
           if not self._near_stop_snap_active:
             self._near_stop_snap_active = True
             print(f"[carcontroller near-stop-snap] vEgo={CS.out.vEgo:.2f} prevApplyBrake={prev_apply_brake} "
-                  f"-> snapApplyBrake={self.apply_brake} pcmAccStatus={CS.pcm_acc_status}", flush=True)
+                  f"-> snapApplyBrake={self.apply_brake} stopAccelEff={self.stopAccel_eff:.2f} "
+                  f"pcmAccStatus={CS.pcm_acc_status}", flush=True)
         else:
           self._near_stop_snap_active = False
           if self.CP.carFingerprint in EV_CAR and self.use_ev_tables:
