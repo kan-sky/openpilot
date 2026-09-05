@@ -440,20 +440,36 @@ class LongitudinalMpc:
 
       x2 = stop_x * np.ones(N + 1) + adjust_dist
 
-      x_obstacles = np.column_stack([lead_0_obstacle, lead_1_obstacle, cruise_obstacle, x2])
-      binding_idx = int(np.argmin(x_obstacles[0]))
-      self.source = SOURCES[binding_idx]
-      # Kans: cruise_obstacle[0] structurally floors at stop_distance as v_ego->0
-      # (its cumulative-distance term collapses to 0 at t=0 since v_cruise_clipped[0]
-      # is clamped to v_ego itself, leaving only + stop_distance) - unlike
-      # lead0/lead1/trafficstop, which floor near 0. Without normalizing this out,
-      # a should_stop distance gate can never pass while 'cruise' is binding (the
-      # car sits fully stopped in LongCtrlState.pid forever, e.g. when a lead is
-      # just beyond stop_distance and cruise wins argmin at the tail of the
-      # approach). Subtract that floor so all sources read "how much closer to go".
-      self.final_obstacle_distance = float(x_obstacles[0][binding_idx])
-      if binding_idx == 2:  # 'cruise'
-        self.final_obstacle_distance -= stop_distance
+      # Kans: cruise_obstacle degenerates to just stop_distance (~5.5m) at t=0
+      # once v_ego is low, because v_cruise_clipped[0] is clamped to v_ego itself
+      # there, collapsing its cumulative-distance term to ~0. When a real lead
+      # sits farther than stop_distance (a very common case - stop_distance is a
+      # follow-gap setting, not a typical lead spacing), this synthetic floor
+      # becomes tighter than lead_0_obstacle and wins outright, injecting an
+      # abrupt too-close constraint at the worst moment (right as the car nears
+      # a stop behind a real lead). Every accFaulted-right-after-stopping
+      # capture this session that showed mpcSource=='cruise' at the stop had
+      # this shape; captures that stayed on lead0/lead1 stopped cleanly with no
+      # fault. Exclude cruise_obstacle (from both the reported source below and
+      # the actual solver feed further down) whenever a real, reasonably close
+      # lead is present near a stop, so the lead's real position governs.
+      cruise_excluded = radarstate.leadOne.present and radarstate.leadOne.dRel < 20.0 and v_ego < 3.0
+      if cruise_excluded:
+        x_obstacles = np.column_stack([lead_0_obstacle, lead_1_obstacle, x2])
+        local_idx = int(np.argmin(x_obstacles[0]))
+        binding_idx = [0, 1, 3][local_idx]  # local x2 column (2) reports as SOURCES[3]
+        self.source = SOURCES[binding_idx]
+        self.final_obstacle_distance = float(x_obstacles[0][local_idx])
+      else:
+        x_obstacles = np.column_stack([lead_0_obstacle, lead_1_obstacle, cruise_obstacle, x2])
+        binding_idx = int(np.argmin(x_obstacles[0]))
+        self.source = SOURCES[binding_idx]
+        # cruise_obstacle[0]'s stop_distance floor (see above) means should_stop's
+        # distance gate could never pass while 'cruise' binds without this offset -
+        # subtract it so all sources read "how much closer to go".
+        self.final_obstacle_distance = float(x_obstacles[0][binding_idx])
+        if binding_idx == 2:  # 'cruise'
+          self.final_obstacle_distance -= stop_distance
 
       # Kans: debug - ATC/cruise vs lead0 binding-source investigation. A close lead
       # (<20m) that loses argmin to 'cruise' means the MPC re-targets the ATC/cruise
@@ -540,6 +556,9 @@ class LongitudinalMpc:
 
     self.solver.set(N, "yref", self.yref[N][:COST_E_DIM])
 
+    # Kans: x_obstacles was already built above with cruise_obstacle excluded
+    # (see cruise_excluded) when applicable, so this directly reflects that -
+    # no need to redo the exclusion check here.
     self.params[:, 2] = np.min(x_obstacles, axis=1)
     self.params[:, 3] = np.copy(self.prev_a)
     self.params[:, 4] = t_follow
