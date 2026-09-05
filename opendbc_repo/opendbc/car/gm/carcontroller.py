@@ -257,6 +257,7 @@ class CarController(CarControllerBase):
             not CC.longActive and
             not CC.enabled and
             not CS.out.cruiseState.enabled and
+            not auto_hold_cruise_cancel_delay and
             CS.autoHold and
             CS.autoHoldActive and
             not CS.out.gasPressed and
@@ -325,7 +326,7 @@ class CarController(CarControllerBase):
           # 앞차 출발:
           # Creep Release는 정지 완료 후에만 허용한다.
           # 정지 직전 vEgo<0.3 상태에서 오검출로 stopping brake가 풀리는 것을 방지.
-          raw_lead_start = (has_lead and (4.0 < lead_drel < 10.0) and (lead_vrel > 0.4) and resume_standstill)
+          raw_lead_start = (has_lead and (4.0 < lead_drel < 10.0) and (lead_vrel > 0.4) and (near_stop_ego or resume_standstill))
 
           if raw_lead_start:
             self.lead_start_count = min(self.lead_start_count + 1, 5)
