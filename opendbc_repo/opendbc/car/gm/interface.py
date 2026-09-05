@@ -381,6 +381,16 @@ class CarInterface(CarInterfaceBase):
       self.CS.autoHoldActive = False
       return
 
+    # Kans: 이 포크의 AutoResume는 가속페달 없이 RES_ACCEL 버튼만으로 재출발시키므로,
+    # gasPressed가 한 번도 안 걸려서 위 조건으로는 절대 안 풀림 - 차가 실제로
+    # vEgoStarting을 넘어 움직이기 시작하면 페달 여부와 무관하게 해제.
+    # (이게 안 풀리고 sticky로 남아있으면 carcontroller.py의 manual_auto_hold가
+    # 다음 정지에서 크루즈가 잠깐이라도 꺼지는 순간 엉뚱하게 True가 되어
+    # resume_frame/resume_fault_guard를 리셋시켜버릴 수 있음)
+    if self.CS.out.vEgo > self.CP.vEgoStarting:
+      self.CS.autoHoldActive = False
+      return
+
     # 이미 AutoHold 중이면 유지
     if self.CS.autoHoldActive:
       self.CS.autoHoldActivated = True
