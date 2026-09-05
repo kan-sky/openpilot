@@ -908,8 +908,6 @@ const SETTING_PARAM_DISPLAY_TYPES = Object.freeze({
   AutoNaviSpeedSafetyFactor: "percent",
   RadarReactionFactor: "percent",
   SteerRatioRate: "percent",
-  DynamicTFollowLC: "percent",
-  TFollowDecelBoost: "percent",
   ShowCustomBrightness: "percent",
   ClusterHudBrightness: "percent",
 });
