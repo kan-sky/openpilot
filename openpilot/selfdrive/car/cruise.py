@@ -77,8 +77,6 @@ class VCruiseHelper:
     self._gas_tok = False
 
     self._brake_pressed_count = 0
-    self._soft_hold_count = 0
-    self._soft_hold_active = 0
     self._cruise_ready = False
     self._cruise_cancel_state = False
     self._pause_auto_speed_up = False
@@ -371,9 +369,7 @@ class VCruiseHelper:
         self._lat_enabled = True
         self._pause_auto_speed_up = False
 
-        if self._soft_hold_active > 0:
-          self._soft_hold_active = 0
-        elif self._v_cruise_kph_at_brake > 0 and v_cruise_kph < self._v_cruise_kph_at_brake:
+        if self._v_cruise_kph_at_brake > 0 and v_cruise_kph < self._v_cruise_kph_at_brake:
           v_cruise_kph = self._v_cruise_kph_at_brake
           self._v_cruise_kph_at_brake = 0
         elif self._cruise_button_mode == 0:
@@ -385,9 +381,7 @@ class VCruiseHelper:
         self._lat_enabled = True
         self._pause_auto_speed_up = True
 
-        if self._soft_hold_active > 0:
-          self._cruise_control(-1, -1, "Cruise off, softhold mode (decelCruise)")
-        elif not enabled:
+        if not enabled:
           v_cruise_kph = max(self.v_ego_kph_set, self._cruise_speed_min)
         elif self.v_ego_kph_set > v_cruise_kph + 2 and self._cruise_button_mode in [2, 3]:
           v_cruise_kph = max(self.v_ego_kph_set, self._cruise_speed_min)
@@ -458,12 +452,10 @@ class VCruiseHelper:
       return
 
     if self.autoCruiseControl == 0 and enable != 0:
-      self._soft_hold_active = 0
       return
 
     if self.autoCruiseControl_cancel_timer > 0 and enable != 0:
       self._add_log(reason + " > timer Canceled")
-      self._soft_hold_active = 0
       return
 
     self._activate_cruise = enable
@@ -505,11 +497,6 @@ class VCruiseHelper:
     traffic_start = self.xState_last in [3, 5] and self.xState == 2
     if traffic_start and not enabled and not CS.brakePressed and CS.gearShifter == GearShifter.drive:
       self._cruise_control(1, -1, "Cruise on (traffic green)")
-
-    # SoftHold release -> AutoCruise request
-    if not enabled and self._brake_pressed_count == -1 and self._soft_hold_active > 0:
-      self._soft_hold_active = 2
-      self._cruise_control(1, -1, "Cruise on (soft hold)")
 
     # Short gas-tok:
     # - cruise OFF: request AutoCruise and set current speed
@@ -571,7 +558,6 @@ class VCruiseHelper:
       self._gas_pressed_count_last = self._gas_pressed_count
       self._gas_pressed_value = max(CS.gas, self._gas_pressed_value) if self._gas_pressed_count > 1 else CS.gas
       self._gas_tok = False
-      self._soft_hold_active = 0
 
       if gas_pressed_start and self.disengage_on_accelerator and enabled:
         self._cruise_ready = False
@@ -591,14 +577,7 @@ class VCruiseHelper:
       if self._brake_pressed_count == 1 and self.enabled_last:
         self._v_cruise_kph_at_brake = self.v_cruise_kph
         self._add_log(f"{self.v_cruise_kph} Cruise speed at brake")
-      # 정지 상태에서 일정 시간 이상 브레이크 → soft hold 진입
-      self._soft_hold_count = self._soft_hold_count + 1 if CS.vEgo < 0.1 and CS.gearShifter == GearShifter.drive else 0
-      if self.autoCruiseControl == 0 or self.CP.pcmCruise:
-        self._soft_hold_active = 0
-      else:
-        self._soft_hold_active = 1 if self._soft_hold_count > 60 else 0
     else:
-      self._soft_hold_count = 0
       self._brake_pressed_count = min(-1, self._brake_pressed_count - 1)
 
   # Kans:
