@@ -7,7 +7,6 @@ Structure reference for `selfdrive/carrot`.
 ```text
 selfdrive/carrot/
   carrot_server.py                 main web server entry
-  carrot_controls.py               carrot control helpers
   carrot_functions.py              carrot shared functions
   carrot_learning.py               carrot learning logic
   carrot_man.py                    carrot manager

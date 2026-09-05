@@ -427,8 +427,12 @@ class LongitudinalMpc:
 
       cruise_obstacle = np.cumsum(T_DIFFS * v_cruise_clipped) + get_safe_obstacle_distance(v_cruise_clipped, t_follow, comfort_brake, stop_distance)
 
-      adjust_dist = carrot.trafficStopDistanceAdjust if v_ego > 0.1 else -2.0
-      adjust_dist = np.clip(adjust_dist, -2.0, 0.0)  # Kans: traffic stop Dist offset
+      # Kans: this used to hard-switch to -2.0 once v_ego<=0.1, a discontinuous
+      # ~1.2m jump (default TrafficStopDistanceAdjust is -0.8) right as the car
+      # nears the stop line, retargeting the traffic-stop obstacle (x2) farther
+      # back at the worst possible moment - suspected cause of stopping ~10m
+      # short of the actual line. Always use the same tunable value.
+      adjust_dist = np.clip(carrot.trafficStopDistanceAdjust, -2.0, 0.0)
 
       d_min = np.interp(v_ego, [0.0, 10.0, 15.0, 20.0], [5.0, 45.0, 65.0, 75.0])
       if d_min < stop_x + adjust_dist < cruise_obstacle[0]:

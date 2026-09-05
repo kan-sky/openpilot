@@ -90,6 +90,7 @@ class VCruiseHelper:
     self.d_rel = 0
     self.v_rel = 0
     self.cruiseOnDist = 7.0
+    self._debug_cruiseondist_armed = True
 
     self._cancel_timer = 0
     self._log_timer = 0
@@ -513,6 +514,11 @@ class VCruiseHelper:
     # Short gas-tok:
     # - cruise OFF: request AutoCruise and set current speed
     # - cruise ON : raise set speed to next configured unit
+    if self._gas_tok:
+      print(f"[cruise gas-tok] enabled={enabled} disengageOnAccel={self.disengage_on_accelerator} "
+            f"vEgoKphSet={self.v_ego_kph_set:.1f} autoGasTokSpeed={self.autoGasTokSpeed:.1f} "
+            f"autoCruiseControl={self.autoCruiseControl} cruiseCancelState={self._cruise_cancel_state} "
+            f"autoCruiseControlCancelTimer={self.autoCruiseControl_cancel_timer}", flush=True)
     if (not self.disengage_on_accelerator and self._gas_tok and
         self.v_ego_kph_set >= self.autoGasTokSpeed):
       if not enabled:
@@ -529,6 +535,16 @@ class VCruiseHelper:
       v_cruise_kph = self.v_ego_kph_set
 
     # Coasting toward a lead car with cruise off: engage before it gets unsafe.
+    if not enabled and self.d_rel > 0 and self.d_rel > self.cruiseOnDist * 1.5:
+      self._debug_cruiseondist_armed = True
+    if (not enabled and self.d_rel > 0 and self.d_rel < self.cruiseOnDist * 1.3 and
+        self._debug_cruiseondist_armed):
+      self._debug_cruiseondist_armed = False
+      print(f"[cruise on-dist] dRel={self.d_rel:.1f} cruiseOnDist={self.cruiseOnDist:.1f} "
+            f"vEgo={CS.vEgo:.2f} gasPressedCount={self._gas_pressed_count} "
+            f"brakePressedCount={self._brake_pressed_count} steeringAngle={CS.steeringAngleDeg:.1f} "
+            f"autoCruiseControl={self.autoCruiseControl} cruiseCancelState={self._cruise_cancel_state}",
+            flush=True)
     if (not enabled and self._gas_pressed_count < 0 and self._brake_pressed_count < 0 and
         self.d_rel > 0 and CS.vEgo > 0.02):
       safe_state, safe_dist = self._check_safe_stop(CS, 4)
