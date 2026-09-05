@@ -20,6 +20,7 @@ from opendbc.car.car_helpers import get_car, interfaces
 from opendbc.car.interfaces import CarInterfaceBase, RadarInterfaceBase
 from openpilot.selfdrive.pandad import can_capnp_to_list, can_list_to_can_capnp
 from openpilot.selfdrive.car.cruise import VCruiseHelper
+from openpilot.selfdrive.car.alternative_experience import get_alternative_experience
 #from openpilot.selfdrive.car.car_specific import MockCarState
 #from openpilot.selfdrive.car.openpilot_toggle import CruiseMainOpenpilotToggle
 
@@ -113,7 +114,14 @@ class Car:
       self.CI, self.CP = CI, CI.CP
       self.RI = RI
 
-    self.CP.alternativeExperience = 0
+    # Kans: was hardcoded to 0 (DEFAULT), meaning panda always enforced its own
+    # disengage-on-gas safety check regardless of the DisengageOnAccelerator
+    # software setting - carrot-wip wires this through via get_alternative_experience,
+    # tz never had this file at all. Without it, DisengageOnAccelerator=False only
+    # kept cruise.py/selfdrived.py from disengaging in software, but the panda
+    # firmware layer would still cut control on gas press, which is likely why
+    # gas-tap-to-engage never actually worked.
+    self.CP.alternativeExperience = get_alternative_experience(self.params.get_bool("DisengageOnAccelerator"))
     openpilot_enabled_toggle = self.params.get_bool("OpenpilotEnabledToggle")
     controller_available = self.CI.CC is not None and openpilot_enabled_toggle
     self.CP.passive = not controller_available
