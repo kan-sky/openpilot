@@ -81,6 +81,7 @@ class LongControl:
 
   def update(self, active, CS, long_plan, accel_limits, t_since_plan):
     a_target_ff = long_plan.aTarget
+    v_target_now = long_plan.vTargetNow
     j_target_now = long_plan.jTargetNow
     should_stop = long_plan.shouldStop
 
@@ -128,7 +129,7 @@ class LongControl:
       # before. kiV=.35 was tuned against speed-error's larger error magnitude, so
       # it will likely read as weaker now - road-test and raise LongTuningKiV if
       # the response feels soft, .35 was never a validated-for-this constant.
-      error = a_target_ff - CS.aEgo
+      error = v_target_now - CS.vEgo
       output_accel = self.pid.update(error, speed=CS.vEgo,
                                      feedforward=a_target_ff)
 
