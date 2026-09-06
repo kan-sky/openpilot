@@ -211,6 +211,10 @@ class Car:
     # TODO: mirror the carState.cruiseState struct?
     CS.vCruise = float(self.v_cruise_helper.v_cruise_kph)
     CS.vCruiseCluster = float(self.v_cruise_helper.v_cruise_cluster_kph)
+    # Kans: was dropped when card.py was ported - carrot_man.py's make_send_message()
+    # already reads CS.logCarrot to surface it on the carrot debug overlay, but nothing
+    # was ever setting it, so that overlay was always blank.
+    CS.logCarrot = self.v_cruise_helper.log
 
     # GM AutoCruise: keep only the activateCruise latch output.
     CS.activateCruise = self.v_cruise_helper.get_activate_cruise()
