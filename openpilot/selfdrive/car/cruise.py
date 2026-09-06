@@ -85,6 +85,7 @@ class VCruiseHelper:
     self._lat_enabled = self.params.get_int("AutoEngage") > 0
     self._v_cruise_kph_at_brake = 0
     self.cruise_state_available_last = False
+    self._cruise_speed_initialized = False
 
     self.d_rel = 0
     self.v_rel = 0
@@ -116,6 +117,9 @@ class VCruiseHelper:
   @property
   def v_cruise_initialized(self):
     return self.v_cruise_kph != V_CRUISE_UNSET
+
+  def _current_speed_for_initial_resume(self):
+    return max(self.v_ego_kph_set, self._cruise_speed_min)
 
   def _add_log(self, log):
     if len(log) == 0:
@@ -373,13 +377,30 @@ class VCruiseHelper:
         self._lat_enabled = True
         self._pause_auto_speed_up = False
 
-        if self._v_cruise_kph_at_brake > 0 and v_cruise_kph < self._v_cruise_kph_at_brake:
-          v_cruise_kph = self._v_cruise_kph_at_brake
-          self._v_cruise_kph_at_brake = 0
-        elif self._cruise_button_mode == 0:
-          v_cruise_kph = button_kph
+        # Kans: without this gate, every accelCruise press (including the
+        # spoofed RES_ACCEL/DECEL_SET carcontroller.py sends to auto-engage
+        # cruise from off) fell through to _v_cruise_desired(), which assumes
+        # cruise is already active and just steps the set speed up by one
+        # unit from whatever v_cruise_kph last held - not necessarily the
+        # current driving speed. Restored from carrot-wip: while not yet
+        # engaged (or at a standstill), the first resume of the drive snaps
+        # to the actual current speed instead.
+        if self._cruise_ready or not enabled or CS.cruiseState.standstill:
+          if self._v_cruise_kph_at_brake > 0:
+            v_cruise_kph = max(v_cruise_kph, self._v_cruise_kph_at_brake)
+            self._v_cruise_kph_at_brake = 0
+            self._cruise_speed_initialized = True
+          elif not self._cruise_speed_initialized:
+            v_cruise_kph = self._current_speed_for_initial_resume()
+            self._cruise_speed_initialized = True
+            self._add_log(f"{v_cruise_kph} Cruise resume from current speed")
         else:
-          v_cruise_kph = self._v_cruise_desired(CS, v_cruise_kph)
+          self._v_cruise_kph_at_brake = 0
+          if self._cruise_button_mode == 0:
+            v_cruise_kph = button_kph
+          else:
+            v_cruise_kph = self._v_cruise_desired(CS, v_cruise_kph)
+        self._cruise_speed_initialized = True
 
       elif button_type == ButtonType.decelCruise:
         self._lat_enabled = True
