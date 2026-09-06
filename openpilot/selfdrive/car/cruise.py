@@ -215,10 +215,25 @@ class VCruiseHelper:
       self.xState = lp.xState
       self.trafficState = lp.trafficState
       self.aTarget = lp.aTarget
-    if sm is not None and sm.alive['radarState']:
+    radar_alive = sm is not None and sm.alive['radarState']
+    lead_present = False
+    if radar_alive:
       lead = sm['radarState'].leadOne
+      lead_present = lead.present
       self.d_rel = lead.dRel if lead.present else 0
       self.v_rel = lead.vRel if lead.present else 0
+
+    # Kans: diagnostic - [cruise on-dist] never fired during a real drive with
+    # cruise deliberately off and a real lead closing in. Print unconditionally
+    # (throttled) whenever cruise is off, bypassing the arm/disarm edge-trigger
+    # entirely, to see whether self.d_rel/radarState are actually populated at
+    # all in this scenario, independent of that edge-trigger's own logic.
+    if not enabled:
+      self._debug_ondist_frame = getattr(self, "_debug_ondist_frame", 0) + 1
+      if self._debug_ondist_frame % 100 == 0:
+        print(f"[cruise on-dist raw] dRel={self.d_rel:.1f} vRel={self.v_rel:.2f} "
+              f"cruiseOnDist={self.cruiseOnDist:.1f} radarAlive={radar_alive} "
+              f"leadPresent={lead_present} vEgo={CS.vEgo:.2f}", flush=True)
 
     if CS.gearShifter != GearShifter.drive:
       self.autoCruiseControl_cancel_timer = int(20 / DT_CTRL)
