@@ -32,7 +32,6 @@
               "params": [
                 "AutoCruiseControl",
                 "AutoGasTokSpeed",
-                "AutoGasCancelSpeed",
                 "AutoGasSyncSpeed",
                 "CruiseOnDist"
               ]
@@ -77,19 +76,6 @@
                 "CruiseButtonTest1",
                 "CruiseButtonTest2",
                 "CruiseButtonTest3"
-              ]
-            },
-            {
-              "id": "BASIC_SPEEDTABLE",
-              "ko": "속도 프리셋",
-              "en": "Speed Presets",
-              "zh": "速度预设",
-              "params": [
-                "CruiseSpeed1",
-                "CruiseSpeed2",
-                "CruiseSpeed3",
-                "CruiseSpeed4",
-                "CruiseSpeed5"
               ]
             }
           ]
@@ -1557,86 +1543,6 @@
     },
     {
       "group": "버튼설정",
-      "name": "CruiseSpeed1",
-      "title": "크루즈속도1(30)",
-      "descr": "(버튼모드 사용자3) 단계별속도\n 0:도로제한속도 + 자동속도증가 오프셋",
-      "egroup": "BUTN",
-      "etitle": "Cruise Speed1(30)",
-      "edescr": "Button Mode User 3, Stepwise Speed, 0: Road Speed Limit + Auto Speed Increase Offset",
-      "cgroup": "按键设置",
-      "ctitle": "巡航速度1(30)",
-      "cdescr": "按钮模式用户 3, 分段速度, 0: 道路限速 + 自动加速偏移",
-      "min": 0,
-      "max": 160,
-      "default": 10,
-      "unit": 10
-    },
-    {
-      "group": "버튼설정",
-      "name": "CruiseSpeed2",
-      "title": "크루즈속도2(50)",
-      "descr": "(버튼모드 사용자3) 속도테이블 2번째",
-      "egroup": "BUTN",
-      "etitle": "Cruise Speed2(50)",
-      "edescr": "Button Mode User 3, Second Speed",
-      "cgroup": "按键设置",
-      "ctitle": "巡航速度2(50)",
-      "cdescr": "按钮模式用户 3, 第二段速度",
-      "min": 1,
-      "max": 160,
-      "default": 10,
-      "unit": 10
-    },
-    {
-      "group": "버튼설정",
-      "name": "CruiseSpeed3",
-      "title": "크루즈속도3(80)",
-      "descr": "(버튼모드 사용자3) 속도테이블 3번째",
-      "egroup": "BUTN",
-      "etitle": "Cruise Speed3(80)",
-      "edescr": "Button Mode User 3, Third Speed",
-      "cgroup": "按键设置",
-      "ctitle": "巡航速度3(80)",
-      "cdescr": "按钮模式用户 3, 第三段速度",
-      "min": 1,
-      "max": 160,
-      "default": 10,
-      "unit": 10
-    },
-    {
-      "group": "버튼설정",
-      "name": "CruiseSpeed4",
-      "title": "크루즈속도4(110)",
-      "descr": "(버튼모드 사용자3) 속도테이블 4번째",
-      "egroup": "BUTN",
-      "etitle": "Cruise Speed4(110)",
-      "edescr": "Button Mode User 3, Fourth Speed",
-      "cgroup": "按键设置",
-      "ctitle": "巡航速度4(110)",
-      "cdescr": "按钮模式用户 3, 第四段速度",
-      "min": 1,
-      "max": 160,
-      "default": 10,
-      "unit": 10
-    },
-    {
-      "group": "버튼설정",
-      "name": "CruiseSpeed5",
-      "title": "크루즈속도5(130)",
-      "descr": "(버튼모드 사용자3) 속도테이블 5번째",
-      "egroup": "BUTN",
-      "etitle": "Cruise Speed5(130)",
-      "edescr": "Button Mode User 3, Fifth Speed",
-      "cgroup": "按键设置",
-      "ctitle": "巡航速度5(130)",
-      "cdescr": "按钮模式用户 3, 第五段速度",
-      "min": 1,
-      "max": 160,
-      "default": 10,
-      "unit": 10
-    },
-    {
-      "group": "버튼설정",
       "name": "PaddleMode",
       "title": "패들시프트모드(0)",
       "descr": "0:크루즈ON, 1:크루즈대기, 2:자동감속, 3:CarrotCruise ",
@@ -1681,22 +1587,6 @@
       "min": 0,
       "max": 200,
       "default": 0,
-      "unit": 5
-    },
-    {
-      "group": "오토크루즈",
-      "name": "AutoGasCancelSpeed",
-      "title": "가속페달 해제 시 크루즈 해제 속도(30)",
-      "descr": "가속페달에서 발을 뗐을 때 현재 속도가 설정값 미만이면 크루즈를 해제합니다.",
-      "egroup": "AUTOCRUISE",
-      "etitle": "Auto Cruise: Gas Release Cancel Speed",
-      "edescr": "When releasing the accelerator pedal, cruise is canceled below this speed.",
-      "cgroup": "自动巡航",
-      "ctitle": "自动巡航: 松开油门取消速度",
-      "cdescr": "松开油门踏板时，当前速度低于设定值则取消巡航。",
-      "min": 0,
-      "max": 200,
-      "default": 30,
       "unit": 5
     },
     {
