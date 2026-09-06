@@ -1,5 +1,6 @@
 from openpilot.common.params import Params
 from openpilot.common.filter_simple import FirstOrderFilter
+from openpilot.common.swaglog import cloudlog
 
 import numpy as np
 from opendbc.can import CANPacker
@@ -308,6 +309,13 @@ class CarController(CarControllerBase):
             self.resume_fault_guard = 0
             self.activateCruise_after_brake = False
 
+          if CS.out.activateCruise > 0 and not self._pending_activateCruise:
+            # Kans: one-shot visibility into why an engage request does/doesn't
+            # make it to _pending_activateCruise - readable after a drive via
+            # `grep '\[carcontroller\]' /data/log/swaglog.*` over SSH.
+            cloudlog.warning(f"[carcontroller] activateCruise request: auto_hold_block_cruise={auto_hold_block_cruise} "
+                              f"brakePressed={CS.out.brakePressed} cruiseState.enabled={CS.out.cruiseState.enabled}")
+
           if CS.out.activateCruise > 0 and not auto_hold_block_cruise and not CS.out.brakePressed:
             self._pending_activateCruise = True
 
@@ -383,21 +391,17 @@ class CarController(CarControllerBase):
 
               if within_window and self.autoCruise_try_count < 2:
                 if (self.frame - self.last_button_frame) * DT_CTRL >= 0.12:
-                  # Kans: this whole block only runs while cruise is OFF (engage
-                  # attempt), where GM's RESUME button only works if a speed was
-                  # already stored earlier this drive cycle - the very first
-                  # engage of a drive (the common case for gas-tok/CruiseOnDist)
-                  # needs SET/DECEL instead, confirmed by on-road testing.
-                  # Kept the original branch structure (RES_ACCEL is still used
-                  # for the else case, e.g. a stale activateCruise read) - just
-                  # swapped which button the activateCruise==1 case sends.
-                  btn = CruiseButtons.DECEL_SET if CS.out.activateCruise == 1 else CruiseButtons.RES_ACCEL
+                  btn = CruiseButtons.RES_ACCEL if CS.out.activateCruise == 1 else CruiseButtons.DECEL_SET
+                  cloudlog.warning(f"[carcontroller] AutoCruise send btn={btn} try={self.autoCruise_try_count} "
+                                    f"activateCruise={CS.out.activateCruise}")
                   self.send_btn(CS, can_sends, btn)
                   self.last_button_frame = self.frame
                   self.autoCruise_try_count += 1
 
               # 종료 조건: 시간 초과 / 2회 시도 완료 / 크루즈 실제 ON
               if (not within_window) or (self.autoCruise_try_count >= 2) or CS.out.cruiseState.enabled:
+                cloudlog.warning(f"[carcontroller] AutoCruise window closed: tries={self.autoCruise_try_count} "
+                                  f"cruiseState.enabled={CS.out.cruiseState.enabled} timed_out={not within_window}")
                 self.autoCruise_activate = False
                 self.autoCruise_frame = 0
                 self.autoCruise_try_count = 0
