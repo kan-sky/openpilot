@@ -88,7 +88,6 @@ class VCruiseHelper:
     self.d_rel = 0
     self.v_rel = 0
     self.cruiseOnDist = 7.0
-    self._debug_cruiseondist_armed = True
 
     self._cancel_timer = 0
     self._log_timer = 0
@@ -98,6 +97,7 @@ class VCruiseHelper:
     self.autoCruiseControl_cancel_timer = 0
     self.autoCruiseControl = 0
     self.autoGasTokSpeed = 0
+    self.autoGasCancelSpeed = 30
     self.autoGasSyncSpeed = 0
     # Carrot traffic-light state
     self.xState = 0
@@ -133,6 +133,7 @@ class VCruiseHelper:
     if self.frame % 10 == 0:
       self.autoCruiseControl = self.params.get_int("AutoCruiseControl")
       self.autoGasTokSpeed = self.params.get_int("AutoGasTokSpeed") * unit_factor
+      self.autoGasCancelSpeed = self.params.get_int("AutoGasCancelSpeed") * unit_factor
       self.autoGasSyncSpeed = self.params.get_int("AutoGasSyncSpeed")
 
       cruise_speed_unit = self.params.get_int("CruiseSpeedUnit")
@@ -215,25 +216,10 @@ class VCruiseHelper:
       self.xState = lp.xState
       self.trafficState = lp.trafficState
       self.aTarget = lp.aTarget
-    radar_alive = sm is not None and sm.alive['radarState']
-    lead_present = False
-    if radar_alive:
+    if sm is not None and sm.alive['radarState']:
       lead = sm['radarState'].leadOne
-      lead_present = lead.present
       self.d_rel = lead.dRel if lead.present else 0
       self.v_rel = lead.vRel if lead.present else 0
-
-    # Kans: diagnostic - [cruise on-dist] never fired during a real drive with
-    # cruise deliberately off and a real lead closing in. Print unconditionally
-    # (throttled) whenever cruise is off, bypassing the arm/disarm edge-trigger
-    # entirely, to see whether self.d_rel/radarState are actually populated at
-    # all in this scenario, independent of that edge-trigger's own logic.
-    if not enabled:
-      self._debug_ondist_frame = getattr(self, "_debug_ondist_frame", 0) + 1
-      if self._debug_ondist_frame % 100 == 0:
-        print(f"[cruise on-dist raw] dRel={self.d_rel:.1f} vRel={self.v_rel:.2f} "
-              f"cruiseOnDist={self.cruiseOnDist:.1f} radarAlive={radar_alive} "
-              f"leadPresent={lead_present} vEgo={CS.vEgo:.2f}", flush=True)
 
     if CS.gearShifter != GearShifter.drive:
       self.autoCruiseControl_cancel_timer = int(20 / DT_CTRL)
@@ -513,14 +499,19 @@ class VCruiseHelper:
     if traffic_start and not enabled and not CS.brakePressed and CS.gearShifter == GearShifter.drive:
       self._cruise_control(1, -1, "Cruise on (traffic green)")
 
+    # Kans: this whole if/elif chain (gas-tok -> exact-release-edge triggers ->
+    # persistent-released/CruiseOnDist) was ported from carrot-wip's VCruiseCarrot
+    # (the class actually used by card.py there - VCruiseHelper is unused dead
+    # code even in carrot-wip, which is why comparing against it earlier missed
+    # this). tz had previously extracted only the gas-tok and "coasting toward
+    # lead" pieces as independent standalone ifs, dropping the two exact-edge
+    # elif branches entirely - user confirmed these are the core "just released
+    # the pedal" triggers that CruiseOnDist/gas-tok engage depend on being
+    # mutually exclusive with, restoring the original elif chain.
+    #
     # Short gas-tok:
     # - cruise OFF: request AutoCruise and set current speed
     # - cruise ON : raise set speed to next configured unit
-    if self._gas_tok:
-      print(f"[cruise gas-tok] enabled={enabled} disengageOnAccel={self.disengage_on_accelerator} "
-            f"vEgoKphSet={self.v_ego_kph_set:.1f} autoGasTokSpeed={self.autoGasTokSpeed:.1f} "
-            f"autoCruiseControl={self.autoCruiseControl} cruiseCancelState={self._cruise_cancel_state} "
-            f"autoCruiseControlCancelTimer={self.autoCruiseControl_cancel_timer}", flush=True)
     if (not self.disengage_on_accelerator and self._gas_tok and
         self.v_ego_kph_set >= self.autoGasTokSpeed):
       if not enabled:
@@ -529,33 +520,58 @@ class VCruiseHelper:
       else:
         v_cruise_kph = self._v_cruise_desired(CS, v_cruise_kph)
 
+    # Gas pedal just released (this exact frame) - independent of tap-vs-hold.
+    elif self._gas_pressed_count == -1:
+      if 0 < self.d_rel < CS.vEgo * 0.8:
+        if CS.vEgo < 1.0:
+          self._cruise_control(1, -1 if self.aTarget > 0.0 else 0, "Cruise on (safe speed)")
+        else:
+          self._cruise_control(-1, 0, "Cruise off (lead car too close)")
+      elif self.v_ego_kph_set < self.autoGasCancelSpeed:
+        self._cruise_control(-1, 0, "Cruise off (gas speed)")
+      elif self.xState == 3:
+        v_cruise_kph = min(self.v_ego_kph_set, v_cruise_kph)
+        self._cruise_control(-1, 3, "Cruise off (traffic sign)")
+      elif CS.leftBlinker or CS.rightBlinker:
+        pass
+      elif not self.disengage_on_accelerator and self.v_ego_kph_set >= self.autoGasTokSpeed and not enabled:
+        v_cruise_kph = min(self.v_ego_kph_set, v_cruise_kph)
+        self._cruise_control(1, -1 if self.aTarget > 0.0 else 0, "Cruise on (gas pressed)")
+
+    # Brake pedal just released (this exact frame). carrot-wip also required
+    # self._soft_hold_active == 0 here - soft hold was removed entirely from
+    # this fork, so that clause is dropped (it would always be true anyway).
+    elif self._brake_pressed_count == -1:
+      if CS.leftBlinker or CS.rightBlinker:
+        pass
+      elif self.v_ego_kph_set > self.autoGasTokSpeed:
+        v_cruise_kph = self.v_ego_kph_set
+        self._cruise_control(1, -1 if self.aTarget > 0.0 else 0, "Cruise on (speed)")
+      elif abs(CS.steeringAngleDeg) < 20:
+        if self.xState in [3, 5]:
+          if self.xState == 3:  # 감속중
+            v_cruise_kph = self.v_ego_kph_set
+          self._cruise_control(1, 0, "Cruise on (traffic sign)")
+        elif 0 < self.d_rel < 20:
+          self._cruise_control(1, -1 if self.v_ego_kph_set < 1 else 0, "Cruise on (lead car)")
+
+    # Pedals released for a while now (not just this frame): FCW / CruiseOnDist.
+    elif not enabled and self._gas_pressed_count < 0 and self._brake_pressed_count < 0:
+      if self.d_rel > 0 and CS.vEgo > 0.02:
+        safe_state, safe_dist = self._check_safe_stop(CS, 4)
+        if abs(CS.steeringAngleDeg) > 70:
+          pass
+        elif not safe_state:
+          self._cruise_control(1, -1, "Cruise on (fcw)")
+        elif self.d_rel < self.cruiseOnDist:
+          self._cruise_control(1, 0, "Cruise on (fcw dist)")
+
     # Gas held past the tok threshold (a real hold, not a quick tap): if the
     # driver has accelerated past the set cruise speed, sync v_cruise up to
     # it so releasing the pedal doesn't suddenly brake back down.
     if (self._gas_pressed_count > self._gas_tok_timer and self.autoGasSyncSpeed and
         self.v_ego_kph_set > v_cruise_kph):
       v_cruise_kph = self.v_ego_kph_set
-
-    # Coasting toward a lead car with cruise off: engage before it gets unsafe.
-    if not enabled and self.d_rel > 0 and self.d_rel > self.cruiseOnDist * 1.5:
-      self._debug_cruiseondist_armed = True
-    if (not enabled and self.d_rel > 0 and self.d_rel < self.cruiseOnDist * 1.3 and
-        self._debug_cruiseondist_armed):
-      self._debug_cruiseondist_armed = False
-      print(f"[cruise on-dist] dRel={self.d_rel:.1f} cruiseOnDist={self.cruiseOnDist:.1f} "
-            f"vEgo={CS.vEgo:.2f} gasPressedCount={self._gas_pressed_count} "
-            f"brakePressedCount={self._brake_pressed_count} steeringAngle={CS.steeringAngleDeg:.1f} "
-            f"autoCruiseControl={self.autoCruiseControl} cruiseCancelState={self._cruise_cancel_state}",
-            flush=True)
-    if (not enabled and self._gas_pressed_count < 0 and self._brake_pressed_count < 0 and
-        self.d_rel > 0 and CS.vEgo > 0.02):
-      safe_state, safe_dist = self._check_safe_stop(CS, 4)
-      if abs(CS.steeringAngleDeg) > 70:
-        pass
-      elif not safe_state:
-        self._cruise_control(1, -1, "Cruise on (fcw)")
-      elif self.d_rel < self.cruiseOnDist:
-        self._cruise_control(1, 0, "Cruise on (fcw dist)")
 
     if self._gas_pressed_count == 1 or CS.vEgo < 0.1:
       self._pause_auto_speed_up = False
