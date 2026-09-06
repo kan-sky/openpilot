@@ -3,6 +3,7 @@ import numpy as np
 
 from opendbc.car.structs import car
 from openpilot.common.constants import CV
+from openpilot.common.swaglog import cloudlog
 
 from opendbc.car import structs, DT_CTRL
 GearShifter = structs.CarState.GearShifter
@@ -126,6 +127,10 @@ class VCruiseHelper:
       self.log = log
       #self.event = event
       self._log_timer = self._log_timeout
+      # Kans: also persist to /data/log/swaglog so this is readable after a
+      # drive with `grep "\[cruise\]" swaglog*` over SSH, instead of having to
+      # screen-record the live logCarrot overlay to capture it.
+      cloudlog.warning(f"[cruise] {log}")
 
   def update_params(self, is_metric):
     unit_factor = 1.0 if is_metric else CV.MPH_TO_KPH
