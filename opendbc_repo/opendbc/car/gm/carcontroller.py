@@ -388,9 +388,11 @@ class CarController(CarControllerBase):
                   # already stored earlier this drive cycle - the very first
                   # engage of a drive (the common case for gas-tok/CruiseOnDist)
                   # needs SET/DECEL instead, confirmed by on-road testing.
-                  # SET/DECEL engages reliably in both cases, so always use it
-                  # here instead of switching on activateCruise's value.
-                  self.send_btn(CS, can_sends, CruiseButtons.DECEL_SET)
+                  # Kept the original branch structure (RES_ACCEL is still used
+                  # for the else case, e.g. a stale activateCruise read) - just
+                  # swapped which button the activateCruise==1 case sends.
+                  btn = CruiseButtons.DECEL_SET if CS.out.activateCruise == 1 else CruiseButtons.RES_ACCEL
+                  self.send_btn(CS, can_sends, btn)
                   self.last_button_frame = self.frame
                   self.autoCruise_try_count += 1
 
