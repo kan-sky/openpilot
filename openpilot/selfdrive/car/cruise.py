@@ -384,6 +384,11 @@ class VCruiseHelper:
           v_cruise_kph = max(self.v_ego_kph_set, self._cruise_speed_min)
         elif self.v_ego_kph_set > v_cruise_kph + 2 and self._cruise_button_mode in [2, 3]:
           v_cruise_kph = max(self.v_ego_kph_set, self._cruise_speed_min)
+        elif self.v_ego_kph_set > self._cruise_speed_min and v_cruise_kph > self.v_ego_kph_set:
+          # Currently going slower than the set speed (e.g. a curve-speed
+          # slowdown) - capture the current speed instead of just stepping
+          # the set speed down by one unit, per devel-0815.
+          v_cruise_kph = self.v_ego_kph_set
         else:
           # Kans: modes 2/3 had no fallback here, so a short decelCruise press
           # while cruising steadily at/near the set speed (the common case -
