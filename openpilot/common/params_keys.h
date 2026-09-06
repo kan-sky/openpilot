@@ -146,7 +146,6 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"SupportedCars_gm", {PERSISTENT, STRING}},
     {"AutoCruiseControl", {PERSISTENT, INT, "1"}},
     {"AutoGasTokSpeed", {PERSISTENT, INT, "5"}},
-    {"AutoGasCancelSpeed", {PERSISTENT, INT, "30"}},
     {"AutoEngage", {PERSISTENT, INT, "2"}},
     {"StoppingAccel", {PERSISTENT, INT, "-42"}},
     {"CruiseButtonMode", {PERSISTENT, INT, "2"}},
