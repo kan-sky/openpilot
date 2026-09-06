@@ -308,6 +308,22 @@ class CarController(CarControllerBase):
             self.resume_fault_guard = 0
             self.activateCruise_after_brake = False
 
+          # Kans: diagnostic - gas-tok/CruiseOnDist engage requests (cruise.py's
+          # CS.out.activateCruise) confirmed correct in cruise.py's own logs but
+          # cruise never actually engaged - check whether auto_hold_block_cruise
+          # (manual AutoHold) is silently eating the request here. Edge-triggered
+          # on activateCruise's rising edge.
+          if not hasattr(self, "_debug_prev_activate_cruise"):
+            self._debug_prev_activate_cruise = 0
+          if CS.out.activateCruise > 0 and self._debug_prev_activate_cruise <= 0:
+            print(f"[carcontroller activate-cruise] activateCruise={CS.out.activateCruise} "
+                  f"autoHoldBlockCruise={auto_hold_block_cruise} manualAutoHold={manual_auto_hold} "
+                  f"autoHold={CS.autoHold} autoHoldActive={CS.autoHoldActive} "
+                  f"autoHoldActivated={CS.autoHoldActivated} outAutoHoldActivated={CS.out.autoHoldActivated} "
+                  f"brakePressed={CS.out.brakePressed} cruiseStateEnabled={CS.out.cruiseState.enabled} "
+                  f"ccEnabled={CC.enabled} vEgo={CS.out.vEgo:.2f}", flush=True)
+          self._debug_prev_activate_cruise = CS.out.activateCruise
+
           if CS.out.activateCruise > 0 and not auto_hold_block_cruise and not CS.out.brakePressed:
             self._pending_activateCruise = True
 
