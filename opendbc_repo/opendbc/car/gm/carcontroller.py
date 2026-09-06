@@ -8,7 +8,7 @@ from opendbc.car import Bus, DT_CTRL, structs, create_gas_interceptor_command, A
 from opendbc.car.lateral import apply_driver_steer_torque_limits
 from opendbc.car.gm import gmcan
 from opendbc.car.common.conversions import Conversions as CV
-from opendbc.car.gm.values import CAR, DBC, AccState, CanBus, CarControllerParams, CruiseButtons, EV_CAR, SDGM_CAR, ALT_ACCS, CAMERA_ACC_CAR
+from opendbc.car.gm.values import DBC, AccState, CanBus, CarControllerParams, CruiseButtons, EV_CAR, SDGM_CAR, ALT_ACCS, CAMERA_ACC_CAR
 from opendbc.car.interfaces import CarControllerBase
 from openpilot.selfdrive.controls.lib.drive_helpers import apply_deadzone
 
@@ -379,25 +379,7 @@ class CarController(CarControllerBase):
 
 
           # AutoCruise: 크루즈 OFF 상태에서, 메인 활성(activateCruise) 신호가 있을 때
-          #
-          # Kans: this whole Volt-only branch was missing from devel-0815's
-          # carcontroller.py (confirmed via grep - not present there at all),
-          # so tz never had it either. The generic "2 tries in 0.25s" retry
-          # below doesn't reliably latch GM ACC on for the Volt; carrot-wip's
-          # original Volt-only path instead spams DECEL_SET at 25Hz for as
-          # long as activateCruise's on-latch holds (~0.5s from cruise.py -
-          # up to ~12 attempts instead of 2). Restored per user. The full
-          # condition (not just the fingerprint check) is on this `if` so a
-          # Volt not currently trying to engage still falls through to the
-          # AutoResume `elif` below, same as before this branch existed.
-          if (self.CP.carFingerprint == CAR.CHEVROLET_VOLT and auto_cruise_enabled and
-              CS.out.activateCruise > 0 and not auto_hold_block_cruise and not CS.out.cruiseState.enabled):
-            if (self.frame - self.last_button_frame) * DT_CTRL >= 0.04:
-              cloudlog.warning(f"[carcontroller] AutoCruise(Volt) send DECEL_SET activateCruise={CS.out.activateCruise}")
-              self.send_btn(CS, can_sends, CruiseButtons.DECEL_SET)
-              self.last_button_frame = self.frame
-
-          elif auto_cruise_enabled and self._pending_activateCruise and not CS.out.cruiseState.enabled:
+          if auto_cruise_enabled and self._pending_activateCruise and not CS.out.cruiseState.enabled:
             # Kans: AutoCruise (0.25초 윈도 안에 최대 2회 버튼 시도)
             if not self.autoCruise_activate:
               self.autoCruise_activate = True
