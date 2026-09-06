@@ -383,8 +383,14 @@ class CarController(CarControllerBase):
 
               if within_window and self.autoCruise_try_count < 2:
                 if (self.frame - self.last_button_frame) * DT_CTRL >= 0.12:
-                  btn = CruiseButtons.RES_ACCEL if CS.out.activateCruise == 1 else CruiseButtons.DECEL_SET
-                  self.send_btn(CS, can_sends, btn)
+                  # Kans: this whole block only runs while cruise is OFF (engage
+                  # attempt), where GM's RESUME button only works if a speed was
+                  # already stored earlier this drive cycle - the very first
+                  # engage of a drive (the common case for gas-tok/CruiseOnDist)
+                  # needs SET/DECEL instead, confirmed by on-road testing.
+                  # SET/DECEL engages reliably in both cases, so always use it
+                  # here instead of switching on activateCruise's value.
+                  self.send_btn(CS, can_sends, CruiseButtons.DECEL_SET)
                   self.last_button_frame = self.frame
                   self.autoCruise_try_count += 1
 
