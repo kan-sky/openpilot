@@ -97,7 +97,7 @@ class VCruiseHelper:
     self.log = ""
 
     self.autoCruiseControl_cancel_timer = 0
-    self._gear_was_drive_last = True
+    self._gear_ok = True
     self.autoCruiseControl = 0
     self.autoGasTokSpeed = 0
     self.autoGasSyncSpeed = 0
@@ -230,17 +230,18 @@ class VCruiseHelper:
       self.d_rel = lead.dRel if lead.present else 0
       self.v_rel = lead.vRel if lead.present else 0
 
-    if CS.gearShifter != GearShifter.drive:
-      if self._gear_was_drive_last:
-        # Kans: autoCruiseControl_cancel_timer blocks every engage attempt
-        # for 20s whenever this fires - log the actual gearShifter value on
-        # the edge into "not drive" so we can see what it's actually reading
-        # instead of guessing (readable via `grep '\[cruise-gear\]' swaglog*`).
-        cloudlog.warning(f"[cruise-gear] gearShifter left drive: now={CS.gearShifter}")
+    # Kans: GM's ECMPRDNL2.ManualMode bit is set whenever the Volt's regen
+    # paddle is pulled (routine while driving, e.g. slowing for a lead car -
+    # exactly when auto-engage is needed most), which opendbc maps to
+    # GearShifter.manumatic, not drive - the physical shifter never actually
+    # leaves D. Confirmed via swaglog capture showing every engage attempt
+    # blocked by the 20s autoCruiseControl_cancel_timer below during normal
+    # driving. Treat manumatic the same as drive here.
+    self._gear_ok = CS.gearShifter in (GearShifter.drive, GearShifter.manumatic)
+    if not self._gear_ok:
       self.autoCruiseControl_cancel_timer = int(20 / DT_CTRL)
     else:
       self.autoCruiseControl_cancel_timer = max(0, self.autoCruiseControl_cancel_timer - 1)
-    self._gear_was_drive_last = CS.gearShifter == GearShifter.drive
 
     self.v_cruise_kph_last = self.v_cruise_kph
     self.is_metric = is_metric
@@ -534,7 +535,7 @@ class VCruiseHelper:
     # Kans: traffic-light stop released.
     # e2eStop(3) / e2eStopped(5) -> e2eCruise(2) means Carrot released the stop target.
     traffic_start = self.xState_last in [3, 5] and self.xState == 2
-    if traffic_start and not CC.enabled and not CS.brakePressed and CS.gearShifter == GearShifter.drive:
+    if traffic_start and not CC.enabled and not CS.brakePressed and self._gear_ok:
       self._cruise_control(1, -1, "Cruise on (traffic green)")
 
     # Kans: this whole if/elif chain (gas-tok -> exact-release-edge triggers ->
