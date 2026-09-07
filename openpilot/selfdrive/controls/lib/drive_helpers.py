@@ -14,6 +14,15 @@ MAX_LATERAL_JERK = 5.0  # m/s^3
 MAX_LATERAL_ACCEL_NO_ROLL = 3.0  # m/s^2
 
 
+def apply_deadzone(error, deadzone):
+  if error > deadzone:
+    error -= deadzone
+  elif error < - deadzone:
+    error += deadzone
+  else:
+    error = 0.
+  return error
+
 def should_stop(v_ego: float, a_target: float) -> bool:
   return bool(v_ego < 0.3 and a_target < 0.1)
 
