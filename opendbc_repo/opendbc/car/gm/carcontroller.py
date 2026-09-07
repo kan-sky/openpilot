@@ -209,9 +209,9 @@ class CarController(CarControllerBase):
           self.apply_brake = int(min(-100 * self.stopAccel_eff, self.params.MAX_BRAKE))
           if not self._near_stop_snap_active:
             self._near_stop_snap_active = True
-            print(f"[carcontroller near-stop-snap] vEgo={CS.out.vEgo:.2f} prevApplyBrake={prev_apply_brake} "
+            cloudlog.warning(f"[carcontroller near-stop-snap] vEgo={CS.out.vEgo:.2f} prevApplyBrake={prev_apply_brake} "
                   f"-> snapApplyBrake={self.apply_brake} stopAccelEff={self.stopAccel_eff:.2f} "
-                  f"pcmAccStatus={CS.pcm_acc_status}", flush=True)
+                  f"pcmAccStatus={CS.pcm_acc_status}")
         else:
           self._near_stop_snap_active = False
           if self.CP.carFingerprint in EV_CAR and self.use_ev_tables:
@@ -352,8 +352,8 @@ class CarController(CarControllerBase):
             self.last_button_frame = self.frame - int(0.12 / DT_CTRL)
             # Kans: diagnostic - correlate creep-release window entry with any
             # accFaulted rising edge that follows, especially at wider stop gaps.
-            print(f"[carcontroller autoresume] creep-release window opened: leadDRel={lead_drel:.2f} "
-                  f"leadVRel={lead_vrel:.2f} vEgo={CS.out.vEgo:.2f} pcmAccStatus={CS.pcm_acc_status}", flush=True)
+            cloudlog.warning(f"[carcontroller autoresume] creep-release window opened: leadDRel={lead_drel:.2f} "
+                  f"leadVRel={lead_vrel:.2f} vEgo={CS.out.vEgo:.2f} pcmAccStatus={CS.pcm_acc_status}")
 
           # resume_frame 갱신 후 계산
           creep_dt = (self.frame - self.resume_frame) * DT_CTRL if self.resume_frame != 0 else 999.0
@@ -441,8 +441,8 @@ class CarController(CarControllerBase):
             elif self.CP.carFingerprint in SDGM_CAR:
               # SDGM: starting이 짧을 수 있으니, 창이 열리면 1회는 반드시 쏨
               if self.resume_fault_guard == 0:
-                print(f"[carcontroller autoresume] first RES_ACCEL sent (SDGM): leadDRel={lead_drel:.2f} "
-                      f"vEgo={CS.out.vEgo:.2f} pcmAccStatus={CS.pcm_acc_status}", flush=True)
+                cloudlog.warning(f"[carcontroller autoresume] first RES_ACCEL sent (SDGM): leadDRel={lead_drel:.2f} "
+                      f"vEgo={CS.out.vEgo:.2f} pcmAccStatus={CS.pcm_acc_status}")
                 self.send_btn(CS, can_sends, CruiseButtons.RES_ACCEL)
                 self.last_button_frame = self.frame
                 self.resume_fault_guard = 1
@@ -462,8 +462,8 @@ class CarController(CarControllerBase):
                 # 버튼 주기 0.12초, 리쥼실패율 가장 낮은 값으로 보임.
                 if (self.frame - self.last_button_frame) * DT_CTRL >= 0.12:
                   if self.resume_fault_guard == 0:
-                    print(f"[carcontroller autoresume] first RES_ACCEL sent: leadDRel={lead_drel:.2f} "
-                          f"vEgo={CS.out.vEgo:.2f} pcmAccStatus={CS.pcm_acc_status}", flush=True)
+                    cloudlog.warning(f"[carcontroller autoresume] first RES_ACCEL sent: leadDRel={lead_drel:.2f} "
+                          f"vEgo={CS.out.vEgo:.2f} pcmAccStatus={CS.pcm_acc_status}")
                   self.send_btn(CS, can_sends, CruiseButtons.RES_ACCEL)
                   self.last_button_frame = self.frame
                   self.resume_fault_guard += 1  # 송신횟수 기록
