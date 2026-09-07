@@ -785,9 +785,9 @@ class RadarD:
     new_ids = confirmed_ids - self._debug_prev_cutin_ids
     for t in self.tracks.values():
       if t.identifier in new_ids:
-        print(f"[radard cutin] confirmed trackId={t.identifier} dRel={t.dRel:.1f} yRel={t.yRel:.1f} "
+        cloudlog.warning(f"[radard cutin] confirmed trackId={t.identifier} dRel={t.dRel:.1f} yRel={t.yRel:.1f} "
               f"vLead={t.vLead:.1f} dPath={t.dPath:.2f} inwardSpeed={t.dPath_inward_speed:.2f} "
-              f"vEgo={self.v_ego:.1f} sensitivity={self.cutin_sensitivity:.0f}", flush=True)
+              f"vEgo={self.v_ego:.1f} sensitivity={self.cutin_sensitivity:.0f}")
     self._debug_prev_cutin_ids = confirmed_ids
 
     return self._apply_cutin_output_hold(cutin_list)
@@ -919,20 +919,20 @@ class RadarD:
       new_lead_id = lead_one.radarTrackId if (lead_one.present and lead_one.radar) else None
       if new_lead_id is not None and new_lead_id != self._debug_prev_lead_id:
         t = self.tracks.get(new_lead_id)
-        print(f"[radard lead-switch] prevId={self._debug_prev_lead_id} -> newId={new_lead_id} "
+        cloudlog.warning(f"[radard lead-switch] prevId={self._debug_prev_lead_id} -> newId={new_lead_id} "
               f"dRel={lead_one.dRel:.1f} yRel={lead_one.yRel:.1f} vLead={lead_one.vLead:.1f} "
               f"vRel={lead_one.vRel:.1f} vEgo={self.v_ego:.1f} "
               f"selectedCount={t.selected_count if t else -1} "
-              f"isStoppedCarCount={t.is_stopped_car_count if t else -1}", flush=True)
+              f"isStoppedCarCount={t.is_stopped_car_count if t else -1}")
       self._debug_prev_lead_id = new_lead_id
 
       lead_two = self.radar_state.leadTwo
       new_lead2_id = lead_two.radarTrackId if (lead_two.present and lead_two.radar) else None
       if new_lead2_id is not None and new_lead2_id != self._debug_prev_lead2_id:
-        print(f"[radard lead2-switch] prevId={self._debug_prev_lead2_id} -> newId={new_lead2_id} "
+        cloudlog.warning(f"[radard lead2-switch] prevId={self._debug_prev_lead2_id} -> newId={new_lead2_id} "
               f"dRel={lead_two.dRel:.1f} yRel={lead_two.yRel:.1f} vLead={lead_two.vLead:.1f} "
               f"vEgo={self.v_ego:.1f} leadOneId={new_lead_id} "
-              f"leadOneDRel={lead_one.dRel:.1f}", flush=True)
+              f"leadOneDRel={lead_one.dRel:.1f}")
       self._debug_prev_lead2_id = new_lead2_id
 
   def publish(self, pm: messaging.PubMaster):
