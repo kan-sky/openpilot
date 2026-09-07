@@ -1,6 +1,8 @@
 from openpilot.cereal import log
 from openpilot.common.constants import CV
 from openpilot.common.realtime import DT_MDL
+import numpy as np
+from openpilot.common.params import Params
 
 LaneChangeState = log.LaneChangeState
 LaneChangeDirection = log.LaneChangeDirection
@@ -11,17 +13,39 @@ LANE_CHANGE_START_TIME = 0.5
 
 class DesireHelper:
   def __init__(self):
+    self.params = Params()
+    self.frame = 0
+
+    # FSM core
     self.lane_change_state = LaneChangeState.off
     self.lane_change_direction = LaneChangeDirection.none
     self.lane_change_timer = 0.0
     self.prev_one_blinker = False
     self.desire = log.Desire.none
 
+    self.modelTurnSpeedFactor = 0.0
+    self.model_turn_speed = 200.0
+  def _make_model_turn_speed(self, modeldata):
+    self.frame += 1
+
+    if self.frame % 100 == 0:
+      self.modelTurnSpeedFactor = self.params.get_float("ModelTurnSpeedFactor") * 0.1
+
+    if self.modelTurnSpeedFactor > 0:
+      model_turn_speed = np.interp(self.modelTurnSpeedFactor,
+                                   modeldata.velocity.t,
+                                   modeldata.velocity.x) * CV.MS_TO_KPH * 1.2
+
+      self.model_turn_speed = self.model_turn_speed * 0.9 + model_turn_speed * 0.1
+    else:
+      self.model_turn_speed = 200.0
   @staticmethod
   def get_lane_change_direction(CS):
     return LaneChangeDirection.left if CS.leftBlinker else LaneChangeDirection.right
 
-  def update(self, carstate, lateral_active, lane_change_prob):
+  def update(self, carstate, modeldata, lateral_active, lane_change_prob):
+    self._make_model_turn_speed(modeldata)
+
     v_ego = carstate.vEgo
     one_blinker = carstate.leftBlinker != carstate.rightBlinker
     below_lane_change_speed = v_ego < LANE_CHANGE_SPEED_MIN

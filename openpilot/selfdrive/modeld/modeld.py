@@ -45,7 +45,7 @@ def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.
                           lat_action_t: float, long_action_t: float, v_ego: float) -> log.ModelDataV2.Action:
   if 'action' not in model_output:
     plan = model_output['plan'][0]
-    desired_accel = get_accel_from_plan(plan[:,Plan.VELOCITY][:,0],
+    desired_accel, _, _, _ = get_accel_from_plan(plan[:,Plan.VELOCITY][:,0],
                                         plan[:,Plan.ACCELERATION][:,0],
                                         ModelConstants.T_IDXS,
                                         action_t=long_action_t)
@@ -416,9 +416,10 @@ def main(demo=False):
       l_lane_change_prob = desire_state[log.Desire.laneChangeLeft]
       r_lane_change_prob = desire_state[log.Desire.laneChangeRight]
       lane_change_prob = l_lane_change_prob + r_lane_change_prob
-      DH.update(sm['carState'], sm['carControl'].latActive, lane_change_prob)
+      DH.update(sm['carState'], modelv2_send.modelV2, sm['carControl'].latActive, lane_change_prob)
       modelv2_send.modelV2.meta.laneChangeState = DH.lane_change_state
       modelv2_send.modelV2.meta.laneChangeDirection = DH.lane_change_direction
+      modelv2_send.modelV2.meta.modelTurnSpeed = float(DH.model_turn_speed)
 
       fill_driving_model_data(drivingdata_send, modelv2_send)
       fill_pose_msg(posenet_send, model_output, meta_main.frame_id, vipc_dropped_frames, meta_main.timestamp_eof, extrinsics_calibration_seen)
