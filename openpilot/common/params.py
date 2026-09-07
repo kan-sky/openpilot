@@ -70,8 +70,13 @@ params_get_key_type = _bind("params_get_key_type", [ParamsHandle, ctypes.c_char_
 params_get_default = _bind("params_get_default", [ParamsHandle, ctypes.c_char_p], ParamsBuffer)
 params_get = _bind("params_get", [ParamsHandle, ctypes.c_char_p, ctypes.c_bool], ParamsBuffer)
 params_get_bool = _bind("params_get_bool", [ParamsHandle, ctypes.c_char_p, ctypes.c_bool], ctypes.c_bool)
+params_get_int = _bind("params_get_int", [ParamsHandle, ctypes.c_char_p, ctypes.c_bool], ctypes.c_int)
+params_get_float = _bind("params_get_float", [ParamsHandle, ctypes.c_char_p, ctypes.c_bool], ctypes.c_float)
+
 params_put = _bind("params_put", [ParamsHandle, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_size_t, ctypes.c_bool], ctypes.c_int)
 params_put_bool = _bind("params_put_bool", [ParamsHandle, ctypes.c_char_p, ctypes.c_bool, ctypes.c_bool], ctypes.c_int)
+params_put_int = _bind("params_put_int", [ParamsHandle, ctypes.c_char_p, ctypes.c_int, ctypes.c_bool], ctypes.c_int)
+params_put_float = _bind("params_put_float", [ParamsHandle, ctypes.c_char_p, ctypes.c_float, ctypes.c_bool], ctypes.c_int)
 params_remove = _bind("params_remove", [ParamsHandle, ctypes.c_char_p], ctypes.c_int)
 params_get_path = _bind("params_get_path", [ParamsHandle, ctypes.c_char_p, ctypes.c_size_t], ParamsBuffer)
 params_keys_size = _bind("params_keys_size", [ParamsHandle], ctypes.c_size_t)
@@ -164,6 +169,12 @@ class Params:
   def get_bool(self, key, block=False):
     return bool(params_get_bool(self.p, self.check_key(key), block))
 
+  def get_int(self, key, block=False):
+    return int(params_get_int(self.p, self.check_key(key), block))
+
+  def get_float(self, key, block=False):
+    return float(params_get_float(self.p, self.check_key(key), block))
+
   def _put_cast(self, key, dat):
     return ensure_bytes(self.python2cpp(type(dat), self.get_type(key), dat, key))
 
@@ -175,6 +186,24 @@ class Params:
 
   def put_bool(self, key, val, block=False):
     params_put_bool(self.p, self.check_key(key), val, block)
+
+  def put_int(self, key, val, block=True):
+    params_put_int(self.p, self.check_key(key), val, block)
+
+  def put_float(self, key, val, block=True):
+    params_put_float(self.p, self.check_key(key), val, block)
+
+  def put_nonblocking(self, key, dat):
+    self.put(key, dat, block=False)
+
+  def put_bool_nonblocking(self, key, val):
+    self.put_bool(key, val, block=False)
+
+  def put_int_nonblocking(self, key, val):
+    self.put_int(key, val, block=False)
+
+  def put_float_nonblocking(self, key, val):
+    self.put_float(key, val, block=False)
 
   def remove(self, key):
     params_remove(self.p, self.check_key(key))

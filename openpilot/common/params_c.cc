@@ -113,6 +113,18 @@ bool params_get_bool(ParamsHandle *handle, const char *key, bool block) noexcept
   });
 }
 
+int params_get_int(ParamsHandle *handle, const char *key, bool block) noexcept {
+  return translate_exceptions(0, [&]() {
+    return handle->params.getInt(key, block);
+  });
+}
+
+float params_get_float(ParamsHandle *handle, const char *key, bool block) noexcept {
+  return translate_exceptions(0.0F, [&]() {
+    return handle->params.getFloat(key, block);
+  });
+}
+
 int params_put(ParamsHandle *handle, const char *key, const char *value, size_t size, bool block) noexcept {
   return translate_exceptions(-1, [&]() {
     if (block) {
@@ -129,6 +141,26 @@ int params_put_bool(ParamsHandle *handle, const char *key, bool value, bool bloc
       return handle->params.putBool(key, value);
     }
     handle->params.putBoolNonBlocking(key, value);
+    return 0;
+  });
+}
+
+int params_put_int(ParamsHandle *handle, const char *key, int value, bool block) noexcept {
+  return translate_exceptions(-1, [&]() {
+    if (block) {
+      return handle->params.putInt(key, value);
+    }
+    handle->params.putIntNonBlocking(key, value);
+    return 0;
+  });
+}
+
+int params_put_float(ParamsHandle *handle, const char *key, float value, bool block) noexcept {
+  return translate_exceptions(-1, [&]() {
+    if (block) {
+      return handle->params.putFloat(key, value);
+    }
+    handle->params.putFloatNonBlocking(key, value);
     return 0;
   });
 }
