@@ -211,19 +211,20 @@ class VCruiseHelper:
         self.button_timers[b.type.raw] = 1 if b.pressed else 0
         self.button_change_states[b.type.raw] = {"standstill": CS.cruiseState.standstill, "enabled": enabled}
 
-  def update_v_cruise(self, CS, enabled, is_metric, sm=None):
+  def update_v_cruise(self, CS, sm, is_metric):
     self._add_log("")
     self.update_params(is_metric)
     self.frame += 1
+    CC = sm['carControl']
     # Kans: receive traffic-light state from longitudinal planner.
     self.xState_last = self.xState
     self.trafficState_last = self.trafficState
-    if sm is not None and sm.alive['longitudinalPlan']:
+    if sm.alive['longitudinalPlan']:
       lp = sm['longitudinalPlan']
       self.xState = lp.xState
       self.trafficState = lp.trafficState
       self.aTarget = lp.aTarget
-    if sm is not None and sm.alive['radarState']:
+    if sm.alive['radarState']:
       lead = sm['radarState'].leadOne
       self.d_rel = lead.dRel if lead.present else 0
       self.v_rel = lead.vRel if lead.present else 0
@@ -240,12 +241,12 @@ class VCruiseHelper:
     self.v_ego_kph_set = int(CS.vEgoCluster * CV.MS_TO_KPH + 0.5)
     self._activate_cruise = 0
 
-    self._prepare_brake_gas(CS, enabled)
+    self._prepare_brake_gas(CS, CC)
 
-    if enabled:
+    if CC.enabled:
       self._cruise_ready = False
 
-    v_cruise_kph = self._update_cruise_buttons(CS, enabled, self.v_cruise_kph)
+    v_cruise_kph = self._update_cruise_buttons(CS, CC, self.v_cruise_kph)
 
     if self._activate_cruise > 0:
       self._cruise_ready = False
@@ -276,7 +277,7 @@ class VCruiseHelper:
       self.v_cruise_cluster_kph = self.v_cruise_kph
 
     self.cruise_state_available_last = CS.cruiseState.available
-    self.enabled_last = enabled
+    self.enabled_last = CC.enabled
 
   def initialize_v_cruise(self, CS, experimental_mode: bool) -> None:
     # Initial set/resume speed is handled in update_v_cruise/_update_cruise_buttons.
@@ -361,7 +362,7 @@ class VCruiseHelper:
     return button_kph, button_type, self.long_pressed
 
 
-  def _update_cruise_buttons(self, CS, enabled, v_cruise_kph):
+  def _update_cruise_buttons(self, CS, CC, v_cruise_kph):
     button_kph, button_type, long_pressed = self._prepare_buttons(CS, v_cruise_kph)
 
     if button_type in [ButtonType.accelCruise, ButtonType.decelCruise]:
@@ -385,7 +386,7 @@ class VCruiseHelper:
         # current driving speed. Restored from carrot-wip: while not yet
         # engaged (or at a standstill), the first resume of the drive snaps
         # to the actual current speed instead.
-        if self._cruise_ready or not enabled or CS.cruiseState.standstill:
+        if self._cruise_ready or not CC.enabled or CS.cruiseState.standstill:
           if self._v_cruise_kph_at_brake > 0:
             v_cruise_kph = max(v_cruise_kph, self._v_cruise_kph_at_brake)
             self._v_cruise_kph_at_brake = 0
@@ -406,7 +407,7 @@ class VCruiseHelper:
         self._lat_enabled = True
         self._pause_auto_speed_up = True
 
-        if not enabled:
+        if not CC.enabled:
           v_cruise_kph = max(self.v_ego_kph_set, self._cruise_speed_min)
         elif self.v_ego_kph_set > v_cruise_kph + 2 and self._cruise_button_mode in [2, 3]:
           v_cruise_kph = max(self.v_ego_kph_set, self._cruise_speed_min)
@@ -454,7 +455,7 @@ class VCruiseHelper:
         #self._add_log("Lateral disabled")
         self._add_log("Lateral " + "enabled" if self._lat_enabled else "disabled")
 
-    return self._update_cruise_state(CS, enabled, v_cruise_kph)
+    return self._update_cruise_state(CS, CC, v_cruise_kph)
 
   ## desiredSpeed :
   #   leadCar_distance, leadCar_speed, leadCar_accel,
@@ -514,7 +515,7 @@ class VCruiseHelper:
       return True, d_final
     return False, d_final
 
-  def _update_cruise_state(self, CS, enabled, v_cruise_kph):
+  def _update_cruise_state(self, CS, CC, v_cruise_kph):
     # activateCruise ON latch timer
     if self._activate_cruise_on_timer > 0:
       self._activate_cruise_on_timer -= 1
@@ -525,7 +526,7 @@ class VCruiseHelper:
     # Kans: traffic-light stop released.
     # e2eStop(3) / e2eStopped(5) -> e2eCruise(2) means Carrot released the stop target.
     traffic_start = self.xState_last in [3, 5] and self.xState == 2
-    if traffic_start and not enabled and not CS.brakePressed and CS.gearShifter == GearShifter.drive:
+    if traffic_start and not CC.enabled and not CS.brakePressed and CS.gearShifter == GearShifter.drive:
       self._cruise_control(1, -1, "Cruise on (traffic green)")
 
     # Kans: this whole if/elif chain (gas-tok -> exact-release-edge triggers ->
@@ -540,7 +541,7 @@ class VCruiseHelper:
     # - cruise ON : raise set speed to next configured unit
     if (not self.disengage_on_accelerator and self._gas_tok and
         self.v_ego_kph_set >= self.autoGasTokSpeed):
-      if not enabled:
+      if not CC.enabled:
         self._cruise_control(1, -1, "Cruise on (gas tok)")
         v_cruise_kph = max(v_cruise_kph, self.v_ego_kph_set)
       else:
@@ -556,7 +557,7 @@ class VCruiseHelper:
           self._cruise_control(1, -1 if self.aTarget > 0.0 else 0, "Cruise on (safe speed)")
         else:
           self._cruise_control(-1, 0, "Cruise off (lead car too close)")
-      elif not has_lead and self.v_ego_kph_set >= self.autoGasTokSpeed and not enabled:
+      elif not has_lead and self.v_ego_kph_set >= self.autoGasTokSpeed and not CC.enabled:
         v_cruise_kph = self.v_ego_kph_set
         self._cruise_control(1, -1 if self.aTarget > 0.0 else 0, "Cruise on (gas pressed, no lead)")
       elif self.xState == 3:
@@ -567,7 +568,7 @@ class VCruiseHelper:
         self._cruise_control(1, -1, "Cruise on (traffic light green)")
       elif CS.leftBlinker or CS.rightBlinker:
         pass
-      elif not self.disengage_on_accelerator and self.v_ego_kph_set >= self.autoGasTokSpeed and not enabled:
+      elif not self.disengage_on_accelerator and self.v_ego_kph_set >= self.autoGasTokSpeed and not CC.enabled:
         v_cruise_kph = min(self.v_ego_kph_set, v_cruise_kph)
         self._cruise_control(1, -1 if self.aTarget > 0.0 else 0, "Cruise on (gas pressed)")
 
@@ -581,7 +582,7 @@ class VCruiseHelper:
       safe_lead = has_lead and (3.0 <= self.d_rel <= max_cruise_dist)
       if CS.leftBlinker or CS.rightBlinker:
         pass
-      elif not has_lead and not enabled:
+      elif not has_lead and not CC.enabled:
         v_cruise_kph = self.v_ego_kph_set
         self._cruise_control(1, -1, "Cruise on (no lead)")
       elif safe_lead:
@@ -600,7 +601,7 @@ class VCruiseHelper:
 
     # Pedals released for a while now (not just this frame): FCW / CruiseOnDist.
     elif self._brake_pressed_count < 0 and self._gas_pressed_count < 0:
-      if not enabled:
+      if not CC.enabled:
         if self.d_rel > 0 and CS.vEgo > 0.02:
           safe_state, safe_dist = self._check_safe_stop(CS, 4)
           if abs(CS.steeringAngleDeg) > 70:
@@ -633,7 +634,7 @@ class VCruiseHelper:
 
     return v_cruise_kph
 
-  def _prepare_brake_gas(self, CS, enabled):
+  def _prepare_brake_gas(self, CS, CC):
     if CS.gasPressed:
       gas_pressed_start = self._gas_pressed_count <= 0
       self._gas_pressed_count = max(1, self._gas_pressed_count + 1)
@@ -641,7 +642,7 @@ class VCruiseHelper:
       self._gas_pressed_value = max(CS.gas, self._gas_pressed_value) if self._gas_pressed_count > 1 else CS.gas
       self._gas_tok = False
 
-      if gas_pressed_start and self.disengage_on_accelerator and enabled:
+      if gas_pressed_start and self.disengage_on_accelerator and CC.enabled:
         self._cruise_ready = False
         self._cruise_control(-1, 0, "Cruise off (gas pressed)")
     else:

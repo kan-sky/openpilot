@@ -203,7 +203,7 @@ class Car:
     RD: structs.RadarDataT | None = self.RI.update(can_list)
     #self.t2 = time.monotonic()
 
-    self.v_cruise_helper.update_v_cruise(CS, self.sm['carControl'].enabled, self.is_metric, self.sm)
+    self.v_cruise_helper.update_v_cruise(CS, self.sm, self.is_metric)
     if self.sm['carControl'].enabled and not self.CC_prev.enabled:
       # Use CarState w/ buttons from the step selfdrived enables on
       self.v_cruise_helper.initialize_v_cruise(self.CS_prev, self.experimental_mode)
