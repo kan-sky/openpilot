@@ -1,5 +1,6 @@
 import itertools
 import numpy as np
+from types import SimpleNamespace
 
 from openpilot.common.test import OpenpilotTestCase
 from openpilot.common.parameterized import parameterized_class
@@ -11,6 +12,21 @@ from openpilot.selfdrive.test.longitudinal_maneuvers.maneuver import Maneuver
 
 ButtonEvent = car.CarState.ButtonEvent
 ButtonType = car.CarState.ButtonEvent.Type
+
+
+class FakeSM:
+  """Minimal stand-in for messaging.SubMaster - just enough for
+  VCruiseHelper.update_v_cruise, which now takes sm instead of a bare
+  enabled bool (to match carrot's own VCruiseHelper.update_v_cruise
+  signature for easier upstream diffing)."""
+  def __init__(self, enabled):
+    self.alive = {"longitudinalPlan": False, "radarState": False}
+    self._carControl = SimpleNamespace(enabled=enabled)
+
+  def __getitem__(self, key):
+    if key == "carControl":
+      return self._carControl
+    raise KeyError(key)
 
 
 def run_cruise_simulation(cruise, e2e, personality, t_end=20.):
@@ -55,7 +71,7 @@ class TestVCruiseHelper(OpenpilotTestCase):
   def reset_cruise_speed_state(self):
     # Two resets previous cruise speed
     for _ in range(2):
-      self.v_cruise_helper.update_v_cruise(car.CarState(cruiseState={"available": False}), enabled=False, is_metric=False)
+      self.v_cruise_helper.update_v_cruise(car.CarState(cruiseState={"available": False}), FakeSM(False), is_metric=False)
 
   def enable(self, v_ego, experimental_mode):
     # Simulates user pressing set with a current speed
@@ -73,7 +89,7 @@ class TestVCruiseHelper(OpenpilotTestCase):
         CS = car.CarState(cruiseState={"available": True})
         CS.buttonEvents = [ButtonEvent(type=btn, pressed=pressed)]
 
-        self.v_cruise_helper.update_v_cruise(CS, enabled=True, is_metric=False)
+        self.v_cruise_helper.update_v_cruise(CS, FakeSM(True), is_metric=False)
         assert pressed == (self.v_cruise_helper.v_cruise_kph == self.v_cruise_helper.v_cruise_kph_last)
 
   def test_rising_edge_enable(self):
@@ -88,7 +104,7 @@ class TestVCruiseHelper(OpenpilotTestCase):
                              (True, False)):
       CS = car.CarState(cruiseState={"available": True})
       CS.buttonEvents = [ButtonEvent(type=ButtonType.decelCruise, pressed=pressed)]
-      self.v_cruise_helper.update_v_cruise(CS, enabled=enabled, is_metric=False)
+      self.v_cruise_helper.update_v_cruise(CS, FakeSM(enabled), is_metric=False)
       if pressed:
         self.enable(V_CRUISE_INITIAL * CV.KPH_TO_MS, False)
 
@@ -106,7 +122,7 @@ class TestVCruiseHelper(OpenpilotTestCase):
       for pressed in (True, False):
         CS = car.CarState(cruiseState={"available": True, "standstill": standstill})
         CS.buttonEvents = [ButtonEvent(type=ButtonType.accelCruise, pressed=pressed)]
-        self.v_cruise_helper.update_v_cruise(CS, enabled=True, is_metric=False)
+        self.v_cruise_helper.update_v_cruise(CS, FakeSM(True), is_metric=False)
 
         # speed should only update if not at standstill and button falling edge
         should_equal = standstill or pressed
@@ -129,7 +145,7 @@ class TestVCruiseHelper(OpenpilotTestCase):
 
       CS = car.CarState(vEgo=float(v_ego), gasPressed=True, cruiseState={"available": True})
       CS.buttonEvents = [ButtonEvent(type=ButtonType.decelCruise, pressed=False)]
-      self.v_cruise_helper.update_v_cruise(CS, enabled=True, is_metric=False)
+      self.v_cruise_helper.update_v_cruise(CS, FakeSM(True), is_metric=False)
 
       # TODO: fix skipping first run due to enabled on rising edge exception
       if v_ego == 0.0:

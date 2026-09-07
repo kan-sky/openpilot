@@ -5,7 +5,9 @@ from opendbc.car.car_helpers import interfaces
 from opendbc.car.interfaces import MAX_CTRL_SPEED
 from opendbc.car.toyota.values import ToyotaFlags
 
-from openpilot.selfdrive.selfdrived.events import Events
+from openpilot.selfdrive.selfdrived.events import Events, ET
+
+from openpilot.common.params import Params
 
 ButtonType = structs.CarState.ButtonEvent.Type
 GearShifter = structs.CarState.GearShifter
@@ -22,7 +24,18 @@ class CarEvents:
     self.no_steer_warning = False
     self.silent_steer_warning = True
 
+    self.params = Params()
+    self.frame = 0
+    self.mute_door = False
+    self.mute_seatbelt = False
+  def update_params(self):
+    if self.frame % 100 == 0:
+      self.mute_seatbelt = self.params.get_bool("MuteSeatbelt")
+      self.mute_door = self.params.get_bool("MuteDoor")
+
   def update(self, CS: car.CarState, CS_prev: car.CarState, CC: car.CarControl):
+    self.frame += 1
+    self.update_params()
     if self.CP.brand in ('body', 'mock'):
       return Events()
 
@@ -131,7 +144,7 @@ class CarEvents:
       events.add(EventName.brakeHold)
     if CS.parkingBrake:
       events.add(EventName.parkBrake)
-    if CS.accFaulted:
+    if CS.accFaulted and not CS.brakePressed:
       events.add(EventName.accFaulted)
     if CS.carNotReady:
       events.add(EventName.carNotReady)
@@ -170,9 +183,11 @@ class CarEvents:
         # if the user overrode recently, show a less harsh alert
         if self.silent_steer_warning or CS.standstill or self.steering_unpressed < int(1.5 / DT_CTRL):
           self.silent_steer_warning = True
-          events.add(EventName.steerTempUnavailableSilent)
+          if CS.vEgo < self.CP.minSteerSpeed:
+            events.add(EventName.steerTempUnavailableSilent)
         else:
-          events.add(EventName.steerTempUnavailable)
+          if CS.vEgo < self.CP.minSteerSpeed:
+            events.add(EventName.steerTempUnavailable)
     else:
       self.no_steer_warning = False
       self.silent_steer_warning = False
@@ -187,4 +202,11 @@ class CarEvents:
       elif not CS.cruiseState.enabled:
         events.add(EventName.pcmDisable)
 
+
+    if not self.CP.pcmCruise:
+      if CS.activateCruise > 0 and CS_prev.activateCruise <= 0:
+        if not events.contains(ET.NO_ENTRY):
+          events.add(EventName.buttonEnable)
+      elif CS.activateCruise < 0 and CS_prev.activateCruise >= 0:
+        events.add(EventName.buttonCancel)
     return events
