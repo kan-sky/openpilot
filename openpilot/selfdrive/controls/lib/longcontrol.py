@@ -4,16 +4,30 @@ from openpilot.common.realtime import DT_CTRL
 from openpilot.selfdrive.controls.lib.drive_helpers import CONTROL_N
 from openpilot.common.pid import PIDController
 from openpilot.selfdrive.modeld.constants import ModelConstants
+from openpilot.common.params import Params
 
 CONTROL_N_T_IDX = ModelConstants.T_IDXS[:CONTROL_N]
 
 LongCtrlState = car.CarControl.Actuators.LongControlState
 
 
-def long_control_state_trans(active, long_control_state, should_stop, brake_pressed, cruise_standstill):
+def long_control_state_trans(CP, active, long_control_state, v_ego,
+                             should_stop, brake_pressed, cruise_standstill):
+  # Kans: reverted to the plain/comma-stock unconditional transition (no
+  # a_ego/fcw_stop reentry debounce). That debounce was restored earlier to
+  # chase the "twitch then stuck until manual RESUME" bug, but has a known
+  # history of also causing "doesn't stop behind lead car" (why it was
+  # dropped once before, pre-tz) and is now suspected of causing a new
+  # 3-stage stutter near stops (pid<->stopping toggling as should_stop
+  # flickers near threshold). The twitch/stuck bug may have actually been
+  # fully explained by the separate AccState import crash in
+  # opendbc/car/gm/carcontroller.py (fixed independently) - testing without
+  # this debounce to see if it's still needed at all.
+  stopping_condition = should_stop
   starting_condition = (not should_stop and
                         not cruise_standstill and
                         not brake_pressed)
+  started_condition = v_ego > CP.vEgoStarting
 
   if not active:
     long_control_state = LongCtrlState.off
@@ -22,16 +36,23 @@ def long_control_state_trans(active, long_control_state, should_stop, brake_pres
     if long_control_state == LongCtrlState.off:
       if not starting_condition:
         long_control_state = LongCtrlState.stopping
+      elif CP.startingState:
+        long_control_state = LongCtrlState.starting
       else:
         long_control_state = LongCtrlState.pid
 
     elif long_control_state == LongCtrlState.stopping:
       if starting_condition:
-        long_control_state = LongCtrlState.pid
+        if CP.startingState:
+          long_control_state = LongCtrlState.starting
+        else:
+          long_control_state = LongCtrlState.pid
 
-    elif long_control_state == LongCtrlState.pid:
-      if should_stop:
+    elif long_control_state in [LongCtrlState.starting, LongCtrlState.pid]:
+      if stopping_condition:
         long_control_state = LongCtrlState.stopping
+      elif started_condition:
+        long_control_state = LongCtrlState.pid
 
   return long_control_state
 
@@ -39,36 +60,79 @@ class LongControl:
   def __init__(self, CP):
     self.CP = CP
     self.long_control_state = LongCtrlState.off
+    # Kans: kp is always 0 for this fork (matches comma stock's GM convention -
+    # comma never sets a longitudinal P-term for GM), so pass it as a plain float
+    # like comma stock does, instead of the CP.longitudinalTuning.kpBP/kpV
+    # BP-interpolated pair (still resolves to 0.0 either way - the live
+    # LongTuningKpV override below reads CP.longitudinalTuning.kpBP directly and
+    # is unaffected by this).
     self.pid = PIDController(0.0, (CP.longitudinalTuning.kiBP, CP.longitudinalTuning.kiV),
-                             rate=1 / DT_CTRL)
+                             k_f=CP.longitudinalTuning.kf, rate=1 / DT_CTRL)
     self.last_output_accel = 0.0
+
+
+    self.params = Params()
+    self.readParamCount = 0
+    self.stopping_accel = 0.0
+    self.j_lead = 0.0
 
   def reset(self):
     self.pid.reset()
 
-  def update(self, active, CS, a_target, should_stop, accel_limits):
-    """Update longitudinal control. This updates the state machine and runs a PID loop"""
+  def update(self, active, CS, long_plan, accel_limits, t_since_plan):
+    a_target_ff = long_plan.aTarget
+    v_target_now = long_plan.vTargetNow
+    j_target_now = long_plan.jTargetNow
+    should_stop = long_plan.shouldStop
+
+    self.readParamCount += 1
+    if self.readParamCount >= 100:
+      self.readParamCount = 0
+      self.stopping_accel = self.params.get_float("StoppingAccel") * 0.01
+    elif self.readParamCount == 10:
+      if len(self.CP.longitudinalTuning.kpBP) == 1 and len(self.CP.longitudinalTuning.kiBP) == 1:
+        longitudinalTuningKpV = self.params.get_float("LongTuningKpV") * 0.01
+        longitudinalTuningKiV = self.params.get_float("LongTuningKiV") * 0.001
+
+        self.pid._k_p = (self.CP.longitudinalTuning.kpBP, [longitudinalTuningKpV])
+        self.pid._k_i = (self.CP.longitudinalTuning.kiBP, [longitudinalTuningKiV])
+        self.pid._k_f = ([0], [self.params.get_float("LongTuningKf") * 0.01])
+
+    # Update longitudinal control. This updates the state machine and runs a PID loop
     self.pid.neg_limit = accel_limits[0]
     self.pid.pos_limit = accel_limits[1]
 
-    self.long_control_state = long_control_state_trans(active, self.long_control_state, should_stop,
-                                                       CS.brakePressed, CS.cruiseState.standstill)
+    self.long_control_state = long_control_state_trans(self.CP, active, self.long_control_state, CS.vEgo,
+                                                       should_stop, CS.brakePressed,
+                                                       CS.cruiseState.standstill)
+
     if self.long_control_state == LongCtrlState.off:
       self.reset()
-      output_accel = 0.
+      output_accel = 0.0
 
     elif self.long_control_state == LongCtrlState.stopping:
       output_accel = self.last_output_accel
-      if output_accel > self.CP.stopAccel:
+
+      stopAccel = self.stopping_accel if self.stopping_accel < 0.0 else self.CP.stopAccel
+      if output_accel > stopAccel:
         output_accel = min(output_accel, 0.0)
-        # TODO: can we just go straight to stopAccel?
-        output_accel -= 1.0 * DT_CTRL  # m/s^2/s while trying to stop
+        output_accel -= self.CP.stoppingDecelRate * DT_CTRL
+      self.reset()
+
+    elif self.long_control_state == LongCtrlState.starting:
+      output_accel = self.CP.startAccel
       self.reset()
 
     else:  # LongCtrlState.pid
-      error = a_target - CS.aEgo
+      # Kans: switched to comma stock's accel-error PID (error = a_target - CS.aEgo)
+      # instead of the speed-error form (v_target_now - CS.vEgo) this fork used
+      # before. kiV=.35 was tuned against speed-error's larger error magnitude, so
+      # it will likely read as weaker now - road-test and raise LongTuningKiV if
+      # the response feels soft, .35 was never a validated-for-this constant.
+      error = v_target_now - CS.vEgo
       output_accel = self.pid.update(error, speed=CS.vEgo,
-                                     feedforward=a_target)
+                                     feedforward=a_target_ff)
 
     self.last_output_accel = np.clip(output_accel, accel_limits[0], accel_limits[1])
-    return self.last_output_accel
+
+    return self.last_output_accel, a_target_ff, j_target_now
