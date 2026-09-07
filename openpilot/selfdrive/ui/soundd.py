@@ -7,6 +7,7 @@ import wave
 from openpilot.cereal import log, messaging
 from openpilot.common.basedir import BASEDIR
 from openpilot.common.filter_simple import FirstOrderFilter
+from openpilot.common.params import Params
 from openpilot.common.realtime import Ratekeeper
 from openpilot.common.utils import retry
 from openpilot.common.swaglog import cloudlog
@@ -17,7 +18,7 @@ from openpilot.common.hardware import HARDWARE
 SAMPLE_RATE = 48000
 SAMPLE_BUFFER = 4096 # (approx 100ms)
 MAX_VOLUME = 1.0
-MIN_VOLUME = 0.1
+MIN_VOLUME = 0.4
 ALERT_RAMP_TIME = 4 # seconds to ramp to max volume for warningImmediate
 SELFDRIVE_STATE_TIMEOUT = 5 # 5 seconds
 FILTER_DT = 1. / (micd.SAMPLE_RATE / micd.FFT_SAMPLES)
@@ -28,7 +29,7 @@ DB_SCALE = 30 # AMBIENT_DB + DB_SCALE is where MAX_VOLUME is applied
 VOLUME_BASE = 20
 if HARDWARE.get_device_type() == "tizi":
   AMBIENT_DB = 30
-  VOLUME_BASE = 10
+  VOLUME_BASE = 50
 
 AudibleAlert = log.SelfdriveState.AudibleAlert
 
@@ -47,8 +48,12 @@ sound_list: dict[int, tuple[str, int | None, float]] = {
 
   AudibleAlert.warningSoft: ("critical.wav", None, MAX_VOLUME),
   AudibleAlert.warningImmediate: ("dm_critical.wav", None, MAX_VOLUME),
+  #AudibleAlert.nnff: ("nnff.wav", 1, MAX_VOLUME),
+  AudibleAlert.trafficSignGreen: ("traffic_sign_green.wav", 1, MAX_VOLUME),
+  AudibleAlert.trafficSignChanged: ("traffic_sign_changed.wav", 1, MAX_VOLUME),
+  AudibleAlert.stopping: ("audio_stopping.wav", 1, MAX_VOLUME),
+  AudibleAlert.autoHold: ("audio_auto_hold.wav", 1, MAX_VOLUME),
 }
-
 def check_selfdrive_timeout_alert(sm):
   ss_missing = time.monotonic() - sm.recv_time['selfdriveState']
 
@@ -57,6 +62,34 @@ def check_selfdrive_timeout_alert(sm):
       return True
 
   return False
+
+def linear_resample(samples, original_rate, new_rate):
+  if original_rate == new_rate:
+    return samples
+
+  # Calculate the resampling factor and the number of samples in the resampled signal
+  resampling_factor = float(new_rate) / original_rate
+  num_resampled_samples = int(len(samples) * resampling_factor)
+
+  # Create the resampled signal array
+  resampled = np.zeros(num_resampled_samples, dtype=np.float32)
+
+  for i in range(num_resampled_samples):
+    # Calculate the original sample index
+    orig_index = i / resampling_factor
+
+    # Find the two nearest original samples
+    lower_index = int(orig_index)
+    upper_index = min(lower_index + 1, len(samples) - 1)
+
+    # Perform linear interpolation
+    resampled[i] = (samples[lower_index] * (upper_index - orig_index) +
+                    samples[upper_index] * (orig_index - lower_index))
+
+  return resampled
+
+
+
 
 
 class Soundd:
@@ -83,12 +116,21 @@ class Soundd:
       filename, play_count, volume = sound_list[sound]
 
       with wave.open(BASEDIR + "/openpilot/selfdrive/assets/sounds/" + filename, 'r') as wavefile:
-        assert wavefile.getnchannels() == 1
         assert wavefile.getsampwidth() == 2
-        assert wavefile.getframerate() == SAMPLE_RATE
+
+        actual_sample_rate = wavefile.getframerate()
+        nchannels = wavefile.getnchannels()
+        assert nchannels in [1, 2]
 
         length = wavefile.getnframes()
-        self.loaded_sounds[sound] = np.frombuffer(wavefile.readframes(length), dtype=np.int16).astype(np.float32) / (2**16/2)
+        samples = np.frombuffer(wavefile.readframes(length), dtype=np.int16)
+
+        if nchannels == 2:
+          samples = samples[0::2] / 2 + samples[1::2] / 2
+
+        resampled_samples = linear_resample(samples, actual_sample_rate, SAMPLE_RATE) * volume
+
+        self.loaded_sounds[sound] = resampled_samples.astype(np.float32) / (2**16/2)
 
   def get_sound_data(self, frames): # get "frames" worth of data from the current alert sound, looping when required
 
@@ -123,6 +165,10 @@ class Soundd:
     data_out[:frames, 0] = self.get_sound_data(frames)
 
   def update_alert(self, new_alert):
+    if new_alert != AudibleAlert.none and new_alert not in self.loaded_sounds:
+      cloudlog.error(f"soundd received unsupported alert {new_alert}")
+      new_alert = AudibleAlert.none
+
     current_alert_played_once = self.current_alert == AudibleAlert.none or self.current_sound_frame >= len(self.loaded_sounds[self.current_alert])
     # let looping sounds finish the current loop instead of cutting off mid tone
     if new_alert == AudibleAlert.none and self.current_alert != AudibleAlert.none and sound_list[self.current_alert][1] is None:
