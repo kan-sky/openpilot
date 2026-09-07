@@ -231,13 +231,9 @@ struct CarState {
   # process meta
   cumLagMs @50 :Float32;
 
-  # Kans: @58/@59/@60 were free when this was numbered on tz's older base,
-  # but 196 (devel-staging) has since claimed them for its own new fields
-  # (steeringDisengage/stockLkas/blockPcmEnable, kept at their 196 numbers
-  # below). Renumbered to @91/@92 to avoid colliding with those. softHoldActive
-  # (was @60) is dropped entirely - soft hold was removed from this fork.
-  vCluRatio @91 :Float32;
-  logCarrot @92 :Text;
+  vCluRatio @58 :Float32;
+  logCarrot @59 :Text;
+  softHoldActive @60 :Int16;    #0: not active, 1: active ready, 2: activated
   carNotReady @61 :Bool;  # car is transiently refusing engagement, used to prevent a fault if engaged
   latEnabled @62 :Bool;
   pcmCruiseGap @63 :Int16;      #0: can't read, 1,2,3,4: gap setting
