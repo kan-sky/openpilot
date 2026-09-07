@@ -6,6 +6,7 @@ from openpilot.common.constants import CV
 from openpilot.common.swaglog import cloudlog
 
 from opendbc.car import structs, DT_CTRL
+from opendbc.car.car_helpers import interfaces
 GearShifter = structs.CarState.GearShifter
 
 # WARNING: this value was determined based on the model's training distribution,
@@ -41,6 +42,13 @@ class VCruiseHelper:
     self.frame = 0
     self.params_memory = Params("/dev/shm/params")
     self.params = Params()
+
+    # Kans: mirror opendbc's per-car DRIVABLE_GEARS (used by car_events.py's
+    # wrongGear event) here too - GM's regen paddle sets gearShifter to
+    # manumatic (not drive) even though the physical shifter stays in D, and
+    # cruise.py's own autoCruiseControl_cancel_timer gear check needs to
+    # tolerate that the same way the official engage-permission event does.
+    self._drivable_gears = (GearShifter.drive, *interfaces[CP.carFingerprint].DRIVABLE_GEARS)
 
     self.v_cruise_kph = 20
     self.v_cruise_cluster_kph = 20
@@ -236,8 +244,10 @@ class VCruiseHelper:
     # GearShifter.manumatic, not drive - the physical shifter never actually
     # leaves D. Confirmed via swaglog capture showing every engage attempt
     # blocked by the 20s autoCruiseControl_cancel_timer below during normal
-    # driving. Treat manumatic the same as drive here.
-    self._gear_ok = CS.gearShifter in (GearShifter.drive, GearShifter.manumatic)
+    # driving. self._drivable_gears mirrors opendbc's own DRIVABLE_GEARS
+    # (also used by car_events.py's wrongGear event), so this stays
+    # consistent with the official engage-permission tolerance list.
+    self._gear_ok = CS.gearShifter in self._drivable_gears
     if not self._gear_ok:
       self.autoCruiseControl_cancel_timer = int(20 / DT_CTRL)
     else:
