@@ -9,6 +9,7 @@ from openpilot.common.constants import CV
 from openpilot.common.filter_simple import MyMovingAverage
 from openpilot.selfdrive.carrot.traffic_stop import is_traffic_stop_entry_allowed
 from openpilot.selfdrive.selfdrived.events import Events
+from openpilot.common.swaglog import cloudlog
 
 EventName = log.OnroadEvent.EventName
 
@@ -446,6 +447,18 @@ class CarrotPlanner:
           if v_ego < 0.3:
             self.stopping_count = 0.5 / DT_MDL
             self.xState = XState.e2eStopped
+            # Kans: diagnostic - the stop-distance-varies-drive-to-drive report can't
+            # be root-caused from swaglog/rlog alone, since none of these values are
+            # published on any capnp field. Log them once here, at the moment the
+            # target locks in, so a future capture can show whether _stop_x_rl
+            # ratcheted onto a stale/spiked raw estimate (see its asymmetric
+            # jump-up/decay-down update a few lines above stop_model_x_rl).
+            cloudlog.warning(
+              f"[carrot stop-dist] LOCKED stopModelXRaw={stop_model_x_raw:.2f} "
+              f"stopModelXRl={stop_model_x_rl:.2f} trafficStopAdjustRatio={self.trafficStopAdjustRatio:.2f} "
+              f"trafficStopDistanceAdjust={self.trafficStopDistanceAdjust:.2f} "
+              f"actualStopDistance={self.actual_stop_distance:.2f} vEgo={v_ego:.2f}"
+            )
     elif self.xState == XState.e2ePrepare:
       if lead_detected:
         self.xState = XState.lead
@@ -468,6 +481,14 @@ class CarrotPlanner:
         self.xState = XState.e2eStop
         # Kans: 실제 빨간불 정지거리에서 신호정지거리만큼 빼서 미리 정지하게 함.
         self.actual_stop_distance = max(0.0, stop_model_x_rl - self.trafficStopDistanceAdjust)
+        # Kans: diagnostic - see the matching LOCKED log where XState.e2eStopped is
+        # entered; comparing ENTER vs LOCKED shows how far stop_model_x_rl moved
+        # during the approach (ratchet jump-up vs slow decay-down).
+        cloudlog.warning(
+          f"[carrot stop-dist] ENTER stopModelXRl={stop_model_x_rl:.2f} "
+          f"trafficStopDistanceAdjust={self.trafficStopDistanceAdjust:.2f} "
+          f"actualStopDistance={self.actual_stop_distance:.2f} vEgo={v_ego:.2f}"
+        )
       else:
         self.xState = XState.e2eCruise
 
