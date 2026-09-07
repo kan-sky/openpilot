@@ -61,9 +61,9 @@ def clip_curvature(v_ego, prev_curvature, new_curvature, roll) -> tuple[float, b
 # distance already nets out the desired follow gap / stop-line offset, so ~0 means
 # "already at the intended stopping point" - this stays generous enough to absorb
 # MPC solve noise while still ruling out latching 5-10m early.
-REMAINING_DISTANCE_GATE = 2.5
+REMAINING_DISTANCE_GATE = 4.0
 
-def get_accel_from_plan(speeds, accels, t_idxs, action_t=DT_MDL, vEgoStopping=0.3, remaining_distance=1000.0):
+def get_accel_from_plan(speeds, accels, t_idxs, action_t=DT_MDL, vEgoStopping=0.3, remaining_distance=1000.0, standstill=False):
   if len(speeds) == len(t_idxs):
     v_target_now = speeds[0]
     a_target_now = accels[0]
@@ -85,8 +85,17 @@ def get_accel_from_plan(speeds, accels, t_idxs, action_t=DT_MDL, vEgoStopping=0.
     # tracking) early and stopping short of the intended follow/stop-line distance.
     # Add comma stock's a_target<0.1 plus an explicit remaining-distance gate to
     # narrow that gap for both lead-follow and traffic-stop-line approaches.
+    #
+    # Kans: when the car is already physically standstill (CS.standstill), don't
+    # let remaining_distance keep should_stop=False - a stationary lead's own
+    # tracked position can drift a bit relative to the MPC's desired follow gap,
+    # so remaining_distance can sit above the gate indefinitely even though the
+    # car isn't moving. Without this OR, that showed up on-vehicle as a multi-stage
+    # "stop, creep forward, stop again" pattern each time should_stop briefly went
+    # False while standstill was already true, worse the farther the initial stop
+    # landed from the desired gap (more distance left to creep away).
     should_stop = (v_target < vEgoStopping and v_target_1sec < vEgoStopping and a_target < 0.1
-                   and remaining_distance < REMAINING_DISTANCE_GATE)
+                   and (remaining_distance < REMAINING_DISTANCE_GATE or standstill))
 
   else:
     v_target_now = 0.0
