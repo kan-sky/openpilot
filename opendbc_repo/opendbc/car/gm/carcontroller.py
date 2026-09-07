@@ -391,7 +391,15 @@ class CarController(CarControllerBase):
 
               if within_window and self.autoCruise_try_count < 2:
                 if (self.frame - self.last_button_frame) * DT_CTRL >= 0.12:
-                  btn = CruiseButtons.RES_ACCEL if CS.out.activateCruise == 1 else CruiseButtons.DECEL_SET
+                  # Kans: swaglog capture from a real failed engage attempt
+                  # (lead stopped -> driver braked to a full stop -> gas-tok
+                  # tried to re-engage) showed RES_ACCEL sent repeatedly here
+                  # while cruiseState.enabled stayed False the whole time -
+                  # confirmed on this exact car/scenario that GM's RESUME
+                  # doesn't restore cruise after a full stop, only SET does
+                  # (manually pressing SET in the same situation always
+                  # re-engages). Use DECEL_SET for the auto-engage case.
+                  btn = CruiseButtons.DECEL_SET if CS.out.activateCruise == 1 else CruiseButtons.RES_ACCEL
                   cloudlog.warning(f"[carcontroller] AutoCruise send btn={btn} try={self.autoCruise_try_count} "
                                     f"activateCruise={CS.out.activateCruise}")
                   self.send_btn(CS, can_sends, btn)
