@@ -21,6 +21,7 @@ from openpilot.common.swaglog import cloudlog
 from openpilot.common.hardware import HARDWARE, PC
 from openpilot.system.ui.lib.multilang import FONT_FALLBACK_LANGUAGES, TRANSLATIONS_DIR, multilang
 from openpilot.common.realtime import Ratekeeper
+from openpilot.common.params import Params
 
 _DEFAULT_FPS = int(os.getenv("FPS", {'tizi': 20}.get(HARDWARE.get_device_type(), 60)))
 FPS_LOG_INTERVAL = 5  # Seconds between logging FPS drops
@@ -88,11 +89,13 @@ DEFAULT_TEXT_COLOR = rl.Color(255, 255, 255, int(255 * 0.9))
 
 # Qt draws fonts accounting for ascent/descent differently, so compensate to match old styles
 # The real scales for the fonts below range from 1.212 to 1.266
-FONT_SCALE = 1.242 if BIG_UI else 1.16
+# Kans:
+lang = Params().get("LanguageSetting") or "en"
+FONT_SCALE = (1.242 if BIG_UI else 1.16) * (0.9 if lang == "ko" else 1.0)
 
 ASSETS_DIR = files("openpilot.selfdrive").joinpath("assets")
 FONT_DIR = ASSETS_DIR.joinpath("fonts")
-EXTRA_FONT_CHARS = "–‑✓×°§•X⚙✕◀▶✔⌫⇧␣○●↳çêüñ–‑✓×°§•€£¥"
+EXTRA_FONT_CHARS = "–‑✓×°§•X⚙✕◀▶✔⌫⇧␣○●↳çêüñ–‑✓×°§•€£¥↑↓←→↖↗↘↙±÷℃℉✔✕✖■□◆◇…“”‘’"
 NOTO_FONTS = {
   "ja": "NotoSansCJKjp-Regular.otf",
   "ko": "NotoSansCJKkr-Regular.otf",
@@ -100,6 +103,7 @@ NOTO_FONTS = {
   "zh-CHS": "NotoSansCJKsc-Regular.otf",
   "zh-CHT": "NotoSansCJKtc-Regular.otf",
 }
+KR_FONTS = {"NanumGothicBold"}
 
 
 class FontWeight(StrEnum):
@@ -108,11 +112,13 @@ class FontWeight(StrEnum):
   BOLD = "Inter-Bold.ttf"
   SEMI_BOLD = "Inter-SemiBold.ttf"
   UNIFONT = "unifont.otf"
+  KR_BOLD = "NanumGothicBold.ttf"
 
   # Small UI fonts
   DISPLAY_REGULAR = "Inter-Regular.ttf"
   ROMAN = "Inter-Regular.ttf"
-  DISPLAY = "Inter-Bold.ttf"
+  #DISPLAY = "Inter-Bold.ttf"
+  DISPLAY = "NanumGothicBold.ttf"
 
 
 def font_fallback(font: rl.Font) -> rl.Font:
@@ -721,7 +727,8 @@ class GuiApplication:
     for font_weight_file in FontWeight:
       with as_file(FONT_DIR) as fspath:
         unifont = font_weight_file == FontWeight.UNIFONT
-        codepoints = sorted(map(ord, unifont_chars if unifont else base_chars))
+        kr_font = Path(font_weight_file).stem in KR_FONTS
+        codepoints = sorted(map(ord, unifont_chars if (unifont or kr_font) else base_chars))
         codepoint_buffer = rl.ffi.new("int[]", codepoints)
         font = rl.load_font_ex((fspath / font_weight_file).as_posix(), 16 if unifont else 200,
                                rl.ffi.cast("int *", codepoint_buffer), len(codepoints))
