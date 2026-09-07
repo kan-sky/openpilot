@@ -227,6 +227,8 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"AutoNaviSpeedBumpTime", {PERSISTENT, INT, "4"}},
     {"AutoNaviSpeedBumpSpeed", {PERSISTENT, INT, "25"}},
     {"DisableDM", {PERSISTENT, INT, "1"}},
+    {"MuteDoor", {PERSISTENT, INT, "1"}},
+    {"MuteSeatbelt", {PERSISTENT, INT, "1"}},
     {"AutoNaviSpeedDecelRate", {PERSISTENT, INT, "100"}},
     {"CarrotException", {CLEAR_ON_MANAGER_START, STRING}},
     {"AutoNaviSpeedSafetyFactor", {PERSISTENT, INT, "95"}},
