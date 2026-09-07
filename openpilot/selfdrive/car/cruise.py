@@ -97,6 +97,7 @@ class VCruiseHelper:
     self.log = ""
 
     self.autoCruiseControl_cancel_timer = 0
+    self._gear_was_drive_last = True
     self.autoCruiseControl = 0
     self.autoGasTokSpeed = 0
     self.autoGasSyncSpeed = 0
@@ -230,9 +231,16 @@ class VCruiseHelper:
       self.v_rel = lead.vRel if lead.present else 0
 
     if CS.gearShifter != GearShifter.drive:
+      if self._gear_was_drive_last:
+        # Kans: autoCruiseControl_cancel_timer blocks every engage attempt
+        # for 20s whenever this fires - log the actual gearShifter value on
+        # the edge into "not drive" so we can see what it's actually reading
+        # instead of guessing (readable via `grep '\[cruise-gear\]' swaglog*`).
+        cloudlog.warning(f"[cruise-gear] gearShifter left drive: now={CS.gearShifter}")
       self.autoCruiseControl_cancel_timer = int(20 / DT_CTRL)
     else:
       self.autoCruiseControl_cancel_timer = max(0, self.autoCruiseControl_cancel_timer - 1)
+    self._gear_was_drive_last = CS.gearShifter == GearShifter.drive
 
     self.v_cruise_kph_last = self.v_cruise_kph
     self.is_metric = is_metric
