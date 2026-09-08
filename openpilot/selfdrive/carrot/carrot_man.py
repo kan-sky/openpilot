@@ -52,22 +52,22 @@ BROADCAST_NETWORK_ERROR_LOG_INTERVAL = 30.0
 
 
 def limit_route_points(points, max_points=NAVI_ROUTE_MAX_POINTS):
-    if max_points <= 0:
-        return []
-    count = len(points)
-    if count <= max_points:
-        return list(points)
+  if max_points <= 0:
+    return []
+  count = len(points)
+  if count <= max_points:
+    return list(points)
 
-    limited = []
-    last_index = count - 1
-    previous_index = -1
-    for i in range(max_points):
-        source_index = round(i * last_index / max(1, max_points - 1))
-        if source_index == previous_index:
-            continue
-        limited.append(points[source_index])
-        previous_index = source_index
-    return limited
+  limited = []
+  last_index = count - 1
+  previous_index = -1
+  for i in range(max_points):
+    source_index = round(i * last_index / max(1, max_points - 1))
+    if source_index == previous_index:
+      continue
+    limited.append(points[source_index])
+    previous_index = source_index
+  return limited
 
 
 _carrot_exception_tmux_send_lock = threading.Lock()
@@ -132,98 +132,98 @@ V_CRUVE_LOOKUP_VALS = [300, 150, 120, 110, 100, 90, 80, 70, 60, 50, 40, 15, 5]
 
 # Haversine formula to calculate distance between two GPS coordinates
 def haversine(lon1, lat1, lon2, lat2):
-    R = 6371000
-    phi1, phi2 = math.radians(lat1), math.radians(lat2)
-    dphi = math.radians(lat2 - lat1)
-    dlambda = math.radians(lon2 - lon1)
-    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
-    return 2 * R * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+  R = 6371000
+  phi1, phi2 = math.radians(lat1), math.radians(lat2)
+  dphi = math.radians(lat2 - lat1)
+  dlambda = math.radians(lon2 - lon1)
+  a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
+  return 2 * R * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
 # Get the closest point on a segment between two coordinates
 def closest_point_on_segment(p1, p2, current_position):
-    x1, y1 = p1
-    x2, y2 = p2
-    px, py = current_position
-    dx = x2 - x1
-    dy = y2 - y1
-    if dx == 0 and dy == 0:
-        return p1
-    t = ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy)
-    t = max(0, min(1, t))
-    return (x1 + t * dx, y1 + t * dy)
+  x1, y1 = p1
+  x2, y2 = p2
+  px, py = current_position
+  dx = x2 - x1
+  dy = y2 - y1
+  if dx == 0 and dy == 0:
+    return p1
+  t = ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy)
+  t = max(0, min(1, t))
+  return (x1 + t * dx, y1 + t * dy)
 
 
 # Get path after a certain distance from the current position
 def get_path_after_distance(start_index, coordinates, current_position, distance_m):
-    total_distance = 0
-    path_after_distance = []
-    closest_index = -1
-    closest_point = None
-    min_distance = float('inf')
-    start_index = max(0, start_index - 2)
+  total_distance = 0
+  path_after_distance = []
+  closest_index = -1
+  closest_point = None
+  min_distance = float('inf')
+  start_index = max(0, start_index - 2)
 
-    for i in range(start_index, len(coordinates) - 1):
-        p1 = coordinates[i]
-        p2 = coordinates[i + 1]
-        candidate_point = closest_point_on_segment(p1, p2, current_position)
-        distance = haversine(current_position[0], current_position[1], candidate_point[0], candidate_point[1])
-        if distance < min_distance:
-            min_distance = distance
-            closest_point = candidate_point
-            closest_index = i
-        elif distance > min_distance and min_distance < 10:
-            break
+  for i in range(start_index, len(coordinates) - 1):
+    p1 = coordinates[i]
+    p2 = coordinates[i + 1]
+    candidate_point = closest_point_on_segment(p1, p2, current_position)
+    distance = haversine(current_position[0], current_position[1], candidate_point[0], candidate_point[1])
+    if distance < min_distance:
+      min_distance = distance
+      closest_point = candidate_point
+      closest_index = i
+    elif distance > min_distance and min_distance < 10:
+      break
 
-    start_index = closest_index
-    if closest_index != -1:
-        path_after_distance.append(closest_point)
-        path_after_distance.append(coordinates[closest_index + 1])
-        total_distance = haversine(closest_point[0], closest_point[1], coordinates[closest_index + 1][0], coordinates[closest_index + 1][1])
-        for i in range(closest_index + 1, len(coordinates) - 1):
-            coord1 = coordinates[i]
-            coord2 = coordinates[i + 1]
-            segment_distance = haversine(coord1[0], coord1[1], coord2[0], coord2[1])
-            if total_distance + segment_distance >= distance_m and segment_distance > 0:
-                remaining_distance = distance_m - total_distance
-                ratio = remaining_distance / segment_distance
-                path_after_distance.append((coord1[0] + ratio * (coord2[0] - coord1[0]), coord1[1] + ratio * (coord2[1] - coord1[1])))
-                break
-            total_distance += segment_distance
-            path_after_distance.append(coord2)
+  start_index = closest_index
+  if closest_index != -1:
+    path_after_distance.append(closest_point)
+    path_after_distance.append(coordinates[closest_index + 1])
+    total_distance = haversine(closest_point[0], closest_point[1], coordinates[closest_index + 1][0], coordinates[closest_index + 1][1])
+    for i in range(closest_index + 1, len(coordinates) - 1):
+      coord1 = coordinates[i]
+      coord2 = coordinates[i + 1]
+      segment_distance = haversine(coord1[0], coord1[1], coord2[0], coord2[1])
+      if total_distance + segment_distance >= distance_m and segment_distance > 0:
+        remaining_distance = distance_m - total_distance
+        ratio = remaining_distance / segment_distance
+        path_after_distance.append((coord1[0] + ratio * (coord2[0] - coord1[0]), coord1[1] + ratio * (coord2[1] - coord1[1])))
+        break
+      total_distance += segment_distance
+      path_after_distance.append(coord2)
 
-    return path_after_distance, start_index, closest_point
+  return path_after_distance, start_index, closest_point
 
 
 def calculate_angle(point1, point2):
-    delta_lon = point2[0] - point1[0]
-    delta_lat = point2[1] - point1[1]
-    return math.degrees(math.atan2(delta_lat, delta_lon))
+  delta_lon = point2[0] - point1[0]
+  delta_lat = point2[1] - point1[1]
+  return math.degrees(math.atan2(delta_lat, delta_lon))
 
 # Convert GPS coordinates to relative x, y coordinates based on a reference point and heading
 def gps_to_relative_xy(gps_path, reference_point, heading_deg):
-    ref_lon, ref_lat = reference_point
-    relative_coordinates = []
-    heading_rad = math.radians(heading_deg)
-    for lon, lat in gps_path:
-        x = (lon - ref_lon) * 40008000 * math.cos(math.radians(ref_lat)) / 360
-        y = (lat - ref_lat) * 40008000 / 360
-        x_rot = x * math.cos(heading_rad) - y * math.sin(heading_rad)
-        y_rot = x * math.sin(heading_rad) + y * math.cos(heading_rad)
-        relative_coordinates.append((y_rot, x_rot))
-    return relative_coordinates
+  ref_lon, ref_lat = reference_point
+  relative_coordinates = []
+  heading_rad = math.radians(heading_deg)
+  for lon, lat in gps_path:
+    x = (lon - ref_lon) * 40008000 * math.cos(math.radians(ref_lat)) / 360
+    y = (lat - ref_lat) * 40008000 / 360
+    x_rot = x * math.cos(heading_rad) - y * math.sin(heading_rad)
+    y_rot = x * math.sin(heading_rad) + y * math.cos(heading_rad)
+    relative_coordinates.append((y_rot, x_rot))
+  return relative_coordinates
 
 
 # Calculate curvature given three points using a faster vector-based method
 def calculate_curvature(p1, p2, p3):
-    v1 = (p2[0] - p1[0], p2[1] - p1[1])
-    v2 = (p3[0] - p2[0], p3[1] - p2[1])
-    cross_product = v1[0] * v2[1] - v1[1] * v2[0]
-    len_v1 = math.sqrt(v1[0] ** 2 + v1[1] ** 2)
-    len_v2 = math.sqrt(v2[0] ** 2 + v2[1] ** 2)
-    if len_v1 * len_v2 == 0:
-        return 0
-    return cross_product / (len_v1 * len_v2 * len_v1)
+  v1 = (p2[0] - p1[0], p2[1] - p1[1])
+  v2 = (p3[0] - p2[0], p3[1] - p2[1])
+  cross_product = v1[0] * v2[1] - v1[1] * v2[0]
+  len_v1 = math.sqrt(v1[0] ** 2 + v1[1] ** 2)
+  len_v2 = math.sqrt(v2[0] ** 2 + v2[1] ** 2)
+  if len_v1 * len_v2 == 0:
+    return 0
+  return cross_product / (len_v1 * len_v2 * len_v1)
 
 
 class CarrotMan:
