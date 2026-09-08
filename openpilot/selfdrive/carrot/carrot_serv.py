@@ -979,8 +979,8 @@ class CarrotServ:
 
       if is_turn:
         # 일반 좌/우회전: 접근 중에는 현재속도 비율, 턴 직전에는 15km/h
-        approach_speed = max(20.0, min(35.0, apply_speed))
-        turn_speed = 15.0 if 0 < x_dist_to_turn <= 20.0 else approach_speed
+        approach_speed = max(15.0, min(35.0, apply_speed))
+        turn_speed = 15.0 if 0 < x_dist_to_turn <= 15.0 else approach_speed
 
       elif is_rotary:
         # 로터리: 너무 느리면 후속차 방해
@@ -1006,10 +1006,11 @@ class CarrotServ:
     if is_turn:
       # Kans: 일반 좌/우회전/교차로
       # 조향변경이 늦으니 멀리서부터 미리 준비하게 한다.
-      start_fork_dist = 45.0
       road_dist = np.interp(self.nTBTNextRoadWidth, [5, 10], [30, 45])
       speed_dist = np.interp(v_ego_kph, [20, 30, 50], [15, 25, 40])
       start_turn_dist = min(road_dist, speed_dist)
+      # start_fork_dist(prepare->활성 전환)는 start_turn_dist보다 항상 10m 멀리서 시작한다.
+      start_fork_dist = start_turn_dist + 10.0
       atc_debug = "Trn"
 
     elif is_rotary:
