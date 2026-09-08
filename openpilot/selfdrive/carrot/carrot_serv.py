@@ -1026,7 +1026,9 @@ class CarrotServ:
         atc_debug = "Rmp"
 
       elif is_highway_like:
-        start_fork_dist = 100.0
+        # Kans: 100m 고정은 고속 접근 시 후방차엔 늦게 변경하는 것처럼 보일 수 있어
+        # 속도가 빠를수록 더 멀리서 시작하도록 보간(하한 110m).
+        start_fork_dist = float(np.interp(v_ego_kph, [70, 90, 110], [115, 130, 150]))
         atc_debug = "Hwy"
 
       else:
