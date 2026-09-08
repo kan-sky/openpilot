@@ -805,6 +805,15 @@ class CarrotServ:
     current_changed = force or current.sequence != self.carrot_navi_current_sequence
     next_guidance = navi.next
     next_changed = force or next_guidance.sequence != self.carrot_navi_next_sequence
+
+    if current.present:
+      cloudlog.warning(
+        f"[carrot turn-dist] seq={current.sequence} changed={current_changed} "
+        f"navDistM={current.distance_m} deadReckonXDist={self.xDistToTurn:.1f} "
+        f"diff={current.distance_m - self.xDistToTurn:.1f} turnType={current.turn_type} "
+        f"totalDistance={self.totalDistance:.1f}"
+      )
+
     if not current_changed and not next_changed:
       return
 
