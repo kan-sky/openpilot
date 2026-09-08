@@ -973,14 +973,14 @@ class CarrotServ:
     is_highway_like = self.roadcate in [0, 1] or self.nRoadLimitSpeed >= 70
 
     if self.autoTurnControlSpeedTurn > 0:
-      turn_ratio = min(0.90, self.autoTurnControlSpeedTurn)
+      turn_ratio = max(0.90, self.autoTurnControlSpeedTurn)
       apply_speed = v_ego_kph * turn_ratio
       fork_speed = turn_speed
 
       if is_turn:
         # 일반 좌/우회전: 접근 중에는 현재속도 비율, 턴 직전에는 15km/h
         approach_speed = max(15.0, min(35.0, apply_speed))
-        turn_speed = 15.0 if 0 < x_dist_to_turn <= 15.0 else approach_speed
+        turn_speed = 11.0 if 0 < x_dist_to_turn <= 15.0 else approach_speed
 
       elif is_rotary:
         # 로터리: 너무 느리면 후속차 방해
@@ -999,8 +999,8 @@ class CarrotServ:
     # start_fork_dist: fork/차선변경 prepare 해제 거리
     # start_turn_dist: 일반 좌/우회전에서 atc left/right 유지 경계
     # 핸들이 늦게 꺾이면 start_fork_dist를 키우고, “턴” 시점이 늦으면 start_turn_dist를 키운다.
-    start_fork_dist = 45.0
-    start_turn_dist = 30.0
+    start_fork_dist = 50.0
+    start_turn_dist = 35.0
     atc_debug = "Df"
 
     if is_turn:
