@@ -566,7 +566,10 @@ class CarrotMan:
     return result
 
   def kisa_app_thread(self):
-    # Legacy KISA/Waze UDP input. Disabled by default.
+    # KISA/Waze-format UDP bridge for non-Tmap nav apps (e.g. Kakao Navi): parses
+    # kisawaze* fields and feeds carrot_serv.update_kisa(), which prioritizes this
+    # over Tmap's own signal (active_kisa_count > 0) for speed-limit/camera alerts.
+    # Always listening on :12345 - idle only because no app is sending to it by default.
     while self.is_running:
       try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
