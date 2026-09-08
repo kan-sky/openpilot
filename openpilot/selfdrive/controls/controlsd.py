@@ -40,7 +40,7 @@ class Controls:
 
     self.sm = messaging.SubMaster(['lateralDelay', 'vehicleParameters', 'lateralTorqueParameters', 'modelV2', 'selfdriveState',
                                    'extrinsicsCalibration', 'deviceMotion', 'longitudinalPlan', 'lateralManeuverPlan', 'carState', 'carOutput', 'radarState',
-                                   'driverMonitoringState', 'onroadEvents', 'driverAssistance'], poll='selfdriveState')
+                                   'driverMonitoringState', 'onroadEvents', 'driverAssistance', 'carrotMan'], poll='selfdriveState')
     self.pm = messaging.PubMaster(['carControl', 'controlsState'])
 
     self.steer_limited_by_safety = False
@@ -176,6 +176,9 @@ class Controls:
 
     CC.cruiseControl.override = CC.enabled and not CC.longActive and self.CP.openpilotLongitudinalControl
     CC.cruiseControl.cancel = CS.cruiseState.enabled and (not CC.enabled or not self.CP.pcmCruise)
+
+    desired_kph = min(CS.vCruiseCluster, self.sm['carrotMan'].desiredSpeed)
+    setSpeed = float(desired_kph * CV.KPH_TO_MS)
     speeds = self.sm['longitudinalPlan'].speeds
     if len(speeds):
       # Carrot: 리쥼조건을 shouldStop에서 미래속도의 마지막값[-1]으로 판단.
@@ -185,7 +188,19 @@ class Controls:
       setSpeed = speeds[-1] / vCluRatio
 
     hudControl = CC.hudControl
-    hudControl.setSpeed = float(CS.vCruiseCluster * CV.KPH_TO_MS)
+    lp = self.sm['longitudinalPlan']
+    if self.CP.pcmCruise:
+      speed_from_pcm = self.params.get_int("SpeedFromPCM")
+      if speed_from_pcm == 1:  # toyota
+        hudControl.setSpeed = float(CS.vCruiseCluster * CV.KPH_TO_MS)
+      elif speed_from_pcm == 2:
+        hudControl.setSpeed = float(max(30 / 3.6, desired_kph * CV.KPH_TO_MS))
+      elif speed_from_pcm == 3:  # honda
+        hudControl.setSpeed = setSpeed if lp.xState == 3 else float(desired_kph * CV.KPH_TO_MS)
+      else:
+        hudControl.setSpeed = float(max(30 / 3.6, setSpeed))
+    else:
+      hudControl.setSpeed = setSpeed if lp.xState == 3 else float(desired_kph * CV.KPH_TO_MS)
     hudControl.speedVisible = CC.enabled
     hudControl.lanesVisible = CC.enabled
     hudControl.leadVisible = self.sm['longitudinalPlan'].hasLead
