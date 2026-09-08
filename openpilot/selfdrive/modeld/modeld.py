@@ -273,7 +273,7 @@ def main(demo=False):
   # messaging
   pub_socks = ["modelV2", "drivingModelData", "cameraOdometry"] + (["chestnutState"] if USBGPU else [])
   pm = PubMaster(pub_socks)
-  sm = SubMaster(["deviceState", "carState", "narrowRoadCameraState", "extrinsicsCalibration", "driverMonitoringState", "carControl", "lateralDelay"])
+  sm = SubMaster(["deviceState", "carState", "narrowRoadCameraState", "extrinsicsCalibration", "driverMonitoringState", "carControl", "lateralDelay", "carrotMan", "radarState"])
 
   publish_state = PublishState()
   params = Params()
@@ -416,10 +416,19 @@ def main(demo=False):
       l_lane_change_prob = desire_state[log.Desire.laneChangeLeft]
       r_lane_change_prob = desire_state[log.Desire.laneChangeRight]
       lane_change_prob = l_lane_change_prob + r_lane_change_prob
-      DH.update(sm['carState'], modelv2_send.modelV2, sm['carControl'].latActive, lane_change_prob)
+      DH.update(sm['carState'], modelv2_send.modelV2, sm['carControl'].latActive, lane_change_prob, sm['carrotMan'], sm['radarState'])
       modelv2_send.modelV2.meta.laneChangeState = DH.lane_change_state
       modelv2_send.modelV2.meta.laneChangeDirection = DH.lane_change_direction
+      modelv2_send.modelV2.meta.desireLog = DH.desireLog
+      modelv2_send.modelV2.meta.laneWidthLeft = float(DH.left.lane_width)
+      modelv2_send.modelV2.meta.laneWidthRight = float(DH.right.lane_width)
+      modelv2_send.modelV2.meta.distanceToRoadEdgeLeft = float(DH.left.dist_to_edge)
+      modelv2_send.modelV2.meta.distanceToRoadEdgeRight = float(DH.right.dist_to_edge)
+      modelv2_send.modelV2.meta.desire = DH.desire
+      modelv2_send.modelV2.meta.laneChangeProb = DH.lane_change_ll_prob
       modelv2_send.modelV2.meta.modelTurnSpeed = float(DH.model_turn_speed)
+      modelv2_send.modelV2.meta.laneChangeAvailableLeft = DH.lane_change_available_left
+      modelv2_send.modelV2.meta.laneChangeAvailableRight = DH.lane_change_available_right
 
       fill_driving_model_data(drivingdata_send, modelv2_send)
       fill_pose_msg(posenet_send, model_output, meta_main.frame_id, vipc_dropped_frames, meta_main.timestamp_eof, extrinsics_calibration_seen)
