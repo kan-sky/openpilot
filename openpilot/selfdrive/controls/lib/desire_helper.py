@@ -3,6 +3,7 @@ from openpilot.common.constants import CV
 from openpilot.common.realtime import DT_MDL
 import numpy as np
 from openpilot.common.params import Params
+from openpilot.common.swaglog import cloudlog
 
 from openpilot.selfdrive.controls.lib.desire_lib.constants import (
   LaneChangeState, LaneChangeDirection, TurnDirection,
@@ -301,6 +302,23 @@ class DesireHelper:
     else:
       self.auto_lane_change_enable = False
       self.next_lane_change = False
+
+    if self.atc_type != "none" and self.frame % 10 == 0:
+      cloudlog.warning(
+        f"[desire atc] atcType={self.atc_type} side={side.name if side else None} "
+        f"laneChangeState={self.lane_change_state} desireEnabled={desire_enabled} "
+        f"atcOnly={atc_lane_change_only} atcManualOnly={atc_lane_change_manual_only} "
+        f"autoLCEnable={self.auto_lane_change_enable} autoLCTrigger={auto_lane_change_trigger} "
+        f"edgeAvail={side.edge_available if side else None} "
+        f"laneAvailTrigger={side.lane_available_trigger if side else None} "
+        f"laneAppeared={side.lane_appeared if side else None} "
+        f"laneExistCount={side.lane_exist_count.counter if side else None} "
+        f"sideObjDetected={side.side_object_detected if side else None} "
+        f"bsdHold={side.bsd_hold_counter if side else None} "
+        f"laneChangeAvail={side.lane_change_available if side else None} "
+        f"laneChangeAvailGeom={side.lane_change_available_geom if side else None} "
+        f"vEgo={v_ego:.1f} belowLCSpeed={below_lane_change_speed}"
+      )
 
     # ───────────────────────── FSM ─────────────────────────
     if not lateral_active or self.lane_change_timer > LANE_CHANGE_TIME_MAX or trailer_maneuver_blocked:
