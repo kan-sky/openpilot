@@ -364,9 +364,10 @@ class DesireHelper:
 
             # 맨 끝 차선이 아니면, ATC 자동 차선변경 비활성
             # (원본 유지: 차선 존재하거나 geom 가능하면 auto off, 아니면 on)
-            # Kans: 분기/진출로는 옆에 차선기하구조가 남아있어도(진출로 자체가 차선처럼
-            # 보여 _is_last_lane이 절대 True가 안 됨) edge_available만으로도 자동 실행을 허용한다.
-            self.auto_lane_change_enable = self._is_last_lane(side) or (atc_lane_change_only and side.edge_available)
+            # Kans: 분기/진출로 안내(atc_lane_change_only)는 옆에 차선이 남아있어도
+            # 지점 도달 자체로 실행을 허용한다 - edge_available/lane 존재 여부와 무관하게
+            # armed. 최종 안전체크(object/BSD)는 side.lane_change_available에서 그대로 걸린다.
+            self.auto_lane_change_enable = self._is_last_lane(side) or atc_lane_change_only
             self.next_lane_change = False
 
         elif self.lane_change_state == LaneChangeState.preLaneChange:
@@ -390,11 +391,11 @@ class DesireHelper:
             atc_geometry_release = atc_lane_change_only and auto_lane_change_trigger
             atc_line_release = (atc_driver_confirm or atc_geometry_release) and side_clear_without_line
 
-            # Arm automatic ATC once this side is the last lane, or (for a fork/exit
-            # guidance point) once the road edge is visible - a fork/exit lane often
-            # still reads as a valid lane geometrically, so _is_last_lane alone never
-            # latches there. Keep it latched so a newly appearing lane can start later.
-            if atc_lane_change_only and (self._is_last_lane(side) or side.edge_available):
+            # Arm automatic ATC for the whole duration of a fork/exit guidance point,
+            # regardless of lane/edge geometry - _is_last_lane rarely latches there
+            # since the exit lane itself often still reads as a valid lane. Object/BSD
+            # safety is still enforced at the final check via side.lane_change_available.
+            if atc_lane_change_only:
               self.auto_lane_change_enable = True
 
             if not desire_enabled or below_lane_change_speed:
