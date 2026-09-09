@@ -320,6 +320,7 @@ class DesireHelper:
         f"maneuverType={self.maneuver_type} turnDirection={self.turn_direction} "
         f"turnDisableCount={self.turn_disable_count} turnDesireState={self.turn_desire_state} "
         f"distToEdgeFar={side.dist_to_edge_far if side else None} "
+        f"xDistToTurn={carrotMan.xDistToTurn} "
         f"vEgo={v_ego:.1f} belowLCSpeed={below_lane_change_speed}"
       )
 
