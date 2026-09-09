@@ -303,27 +303,6 @@ class DesireHelper:
       self.auto_lane_change_enable = False
       self.next_lane_change = False
 
-    if self.atc_type != "none" and self.frame % 10 == 0:
-      cloudlog.warning(
-        f"[desire atc] atcType={self.atc_type} side={side.name if side else None} "
-        f"laneChangeState={self.lane_change_state} desireEnabled={desire_enabled} "
-        f"atcOnly={atc_lane_change_only} atcManualOnly={atc_lane_change_manual_only} "
-        f"autoLCEnable={self.auto_lane_change_enable} autoLCTrigger={auto_lane_change_trigger} "
-        f"edgeAvail={side.edge_available if side else None} "
-        f"laneAvailTrigger={side.lane_available_trigger if side else None} "
-        f"laneAppeared={side.lane_appeared if side else None} "
-        f"laneExistCount={side.lane_exist_count.counter if side else None} "
-        f"sideObjDetected={side.side_object_detected if side else None} "
-        f"bsdHold={side.bsd_hold_counter if side else None} "
-        f"laneChangeAvail={side.lane_change_available if side else None} "
-        f"laneChangeAvailGeom={side.lane_change_available_geom if side else None} "
-        f"maneuverType={self.maneuver_type} turnDirection={self.turn_direction} "
-        f"turnDisableCount={self.turn_disable_count} turnDesireState={self.turn_desire_state} "
-        f"distToEdgeFar={side.dist_to_edge_far if side else None} "
-        f"xDistToTurn={carrotMan.xDistToTurn} "
-        f"vEgo={v_ego:.1f} belowLCSpeed={below_lane_change_speed}"
-      )
-
     # ───────────────────────── FSM ─────────────────────────
     if not lateral_active or self.lane_change_timer > LANE_CHANGE_TIME_MAX or trailer_maneuver_blocked:
       self.lane_change_state = LaneChangeState.off
@@ -484,6 +463,27 @@ class DesireHelper:
     self.right.commit_last()
 
     self.prev_desire_enabled = desire_enabled
+
+    if self.atc_type != "none" and self.frame % 2 == 0:
+      cloudlog.warning(
+        f"[desire atc] atcType={self.atc_type} side={side.name if side else None} "
+        f"laneChangeState={self.lane_change_state} desireEnabled={desire_enabled} "
+        f"atcOnly={atc_lane_change_only} atcManualOnly={atc_lane_change_manual_only} "
+        f"autoLCEnable={self.auto_lane_change_enable} autoLCTrigger={auto_lane_change_trigger} "
+        f"edgeAvail={side.edge_available if side else None} "
+        f"laneAvailTrigger={side.lane_available_trigger if side else None} "
+        f"laneAppeared={side.lane_appeared if side else None} "
+        f"laneExistCount={side.lane_exist_count.counter if side else None} "
+        f"sideObjDetected={side.side_object_detected if side else None} "
+        f"bsdHold={side.bsd_hold_counter if side else None} "
+        f"laneChangeAvail={side.lane_change_available if side else None} "
+        f"laneChangeAvailGeom={side.lane_change_available_geom if side else None} "
+        f"maneuverType={self.maneuver_type} turnDirection={self.turn_direction} "
+        f"turnDisableCount={self.turn_disable_count} turnDesireState={self.turn_desire_state} "
+        f"distToEdgeFar={side.dist_to_edge_far if side else None} "
+        f"xDistToTurn={carrotMan.xDistToTurn} "
+        f"vEgo={v_ego:.1f} belowLCSpeed={below_lane_change_speed}"
+      )
 
     # 반대 방향 토크로 cancel (기존 유지)
     steering_pressed_cancel = carstate.steeringPressed and (
