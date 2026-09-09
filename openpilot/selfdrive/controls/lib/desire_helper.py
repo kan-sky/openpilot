@@ -364,10 +364,7 @@ class DesireHelper:
 
             # 맨 끝 차선이 아니면, ATC 자동 차선변경 비활성
             # (원본 유지: 차선 존재하거나 geom 가능하면 auto off, 아니면 on)
-            # Kans: 분기/진출로 안내(atc_lane_change_only)는 옆에 차선이 남아있어도
-            # 지점 도달 자체로 실행을 허용한다 - edge_available/lane 존재 여부와 무관하게
-            # armed. 최종 안전체크(object/BSD)는 side.lane_change_available에서 그대로 걸린다.
-            self.auto_lane_change_enable = self._is_last_lane(side) or atc_lane_change_only
+            self.auto_lane_change_enable = self._is_last_lane(side)
             self.next_lane_change = False
 
         elif self.lane_change_state == LaneChangeState.preLaneChange:
@@ -391,11 +388,9 @@ class DesireHelper:
             atc_geometry_release = atc_lane_change_only and auto_lane_change_trigger
             atc_line_release = (atc_driver_confirm or atc_geometry_release) and side_clear_without_line
 
-            # Arm automatic ATC for the whole duration of a fork/exit guidance point,
-            # regardless of lane/edge geometry - _is_last_lane rarely latches there
-            # since the exit lane itself often still reads as a valid lane. Object/BSD
-            # safety is still enforced at the final check via side.lane_change_available.
-            if atc_lane_change_only:
+            # Arm automatic ATC only after this side has actually become the last lane.
+            # Keep it latched so a newly appearing lane can start the maneuver later.
+            if atc_lane_change_only and self._is_last_lane(side):
               self.auto_lane_change_enable = True
 
             if not desire_enabled or below_lane_change_speed:
@@ -431,15 +426,8 @@ class DesireHelper:
                   if side.lane_change_available or atc_line_release:
                     self.lane_change_state = LaneChangeState.laneChangeStarting
                 else:
-                  # Kans: block_released_auto/auto_lane_change_trigger/lane_line_info_edge_detect는
-                  # 전부 "그 순간 한 번" 발생하는 엣지 신호라, 분기 진입 시점부터 이미
-                  # lane_change_available이 True였던 케이스(옆에 차선이 계속 있던 경우)에는
-                  # 엣지가 아예 발생하지 않아 영영 실행되지 않는다. ATC 분기/진출로 안내이고
-                  # auto_lane_change_enable이 이미 armed 상태라면, 펄스를 기다리지 않고
-                  # 지점(atc_lane_change_only 활성 구간) 도달 자체를 실행조건으로 인정한다.
                   if torque_applied or ((not atc_lane_change_manual_only) and (
-                    auto_lane_change_trigger or side.lane_line_info_edge_detect or block_released_auto or
-                    (atc_lane_change_only and self.auto_lane_change_enable)
+                    auto_lane_change_trigger or side.lane_line_info_edge_detect or block_released_auto
                   )):
                     # 여기서는 시작 직전 안전성 체크
                     if side.lane_change_available or atc_line_release:
