@@ -357,7 +357,9 @@ class DesireHelper:
         self.turn_direction = TurnDirection.none
 
         if self.lane_change_state == LaneChangeState.off:
-          if desire_enabled and not self.prev_desire_enabled and not below_lane_change_speed and side is not None:
+          # Kans: ATC 분기/진출로는 진입 자체가 감속(15km/h 등)을 동반하므로, 30km/h
+          # 최저속도(driver blinker 오작동 방지용)를 그대로 적용하면 항상 취소된다.
+          if desire_enabled and not self.prev_desire_enabled and (not below_lane_change_speed or atc_lane_change_only) and side is not None:
             self.lane_change_state = LaneChangeState.preLaneChange
             self.lane_change_ll_prob = 1.0
             self.lane_change_delay = self.laneChangeDelay
@@ -393,7 +395,7 @@ class DesireHelper:
             if atc_lane_change_only and self._is_last_lane(side):
               self.auto_lane_change_enable = True
 
-            if not desire_enabled or below_lane_change_speed:
+            if not desire_enabled or (below_lane_change_speed and not atc_lane_change_only):
               self.lane_change_state = LaneChangeState.off
               self.lane_change_direction = LaneChangeDirection.none
             else:
