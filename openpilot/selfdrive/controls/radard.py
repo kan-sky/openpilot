@@ -121,6 +121,23 @@ class KalmanParams:
     self.K = [[np.interp(dt, dts, K0)], [np.interp(dt, dts, K1)]]
 
 
+# Kans (carrot-wip): thresholds for excluding an in-lane track from the
+# left/right side-lead classification (it belongs in front, not to a side).
+CENTER_LEAD_NEAR_DPATH_LIMIT = 1.2
+CENTER_LEAD_FAR_DPATH_LIMIT = 0.9
+CENTER_LEAD_FAR_DREL = 60.0
+CENTER_LEAD_NEAR_IN_LANE_PROB = 0.3
+CENTER_LEAD_FAR_IN_LANE_PROB = 0.45
+
+
+def pick_side_lead(leads: list[dict[str, Any]]) -> dict[str, Any]:
+  return min(
+    (ld for ld in leads if ld['dRel'] > 5 and abs(ld['dPath']) < 3.5),
+    key=lambda d: d['dRel'],
+    default={'present': False}
+  )
+
+
 class Track:
   def __init__(self, identifier: int, v_lead: float, kalman_params: KalmanParams):
     self.identifier = identifier
@@ -377,6 +394,7 @@ class Track:
     return {
       "dRel": float(self.dRel),
       "yRel": float(self.yRel),
+      "dPath": float(self.dPath),
       "vRel": float(self.vRel),
       "vLead": float(self.vLead),
       "vLeadK": float(self.vLeadK),
@@ -792,6 +810,36 @@ class RadarD:
 
     return self._apply_cutin_output_hold(cutin_list)
 
+  def _is_center_lead_candidate(self, t: Track) -> bool:
+    # Kans (carrot-wip): a track this in-lane belongs to the front, not a side.
+    in_lane_min = CENTER_LEAD_NEAR_IN_LANE_PROB
+    dpath_limit = CENTER_LEAD_NEAR_DPATH_LIMIT
+    if t.dRel > CENTER_LEAD_FAR_DREL:
+      in_lane_min = CENTER_LEAD_FAR_IN_LANE_PROB
+      dpath_limit = CENTER_LEAD_FAR_DPATH_LIMIT
+    return t.in_lane_prob > in_lane_min and abs(t.dPath) < dpath_limit
+
+  def compute_side_leads(self) -> None:
+    # Kans (carrot-wip): populate leadLeft/leadRight/leadsLeft/leadsRight from
+    # the front radar's own tracks (yRel sign), independent of BSD and of the
+    # corner-radar hardware carrot-wip's own version prefers when present -
+    # GM has neither, so this is the only side-lead source available here.
+    left_list: list[dict[str, Any]] = []
+    right_list: list[dict[str, Any]] = []
+    for t in self.tracks.values():
+      if self._is_center_lead_candidate(t):
+        continue
+      ld = t.get_RadarState(0.0)
+      if t.yRel > 0:
+        left_list.append(ld)
+      else:
+        right_list.append(ld)
+
+    self.radar_state.leadsLeft = left_list
+    self.radar_state.leadsRight = right_list
+    self.radar_state.leadLeft = pick_side_lead(left_list)
+    self.radar_state.leadRight = pick_side_lead(right_list)
+
   def update(self, sm: messaging.SubMaster, rr: car.RadarData):
     self.ready = sm.seen['modelV2']
 
@@ -877,6 +925,7 @@ class RadarD:
     self.radar_state = log.RadarState.new_message()
     self.radar_state.mdMonoTime = sm.logMonoTime['modelV2']
     self.radar_state.radarErrors = rr.errors
+    self.compute_side_leads()
 
     if len(sm['modelV2'].velocity.x):
       model_v_ego = sm['modelV2'].velocity.x[0]
