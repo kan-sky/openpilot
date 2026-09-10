@@ -480,6 +480,10 @@ class DesireHelper:
         f"turnDisableCount={self.turn_disable_count} turnDesireState={self.turn_desire_state} "
         f"distToEdgeFar={side.dist_to_edge_far if side else None} "
         f"xDistToTurn={carrotMan.xDistToTurn} "
+        f"steeringPressed={carstate.steeringPressed} steeringTorque={carstate.steeringTorque:.1f} "
+        f"laneLineInfoMod={side.lane_line_info_mod if side else None} "
+        f"laneLineInfoEdgeDetect={side.lane_line_info_edge_detect if side else None} "
+        f"laneChangeAvailReleased={side.lane_change_available_released if side else None} "
         f"vEgo={v_ego:.1f} belowLCSpeed={below_lane_change_speed}"
       )
 
