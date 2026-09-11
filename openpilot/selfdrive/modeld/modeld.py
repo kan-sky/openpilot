@@ -340,6 +340,16 @@ def main(demo=False):
 
     sm.update(0)
     desire = DH.desire
+    # Kans (0623 backup): DH.desire only becomes laneChangeLeft/Right once the
+    # FSM reaches laneChangeStarting - the whole preLaneChange (prepare) phase
+    # publishes log.Desire.none, so the model never sees the pulse until the
+    # maneuver is already starting. Give it a heads-up as soon as the FSM
+    # leaves off, so the model has lead time to bias its path prediction.
+    if DH.lane_change_state != log.LaneChangeState.off:
+      if DH.lane_change_direction == log.LaneChangeDirection.left:
+        desire = log.Desire.laneChangeLeft
+      elif DH.lane_change_direction == log.LaneChangeDirection.right:
+        desire = log.Desire.laneChangeRight
     is_rhd = sm["driverMonitoringState"].isRHD
     frame_id = sm["narrowRoadCameraState"].frameId
     v_ego = max(sm["carState"].vEgo, 0.)
