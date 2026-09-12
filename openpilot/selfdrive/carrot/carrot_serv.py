@@ -1009,8 +1009,8 @@ class CarrotServ:
       road_dist = np.interp(self.nTBTNextRoadWidth, [5, 10], [30, 45])
       speed_dist = np.interp(v_ego_kph, [20, 30, 50], [15, 25, 40])
       start_turn_dist = min(road_dist, speed_dist)
-      # start_fork_dist(prepare->활성 전환)는 start_turn_dist보다 항상 20m 멀리서 시작한다.
-      start_fork_dist = start_turn_dist + 20.0
+      # start_fork_dist(prepare->활성 전환)는 start_turn_dist보다 항상 15m 멀리서 시작한다.
+      start_fork_dist = start_turn_dist + 15.0
       atc_debug = "Trn"
 
     elif is_rotary:
