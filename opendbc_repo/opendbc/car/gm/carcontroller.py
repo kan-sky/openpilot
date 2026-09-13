@@ -77,6 +77,16 @@ class CarController(CarControllerBase):
     self.resume_fault_guard = 0
     self.lead_start_count = 0  # 앞차 출발시도 횟수
 
+    # Kans: resume-timing diagnostic - times each SnG resume milestone
+    # relative to the first frame raw_lead_start goes true, to find which
+    # gate (lead_start latch / creep-release / longControlState->starting /
+    # cruiseState.standstill clear / first RES_ACCEL / actual vEgo movement)
+    # is eating the "느린 재출발" time. Edge-triggered, ~1 line per milestone
+    # per episode.
+    self._depart_t0_frame = None
+    self._resume_timing_logged = set()
+    self._prev_cruise_standstill = None
+
     self.btn_rc_pt = -1
     self.btn_rc_cam = -1
     self._brk_rc = -1
@@ -328,6 +338,15 @@ class CarController(CarControllerBase):
           resume_standstill = CS.out.standstill or CS.out.cruiseState.standstill
           reopen_delay = max(self.resumeDelay_time * 1.5, 0.28)
 
+          # Kans: resume-timing - cruiseState.standstill (GM's own AccState.STANDSTILL)
+          # clearing is the gate longcontrol.py needs to leave `stopping`; time it.
+          if self._prev_cruise_standstill and not CS.out.cruiseState.standstill and \
+             self._depart_t0_frame is not None and 'standstill_clear' not in self._resume_timing_logged:
+            self._resume_timing_logged.add('standstill_clear')
+            cloudlog.warning(f"[carcontroller resume-timing] cruiseState.standstill cleared "
+                              f"t+{(self.frame - self._depart_t0_frame) * DT_CTRL:.2f}s")
+          self._prev_cruise_standstill = CS.out.cruiseState.standstill
+
           # follow 조건(정지/재출발 구간에서 vRel 흔들림 감안)
           lead_follow_ok = has_lead and (2.0 < lead_drel < 15.0) and (lead_vrel > 0.3)
 
@@ -336,12 +355,35 @@ class CarController(CarControllerBase):
           # 정지 직전 vEgo<0.3 상태에서 오검출로 stopping brake가 풀리는 것을 방지.
           raw_lead_start = (has_lead and (4.0 < lead_drel < 10.0) and (lead_vrel > 0.4) and (near_stop_ego or resume_standstill))
 
+          # Kans: resume-timing - t0 anchor for the whole resume episode, plus
+          # a safety timeout in case a re-stop/re-departure never completes cleanly.
+          if raw_lead_start and self._depart_t0_frame is None:
+            self._depart_t0_frame = self.frame
+            self._resume_timing_logged = set()
+          elif self._depart_t0_frame is not None and (self.frame - self._depart_t0_frame) * DT_CTRL > 10.0:
+            self._depart_t0_frame = None
+            self._resume_timing_logged = set()
+          resume_elapsed = (self.frame - self._depart_t0_frame) * DT_CTRL if self._depart_t0_frame is not None else -1.0
+
           if raw_lead_start:
             self.lead_start_count = min(self.lead_start_count + 1, 5)
           else:
             self.lead_start_count = 0
 
           lead_start = self.lead_start_count >= 3
+
+          if lead_start and self._depart_t0_frame is not None and 'lead_start_latch' not in self._resume_timing_logged:
+            self._resume_timing_logged.add('lead_start_latch')
+            cloudlog.warning(f"[carcontroller resume-timing] lead_start latched t+{resume_elapsed:.2f}s")
+
+          if starting and self._depart_t0_frame is not None and 'long_ctrl_starting' not in self._resume_timing_logged:
+            self._resume_timing_logged.add('long_ctrl_starting')
+            cloudlog.warning(f"[carcontroller resume-timing] longControlState->starting t+{resume_elapsed:.2f}s "
+                              f"cruiseStandstill={CS.out.cruiseState.standstill}")
+
+          if CS.out.vEgo > 0.5 and self._depart_t0_frame is not None and 'vego_0p5' not in self._resume_timing_logged:
+            self._resume_timing_logged.add('vego_0p5')
+            cloudlog.warning(f"[carcontroller resume-timing] vEgo>0.5 t+{resume_elapsed:.2f}s")
 
           # Kans: Creep Release Window
           # 완전 정지 후 앞차 출발이 확인되면 starting 진입 전 브레이크를 잠시 풀어준다.
@@ -353,7 +395,8 @@ class CarController(CarControllerBase):
             # Kans: diagnostic - correlate creep-release window entry with any
             # accFaulted rising edge that follows, especially at wider stop gaps.
             cloudlog.warning(f"[carcontroller autoresume] creep-release window opened: leadDRel={lead_drel:.2f} "
-                  f"leadVRel={lead_vrel:.2f} vEgo={CS.out.vEgo:.2f} pcmAccStatus={CS.pcm_acc_status}")
+                  f"leadVRel={lead_vrel:.2f} vEgo={CS.out.vEgo:.2f} pcmAccStatus={CS.pcm_acc_status} "
+                  f"t+{resume_elapsed:.2f}s")
 
           # resume_frame 갱신 후 계산
           creep_dt = (self.frame - self.resume_frame) * DT_CTRL if self.resume_frame != 0 else 999.0
@@ -442,7 +485,7 @@ class CarController(CarControllerBase):
               # SDGM: starting이 짧을 수 있으니, 창이 열리면 1회는 반드시 쏨
               if self.resume_fault_guard == 0:
                 cloudlog.warning(f"[carcontroller autoresume] first RES_ACCEL sent (SDGM): leadDRel={lead_drel:.2f} "
-                      f"vEgo={CS.out.vEgo:.2f} pcmAccStatus={CS.pcm_acc_status}")
+                      f"vEgo={CS.out.vEgo:.2f} pcmAccStatus={CS.pcm_acc_status} t+{resume_elapsed:.2f}s")
                 self.send_btn(CS, can_sends, CruiseButtons.RES_ACCEL)
                 self.last_button_frame = self.frame
                 self.resume_fault_guard = 1
@@ -463,7 +506,7 @@ class CarController(CarControllerBase):
                 if (self.frame - self.last_button_frame) * DT_CTRL >= 0.12:
                   if self.resume_fault_guard == 0:
                     cloudlog.warning(f"[carcontroller autoresume] first RES_ACCEL sent: leadDRel={lead_drel:.2f} "
-                          f"vEgo={CS.out.vEgo:.2f} pcmAccStatus={CS.pcm_acc_status}")
+                          f"vEgo={CS.out.vEgo:.2f} pcmAccStatus={CS.pcm_acc_status} t+{resume_elapsed:.2f}s")
                   self.send_btn(CS, can_sends, CruiseButtons.RES_ACCEL)
                   self.last_button_frame = self.frame
                   self.resume_fault_guard += 1  # 송신횟수 기록
