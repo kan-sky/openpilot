@@ -166,6 +166,13 @@ class CarrotServ:
     self.navType, self.navModifier = "invalid", ""
     self.navTypeNext, self.navModifierNext = "invalid", ""
 
+    # Kans: atc-dist diagnostic - edge-triggered log of roadcate/nRoadLimitSpeed/
+    # is_highway_like at the moment a fork/lane-change maneuver first appears, to
+    # check whether a navi that doesn't tag 고속화도로 with roadcate 0/1 (or a
+    # speed limit >=70) is silently falling into the short-distance "일반 분기"
+    # branch instead of the 110-150m highway branch.
+    self._prev_atc_lane_change_info = None
+
     self.carrotIndex = 0
     self.carrotCmdIndex = 0
     self.carrotCmd = ""
@@ -1052,6 +1059,14 @@ class CarrotServ:
         f"FD:{start_fork_dist:.0f} "
         f"TD:{start_turn_dist:.0f}"
       )
+
+      lane_change_info = x_turn_info if is_lane_change else None
+      if lane_change_info is not None and lane_change_info != self._prev_atc_lane_change_info:
+        cloudlog.warning(f"[carrot atc-dist] fork/lane-change maneuver appeared: turnInfo={x_turn_info} "
+                          f"navType={self.navType} roadcate={self.roadcate} nRoadLimitSpeed={self.nRoadLimitSpeed:.0f} "
+                          f"isHighwayLike={is_highway_like} startForkDist={start_fork_dist:.1f} "
+                          f"xDistToTurn={x_dist_to_turn:.0f} vEgoKph={v_ego_kph:.1f} atcDebug={atc_debug}")
+      self._prev_atc_lane_change_info = lane_change_info
 
     turn_info_mapping = {
         1: {"type": "turn left", "speed": turn_speed, "dist": turn_dist_for_speed, "start": start_fork_dist},
