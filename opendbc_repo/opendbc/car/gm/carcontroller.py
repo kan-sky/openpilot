@@ -86,6 +86,7 @@ class CarController(CarControllerBase):
     self._depart_t0_frame = None
     self._resume_timing_logged = set()
     self._prev_cruise_standstill = None
+    self._prev_lcs_diag = None
 
     self.btn_rc_pt = -1
     self.btn_rc_cam = -1
@@ -376,10 +377,18 @@ class CarController(CarControllerBase):
             self._resume_timing_logged.add('lead_start_latch')
             cloudlog.warning(f"[carcontroller resume-timing] lead_start latched t+{resume_elapsed:.2f}s")
 
-          if starting and self._depart_t0_frame is not None and 'long_ctrl_starting' not in self._resume_timing_logged:
-            self._resume_timing_logged.add('long_ctrl_starting')
-            cloudlog.warning(f"[carcontroller resume-timing] longControlState->starting t+{resume_elapsed:.2f}s "
-                              f"cruiseStandstill={CS.out.cruiseState.standstill}")
+          # Kans: full transition log (not edge-once) - a real "느린 재출발" capture
+          # (desire_atc_log9.txt) showed pcmAccStatus stuck at STANDSTILL(4) across
+          # 10+ consecutive "first RES_ACCEL sent" lines while vEgo rose then decayed
+          # (0.25->0.11) - this logs every longControlState flip during the episode
+          # to tell apart "state is flickering stopping<->starting" from "resume_frame
+          # keeps self-resetting via resume_activate while state holds steady".
+          cur_lcs = actuators.longControlState
+          if self._depart_t0_frame is not None and cur_lcs != self._prev_lcs_diag:
+            cloudlog.warning(f"[carcontroller resume-timing] longControlState {self._prev_lcs_diag}->{cur_lcs} "
+                              f"t+{resume_elapsed:.2f}s vEgo={CS.out.vEgo:.2f} pcmAccStatus={CS.pcm_acc_status} "
+                              f"resumeFrame={self.resume_frame} resumeFaultGuard={self.resume_fault_guard}")
+          self._prev_lcs_diag = cur_lcs
 
           if CS.out.vEgo > 0.5 and self._depart_t0_frame is not None and 'vego_0p5' not in self._resume_timing_logged:
             self._resume_timing_logged.add('vego_0p5')
@@ -485,7 +494,8 @@ class CarController(CarControllerBase):
               # SDGM: starting이 짧을 수 있으니, 창이 열리면 1회는 반드시 쏨
               if self.resume_fault_guard == 0:
                 cloudlog.warning(f"[carcontroller autoresume] first RES_ACCEL sent (SDGM): leadDRel={lead_drel:.2f} "
-                      f"vEgo={CS.out.vEgo:.2f} pcmAccStatus={CS.pcm_acc_status} t+{resume_elapsed:.2f}s")
+                      f"vEgo={CS.out.vEgo:.2f} pcmAccStatus={CS.pcm_acc_status} t+{resume_elapsed:.2f}s "
+                      f"longCtrlState={actuators.longControlState} resumeDelay={self.resumeDelay_time:.2f}")
                 self.send_btn(CS, can_sends, CruiseButtons.RES_ACCEL)
                 self.last_button_frame = self.frame
                 self.resume_fault_guard = 1
@@ -506,7 +516,8 @@ class CarController(CarControllerBase):
                 if (self.frame - self.last_button_frame) * DT_CTRL >= 0.12:
                   if self.resume_fault_guard == 0:
                     cloudlog.warning(f"[carcontroller autoresume] first RES_ACCEL sent: leadDRel={lead_drel:.2f} "
-                          f"vEgo={CS.out.vEgo:.2f} pcmAccStatus={CS.pcm_acc_status} t+{resume_elapsed:.2f}s")
+                          f"vEgo={CS.out.vEgo:.2f} pcmAccStatus={CS.pcm_acc_status} t+{resume_elapsed:.2f}s "
+                          f"longCtrlState={actuators.longControlState} resumeDelay={self.resumeDelay_time:.2f}")
                   self.send_btn(CS, can_sends, CruiseButtons.RES_ACCEL)
                   self.last_button_frame = self.frame
                   self.resume_fault_guard += 1  # 송신횟수 기록
