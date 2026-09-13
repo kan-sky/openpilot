@@ -6,6 +6,7 @@ from openpilot.common.realtime import DT_MDL
 
 from .lane_math import calculate_lane_width
 from .hysteresis import ExistCounter
+from .constants import EDGE_AVAILABLE_MEMORY_DIST
 
 
 SIDE_LEAD_CLOSE_DREL = 5.0
@@ -48,6 +49,7 @@ class SideState:
   # availability
   lane_available: bool = False
   edge_available: bool = False
+  edge_seen_in_window: bool = False
 
   # smoothing
   lane_width_queue: deque = field(default_factory=lambda: deque(maxlen=int(1.0 / DT_MDL)))
@@ -117,6 +119,18 @@ class SideState:
     self.cur_prob = float(cur_prob)
     self.current_lane_missing = self.cur_prob < 0.3
 
+  def update_edge_memory(self, x_dist_to_turn):
+    # Kans: 다가오는 fork/turn에 접근하는 동안 같은 쪽 edge_available이 한 번이라도
+    # True였는지 기억해둔다 - last-lane이 무장되는 바로 그 순간 비전이 한 프레임만
+    # 놓쳐도 auto_lane_change_trigger가 영구히 막히는 걸 막기 위함.
+    # 시간이 아니라 거리로 경계를 두어서, 내비가 이미 알려주고 있는 훨씬 먼
+    # 다음(무관한) 이벤트까지 기억이 새어 들어가지 않게 한다.
+    if x_dist_to_turn is not None and x_dist_to_turn <= EDGE_AVAILABLE_MEMORY_DIST:
+      if self.edge_available:
+        self.edge_seen_in_window = True
+    else:
+      self.edge_seen_in_window = False
+
   def update_lane_line_info(self, lane_line_info_raw: int):
     self.lane_line_info_raw = int(lane_line_info_raw)
     mod = self.lane_line_info_raw % 10
@@ -132,10 +146,10 @@ class SideState:
                        ignore_bsd: bool,
                        bsd_hold_sec: float = 2.0,
                        radar_objects=()):
-    # Kans: GM has no corner radar, so the carrot-wip corner-object fallback
-    # (is_corner_track_id/is_stable_corner_track_id, Hyundai track-id ranges)
-    # is dropped - radar_objects is accepted for API compatibility but never
-    # contributes a corner-radar object here (see _is_corner_radar_object).
+    # Kans: GM은 코너 레이더가 없어서 carrot-wip의 코너 오브젝트 폴백
+    # (is_corner_track_id/is_stable_corner_track_id, 현대차 트랙ID 범위)을
+    # 뺐다 - radar_objects는 API 호환성 때문에 받긴 하지만 여기서는 절대
+    # 코너 레이더 오브젝트를 만들어내지 않는다(_is_corner_radar_object 참고).
     radar_objects = tuple(radar_objects)
     corner_objects = tuple(obj for obj in radar_objects if self._is_corner_radar_object(obj))
     primary_object_detected = self._side_lead_is_unsafe(v_ego, radar_obj)
@@ -179,7 +193,7 @@ class SideState:
 
   @classmethod
   def _is_corner_radar_object(cls, radar_obj) -> bool:
-    # Kans: GM has no corner radar (Hyundai-only hardware) - always inert.
+    # Kans: GM은 코너 레이더가 없다(현대차 전용 하드웨어) - 항상 비활성.
     return False
 
   def _bsd_receding_release_ready(self, v_ego: float, radar_objects) -> bool:

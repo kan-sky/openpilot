@@ -114,13 +114,14 @@ class Car:
       self.CI, self.CP = CI, CI.CP
       self.RI = RI
 
-    # Kans: was hardcoded to 0 (DEFAULT), meaning panda always enforced its own
-    # disengage-on-gas safety check regardless of the DisengageOnAccelerator
-    # software setting - carrot-wip wires this through via get_alternative_experience,
-    # tz never had this file at all. Without it, DisengageOnAccelerator=False only
-    # kept cruise.py/selfdrived.py from disengaging in software, but the panda
-    # firmware layer would still cut control on gas press, which is likely why
-    # gas-tap-to-engage never actually worked.
+    # Kans: 예전엔 0(DEFAULT)으로 하드코딩돼 있어서, DisengageOnAccelerator
+    # 소프트웨어 설정과 무관하게 panda가 항상 자체 가속페달-해제 안전체크를
+    # 강제하고 있었다 - carrot-wip은 get_alternative_experience를 통해 이걸
+    # 연결해두는데, tz엔 애초에 이 파일 자체가 없었다. 이게 없으면
+    # DisengageOnAccelerator=False는 cruise.py/selfdrived.py가 소프트웨어
+    # 단에서 해제되는 것만 막을 뿐, panda 펌웨어 계층은 여전히 가스 밟으면
+    # 컨트롤을 끊어버렸을 거고, 그게 아마 gas-tap-to-engage가 실제로 전혀
+    # 작동 안 했던 이유일 것이다.
     self.CP.alternativeExperience = get_alternative_experience(self.params.get_bool("DisengageOnAccelerator"))
     openpilot_enabled_toggle = self.params.get_bool("OpenpilotEnabledToggle")
     controller_available = self.CI.CC is not None and openpilot_enabled_toggle
@@ -211,9 +212,10 @@ class Car:
     # TODO: mirror the carState.cruiseState struct?
     CS.vCruise = float(self.v_cruise_helper.v_cruise_kph)
     CS.vCruiseCluster = float(self.v_cruise_helper.v_cruise_cluster_kph)
-    # Kans: was dropped when card.py was ported - carrot_man.py's make_send_message()
-    # already reads CS.logCarrot to surface it on the carrot debug overlay, but nothing
-    # was ever setting it, so that overlay was always blank.
+    # Kans: card.py를 이식할 때 빠졌던 부분 - carrot_man.py의
+    # make_send_message()는 이미 CS.logCarrot을 읽어서 carrot 디버그
+    # 오버레이에 표시하는데, 이걸 채워주는 코드가 없어서 그 오버레이가
+    # 항상 비어 있었다.
     CS.logCarrot = self.v_cruise_helper.log
 
     # GM AutoCruise: keep only the activateCruise latch output.

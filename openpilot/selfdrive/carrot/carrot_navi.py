@@ -49,21 +49,21 @@ CATALOG_SET = frozenset(CATALOG)
 JSON_ARRAY_NAMES = frozenset(("lane_ahead",))
 
 
-# Kans: non-web Carrot Navi.
+# Kans: 웹이 아닌 Carrot Navi.
 #
-# Only JSON streams required for driving/navigation control are enabled.
+# 주행/내비게이션 제어에 필요한 JSON 스트림만 활성화한다.
 #
-# Enabled:
-#   vehicle            : GPS / heading / vehicle navigation state
-#   guidance_current   : current TBT
-#   guidance_next      : next TBT
-#   lane_current       : current lane guidance
-#   lane_ahead         : upcoming lane guidance
-#   speed              : SDI / camera / section control
-#   traffic_signal     : traffic-light information
-#   crossroad          : crossroad/navigation metadata
-#   route              : TMAP route polyline
-#   navigation_status  : guidance/off-route state
+# 활성화:
+#   vehicle            : GPS / 방향 / 차량 내비게이션 상태
+#   guidance_current   : 현재 TBT
+#   guidance_next      : 다음 TBT
+#   lane_current       : 현재 차선 안내
+#   lane_ahead         : 앞으로의 차선 안내
+#   speed              : SDI / 카메라 / 구간단속
+#   traffic_signal     : 신호등 정보
+#   crossroad          : 교차로/내비게이션 메타데이터
+#   route              : TMAP 경로 폴리라인
+#   navigation_status  : 안내/경로이탈 상태
 #
 # Disabled:
 #   app_status
@@ -103,8 +103,8 @@ def build_manifest(session_id: str) -> dict[str, Any]:
   streams = []
 
   for handle, (kind, name) in enumerate(CATALOG, start=1):
-    # Kans: non-web mode.
-    # Only selected JSON streams are enabled.
+    # Kans: 웹이 아닌 모드.
+    # 선택된 JSON 스트림만 활성화한다.
     enabled = (kind == "json" and name in ENABLED_JSON_STREAMS)
 
     streams.append({"kind": kind, "name": name, "schema_version": 1,

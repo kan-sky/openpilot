@@ -400,10 +400,10 @@ class LongitudinalMpc:
     mode = self.mode
     comfort_brake = carrot.comfort_brake
     stop_distance = carrot.stop_distance
-    # Kans: distance remaining to whichever obstacle is currently binding (lead0/
-    # lead1/cruise/trafficstop), read by longitudinal_planner.py to gate should_stop
-    # on actual proximity, not just the MPC's predicted speed. 1000.0 (no gate) unless
-    # overwritten below in 'acc' mode.
+    # Kans: 현재 구속(binding) 중인 장애물(lead0/lead1/cruise/trafficstop)까지
+    # 남은 거리. longitudinal_planner.py가 이걸 읽어서 should_stop을 MPC의
+    # 예측 속도뿐 아니라 실제 근접도로도 게이트한다. 'acc' 모드 아래에서
+    # 덮어쓰지 않는 한 기본값은 1000.0(게이트 없음).
     self.final_obstacle_distance = 1000.0
 
     if mode == 'blended':
@@ -427,11 +427,12 @@ class LongitudinalMpc:
 
       cruise_obstacle = np.cumsum(T_DIFFS * v_cruise_clipped) + get_safe_obstacle_distance(v_cruise_clipped, t_follow, comfort_brake, stop_distance)
 
-      # Kans: this used to hard-switch to -2.0 once v_ego<=0.1, a discontinuous
-      # ~1.2m jump (default TrafficStopDistanceAdjust is -0.8) right as the car
-      # nears the stop line, retargeting the traffic-stop obstacle (x2) farther
-      # back at the worst possible moment - suspected cause of stopping ~10m
-      # short of the actual line. Always use the same tunable value.
+      # Kans: 예전엔 v_ego<=0.1이 되는 순간 -2.0으로 하드 전환했는데, 차가
+      # 정지선에 다가가는 하필 최악의 순간에 불연속적으로 ~1.2m가
+      # 점프하면서(TrafficStopDistanceAdjust 기본값은 -0.8) 신호정지
+      # 장애물(x2)을 더 뒤로 재타겟팅해버렸다 - 실제 정지선보다 ~10m
+      # 못 미쳐 멈추는 현상의 원인으로 의심됨. 항상 같은 조절 가능한
+      # 값을 쓰도록 했다.
       adjust_dist = np.clip(carrot.trafficStopDistanceAdjust, -2.0, 0.0)
 
       d_min = np.interp(v_ego, [0.0, 10.0, 15.0, 20.0], [5.0, 45.0, 65.0, 75.0])
@@ -440,19 +441,20 @@ class LongitudinalMpc:
 
       x2 = stop_x * np.ones(N + 1) + adjust_dist
 
-      # Kans: cruise_obstacle degenerates to just stop_distance (~5.5m) at t=0
-      # once v_ego is low, because v_cruise_clipped[0] is clamped to v_ego itself
-      # there, collapsing its cumulative-distance term to ~0. When a real lead
-      # sits farther than stop_distance (a very common case - stop_distance is a
-      # follow-gap setting, not a typical lead spacing), this synthetic floor
-      # becomes tighter than lead_0_obstacle and wins outright, injecting an
-      # abrupt too-close constraint at the worst moment (right as the car nears
-      # a stop behind a real lead). Every accFaulted-right-after-stopping
-      # capture this session that showed mpcSource=='cruise' at the stop had
-      # this shape; captures that stayed on lead0/lead1 stopped cleanly with no
-      # fault. Exclude cruise_obstacle (from both the reported source below and
-      # the actual solver feed further down) whenever a real, reasonably close
-      # lead is present near a stop, so the lead's real position governs.
+      # Kans: v_ego가 낮아지면 t=0에서 cruise_obstacle이 그냥
+      # stop_distance(~5.5m)로 퇴화해버리는데, 그 지점에서
+      # v_cruise_clipped[0]이 v_ego 자신으로 클램프되면서 누적거리 항이
+      # ~0으로 무너지기 때문이다. 실제 lead가 stop_distance보다 멀리 있을
+      # 때(아주 흔한 경우다 - stop_distance는 follow-gap 설정이지 일반적인
+      # lead 간격이 아니다), 이 가짜 하한선이 lead_0_obstacle보다 더
+      # 빡빡해져서 그대로 이겨버리고, 하필 최악의 순간(실제 lead 뒤에서
+      # 차가 정지에 다가가는 그 순간)에 갑작스러운 너무-가까움 제약을
+      # 주입한다. 이번 세션에서 캡처한 "정지 직후 accFaulted" 케이스는
+      # 정지 시점에 mpcSource=='cruise'였던 것 전부 이 패턴이었고,
+      # lead0/lead1에 머물렀던 캡처는 오류 없이 깔끔하게 멈췄다. 정지
+      # 근처에 실제로 적당히 가까운 lead가 있으면, cruise_obstacle을
+      # (아래 보고되는 source와 더 아래의 실제 solver 입력 둘 다에서)
+      # 제외해서 lead의 실제 위치가 지배하도록 한다.
       cruise_excluded = radarstate.leadOne.present and radarstate.leadOne.dRel < 20.0 and v_ego < 3.0
       if cruise_excluded:
         x_obstacles = np.column_stack([lead_0_obstacle, lead_1_obstacle, x2])
@@ -471,11 +473,12 @@ class LongitudinalMpc:
         if binding_idx == 2:  # 'cruise'
           self.final_obstacle_distance -= stop_distance
 
-      # Kans: debug - ATC/cruise vs lead0 binding-source investigation. A close lead
-      # (<20m) that loses argmin to 'cruise' means the MPC re-targets the ATC/cruise
-      # speed instead of the lead's position, which can show up as a brief
-      # re-acceleration ("가다서다") while approaching a slow/stopped lead during a
-      # turn. Edge-triggered on self.source changing while a lead this close is present.
+      # Kans: 디버그용 - ATC/cruise vs lead0 구속(binding) 소스 조사. 가까운
+      # lead(<20m)가 argmin에서 'cruise'에 밀리면 MPC가 lead 위치 대신
+      # ATC/cruise 속도로 재타겟팅한다는 뜻이고, 이건 턴 중에 느리거나
+      # 정지한 lead에 접근하면서 순간적으로 재가속("가다서다")하는 걸로
+      # 나타날 수 있다. 이만큼 가까운 lead가 있는 동안 self.source가
+      # 바뀔 때만 엣지 트리거.
       if not hasattr(self, "_debug_prev_mpc_source"):
         self._debug_prev_mpc_source = None
       if (radarstate.leadOne.present and radarstate.leadOne.dRel < 20.0 and
@@ -487,9 +490,10 @@ class LongitudinalMpc:
               f"stopDistance={stop_distance:.2f}")
       self._debug_prev_mpc_source = self.source
 
-      # Kans: debug - stop-distance investigation (7m too far report). Edge-triggered:
-      # arms when v_ego passes above _DEBUG_STOPDIST_REARM, fires up to twice per
-      # approach while v_ego stays below _DEBUG_STOPDIST_TRIGGER, then disarms.
+      # Kans: 디버그용 - 정지거리 조사(7m 너무 멀다는 보고). 엣지 트리거:
+      # v_ego가 _DEBUG_STOPDIST_REARM을 넘으면 armed되고, v_ego가
+      # _DEBUG_STOPDIST_TRIGGER 아래에 머무는 동안 접근당 최대 2번 발화한
+      # 뒤 disarm된다.
       _DEBUG_STOPDIST_TRIGGER = 5.0
       _DEBUG_STOPDIST_REARM = 8.0
       if not hasattr(self, "_debug_stopdist_armed"):
@@ -556,9 +560,9 @@ class LongitudinalMpc:
 
     self.solver.set(N, "yref", self.yref[N][:COST_E_DIM])
 
-    # Kans: x_obstacles was already built above with cruise_obstacle excluded
-    # (see cruise_excluded) when applicable, so this directly reflects that -
-    # no need to redo the exclusion check here.
+    # Kans: x_obstacles는 위에서 해당될 때(cruise_excluded 참고) 이미
+    # cruise_obstacle이 제외된 채로 만들어져 있어서, 이 값이 그걸 그대로
+    # 반영한다 - 여기서 제외 체크를 다시 할 필요 없음.
     self.params[:, 2] = np.min(x_obstacles, axis=1)
     self.params[:, 3] = np.copy(self.prev_a)
     self.params[:, 4] = t_follow

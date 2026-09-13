@@ -8,7 +8,7 @@ from openpilot.system.ui.lib.application import gui_app, FontWeight, MousePos, F
 from openpilot.system.ui.lib.multilang import tr, tr_noop
 from openpilot.system.ui.lib.text_measure import measure_text_cached
 from openpilot.system.ui.widgets import Widget
-#Kans: DevicePosition
+#Kans: 기기 위치
 import math
 from openpilot.common.params import Params
 from openpilot.cereal import messaging, log
@@ -91,7 +91,7 @@ class Sidebar(Widget):
     self._on_flag_click: Callable | None = None
     self._open_settings_callback: Callable | None = None
     self._ip_address = "N/A"
-    # Kans: Device Position
+    # Kans: 기기 위치
     self._params = Params()
 
   def set_callbacks(self, on_settings: Callable | None = None, on_flag: Callable | None = None,

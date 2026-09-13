@@ -737,15 +737,15 @@ class CarrotMan:
     target_lat_a = 1.9
     model_data = sm["modelV2"]
 
-    # Kans: max_curve divides by v_ego**2 below - near a stop, the old 0.1
-    # m/s floor made that denominator tiny (0.01), so ordinary noise in
-    # orientation_rate/model velocity got hugely amplified into a wildly
-    # swinging turn_speed (observed flickering ~120-200kph while stopped,
-    # which flips carrot_serv.py's model-turn-speed candidate in and out of
-    # the desiredSpeed min() and made v_cruise itself flicker while stopped -
-    # suspected trigger for GM ACC faults while stopped behind a lead).
-    # Curve-speed limiting isn't physically meaningful this close to a stop
-    # anyway, so bail out to "no limit" instead of computing a noisy value.
+    # Kans: 아래에서 max_curve가 v_ego**2로 나눠지는데 - 정지 근처에서는
+    # 예전 0.1m/s 하한 때문에 그 분모가 아주 작아져서(0.01),
+    # orientation_rate/모델 속도의 평범한 노이즈가 크게 증폭돼 turn_speed가
+    # 심하게 요동쳤다(정지 중 ~120-200kph로 깜빡이는 게 관측됐고, 이게
+    # carrot_serv.py의 model-turn-speed 후보를 desiredSpeed min()에
+    # 들락날락하게 만들어서 정지 중 v_cruise 자체가 깜빡이게 됐다 - 앞차
+    # 뒤에 정지해 있을 때 GM ACC 오류를 유발하는 원인으로 의심됨).
+    # 어차피 정지에 이렇게 가까우면 커브 속도 제한이 물리적으로 의미가
+    # 없으니, 노이즈 낀 값을 계산하는 대신 "제한 없음"으로 빠져나간다.
     if CS.vEgo < 2.0:
       return 250.0
     v_ego = CS.vEgo
@@ -1267,11 +1267,11 @@ class CarrotMan:
         self.remote_addr = None
 
   def carrot_navi_http_thread(self):
-    # Kans (carrot-wip-0721): the constants (NAVI_HTTP_PORT/NAVI_HTTP_MAX_BODY_SIZE)
-    # and _dispatch_obj() this feeds were already present in tz, but these four
-    # methods themselves and the thread start below were missing - the HTTP POST
-    # path (used by some Android nav-bridge apps instead of the raw TCP-7712
-    # socket) was never actually reachable. Nothing else needed porting.
+    # Kans (carrot-wip-0721): 이 메서드들이 사용하는 상수(NAVI_HTTP_PORT/
+    # NAVI_HTTP_MAX_BODY_SIZE)와 _dispatch_obj()는 tz에 이미 있었지만, 이
+    # 네 메서드 자체와 아래 스레드 시작 부분이 빠져 있었다 - 그래서 HTTP
+    # POST 경로(일부 안드로이드 내비-브릿지 앱이 원시 TCP-7712 소켓 대신
+    # 쓰는 경로)가 실제로는 전혀 도달 불가능했다. 그 외엔 이식할 게 없었다.
     while True:
       try:
         asyncio.run(self.carrot_navi_http_server(self.carrot_navi_http_port))
@@ -1399,11 +1399,12 @@ def main():
   # process, but that process is TMAP-specific and has no rgdata/nRoadLimitSpeed handling
   # of its own - it does not overlap with the legacy nav-bridge input paths below, so
   # starting these here isn't a duplicate.
-  # Kans: carrot_man_thread (7706 JSON UDP: nRoadLimitSpeed/nSdiType/nSdiDist/nTBTDist/
-  # nTBTTurnType) feeds carrot_serv.update(), the same state consumed by the existing
-  # camera/nav speed-control engine (xSpdType/xSpdDist/xDistToTurn) - it just was never
-  # started here. devel runs it as the blocking main-loop call; tz's main loop is
-  # already carrot_man.run(), so start this as a daemon thread like the others instead.
+  # Kans: carrot_man_thread(7706 JSON UDP: nRoadLimitSpeed/nSdiType/nSdiDist/nTBTDist/
+  # nTBTTurnType)는 carrot_serv.update()에 값을 먹여주는데, 이건 기존
+  # 카메라/내비 속도제어 엔진(xSpdType/xSpdDist/xDistToTurn)이 소비하는 것과
+  # 같은 상태다 - 그냥 여기서 시작이 안 되고 있었을 뿐이다. devel은 이걸
+  # 블로킹되는 메인루프 호출로 돌리는데, tz의 메인루프는 이미
+  # carrot_man.run()이라서, 다른 것들처럼 데몬 스레드로 시작하게 했다.
   threading.Thread(target=carrot_man.carrot_man_thread, daemon=True).start()
   threading.Thread(target=carrot_man.kisa_app_thread, daemon=True).start()
   threading.Thread(target=carrot_man.carrot_navi_thread, daemon=True).start()

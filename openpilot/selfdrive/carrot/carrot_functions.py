@@ -130,8 +130,8 @@ class CarrotPlanner:
     self.atcType = ""
     self.atc_active = False
 
-    # Kans: debug - carrot_man.desiredSpeed flicker investigation (v_cruise
-    # unstable while stopped, suspected GM ACC fault trigger)
+    # Kans: 디버그용 - carrot_man.desiredSpeed 깜빡임 조사(정지 중 v_cruise가
+    # 불안정한 현상, GM ACC 오류 트리거로 의심)
     self.carrotManDesiredSpeed = 250
     self.carrotManDesiredSource = "none"
     self.carrotManAlive = False
@@ -186,16 +186,15 @@ class CarrotPlanner:
     factor = self.myHighModeFactor if self.myDrivingMode == DrivingMode.High else self.mySafeFactor
     return np.interp(v_ego, A_CRUISE_MAX_BP_CARROT, cruiseMaxVals) * factor
 
-  # Kans: simplified to a plain personality->tFollowGap lookup. Previously this
-  # ran through a multi-stage pipeline (speed-based breakpoint interpolation,
-  # low-speed distance reduction, a sticky decel-hold + boost, a mySafeFactor
-  # scale, then a rise-only ramp) inherited from carrot's own dynamic-following
-  # design philosophy - removed per user request, since only tFollowGap1-4 are
-  # actually used/wanted here, and the sticky decel-hold state was suspected of
-  # contributing to an intermittent finalObstacleDist jump right at a stop.
-  # dynamic_t_follow()/apply_t_follow() (lane-change and lead-jerk based further
-  # adjustment, and the ramp) were also removed for the same reason - long_mpc.py
-  # no longer calls dynamic_t_follow after get_T_FOLLOW.
+  # Kans: 그냥 personality->tFollowGap 조회로 단순화했다. 원래는 carrot 고유의
+  # 동적 추종 설계 철학을 물려받아 다단계 파이프라인(속도 기반 breakpoint 보간,
+  # 저속 거리 축소, 감속 유지(sticky decel-hold) + 부스트, mySafeFactor 스케일,
+  # 그다음 상승 전용 램프)을 거쳤는데 - 여기선 tFollowGap1-4만 실제로 쓰이고
+  # 원하는 값이라 사용자 요청으로 제거했고, 그 sticky decel-hold 상태가 정지
+  # 직전 finalObstacleDist가 간헐적으로 튀는 원인일 걸로 의심되기도 했다.
+  # dynamic_t_follow()/apply_t_follow()(차선변경/lead-jerk 기반 추가 조정과
+  # 램프)도 같은 이유로 제거됐다 - long_mpc.py는 이제 get_T_FOLLOW 이후에
+  # dynamic_t_follow를 호출하지 않는다.
   def get_T_FOLLOW(self, personality=log.LongitudinalPersonality.standard, v_ego=0.0, a_ego=0.0):
     if personality == log.LongitudinalPersonality.moreRelaxed:
       self.jerk_factor = 1.0
@@ -447,12 +446,12 @@ class CarrotPlanner:
           if v_ego < 0.3:
             self.stopping_count = 0.5 / DT_MDL
             self.xState = XState.e2eStopped
-            # Kans: diagnostic - the stop-distance-varies-drive-to-drive report can't
-            # be root-caused from swaglog/rlog alone, since none of these values are
-            # published on any capnp field. Log them once here, at the moment the
-            # target locks in, so a future capture can show whether _stop_x_rl
-            # ratcheted onto a stale/spiked raw estimate (see its asymmetric
-            # jump-up/decay-down update a few lines above stop_model_x_rl).
+            # Kans: 진단용 - "정지거리가 주행마다 달라진다"는 보고는 이 값들이
+            # 어떤 capnp 필드에도 발행되지 않아서 swaglog/rlog만으로는 근본원인을
+            # 찾을 수 없다. 목표가 확정(lock-in)되는 이 순간 한 번 로그로 남겨서,
+            # 나중에 캡처했을 때 _stop_x_rl이 stale/튄 raw 추정치에 그대로
+            # 눌러앉은 건 아닌지 볼 수 있게 한다(stop_model_x_rl 몇 줄 위의
+            # 비대칭적인 급상승/서서히-감소 업데이트 참고).
             cloudlog.warning(
               f"[carrot stop-dist] LOCKED stopModelXRaw={stop_model_x_raw:.2f} "
               f"stopModelXRl={stop_model_x_rl:.2f} trafficStopAdjustRatio={self.trafficStopAdjustRatio:.2f} "
@@ -481,9 +480,9 @@ class CarrotPlanner:
         self.xState = XState.e2eStop
         # Kans: 실제 빨간불 정지거리에서 신호정지거리만큼 빼서 미리 정지하게 함.
         self.actual_stop_distance = max(0.0, stop_model_x_rl - self.trafficStopDistanceAdjust)
-        # Kans: diagnostic - see the matching LOCKED log where XState.e2eStopped is
-        # entered; comparing ENTER vs LOCKED shows how far stop_model_x_rl moved
-        # during the approach (ratchet jump-up vs slow decay-down).
+        # Kans: 진단용 - XState.e2eStopped로 들어갈 때 찍히는 LOCKED 로그와 짝을
+        # 이룬다; ENTER와 LOCKED를 비교하면 접근하는 동안 stop_model_x_rl이
+        # 얼마나 움직였는지(급상승 vs 서서히-감소) 알 수 있다.
         cloudlog.warning(
           f"[carrot stop-dist] ENTER stopModelXRl={stop_model_x_rl:.2f} "
           f"trafficStopDistanceAdjust={self.trafficStopDistanceAdjust:.2f} "

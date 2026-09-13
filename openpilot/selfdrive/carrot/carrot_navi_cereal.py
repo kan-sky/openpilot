@@ -318,8 +318,8 @@ class CarrotNaviCerealPublisher:
     self.receiver = receiver
     self.messaging = messaging_module
 
-    # Kans: non-web Carrot Navi.
-    # Only publish driving/navigation state.
+    # Kans: 웹이 아닌 Carrot Navi.
+    # 주행/내비게이션 상태만 발행한다.
     self.pm = messaging_module.PubMaster(["carrotNavi"])
 
     self._stop = threading.Event()

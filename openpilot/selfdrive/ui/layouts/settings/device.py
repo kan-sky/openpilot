@@ -1,6 +1,6 @@
 import os
 import math
-import importlib  # Kans: CarSelector
+import importlib  # Kans: 차량선택기
 
 from openpilot.cereal import messaging, log
 from openpilot.common.basedir import BASEDIR
@@ -28,7 +28,7 @@ DESCRIPTIONS = {
 }
 
 
-# Kans: CarSelector - Car List Widget (NO MultiOptionDialog)
+# Kans: 차량선택기 - 차량 목록 위젯 (MultiOptionDialog 아님)
 class CarListDialog(Widget):
   def __init__(self, params: Params, title: str, car_names: list[str], cur: str | None):
     super().__init__()
@@ -88,7 +88,7 @@ class DeviceLayout(Widget):
                                         callback=lambda: gui_app.push_widget(PairingDialog()))
     self._pair_device_btn.set_visible(lambda: not ui_state.prime_state.is_paired())
 
-    # Kans: CarSelector (Dual Button)
+    # Kans: 차량선택기 (Dual Button)
     self._select_car_btn = dual_button_item(lambda: tr("Select Car"), lambda: self._get_selected_car_button_text(),
       left_callback=self._open_gm_car_list, right_callback=self._delete_selected_car_prompt,
       description=lambda: self._get_selected_car_label())
@@ -97,14 +97,14 @@ class DeviceLayout(Widget):
                                         callback=self._reset_calibration_prompt)
     self._reset_calib_btn.set_description_opened_callback(self._update_calib_description)
 
-    # Kans: triple btn for Pwr Off
+    # Kans: 전원 끄기용 triple 버튼
     self._power_off_btn = triple_button_item(lambda: tr("ReCalibration"), lambda: tr("Reboot"), lambda: tr("Power Off"),
                             left_callback=self._reset_calibration_prompt, mid_callback=self._reboot_prompt, right_callback=self._power_off_prompt)
     items = [
       text_item(lambda: tr("Dongle ID"), self._params.get("DongleId") or (lambda: tr("N/A"))),
       text_item(lambda: tr("Serial"), self._params.get("HardwareSerial") or (lambda: tr("N/A"))),
 
-      # Kans: CarSelector (Dual Button row)
+      # Kans: 차량선택기 (Dual Button row)
       self._select_car_btn,
       self._pair_device_btn,
       button_item(lambda: tr("Cabin Camera"), lambda: tr("PREVIEW"), lambda: tr(DESCRIPTIONS['cabin_camera']),
@@ -119,7 +119,7 @@ class DeviceLayout(Widget):
     return items
 
   def _offroad_transition(self):
-    self._power_off_btn.action_item.right_button.set_visible(True) # Kans: visible pwr Btn
+    self._power_off_btn.action_item.right_button.set_visible(True) # Kans: 전원버튼 보이게
 
   def show_event(self):
     super().show_event()
@@ -242,7 +242,7 @@ class DeviceLayout(Widget):
       self._training_guide = TrainingGuide()
     gui_app.push_widget(self._training_guide)
 
-  # Kans: CarSelector
+  # Kans: 차량선택기
   def _get_selected_car_button_text(self) -> str:
     cur = self._params.get("CarSelected3")
     if isinstance(cur, (bytes, bytearray)):

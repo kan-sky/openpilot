@@ -1,11 +1,11 @@
-# Kans: front-radar cut-in-detection helpers, ported from the kan-sky/openpilot
-# devel branch's selfdrive/controls/lib/cutin_helpers.py. Corner-radar/SCC-
-# fallback pieces (side_corner_*, is_corner_*, CORNER_*/SIDE_CORNER_* consts)
-# are dropped entirely - the Volt has neither corner radar nor an SCC channel,
-# and devel itself hardcodes corner radar off for this car. The devel brand
-# gate (car_brand=="hyundai") is not ported here; the caller (radard.py) gates
-# on the CarrotRadarMode param instead. Algorithm bodies below are otherwise
-# unchanged from devel.
+# Kans: 전방 레이더 컷인 감지 헬퍼들. kan-sky/openpilot devel 브랜치의
+# selfdrive/controls/lib/cutin_helpers.py에서 이식함. 코너레이더/SCC 폴백
+# 부분(side_corner_*, is_corner_*, CORNER_*/SIDE_CORNER_* 상수들)은 전부
+# 뺐다 - 볼트엔 코너레이더도 SCC 채널도 없고, devel 자체도 이 차종에선
+# 코너레이더를 하드코딩으로 꺼둔다. devel의 브랜드 게이트(car_brand==
+# "hyundai")도 여기선 이식 안 했다; 대신 호출자(radard.py)가
+# CarrotRadarMode 파라미터로 게이트한다. 아래 알고리즘 본문 자체는
+# devel과 다르지 않다.
 import math
 from collections import deque
 from typing import Any
@@ -46,9 +46,9 @@ FRONT_CUTIN_MIN_CONFIRM_S = 0.30
 
 
 def is_front_radar_cutin_candidate(track_id: int, d_rel: float, y_rel: float) -> bool:
-  # Kans: devel also checks radar_source != "scc" and not is_corner_radar -
-  # neither concept exists for the Volt (no SCC channel, no corner radar),
-  # so those two conditions are dropped.
+  # Kans: devel은 radar_source != "scc"와 not is_corner_radar도 체크하는데
+  # - 볼트엔 둘 다 없는 개념이라(SCC 채널도, 코너레이더도 없음) 이 두
+  # 조건은 뺐다.
   return (
     track_id != 0 and
     FRONT_CUTIN_MIN_DREL_M <= d_rel <= FRONT_CUTIN_MAX_DREL_M and
@@ -289,9 +289,10 @@ def cutin_entry_rejection_reason(
   radar_inward_speed: float | None = None,
   max_d_rel: float | None = None,
 ) -> str | None:
-  # Kans: devel's `corner_track` param is a misnomer even there - it's fed
-  # self._is_active_cutin_track(t), i.e. "is this classified as a cut-in
-  # candidate", not anything corner-specific. Renamed here for clarity.
+  # Kans: devel의 `corner_track` 파라미터는 거기서도 이름이 잘못됐다 -
+  # 실제로 넘어오는 건 self._is_active_cutin_track(t), 즉 "이게 컷인
+  # 후보로 분류됐는가"이지 코너에 특화된 뭔가가 아니다. 명확성을 위해
+  # 여기선 이름을 바꿨다.
   if not enabled:
     return "disabled"
   if not lane_line_available:

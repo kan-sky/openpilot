@@ -41,40 +41,39 @@ V_EGO_STATIONARY = 4.   # no stationary object flag below this speed
 
 RADAR_TO_CAMERA = 1.52  # RADAR is ~ 1.5m ahead from center of mesh frame
 
-# Kans: sticky lead selection (ported from devel). A previously-selected
-# track keeps being reported as the lead for up to STICKY_SELECTED_COUNT_MAX
-# frames even when this frame's vision match fails, protected by
-# track_discontinuous() resetting selected_count on any large dRel/yRel/vLead
-# jump. dPath/in_lane_prob (below) were later ported back in from carrot-wip
-# for the match tie-break and sticky drift guard - these come straight from
-# modelV2 (laneLines/position), not from ajouatom's lane_planner2.py, which
-# this fork is still deliberately moving away from (the actual cut-in-
-# detection system stays excluded).
+# Kans: sticky lead selection(devel에서 이식). 이전에 선택됐던 트랙은 이번
+# 프레임의 비전 매칭이 실패해도 STICKY_SELECTED_COUNT_MAX 프레임까지는 계속
+# lead로 보고된다. 단 track_discontinuous()가 dRel/yRel/vLead에 큰 점프가
+# 있으면 selected_count를 리셋해서 보호한다. dPath/in_lane_prob(아래)는
+# 나중에 매칭 타이브레이크와 sticky drift 가드용으로 carrot-wip에서 다시
+# 이식해온 것 - 이건 ajouatom의 lane_planner2.py가 아니라 modelV2
+# (laneLines/position)에서 바로 가져온다. 이 포크는 lane_planner2.py로부터
+# 계속 의도적으로 멀어지는 중이다(실제 컷인 감지 시스템은 여전히 제외됨).
 STICKY_SELECTED_COUNT_MAX = int(2.0 / DT_MDL)
 
-# Kans (carrot-wip): lateral drift guard for a sticky-selected track - dPath
-# here is against the EGO'S PLANNED PATH (md.position), not lane lines, and
-# is unrelated to ajouatom's lane_planner2.py/cut-in system. If a sticky
-# track wanders further than this off the ego path it's probably drifted
-# onto an adjacent-lane/wrong object, so its sticky status gets dropped.
+# Kans (carrot-wip): sticky-선택된 트랙의 횡방향 drift 가드 - 여기서 dPath는
+# 차선이 아니라 자차의 계획 경로(md.position) 기준이고, ajouatom의
+# lane_planner2.py/컷인 시스템과는 무관하다. sticky 트랙이 자차 경로에서
+# 이만큼 벗어나면 인접 차선/엉뚱한 오브젝트로 drift된 걸로 보고 sticky
+# 상태를 해제한다.
 STICKY_MAX_DPATH = 0.8
 STICKY_FAR_DREL = 60.0
 STICKY_MAX_DPATH_FAR = 1.2
 STICKY_PATH_Y_STD_GAIN = 0.5
 
-# Kans (devel): EnableRadarTracks <= this forces vision-only mode (radar
-# tracks cleared and ignored every frame). A real radar CAN fault
-# (rr.errors.canError/radarFault) forces the same mode automatically,
-# regardless of the param. devel's other EnableRadarTracks values (-1/1/2/3)
-# select between SCC-radar/cut-in/corner-radar sources the Volt doesn't
-# have, so tz only implements this one threshold.
+# Kans (devel): EnableRadarTracks가 이 값 이하면 비전 전용 모드로 강제된다
+# (레이더 트랙을 매 프레임 비우고 무시). 실제 레이더 CAN 오류
+# (rr.errors.canError/radarFault)도 파라미터와 무관하게 자동으로 같은
+# 모드를 강제한다. devel의 다른 EnableRadarTracks 값들(-1/1/2/3)은 볼트에는
+# 없는 SCC레이더/컷인/코너레이더 소스를 선택하는 거라, tz는 이 임계값
+# 하나만 구현한다.
 VISION_ONLY_RADAR_TRACK_MODE = -2
 
-# Kans (devel-0721, preferred over the later no-suffix snapshot per the
-# user - that one predates the carrot/ integration and drifted looser on
-# these specific values): front-radar cut-in detection constants.
-# Corner-radar/SCC variants of these (CORNER_*, SIDE_CORNER_*) are dropped -
-# see lib/cutin_helpers.py's module docstring for why.
+# Kans (devel-0721, 사용자 선호에 따라 나중에 나온 접미사 없는 스냅샷보다
+# 이쪽을 채택 - 그쪽은 carrot/ 통합 이전 버전이고 이 값들이 더 느슨하게
+# 틀어져 있었다): 전방 레이더 컷인 감지 상수들.
+# 이것들의 코너레이더/SCC 버전(CORNER_*, SIDE_CORNER_*)은 뺐다 - 이유는
+# lib/cutin_helpers.py 모듈 docstring 참고.
 CUTIN_STICKY_FRAMES = int(0.5 / DT_MDL)
 CUTIN_OUTPUT_HOLD_FRAMES = max(1, int(round(0.25 / DT_MDL)))
 CUTIN_OUTPUT_HOLD_DREL_M = 3.0
@@ -84,9 +83,9 @@ CUTIN_KEEP_FUTURE_IN_LANE_PROB = 0.12
 CUTIN_KEEP_MAX_DPATH_FUTURE = 1.6
 CUTIN_KEEP_MAX_MOVING_AWAY = 0.3
 CUTIN_PROMOTE_DREL_MARGIN = 1.0
-# Kans (devel-0721): caps how far out a front cut-in can still be entered/
-# published - 0721 applies this to the front path too (the version I
-# initially ported only used it for corner radar).
+# Kans (devel-0721): 전방 컷인이 진입/발행될 수 있는 최대 거리 상한 - 0721은
+# 이걸 전방 경로에도 적용한다(내가 처음 이식했던 버전은 코너레이더에만
+# 썼었다).
 VISION_CUTIN_WIDE_MAX_DREL = 45.0
 CUTIN_YAW_COMP_GAIN = 0.6
 CUTIN_YAW_COMP_MAX_DREL = 50.0
@@ -121,8 +120,8 @@ class KalmanParams:
     self.K = [[np.interp(dt, dts, K0)], [np.interp(dt, dts, K1)]]
 
 
-# Kans (carrot-wip): thresholds for excluding an in-lane track from the
-# left/right side-lead classification (it belongs in front, not to a side).
+# Kans (carrot-wip): 차선 안에 있는 트랙을 좌/우 side-lead 분류에서 제외하는
+# 임계값(그건 옆이 아니라 전방에 속한다).
 CENTER_LEAD_NEAR_DPATH_LIMIT = 1.2
 CENTER_LEAD_FAR_DPATH_LIMIT = 0.9
 CENTER_LEAD_FAR_DREL = 60.0
@@ -153,25 +152,24 @@ class Track:
     self.vRel = 0.0
     self.vLead = v_lead
 
-    # Kans: sticky-selection state (devel)
+    # Kans: sticky-selection 상태 (devel)
     self.selected_count = 0
     self.is_stopped_car_count = 0
 
-    # Kans (carrot-wip): dPath/in_lane_prob (from md.laneLines, for the
-    # match_vision_to_track tie-break) and sticky_dPath (from md.position,
-    # the ego path, for the sticky drift guard). Neither is lane_planner2-
-    # dependent - both come straight from modelV2.
+    # Kans (carrot-wip): dPath/in_lane_prob(md.laneLines에서, match_vision_to_track
+    # 타이브레이크용)와 sticky_dPath(md.position, 자차 경로에서, sticky drift
+    # 가드용). 둘 다 lane_planner2에 의존하지 않고 - modelV2에서 바로 가져온다.
     self.dPath = 0.0
     self.in_lane_prob = 1.0
     self.lane_half_width = 1.85
     self.sticky_dPath = 0.0
     self.sticky_path_y_std = 0.0
 
-    # Kans (devel): front-radar cut-in state. dRel_future/yRel_future are the
-    # yaw-compensated position projected radar_lat_factor seconds ahead;
-    # dPath_future/in_lane_prob_future are d_path() applied to that
-    # projection. dPath_rate/dPath_inward_speed are the lane-relative-motion
-    # estimate computed only while this track is an active cut-in candidate.
+    # Kans (devel): 전방 레이더 컷인 상태. dRel_future/yRel_future는
+    # yaw-보정된 위치를 radar_lat_factor초 앞으로 투영한 값이고,
+    # dPath_future/in_lane_prob_future는 그 투영값에 d_path()를 적용한 것.
+    # dPath_rate/dPath_inward_speed는 이 트랙이 활성 컷인 후보인 동안에만
+    # 계산되는 차선-상대-움직임 추정치.
     self.cut_in_count = 0
     self.cutin_cnt = 0
     self.cut_in_start_abs_dpath = 0.0
@@ -184,17 +182,17 @@ class Track:
     self._cutin_position_history = new_cutin_position_history(DT_MDL)
     self.cutin_radar_inward_speed = 0.0
 
-    # Kans: vlead_for_matching() noise-suppression state (devel)
+    # Kans: vlead_for_matching()의 노이즈 억제 상태 (devel)
     self._vLead_last = 0.0
     self._vLead_filt = 0.0
     self._vLead_filt_init = False
 
   def inherit_cutin_state(self, source: 'Track') -> None:
-    # Kans (devel): when associate_cutin_tracks() detects that this frame's
-    # track at a new radar ID is really the same physical object as a track
-    # from last frame (GM reassigns sequential IDs, so a momentary ID churn
-    # would otherwise reset cut-in confirmation progress to zero), copy the
-    # old track's cut-in state onto the new one.
+    # Kans (devel): associate_cutin_tracks()가 이번 프레임의 새 레이더ID
+    # 트랙이 실은 지난 프레임 트랙과 같은 물리적 오브젝트라고 판단했을 때
+    # (GM은 순차적으로 ID를 재할당해서, 순간적인 ID 변경이 있으면 컷인 확정
+    # 진행도가 0으로 리셋돼버릴 것이다) 이전 트랙의 컷인 상태를 새 트랙에
+    # 복사해준다.
     self.dRel = source.dRel
     self.yRel = source.yRel
     self.vRel = source.vRel
@@ -221,11 +219,11 @@ class Track:
     self.vRel = v_rel   # REL_SPEED
     self.vLead = v_lead
 
-    # Kans: reset sticky-selection state on a large frame-to-frame jump, so a
-    # track-ID reuse/glitch can't be mistaken for a continuously-tracked lead.
-    # Kans (devel): while this track is an active cut-in candidate, use the
-    # tighter cutin-specific discontinuity thresholds instead - precision
-    # matters more there since cut-in confirmation tracks lateral motion.
+    # Kans: 프레임 간 큰 점프가 있으면 sticky-selection 상태를 리셋해서,
+    # 트랙ID 재사용/글리치가 계속 추적되던 lead로 오인되지 않게 한다.
+    # Kans (devel): 이 트랙이 활성 컷인 후보인 동안은 더 엄격한 컷인 전용
+    # discontinuity 임계값을 대신 쓴다 - 컷인 확정은 횡방향 움직임을
+    # 추적하는 거라 정밀도가 더 중요하다.
     track_discontinuous = (
       is_cutin_track_discontinuous(was_measured, prev_dRel, prev_yRel, prev_vLead, self.dRel, self.yRel, self.vLead)
       if is_cutin_track else
@@ -252,20 +250,20 @@ class Track:
       self.cutin_cnt = 0
       self.cut_in_start_abs_dpath = 0.0
 
-    # Kans (devel): yaw-compensated future position, used by the lane-
-    # relative-motion cut-in projection below.
+    # Kans (devel): yaw-보정된 미래 위치. 아래의 차선-상대-움직임 컷인
+    # 투영에 쓰인다.
     v_rel_future, yv_rel_future = self.yaw_compensated_velocities(yaw_rate)
     self.dRel_future = self.dRel + v_rel_future * radar_lat_factor
     self.yRel_future = self.yRel + yv_rel_future * radar_lat_factor
 
-    # Kans (carrot-wip): refresh dPath/in_lane_prob for matching, and drop
-    # sticky status if a sticky track has drifted off the ego path.
+    # Kans (carrot-wip): 매칭용으로 dPath/in_lane_prob를 갱신하고, sticky
+    # 트랙이 자차 경로에서 벗어났으면 sticky 상태를 해제한다.
     if md is not None:
       self.d_path(md)
 
-      # Kans (devel): while an active cut-in candidate, estimate lane-
-      # relative rate of motion and project it forward to decide whether
-      # this track is moving into our lane.
+      # Kans (devel): 활성 컷인 후보인 동안은 차선-상대 움직임 속도를
+      # 추정하고 앞으로 투영해서 이 트랙이 우리 차선으로 들어오는 중인지
+      # 판단한다.
       if is_cutin_track and radar_lat_factor > 0.0:
         self.cutin_radar_inward_speed = max(0.0, -math.copysign(1.0, self.dPath) * yv_rel_future)
         self.dPath_rate, self.dPath_inward_speed = update_lane_relative_motion(
@@ -300,10 +298,10 @@ class Track:
     self.vLeadK = float(self.kf.x[SPEED][0])
     self.aLeadK = float(self.kf.x[ACCEL][0])
 
-    # Learn if constant acceleration. Kans (devel): RadarReactionFactor scales
-    # both the threshold and the learned time constant - tz has no separate
-    # aLead/jLead (only the Kalman-filtered aLeadK), so this uses aLeadK in
-    # place of devel's aLead and drops the jLead check devel adds on top.
+    # Learn if constant acceleration. Kans (devel): RadarReactionFactor가
+    # 임계값과 학습되는 시정수 둘 다 스케일한다 - tz는 별도의 aLead/jLead가
+    # 없어서(칼만필터를 거친 aLeadK만 있음) devel의 aLead 자리에 aLeadK를
+    # 쓰고, devel이 추가로 붙이는 jLead 체크는 뺐다.
     a_lead_threshold = 0.5 * radar_reaction_factor
     if abs(self.aLeadK) < a_lead_threshold:
       self.aLeadTau.x = _LEAD_ACCEL_TAU * radar_reaction_factor
@@ -313,10 +311,10 @@ class Track:
     self.cnt += 1
 
   def d_path(self, md):
-    # Kans (carrot-wip): dPath/in_lane_prob against the lane lines model
-    # gives us directly (md.laneLines), independent of lane_planner2.py.
-    # Kans (devel): also computes the same against the yaw-compensated
-    # future position (dRel_future/yRel_future) for cut-in projection.
+    # Kans (carrot-wip): 차선 모델(md.laneLines)에 대한 dPath/in_lane_prob를
+    # 직접 구한다, lane_planner2.py와는 무관.
+    # Kans (devel): 컷인 투영을 위해 yaw-보정된 미래 위치
+    # (dRel_future/yRel_future)에 대해서도 똑같이 계산해둔다.
     if len(md.laneLines) < 3 or len(md.laneLines[1].x) < 2:
       return
     lane_xs = md.laneLines[1].x
@@ -336,12 +334,12 @@ class Track:
     self.dPath_future, self.in_lane_prob_future, _ = d_path_interp(self.dRel_future, self.yRel_future)
 
   def yaw_compensated_velocities(self, yaw_rate: float) -> tuple[float, float]:
-    # Kans (devel): a curved ego path creates apparent lateral velocity in
-    # the ego frame (yaw_rate * dRel). Remove it before cut-in projection so
-    # adjacent-lane objects on curves aren't classified as moving into our
-    # lane. GM never reports a per-target yaw-relative velocity (yvRel is
-    # always 0 from opendbc/car/gm/radar_interface.py), so 0.0 stands in for
-    # devel's raw yvLead field here.
+    # Kans (devel): 자차 경로가 휘어 있으면 자차 좌표계에서 겉보기 횡속도가
+    # 생긴다(yaw_rate * dRel). 커브에서 옆차선 오브젝트가 우리 차선으로
+    # 들어오는 걸로 오분류되지 않도록 컷인 투영 전에 이걸 제거한다. GM은
+    # 타겟별 yaw-상대 속도를 절대 보고하지 않아서(opendbc/car/gm/
+    # radar_interface.py에서 yvRel은 항상 0) 여기선 devel의 원본 yvLead
+    # 필드 대신 0.0을 쓴다.
     yaw_rate = clamp(float(yaw_rate), -CUTIN_YAW_COMP_MAX_YAW_RATE, CUTIN_YAW_COMP_MAX_YAW_RATE)
     d_rel_for_comp = clamp(self.dRel, 0.0, CUTIN_YAW_COMP_MAX_DREL)
     yv_rel_corr = clamp(
@@ -355,8 +353,8 @@ class Track:
     return float(self.vRel + v_rel_corr), float(yv_rel_corr)
 
   def path_d_path(self, md) -> tuple[float, float]:
-    # Kans (carrot-wip): dPath against the ego's own planned path
-    # (md.position), used only for the sticky drift guard.
+    # Kans (carrot-wip): 자차 자신의 계획 경로(md.position)에 대한 dPath -
+    # sticky drift 가드에만 쓰인다.
     if len(md.position.x) < 2:
       return self.dPath, 0.0
     path_y = float(np.interp(self.dRel, md.position.x, md.position.y))
@@ -370,8 +368,8 @@ class Track:
                          STICKY_MAX_DPATH, STICKY_MAX_DPATH_FAR))
 
   def vlead_for_matching(self, dv_max: float = 4.0, alpha: float = 0.35) -> float:
-    # Kans (devel): spike-clamp + IIR-smooth vLead for matching-score use only
-    # (published vLead/vLeadK are untouched). If cnt < 2: raw vLead.
+    # Kans (devel): 매칭 점수용으로만 vLead에 spike-clamp + IIR 스무딩을
+    # 적용한다(발행되는 vLead/vLeadK는 건드리지 않음). cnt < 2면 원본 vLead.
     v = float(self.vLead)
 
     if self.cnt < 2:
@@ -423,14 +421,14 @@ def laplacian_pdf(x: float, mu: float, b: float):
 
 def match_vision_to_track(v_ego: float, lead: capnp._DynamicStructReader, lead_prob: float,
                           tracks: dict[int, Track], update_counters: bool = True):
-  # Kans (devel): distance/velocity/lateral "sane" gates, a moving-bias
-  # tolerance on vel_sane so a lead that's just started moving from a stop
-  # isn't rejected by raw-vLead noise, a graduated lead_prob acceptance
-  # floor for an already-selected track, and a dedicated "stopped-car-like"
-  # match policy (case B) that needs ~1s of consistent evidence before
-  # promoting a track that fails the strict velocity gate but passes
-  # distance/wide-y. Case A also has a carrot-wip in-lane tie-break - see
-  # STICKY_SELECTED_COUNT_MAX comment above for the dPath/in_lane_prob note.
+  # Kans (devel): 거리/속도/횡방향 "정상범위" 게이트, 정지 상태에서 막
+  # 출발한 lead가 원본-vLead 노이즈 때문에 거부되지 않도록 vel_sane에 두는
+  # moving-bias 허용치, 이미 선택된 트랙에 대한 단계적 lead_prob 수용
+  # 하한선, 그리고 엄격한 속도 게이트는 통과 못 해도 거리/넓은-y는 통과하는
+  # 트랙을 승격시키기 전에 ~1초의 일관된 증거를 요구하는 전용 "정지차 같은"
+  # 매칭 정책(케이스 B). 케이스 A에도 carrot-wip의 in-lane 타이브레이크가
+  # 있다 - dPath/in_lane_prob 관련은 위쪽 STICKY_SELECTED_COUNT_MAX 주석
+  # 참고.
   if not tracks:
     return None
 
@@ -486,11 +484,11 @@ def match_vision_to_track(v_ego: float, lead: capnp._DynamicStructReader, lead_p
 
   best_track = None
   if first_track is not None and first_score >= 1e-4:
-    # A) normal match. Kans (carrot-wip): if a closer, in-lane second_track
-    # is also plausible, prefer it over first_track's raw score - this stops
-    # frame-to-frame flip-flopping between two similarly-scored tracks (e.g.
-    # a stopped lead vs. a track just behind it) from bouncing the selected
-    # lead (and therefore the MPC's obstacle source) back and forth.
+    # A) normal match. Kans (carrot-wip): 더 가깝고 차선 안에 있는
+    # second_track도 그럴듯하면, first_track의 원점수보다 그쪽을 우선한다 -
+    # 이렇게 하면 점수가 비슷한 두 트랙(예: 정지한 lead vs 바로 뒤 트랙)
+    # 사이에서 프레임마다 왔다갔다 하면서 선택된 lead(그리고 결국 MPC의
+    # 장애물 소스)가 요동치는 걸 막는다.
     select_second_track = (
       second_track is not None and dist_sane(first_track) and vel_sane(first_track) and
       vel_sane(second_track) and second_track.in_lane_prob > 0.3 and second_track.cnt > 5 and
@@ -559,19 +557,19 @@ class RadarD:
 
     self.ready = False
 
-    # Kans (devel): RadarReactionFactor - scales the lead-acceleration
-    # learning threshold/time-constant (see Track.update()). Default 0.2
-    # matches devel's declared param default (20 -> *0.01).
+    # Kans (devel): RadarReactionFactor - lead 가속도 학습 임계값/시정수를
+    # 스케일한다(Track.update() 참고). 기본값 0.2는 devel이 선언한 파라미터
+    # 기본값과 일치(20 -> *0.01).
     self.params = Params()
     self._param_frame = 0
     self.radar_reaction_factor = 0.2
     self.enable_radar_tracks = 0
 
-    # Kans (devel): front-radar cut-in detection, ported without the
-    # corner-radar/SCC-fallback machinery devel also has (Volt has neither).
-    # Gated on CarrotRadarMode (default off - opt-in) instead of devel's
-    # car_brand=="hyundai" check; CarrotRadarCutInSensitivity (0-5, UI) gives
-    # a live-adjustable dial instead of devel's fixed sensitivity=50.
+    # Kans (devel): 전방 레이더 컷인 감지. devel에도 있는 코너레이더/SCC
+    # 폴백 장치는 빼고 이식했다(볼트엔 둘 다 없음). devel의
+    # car_brand=="hyundai" 체크 대신 CarrotRadarMode로 게이트(기본 꺼짐 -
+    # 선택적 활성화)했고, devel의 고정 sensitivity=50 대신
+    # CarrotRadarCutInSensitivity(0-5, UI)로 실시간 조절 다이얼을 준다.
     self.front_cutin_enabled = False
     self.lane_line_available = False
     self.radar_lat_factor = 0.0
@@ -587,29 +585,29 @@ class RadarD:
     self.cutin_output_hold_count = 0
     self.cutin_output_hold_reference: tuple[float, float, float] | None = None
 
-    # Kans: debug - suspected cut-in-like deceleration investigation. Edge-triggered
-    # on leadOne's selected *radar* track changing identity, so it prints once per
-    # switch instead of every frame.
+    # Kans: 디버그용 - 컷인처럼 보이는 감속 현상 조사. leadOne으로 선택된
+    # *레이더* 트랙의 정체가 바뀔 때만 엣지 트리거로 찍어서, 매 프레임이
+    # 아니라 전환될 때 한 번만 출력된다.
     self._debug_prev_lead_id: int | None = None
 
-    # Kans: debug - suspected leadTwo instability while stopped/close to a
-    # single lead (leadTwo has no sticky debounce, unlike leadOne, so a
-    # vision-second-lead match can flicker onto a ghost/multipath return of
-    # the same car and swap which obstacle long_mpc binds to). Edge-triggered
-    # on leadTwo's selected radar track identity changing.
+    # Kans: 디버그용 - 정지 중/단일 lead와 가까울 때 leadTwo가 불안정해지는
+    # 현상 의심(leadTwo는 leadOne과 달리 sticky 디바운스가 없어서, 비전의
+    # 두번째-lead 매칭이 같은 차의 고스트/멀티패스 반사로 깜빡이며 long_mpc가
+    # 붙잡는 대상이 바뀔 수 있다). leadTwo로 선택된 레이더 트랙의 정체가
+    # 바뀔 때만 엣지 트리거.
     self._debug_prev_lead2_id: int | None = None
 
-    # Kans: debug - front-radar cut-in detection verification. Edge-triggered
-    # on a track newly reaching confirmed status, so it prints once per
-    # cut-in event instead of every frame it stays confirmed.
+    # Kans: 디버그용 - 전방 레이더 컷인 감지 검증. 트랙이 새로 confirmed
+    # 상태에 도달할 때만 엣지 트리거로 찍어서, confirmed로 유지되는 매
+    # 프레임이 아니라 컷인 이벤트당 한 번만 출력된다.
     self._debug_prev_cutin_ids: set[int] = set()
 
   def get_sticky_track(self, tracks: dict[int, Track]) -> Track | None:
-    # Kans (devel): keep reporting a previously-selected track as the lead
-    # even when this frame's vision match fails, as long as it's still being
-    # measured and hasn't been reset by a track_discontinuous() jump.
-    # Kans (carrot-wip): also drop sticky status here for a track that's
-    # drifted off the ego path since its last update() (see sticky_dPath).
+    # Kans (devel): 이번 프레임 비전 매칭이 실패해도, 계속 측정되고 있고
+    # track_discontinuous() 점프로 리셋되지 않은 이상 이전에 선택됐던
+    # 트랙을 계속 lead로 보고한다.
+    # Kans (carrot-wip): 마지막 update() 이후 자차 경로에서 벗어난 트랙은
+    # 여기서도 sticky 상태를 해제한다(sticky_dPath 참고).
     sticky_tracks = []
     for t in tracks.values():
       if t.selected_count > 0 and abs(t.sticky_dPath) > t.sticky_dpath_limit():
@@ -655,16 +653,16 @@ class RadarD:
 
     return lead_dict
 
-  # ---- front-radar cut-in detection (Kans, devel - corner/SCC pieces dropped) ----
+  # ---- 전방 레이더 컷인 감지 (Kans, devel - 코너/SCC 부분은 뺌) ----
 
   def _is_front_cutin_track(self, t: Track) -> bool:
     return is_front_radar_cutin_candidate(t.identifier, t.dRel, t.yRel)
 
   def _cutin_yaw_rate_from_state(self, sm: messaging.SubMaster) -> float:
-    # Kans: devel prefers sm['livePose'].angularVelocityDevice.z when valid,
-    # falling back to modelV2.orientationRate.z[0]. tz doesn't subscribe to
-    # livePose here, so this always uses the modelV2 fallback - devel's own
-    # fallback path, just without the optional upgrade.
+    # Kans: devel은 유효할 때 sm['livePose'].angularVelocityDevice.z를
+    # 우선하고 modelV2.orientationRate.z[0]로 폴백한다. tz는 여기서
+    # livePose를 구독하지 않아서 항상 modelV2 폴백을 쓴다 - devel 자신의
+    # 폴백 경로이고, 그냥 선택적 업그레이드가 빠진 것뿐이다.
     yaw_rate = 0.0
     if len(sm['modelV2'].orientationRate.z):
       yaw_rate = float(sm['modelV2'].orientationRate.z[0])
@@ -714,8 +712,8 @@ class RadarD:
       return False
     if not self._cutin_is_closer_or_matches_lead_one(t):
       return False
-    # Kans (devel-0721): 25.0 here, not the 55.0 the earlier no-suffix
-    # snapshot had - 0721 keeps a confirmed front cut-in only out to 25m.
+    # Kans (devel-0721): 여기선 25.0 - 예전 접미사 없는 스냅샷의 55.0이
+    # 아니다 - 0721은 확정된 전방 컷인을 25m까지만 유지한다.
     if not (0.8 < t.dRel < 25.0 and t.vLead > 2.0):
       return False
     moving_away = abs(t.dPath_future) - abs(t.dPath)
@@ -724,11 +722,11 @@ class RadarD:
     return t.in_lane_prob_future > CUTIN_KEEP_FUTURE_IN_LANE_PROB or abs(t.dPath_future) < CUTIN_KEEP_MAX_DPATH_FUTURE
 
   def _update_cutin_sticky(self, t: Track) -> bool:
-    # Kans (devel-0721): the earlier no-suffix snapshot let `keeping` alone
-    # re-arm `entering` for the front path too, so a confirmed track stayed
-    # confirmed as long as the looser keep-gate held. 0721 reserves that
-    # shortcut for side-corner tracks only (which the Volt doesn't have) -
-    # a front track must keep re-passing the stricter enter-gate.
+    # Kans (devel-0721): 예전 접미사 없는 스냅샷은 전방 경로에서도 `keeping`
+    # 혼자서 `entering`을 재무장할 수 있게 해서, 느슨한 keep-게이트만
+    # 유지되면 확정된 트랙이 계속 확정 상태로 남았다. 0721은 그 지름길을
+    # 사이드-코너 트랙(볼트엔 없음)에만 남겨뒀다 - 전방 트랙은 더 엄격한
+    # enter-게이트를 계속 다시 통과해야 한다.
     entering = self._is_cutin_enter_candidate(t)
     keeping = t.cut_in_count > 0 and self._is_cutin_keep_candidate(t)
     confirm_frames = cutin_confirmation_frames(self.front_cutin_confirm_frames, t.dRel, t.dPath_inward_speed, self.v_ego)
@@ -739,10 +737,10 @@ class RadarD:
     return t.cut_in_count >= confirm_frames
 
   def _apply_cutin_output_hold(self, cutin_list: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    # Kans (devel): once a cut-in lead disappears (e.g. a brief miss), keep
-    # publishing it for up to CUTIN_OUTPUT_HOLD_FRAMES more frames by
-    # re-matching any still-active cut-in track near its last known position,
-    # so a momentary detection gap doesn't yank leadTwo back and forth.
+    # Kans (devel): 컷인 lead가 사라지면(예: 순간적으로 놓침), 마지막으로
+    # 알려진 위치 근처에서 여전히 활성 상태인 컷인 트랙을 재매칭해서
+    # CUTIN_OUTPUT_HOLD_FRAMES 프레임만큼 더 발행을 유지한다 - 순간적인
+    # 감지 공백 때문에 leadTwo가 왔다갔다 하지 않도록.
     if cutin_list:
       nearest = min(cutin_list, key=lambda lead: float(lead['dRel']))
       self.cutin_output_hold_reference = (float(nearest['dRel']), float(nearest['yRel']), float(nearest['vRel']))
@@ -780,12 +778,11 @@ class RadarD:
     return [lead]
 
   def compute_cutin_list(self) -> list[dict[str, Any]]:
-    # Kans: tz has no compute_leads()-style orchestrator (that's a much
-    # bigger devel structure this fork doesn't have), so this is a new,
-    # narrower entry point: advance every track's cut-in confirmation state
-    # once per frame (this has to run every frame regardless of whether a
-    # track ends up confirmed, since it's a stateful counter) and collect the
-    # ones that are currently confirmed.
+    # Kans: tz에는 compute_leads() 같은 오케스트레이터가 없어서(이 포크엔
+    # 없는 훨씬 큰 devel 구조라서) 이건 새로 만든, 더 좁은 진입점이다: 매
+    # 프레임 모든 트랙의 컷인 확정 상태를 한 번씩 진행시키고(상태를 갖는
+    # 카운터라서 트랙이 결국 확정되든 안 되든 매 프레임 돌아가야 한다)
+    # 현재 확정된 것들만 모은다.
     if not self.front_cutin_enabled:
       self.cutin_output_hold_reference = None
       self.cutin_output_hold_count = 0
@@ -811,7 +808,7 @@ class RadarD:
     return self._apply_cutin_output_hold(cutin_list)
 
   def _is_center_lead_candidate(self, t: Track) -> bool:
-    # Kans (carrot-wip): a track this in-lane belongs to the front, not a side.
+    # Kans (carrot-wip): 이 정도로 차선 안에 있는 트랙은 옆이 아니라 전방에 속한다.
     in_lane_min = CENTER_LEAD_NEAR_IN_LANE_PROB
     dpath_limit = CENTER_LEAD_NEAR_DPATH_LIMIT
     if t.dRel > CENTER_LEAD_FAR_DREL:
@@ -820,10 +817,10 @@ class RadarD:
     return t.in_lane_prob > in_lane_min and abs(t.dPath) < dpath_limit
 
   def compute_side_leads(self) -> None:
-    # Kans (carrot-wip): populate leadLeft/leadRight/leadsLeft/leadsRight from
-    # the front radar's own tracks (yRel sign), independent of BSD and of the
-    # corner-radar hardware carrot-wip's own version prefers when present -
-    # GM has neither, so this is the only side-lead source available here.
+    # Kans (carrot-wip): 전방 레이더 자체 트랙(yRel 부호)으로
+    # leadLeft/leadRight/leadsLeft/leadsRight를 채운다. BSD와도, carrot-wip
+    # 자체 버전이 있을 때 우선하는 코너레이더 하드웨어와도 무관 - GM엔 둘 다
+    # 없어서 여기선 이게 유일하게 쓸 수 있는 side-lead 소스다.
     left_list: list[dict[str, Any]] = []
     right_list: list[dict[str, Any]] = []
     for t in self.tracks.values():
@@ -867,9 +864,10 @@ class RadarD:
     self.radar_lat_factor = self.cutin_tuning["horizon_s"] if self.front_cutin_enabled else 0.0
     self.cutin_yaw_rate = self._cutin_yaw_rate_from_state(sm) if self.front_cutin_enabled else 0.0
 
-    # Kans (devel): a real radar CAN fault, or EnableRadarTracks forced all
-    # the way down, means we don't trust any radar output this frame - drop
-    # every track and let get_lead() fall through to the vision-only path.
+    # Kans (devel): 실제 레이더 CAN 오류가 났거나 EnableRadarTracks가
+    # 완전히 낮춰져 있으면, 이번 프레임 레이더 출력은 아무것도 신뢰하지
+    # 않는다는 뜻 - 트랙을 전부 버리고 get_lead()가 비전 전용 경로로
+    # 넘어가게 둔다.
     radar_faulted = bool(rr.errors.canError or rr.errors.radarFault)
     vision_only_mode = self.enable_radar_tracks <= VISION_ONLY_RADAR_TRACK_MODE or radar_faulted
 
@@ -878,10 +876,10 @@ class RadarD:
     else:
       ar_pts = {pt.trackId: [pt.dRel, pt.yRel, pt.vRel] for pt in rr.points}
 
-      # Kans (devel): snapshot which currently-tracked objects are active
-      # cut-in candidates before this frame's pruning/creation, then
-      # associate them with this frame's candidate points by position so a
-      # radar-ID reassignment doesn't reset cut-in confirmation progress.
+      # Kans (devel): 이번 프레임의 정리/생성 전에, 현재 추적 중인 오브젝트
+      # 중 활성 컷인 후보였던 것들을 스냅샷으로 남겨두고, 위치를 기준으로
+      # 이번 프레임의 후보 포인트들과 연결해서 레이더ID 재할당이 컷인
+      # 확정 진행도를 리셋시키지 않게 한다.
       previous_cutin_tracks: dict[int, Track] = {}
       cutin_associations: dict[int, int] = {}
       if self.front_cutin_enabled:
@@ -944,17 +942,17 @@ class RadarD:
       self.radar_state.leadOne = self.get_lead(self.tracks, leads_v3[0], model_v_ego, self.lead_prob_filters[0].x, low_speed_override=True, sticky=True)
       self.radar_state.leadTwo = self.get_lead(self.tracks, leads_v3[1], model_v_ego, self.lead_prob_filters[1].x, low_speed_override=False, sticky=False)
 
-      # Kans (devel): confirmed cut-in candidates are published in full via
-      # leadsCutIn, and the nearest eligible one (not already leadOne) takes
-      # priority over the plain vision-matched leadTwo above - this is how a
-      # detected cut-in actually reaches longitudinal control.
+      # Kans (devel): 확정된 컷인 후보들은 leadsCutIn을 통해 전부 발행되고,
+      # 그중 자격 있고 가장 가까운 것(아직 leadOne이 아닌)이 위에서 순수
+      # 비전 매칭된 leadTwo보다 우선순위를 갖는다 - 이렇게 감지된 컷인이
+      # 실제로 롱컨(longitudinal control)까지 전달된다.
       cutin_list = self.compute_cutin_list()
       self.radar_state.leadsCutIn = cutin_list
       if self.front_cutin_enabled and cutin_list:
         lead_one = self.radar_state.leadOne
-        # Kans (devel-0721): same VISION_CUTIN_WIDE_MAX_DREL cap as the entry
-        # gate, so a track that could never have entered can't be published
-        # as leadTwo either just because it's still confirmed from closer in.
+        # Kans (devel-0721): entry 게이트와 같은 VISION_CUTIN_WIDE_MAX_DREL
+        # 상한을 적용해서, 애초에 진입할 수 없었던 트랙이 더 가까웠을 때
+        # 확정됐다는 이유만으로 leadTwo로 발행되지 않게 한다.
         max_cutin_d_rel = min(self.cutin_enter_max_x, VISION_CUTIN_WIDE_MAX_DREL)
         eligible = [
           c for c in cutin_list

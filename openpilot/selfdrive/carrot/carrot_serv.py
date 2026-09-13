@@ -166,11 +166,11 @@ class CarrotServ:
     self.navType, self.navModifier = "invalid", ""
     self.navTypeNext, self.navModifierNext = "invalid", ""
 
-    # Kans: atc-dist diagnostic - edge-triggered log of roadcate/nRoadLimitSpeed/
-    # is_highway_like at the moment a fork/lane-change maneuver first appears, to
-    # check whether a navi that doesn't tag 고속화도로 with roadcate 0/1 (or a
-    # speed limit >=70) is silently falling into the short-distance "일반 분기"
-    # branch instead of the 110-150m highway branch.
+    # Kans: atc-dist 진단용 - fork/차선변경 안내가 처음 나타나는 순간
+    # roadcate/nRoadLimitSpeed/is_highway_like를 엣지 트리거로 로그에 남겨서,
+    # 고속화도로를 roadcate 0/1(또는 제한속도 70 이상)로 태깅하지 않는 내비가
+    # 110~150m 고속도로 분기 대신 짧은 거리의 "일반 분기" 쪽으로 조용히
+    # 빠지고 있는 건 아닌지 확인하기 위함.
     self._prev_atc_lane_change_info = None
 
     self.carrotIndex = 0

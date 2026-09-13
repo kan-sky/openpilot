@@ -55,12 +55,12 @@ def clip_curvature(v_ego, prev_curvature, new_curvature, roll) -> tuple[float, b
   return float(new_curvature), limited_accel or limited_max_curv
 
 
-# Kans: how close (m) the MPC's currently-binding obstacle (lead0/lead1/cruise/
-# trafficstop - whichever long_mpc.py picked via argmin) must be before should_stop
-# is allowed to latch, on top of the speed/accel conditions below. The obstacle
-# distance already nets out the desired follow gap / stop-line offset, so ~0 means
-# "already at the intended stopping point" - this stays generous enough to absorb
-# MPC solve noise while still ruling out latching 5-10m early.
+# Kans: MPC가 현재 구속(binding) 중인 장애물(lead0/lead1/cruise/trafficstop -
+# long_mpc.py가 argmin으로 고른 것)이 얼마나 가까워야(m) 아래 속도/가속도
+# 조건에 더해 should_stop이 latch될 수 있는지. 장애물 거리는 이미 원하는
+# follow gap/정지선 오프셋을 뺀 값이라, ~0이면 "이미 의도한 정지 지점"이란
+# 뜻이다 - MPC 계산 노이즈는 흡수할 만큼 넉넉하면서도 5~10m 일찍 latch되는
+# 건 배제할 정도로 잡았다.
 REMAINING_DISTANCE_GATE = 4.0
 
 def get_accel_from_plan(speeds, accels, t_idxs, action_t=DT_MDL, vEgoStopping=0.3, remaining_distance=1000.0, standstill=False):
@@ -76,24 +76,24 @@ def get_accel_from_plan(speeds, accels, t_idxs, action_t=DT_MDL, vEgoStopping=0.
     a_target = 2 * (v_target - v_target_now) / action_t - a_target_now
     v_target_1sec = np.interp(action_t + 1.0, t_idxs, speeds)
 
-    # Kans: comma stock's should_stop() (see below, used only in modeld's e2e path)
-    # gates on actual v_ego + a_target<0.1 - reactive to real state. This 'acc'-mode
-    # path instead only checked the MPC's own *predicted* v_target/v_target_1sec,
-    # with no accel or distance condition - a comfort-tapered MPC solution can
-    # predict a near-zero speed well before the car is actually close to the target
-    # distance, locking into LongCtrlState.stopping (which abandons distance
-    # tracking) early and stopping short of the intended follow/stop-line distance.
-    # Add comma stock's a_target<0.1 plus an explicit remaining-distance gate to
-    # narrow that gap for both lead-follow and traffic-stop-line approaches.
+    # Kans: 콤마스톡의 should_stop()(아래 참고, modeld의 e2e 경로에서만 쓰임)은
+    # 실제 v_ego + a_target<0.1을 게이트로 삼는다 - 실제 상태에 반응한다.
+    # 이 'acc'-모드 경로는 대신 MPC 자신의 *예측* v_target/v_target_1sec만
+    # 체크하고 가속도나 거리 조건이 없었다 - 컴포트 보정이 들어간 MPC 해는
+    # 차가 실제로 목표 거리에 가까워지기 한참 전에 거의 0에 가까운 속도를
+    # 예측할 수 있어서, LongCtrlState.stopping(거리 추적을 포기하는 상태)에
+    # 일찍 락되면서 의도한 follow/정지선 거리보다 못 미쳐 멈추게 된다.
+    # 콤마스톡의 a_target<0.1에 명시적인 남은거리 게이트를 더해서
+    # 앞차추종/신호정지선 접근 양쪽에서 이 간극을 좁힌다.
     #
-    # Kans: when the car is already physically standstill (CS.standstill), don't
-    # let remaining_distance keep should_stop=False - a stationary lead's own
-    # tracked position can drift a bit relative to the MPC's desired follow gap,
-    # so remaining_distance can sit above the gate indefinitely even though the
-    # car isn't moving. Without this OR, that showed up on-vehicle as a multi-stage
-    # "stop, creep forward, stop again" pattern each time should_stop briefly went
-    # False while standstill was already true, worse the farther the initial stop
-    # landed from the desired gap (more distance left to creep away).
+    # Kans: 차가 이미 물리적으로 정지해 있으면(CS.standstill), remaining_distance
+    # 때문에 should_stop=False가 계속 유지되게 두면 안 된다 - 정지한 lead
+    # 자체의 추적 위치가 MPC가 원하는 follow gap 대비 살짝 drift될 수 있어서,
+    # 차가 안 움직이고 있는데도 remaining_distance가 게이트 값 위에
+    # 무한정 머물 수 있다. 이 OR가 없으면 실차에서 should_stop이 standstill이
+    # 이미 True인 동안 잠깐 False로 튈 때마다 "멈춤, 살짝 전진, 다시 멈춤"
+    # 하는 다단계 패턴으로 나타났고, 처음 멈춘 지점이 원하는 gap에서 멀수록
+    # (더 기어나갈 거리가 남을수록) 더 심했다.
     should_stop = (v_target < vEgoStopping and v_target_1sec < vEgoStopping and a_target < 0.1
                    and (remaining_distance < REMAINING_DISTANCE_GATE or standstill))
 

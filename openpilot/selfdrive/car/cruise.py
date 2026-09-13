@@ -43,11 +43,13 @@ class VCruiseHelper:
     self.params_memory = Params("/dev/shm/params")
     self.params = Params()
 
-    # Kans: mirror opendbc's per-car DRIVABLE_GEARS (used by car_events.py's
-    # wrongGear event) here too - GM's regen paddle sets gearShifter to
-    # manumatic (not drive) even though the physical shifter stays in D, and
-    # cruise.py's own autoCruiseControl_cancel_timer gear check needs to
-    # tolerate that the same way the official engage-permission event does.
+    # Kans: opendbc의 차종별 DRIVABLE_GEARS(car_events.py의 wrongGear
+    # 이벤트가 쓰는 것)를 여기도 그대로 반영한다 - GM의 회생제동 패들을
+    # 당기면(주행 중 흔함, 예를 들어 앞차 때문에 감속할 때 - 하필 자동
+    # 인게이지가 가장 필요할 때) 물리적 변속레버는 여전히 D인데도
+    # gearShifter가 manumatic으로 설정된다(drive가 아니라). cruise.py 자체의
+    # autoCruiseControl_cancel_timer 기어 체크도 공식 인게이지-허용
+    # 이벤트와 똑같은 방식으로 이걸 허용해줘야 한다.
     self._drivable_gears = (GearShifter.drive, *interfaces[CP.carFingerprint].DRIVABLE_GEARS)
 
     self.v_cruise_kph = 20
@@ -140,9 +142,9 @@ class VCruiseHelper:
       self.log = log
       #self.event = event
       self._log_timer = self._log_timeout
-      # Kans: also persist to /data/log/swaglog so this is readable after a
-      # drive with `grep "\[cruise\]" swaglog*` over SSH, instead of having to
-      # screen-record the live logCarrot overlay to capture it.
+      # Kans: /data/log/swaglog에도 남겨서, 화면 녹화로 실시간 logCarrot
+      # 오버레이를 캡처할 필요 없이 SSH에서 `grep "\[cruise\]" swaglog*`로
+      # 주행 후에 읽어볼 수 있게 한다.
       cloudlog.warning(f"[cruise] {log}")
 
   def update_params(self, is_metric):
@@ -225,7 +227,7 @@ class VCruiseHelper:
     self.update_params(is_metric)
     self.frame += 1
     CC = sm['carControl']
-    # Kans: receive traffic-light state from longitudinal planner.
+    # Kans: longitudinal planner로부터 신호등 상태를 받는다.
     self.xState_last = self.xState
     self.trafficState_last = self.trafficState
     if sm.alive['longitudinalPlan']:
@@ -238,15 +240,15 @@ class VCruiseHelper:
       self.d_rel = lead.dRel if lead.present else 0
       self.v_rel = lead.vRel if lead.present else 0
 
-    # Kans: GM's ECMPRDNL2.ManualMode bit is set whenever the Volt's regen
-    # paddle is pulled (routine while driving, e.g. slowing for a lead car -
-    # exactly when auto-engage is needed most), which opendbc maps to
-    # GearShifter.manumatic, not drive - the physical shifter never actually
-    # leaves D. Confirmed via swaglog capture showing every engage attempt
-    # blocked by the 20s autoCruiseControl_cancel_timer below during normal
-    # driving. self._drivable_gears mirrors opendbc's own DRIVABLE_GEARS
-    # (also used by car_events.py's wrongGear event), so this stays
-    # consistent with the official engage-permission tolerance list.
+    # Kans: GM의 ECMPRDNL2.ManualMode 비트는 볼트의 회생제동 패들을 당길
+    # 때마다 설정되는데(주행 중 흔한 일이다, 예를 들어 앞차 때문에 감속할
+    # 때 - 하필 자동 인게이지가 가장 필요한 순간), opendbc는 이걸 drive가
+    # 아니라 GearShifter.manumatic으로 매핑한다 - 물리적 변속레버는 실제로
+    # D를 벗어나지 않는데도. swaglog 캡처로 확인해보니 평범한 주행 중
+    # 아래의 20초 autoCruiseControl_cancel_timer 때문에 모든 인게이지
+    # 시도가 막히고 있었다. self._drivable_gears는 opendbc 자체의
+    # DRIVABLE_GEARS(car_events.py의 wrongGear 이벤트도 이걸 쓴다)를
+    # 그대로 반영해서, 공식 인게이지-허용 허용 목록과 일관성을 유지한다.
     self._gear_ok = CS.gearShifter in self._drivable_gears
     if not self._gear_ok:
       self.autoCruiseControl_cancel_timer = int(20 / DT_CTRL)
@@ -396,14 +398,13 @@ class VCruiseHelper:
         self._lat_enabled = True
         self._pause_auto_speed_up = False
 
-        # Kans: without this gate, every accelCruise press (including the
-        # spoofed RES_ACCEL/DECEL_SET carcontroller.py sends to auto-engage
-        # cruise from off) fell through to _v_cruise_desired(), which assumes
-        # cruise is already active and just steps the set speed up by one
-        # unit from whatever v_cruise_kph last held - not necessarily the
-        # current driving speed. Restored from carrot-wip: while not yet
-        # engaged (or at a standstill), the first resume of the drive snaps
-        # to the actual current speed instead.
+        # Kans: 이 게이트가 없으면, accelCruise 누름(carcontroller.py가
+        # 꺼진 상태에서 자동 인게이지하려고 보내는 위조 RES_ACCEL/DECEL_SET
+        # 포함)이 전부 _v_cruise_desired()로 빠지는데, 이 함수는 크루즈가
+        # 이미 켜져 있다고 가정하고 v_cruise_kph의 마지막 값에서 한 단위만
+        # 올려버린다 - 실제 주행 속도와는 무관하게. carrot-wip에서
+        # 복원함: 아직 인게이지 전이거나(또는 정지 상태면), 주행의 첫
+        # resume은 실제 현재 속도로 바로 맞춰지도록 했다.
         if self._cruise_ready or not CC.enabled or CS.cruiseState.standstill:
           if self._v_cruise_kph_at_brake > 0:
             v_cruise_kph = max(v_cruise_kph, self._v_cruise_kph_at_brake)
@@ -435,12 +436,12 @@ class VCruiseHelper:
           # the set speed down by one unit, per devel-0815.
           v_cruise_kph = self.v_ego_kph_set
         else:
-          # Kans: modes 2/3 had no fallback here, so a short decelCruise press
-          # while cruising steadily at/near the set speed (the common case -
-          # neither the softhold, disengaged, nor "going faster than set
-          # speed" branches above apply) did nothing at all. button_kph is
-          # already computed with the correct per-mode unit (SPEED_DOWN_UNIT
-          # in _prepare_buttons), same as accelCruise's button_kph for mode 0.
+          # Kans: 모드 2/3엔 여기 폴백이 없었어서, 설정속도에 안정적으로
+          # 근접/도달해 크루징 중일 때(흔한 케이스 - 위의 softhold, 해제,
+          # "설정속도보다 빠름" 분기 어느 것도 해당 안 됨) 짧게
+          # decelCruise를 눌러도 아무 일도 안 일어났다. button_kph은 모드 0의
+          # accelCruise용 button_kph과 마찬가지로 이미 모드별 올바른 단위
+          # (_prepare_buttons의 SPEED_DOWN_UNIT)로 계산돼 있다.
           v_cruise_kph = button_kph
 
         self._v_cruise_kph_at_brake = 0
@@ -541,18 +542,18 @@ class VCruiseHelper:
     else:
       self._activate_cruise_on_latch = 0
 
-    # Kans: traffic-light stop released.
-    # e2eStop(3) / e2eStopped(5) -> e2eCruise(2) means Carrot released the stop target.
+    # Kans: 신호정지가 해제됨.
+    # e2eStop(3) / e2eStopped(5) -> e2eCruise(2)는 Carrot이 정지 목표를 해제했다는 뜻.
     traffic_start = self.xState_last in [3, 5] and self.xState == 2
     if traffic_start and not CC.enabled and not CS.brakePressed and self._gear_ok:
       self._cruise_control(1, -1, "Cruise on (traffic green)")
 
-    # Kans: this whole if/elif chain (gas-tok -> exact-release-edge triggers ->
-    # persistent-released/CruiseOnDist) was missing in tz - restored per the
-    # user's own road-tested `devel-0815` branch (not carrot-wip's original,
-    # which is rougher - devel-0815 tightens the release-edge windows with
-    # has_lead/safe_lead distance checks and adds an explicit "no lead" case
-    # and a traffic-light-green branch that carrot-wip doesn't have).
+    # Kans: 이 if/elif 체인 전체(gas-tok -> 정확한-release-edge 트리거 ->
+    # persistent-released/CruiseOnDist)가 tz엔 빠져있었다 - 사용자분이
+    # 직접 실도로 검증한 `devel-0815` 브랜치 기준으로 복원함(carrot-wip
+    # 원본은 이보다 거칠다 - devel-0815는 has_lead/safe_lead 거리 체크로
+    # release-edge 윈도우를 더 조이고, carrot-wip엔 없는 명시적 "no lead"
+    # 케이스와 신호-녹색 분기를 추가한다).
     #
     # Short gas-tok:
     # - cruise OFF: request AutoCruise and set current speed

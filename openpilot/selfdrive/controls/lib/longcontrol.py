@@ -13,16 +13,15 @@ LongCtrlState = car.CarControl.Actuators.LongControlState
 
 def long_control_state_trans(CP, active, long_control_state, v_ego,
                              should_stop, brake_pressed, cruise_standstill):
-  # Kans: reverted to the plain/comma-stock unconditional transition (no
-  # a_ego/fcw_stop reentry debounce). That debounce was restored earlier to
-  # chase the "twitch then stuck until manual RESUME" bug, but has a known
-  # history of also causing "doesn't stop behind lead car" (why it was
-  # dropped once before, pre-tz) and is now suspected of causing a new
-  # 3-stage stutter near stops (pid<->stopping toggling as should_stop
-  # flickers near threshold). The twitch/stuck bug may have actually been
-  # fully explained by the separate AccState import crash in
-  # opendbc/car/gm/carcontroller.py (fixed independently) - testing without
-  # this debounce to see if it's still needed at all.
+  # Kans: 순수 콤마스톡의 무조건 전환(a_ego/fcw_stop 재진입 디바운스 없음)으로
+  # 되돌렸다. 그 디바운스는 예전에 "움찔하다 수동 RESUME 전까지 멈춰있는"
+  # 버그를 쫓으려고 복원했던 건데, "앞차 뒤에서 멈추지 않음" 문제도 일으킨
+  # 전력이 있고(그래서 tz 이전에 한 번 뺐었다), 지금은 정지 근처에서 새로운
+  # 3단계 버벅임(should_stop이 임계값 근처에서 깜빡이면서 pid<->stopping이
+  # 토글되는 것)을 일으키는 것으로도 의심된다. 움찔/멈춤 버그는 실은
+  # opendbc/car/gm/carcontroller.py의 별개 AccState import 크래시(독립적으로
+  # 고침)만으로 전부 설명됐을 수도 있다 - 이 디바운스가 정말 필요한지
+  # 없이 테스트해보는 중.
   stopping_condition = should_stop
   starting_condition = (not should_stop and
                         not cruise_standstill and
@@ -60,12 +59,11 @@ class LongControl:
   def __init__(self, CP):
     self.CP = CP
     self.long_control_state = LongCtrlState.off
-    # Kans: kp is always 0 for this fork (matches comma stock's GM convention -
-    # comma never sets a longitudinal P-term for GM), so pass it as a plain float
-    # like comma stock does, instead of the CP.longitudinalTuning.kpBP/kpV
-    # BP-interpolated pair (still resolves to 0.0 either way - the live
-    # LongTuningKpV override below reads CP.longitudinalTuning.kpBP directly and
-    # is unaffected by this).
+    # Kans: 이 포크에선 kp가 항상 0이라(콤마스톡의 GM 관례와 일치 - 콤마는
+    # GM에 롱컨 P항을 절대 설정하지 않는다), CP.longitudinalTuning.kpBP/kpV
+    # BP-보간 쌍 대신 콤마스톡처럼 그냥 float으로 넘긴다(어느 쪽이든 결국
+    # 0.0으로 귀결되긴 한다 - 아래의 실시간 LongTuningKpV 오버라이드는
+    # CP.longitudinalTuning.kpBP를 직접 읽어서 이것과 무관하게 동작한다).
     self.pid = PIDController(0.0, (CP.longitudinalTuning.kiBP, CP.longitudinalTuning.kiV),
                              k_f=CP.longitudinalTuning.kf, rate=1 / DT_CTRL)
     self.last_output_accel = 0.0
@@ -124,11 +122,12 @@ class LongControl:
       self.reset()
 
     else:  # LongCtrlState.pid
-      # Kans: switched to comma stock's accel-error PID (error = a_target - CS.aEgo)
-      # instead of the speed-error form (v_target_now - CS.vEgo) this fork used
-      # before. kiV=.35 was tuned against speed-error's larger error magnitude, so
-      # it will likely read as weaker now - road-test and raise LongTuningKiV if
-      # the response feels soft, .35 was never a validated-for-this constant.
+      # Kans: 이 포크가 이전에 쓰던 속도-오차 방식(v_target_now - CS.vEgo)
+      # 대신 콤마스톡의 가속도-오차 PID(error = a_target - CS.aEgo)로
+      # 바꿨다. kiV=.35는 속도-오차의 더 큰 오차 크기 기준으로 튜닝된
+      # 값이라, 지금은 더 약하게 느껴질 가능성이 높다 - 실도로에서 타보고
+      # 반응이 물렁하면 LongTuningKiV를 올릴 것, .35는 이 방식에 맞춰
+      # 검증된 값이 아니었다.
       error = v_target_now - CS.vEgo
       output_accel = self.pid.update(error, speed=CS.vEgo,
                                      feedforward=a_target_ff)

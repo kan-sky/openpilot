@@ -154,11 +154,11 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"CruiseOnDist", {PERSISTENT, INT, "700"}},
     {"MyDrivingMode", {PERSISTENT, INT, "3"}},
     // Longitudinal tuning
-    // Kans: defaults now match the Volt-specific longitudinalTuning restored
-    // in opendbc/car/gm/interface.py (kpV=0, kiV=.35) - this live override
-    // unconditionally replaces those values once its guard passes (which it
-    // only does for a single-breakpoint kpBP/kiBP, true again for the Volt),
-    // so the UI default has to agree with interface.py or it silently wins.
+    // Kans: 기본값이 이제 opendbc/car/gm/interface.py에 복원된 볼트 전용
+    // longitudinalTuning(kpV=0, kiV=.35)과 일치한다 - 이 실시간 오버라이드는
+    // 자신의 가드를 통과하기만 하면(이건 breakpoint가 하나인 kpBP/kiBP일
+    // 때만 통과하는데, 볼트는 다시 그 경우다) 그 값들을 무조건 대체해버려서,
+    // UI 기본값이 interface.py와 일치하지 않으면 조용히 이겨버린다.
     // A PERSISTENT param already saved as a different value on a device
     // won't pick up a header default change on its own - if this was
     // already 0/0 from the earlier "말타기" hunting fix, KiV needs to be

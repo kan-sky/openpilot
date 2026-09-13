@@ -340,11 +340,11 @@ def main(demo=False):
 
     sm.update(0)
     desire = DH.desire
-    # Kans (0623 backup): DH.desire only becomes laneChangeLeft/Right once the
-    # FSM reaches laneChangeStarting - the whole preLaneChange (prepare) phase
-    # publishes log.Desire.none, so the model never sees the pulse until the
-    # maneuver is already starting. Give it a heads-up as soon as the FSM
-    # leaves off, so the model has lead time to bias its path prediction.
+    # Kans (0623 백업): DH.desire는 FSM이 laneChangeStarting에 도달해야만
+    # laneChangeLeft/Right가 된다 - preLaneChange(준비) 단계 전체는
+    # log.Desire.none을 발행해서, 모델은 이미 maneuver가 시작된 뒤에야
+    # pulse를 보게 된다. FSM이 off를 벗어나는 즉시 미리 귀띔해줘서,
+    # 모델이 경로 예측을 미리 편향시킬 시간을 벌어준다.
     if DH.lane_change_state != log.LaneChangeState.off:
       if DH.lane_change_direction == log.LaneChangeDirection.left:
         desire = log.Desire.laneChangeLeft

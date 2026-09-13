@@ -164,7 +164,7 @@ class DesireHelper:
   # ─────────────────────────────────────────────
   # per-side processing (핵심: 좌/우 모두 매 프레임 계산)
   # ─────────────────────────────────────────────
-  def _process_sides(self, carstate, modeldata, radarState):
+  def _process_sides(self, carstate, modeldata, radarState, x_dist_to_turn):
     # geometry (좌/우)
     # left: outer laneLines[0], current laneLines[1], edge[0], cur_prob laneLineProbs[1]
     self.left.update_lane_geometry(
@@ -184,6 +184,9 @@ class DesireHelper:
     # lane line info (HUD용 raw는 기존대로 leftLaneLine/rightLaneLine)
     self.left.update_lane_line_info(carstate.leftLaneLine)
     self.right.update_lane_line_info(carstate.rightLaneLine)
+
+    self.left.update_edge_memory(x_dist_to_turn)
+    self.right.update_edge_memory(x_dist_to_turn)
 
     # BSD 설정
     ignore_bsd = (self.laneChangeBsd < 0)
@@ -237,7 +240,7 @@ class DesireHelper:
     trailer_maneuver_blocked = carstate.trailerConnected
 
     # per-side compute (좌/우 모두)
-    self._process_sides(carstate, modeldata, radarState)
+    self._process_sides(carstate, modeldata, radarState, carrotMan.xDistToTurn)
     if trailer_maneuver_blocked:
       self.left.lane_change_available = False
       self.right.lane_change_available = False
@@ -288,7 +291,7 @@ class DesireHelper:
         auto_lane_change_trigger = (
           self.auto_lane_change_enable and
           (not atc_lane_change_manual_only) and
-          side.edge_available and
+          (side.edge_available or side.edge_seen_in_window) and
           (side.lane_available_trigger or side.lane_appeared) and
           (not side.side_object_detected) and
           (side.bsd_hold_counter == 0)
@@ -384,7 +387,10 @@ class DesireHelper:
             ignore_bsd = (self.laneChangeBsd < 0)
             block_lanechange_bsd = (self.laneChangeBsd == 1)
             bsd_active = (side.bsd_hold_counter > 0) and (not ignore_bsd)
-            side_clear_without_line = (side.lane_available or side.edge_available) and \
+            # Kans: 순수 ATC(운전자 확인 없이)의 release 조건도 edge_seen_in_window에
+            # 기대도 된다 - auto_lane_change_trigger 쪽의 edge 조건 참고.
+            side_clear_without_line = (side.lane_available or side.edge_available or
+                                       (atc_lane_change_only and side.edge_seen_in_window)) and \
                                       (not side.side_object_detected) and (not bsd_active)
             atc_driver_confirm = atc_lane_change_requested and driver_enabled
             atc_geometry_release = atc_lane_change_only and auto_lane_change_trigger

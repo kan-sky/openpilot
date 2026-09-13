@@ -96,12 +96,11 @@ class LongitudinalPlanner:
 
     self.params = Params()
 
-    # Kans: debug - re-added to chase the "twitches then immediately
-    # re-stops, stuck until manual RESUME" bug. Starts logging on any
-    # deceleration toward a stop, keeps logging every frame through the
-    # stop and any restart attempts, stops once v_ego has been solidly
-    # moving for a bit (or after a timeout so a stuck session can't log
-    # forever).
+    # Kans: 디버그용 - "잠깐 움찔하다 곧바로 다시 멈추고, 수동 RESUME 전까지
+    # 안 움직이는" 버그를 쫓기 위해 다시 추가함. 정지를 향한 감속이 시작되면
+    # 로깅을 시작하고, 정지와 재출발 시도 내내 매 프레임 로깅하다가, v_ego가
+    # 한동안 확실히 움직이면 멈춘다(또는 멈춰있는 세션이 영원히 로그를
+    # 남기지 않도록 타임아웃 후에도 멈춤).
     self.debug_stop = False
     self.debug_stop_moving_frames = 0
     self.debug_stop_frame_count = 0
@@ -255,7 +254,7 @@ class LongitudinalPlanner:
     self.output_v_target_now = output_v_target_now
     self.output_j_target_now = self.j_desired_trajectory[0]
 
-    # Kans: debug - see comment in __init__.
+    # Kans: 디버그용 - __init__의 주석 참고.
     if not self.debug_stop and v_ego < 5.0 and output_a_target < -0.1:
       self.debug_stop = True
       self.debug_stop_moving_frames = 0
@@ -264,8 +263,8 @@ class LongitudinalPlanner:
 
     if self.debug_stop:
       self.debug_stop_frame_count += 1
-      # Kans: this runs at ~20Hz for up to 20s per stop - throttle to ~2Hz so a
-      # single stop doesn't flood swaglog with ~400 lines.
+      # Kans: 정지 1회당 최대 20초 동안 ~20Hz로 도는 거라 - swaglog가
+      # 한 번의 정지로 ~400줄씩 쏟아지지 않게 ~2Hz로 스로틀링한다.
       if self.debug_stop_frame_count % max(1, int(0.5 / self.dt)) == 0:
         cloudlog.warning(f"[long_plan stop-debug] vEgo={v_ego:.3f} aTarget={output_a_target:.3f} vTargetNow={output_v_target_now:.3f} "
               f"shouldStop={self.output_should_stop} longCtrlState={sm['controlsState'].longControlState} "
