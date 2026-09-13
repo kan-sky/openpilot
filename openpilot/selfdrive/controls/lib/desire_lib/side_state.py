@@ -306,7 +306,7 @@ class SideState:
   def update_triggers(self):
     # Preserve the existing lane_available_trigger behavior.
     self.lane_available_trigger = False
-    if self.lane_width_diff > 0.8 and (self.lane_width < self.dist_to_edge):
+    if self.lane_width_diff > 0.6 and (self.lane_width < self.dist_to_edge):
       self.lane_available_trigger = True
 
     # Use >= so the appeared state is not missed after the threshold.
