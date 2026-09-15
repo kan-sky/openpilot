@@ -120,16 +120,16 @@ class SideState:
     self.current_lane_missing = self.cur_prob < 0.3
 
   def update_edge_memory(self, x_dist_to_turn):
-    # Kans: 다가오는 fork/turn에 접근하는 동안 같은 쪽 edge_available이 한 번이라도
-    # True였는지 기억해둔다 - last-lane이 무장되는 바로 그 순간 비전이 한 프레임만
-    # 놓쳐도 auto_lane_change_trigger가 영구히 막히는 걸 막기 위함.
-    # 시간이 아니라 거리로 경계를 두어서, 내비가 이미 알려주고 있는 훨씬 먼
-    # 다음(무관한) 이벤트까지 기억이 새어 들어가지 않게 한다.
-    if x_dist_to_turn is not None and x_dist_to_turn <= EDGE_AVAILABLE_MEMORY_DIST:
-      if self.edge_available:
-        self.edge_seen_in_window = True
-    else:
-      self.edge_seen_in_window = False
+    # Kans: 라이브 edge_available 값과 무관하게, 지금 xDistToTurn이
+    # EDGE_AVAILABLE_MEMORY_DIST 이내면 "탈 곳이 있다"는 조건을 만족한 걸로
+    # 본다. _is_last_lane 안전 게이트(auto_lane_change_enable 무장)는 전혀
+    # 안 건드리고, 이미 무장된 뒤 auto_lane_change_trigger가 요구하는 별도의
+    # edge_available 재확인만 완화한다 - 야간 비전 노이즈로 edge_available이
+    # 흔들려도, 실제 실행은 여전히 그 프레임의 lane_available_trigger(옆차선이
+    # 지금 실시간으로 벌어지고 있다는 신호)가 있어야만 일어난다. 매 프레임
+    # xDistToTurn만으로 다시 계산되므로 별도의 리셋 로직이 필요 없다 - 다음
+    # 이벤트로 넘어가면 그 프레임에 바로 False가 된다.
+    self.edge_seen_in_window = x_dist_to_turn is not None and x_dist_to_turn <= EDGE_AVAILABLE_MEMORY_DIST
 
   def update_lane_line_info(self, lane_line_info_raw: int):
     self.lane_line_info_raw = int(lane_line_info_raw)
