@@ -1,5 +1,6 @@
 from opendbc.car import DT_CTRL
 from opendbc.car.can_definitions import CanData
+from opendbc.car.gm import tbl_controller
 from opendbc.car.gm.values import CAR, CruiseButtons, CanBus
 from opendbc.car.common.conversions import Conversions as CV
 
@@ -70,7 +71,8 @@ def create_adas_keepalive(bus):
   return [CanData(0x409, dat, bus), CanData(0x40a, dat, bus)]
 
 
-def create_gas_regen_command(packer, bus, throttle, idx, enabled, at_full_stop):
+def create_gas_regen_command(packer, bus, throttle, idx, enabled, at_full_stop, car_fingerprint=None):
+  """Create 0x2CB, selecting the stock-verified checksum only for Trailblazer."""
   idx = int(idx) & 0x3  # 2-bit rolling counter
   values = {
     "GasRegenCmdActive": enabled,
@@ -81,10 +83,8 @@ def create_gas_regen_command(packer, bus, throttle, idx, enabled, at_full_stop):
   }
 
   dat = packer.make_can_msg("ASCMGasRegenCmd", bus, values)[1]
-  values["GasRegenChecksum"] = ((1 - enabled) << 24) | \
-                               (((0xff - dat[1]) & 0xff) << 16) | \
-                               (((0xff - dat[2]) & 0xff) << 8) | \
-                               ((0x100 - dat[3] - idx) & 0xff)
+  checksum = tbl_controller.compute_gas_regen_checksum(car_fingerprint, dat, idx)
+  values["GasRegenChecksum"] = ((1 - enabled) << 24) | checksum
 
   return packer.make_can_msg("ASCMGasRegenCmd", bus, values)
 
@@ -121,19 +121,33 @@ def create_friction_brake_command(packer, bus, apply_brake, idx, enabled, near_s
   return packer.make_can_msg("EBCMFrictionBrakeCmd", bus, values)
 
 
-def create_acc_dashboard_command(packer, bus, enabled, target_speed_kph, hud_control, fcw):
+def create_acc_dashboard_command(packer, bus, enabled, target_speed_kph, hud_control, fcw, stock_acc_status=None):
   target_speed = min(target_speed_kph, 255)
 
-  values = {
-    "ACCAlwaysOne": 1,
-    "ACCResumeButton": 0,
+  if stock_acc_status is not None:
+    values = dict(stock_acc_status)
+
+    # When longitudinal control is inactive, forward the exact stock state.
+    # In particular, do not replace the Trailblazer's valid (2, 0, 0)
+    # ACCCruiseState/constant-bit tuple with openpilot's generic (0, 1, 1).
+    if not enabled:
+      return packer.make_can_msg("ASCMActiveCruiseControlStatus", bus, values)
+  else:
+    values = {
+      "ACCAlwaysOne": 1,
+      "ACCResumeButton": 0,
+      "ACCAlwaysOne2": 1,
+    }
+
+  # Preserve the stock protocol state while replacing only the fields needed
+  # for openpilot's active longitudinal-control display.
+  values.update({
     "ACCSpeedSetpoint": target_speed,
     "ACCGapLevel": hud_control.leadDistanceBars * enabled,  # 3 "far", 0 "inactive"
     "ACCCmdActive": enabled,
-    "ACCAlwaysOne2": 1,
     "ACCLeadCar": hud_control.leadVisible,
-    "FCWAlert": 0x3 if fcw else 0
-  }
+    "FCWAlert": 0x3 if fcw else 0,
+  })
 
   return packer.make_can_msg("ASCMActiveCruiseControlStatus", bus, values)
 

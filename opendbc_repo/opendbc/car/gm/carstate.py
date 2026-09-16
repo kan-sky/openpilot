@@ -5,6 +5,7 @@ from openpilot.common.params import Params #kans
 import numpy as np
 from opendbc.car import Bus, create_button_events, structs
 from opendbc.car.common.conversions import Conversions as CV
+from opendbc.car.gm import tbl_controller
 from opendbc.car.interfaces import CarStateBase
 from opendbc.car.gm.values import DBC, AccState, CruiseButtons, STEER_THRESHOLD, CAR, GMFlags, CAMERA_ACC_CAR, EV_CAR, SDGM_CAR, ALT_ACCS
 from opendbc.car.carlog import carlog
@@ -21,6 +22,7 @@ BUTTONS_DICT = {CruiseButtons.RES_ACCEL: ButtonType.accelCruise, CruiseButtons.D
                 CruiseButtons.MAIN: ButtonType.mainCruise, CruiseButtons.CANCEL: ButtonType.cancel,
                 CruiseButtons.GAP_DIST: ButtonType.gapAdjustCruise}
 
+
 class CarState(CarStateBase):
   def __init__(self, CP):
     super().__init__(CP)
@@ -33,6 +35,12 @@ class CarState(CarStateBase):
     self.loopback_lka_steering_cmd_ts_nanos = 0
     self.pt_lka_steering_cmd_counter = 0
     self.cam_lka_steering_cmd_counter = 0
+    self.cam_ascm_2cb_counter = 0
+    self.cam_ascm_2cb_counter_updated = False
+    self.cam_ascm_2cb_counter_ts_nanos = 0
+    self.cam_stock_long_active = None
+    self.cam_stock_long_cancel = False
+    self.cam_acc_status = None
     self.buttons_counter = 0
     self.single_pedal_mode = False
     self.pedal_steady = 0.
@@ -164,6 +172,9 @@ class CarState(CarStateBase):
       self.pt_lka_steering_cmd_counter = pt_cp.vl["ASCMLKASteeringCmd"]["RollingCounter"]
       self.cam_lka_steering_cmd_counter = cam_cp.vl["ASCMLKASteeringCmd"]["RollingCounter"]
 
+    # Trailblazer camera-longitudinal: track the stock 0x2CB/0x370 state (see tbl_controller.py)
+    tbl_controller.update_camera_longitudinal_state(self, self.CP, cam_cp)
+
     # This is to avoid a fault where you engage while still moving backwards after shifting to D.
     # An Equinox has been seen with an unsupported status (3), so only check if either wheel is in reverse (2)
     left_whl_sign = -1 if pt_cp.vl["EBCMWheelSpdRear"]["RLWheelDir"] == 2 else 1
@@ -240,8 +251,6 @@ class CarState(CarStateBase):
     friction_brake_unavailable = pt_cp.vl["EBCMFrictionBrakeStatus"]["FrictionBrakeUnavailable"] == 1
     startup_fault_ignore = (time.monotonic() - self.startup_time) < 60.0
     ret.accFaulted = ((cruise_faulted and not startup_fault_ignore) or friction_brake_unavailable)
-    if self.CP.carFingerprint in CAR.CHEVROLET_TRAILBLAZER:
-      ret.accFaulted = False
 
     # Kans: diagnostic - log which condition actually tripped accFaulted, since
     # "Cruise Fault: Restart the Car" doesn't say why on screen.
@@ -304,6 +313,13 @@ class CarState(CarStateBase):
                               {1: ButtonType.lkas})
       ]
 
+    if self.cam_stock_long_cancel:
+      # Treat the camera's active-to-inactive edge like a complete momentary
+      # cancel click. The controller has already neutralized this cycle's
+      # actuation; this edge also prevents openpilot from remaining visually
+      # engaged with no ACC without latching the cruise-button state machine.
+      ret.buttonEvents = [*ret.buttonEvents, *tbl_controller.create_stock_long_cancel_button_events()]
+
     if ret.vEgo < self.CP.minSteerSpeed:
       ret.lowSpeedAlert = True
 
@@ -330,6 +346,7 @@ class CarState(CarStateBase):
       cam_messages += [
         ("SDGM_ALPHA_LONG", float('nan')),
       ]
+    cam_messages += tbl_controller.get_longitudinal_sync_messages(CP)
     loopback_messages = [
       ("ASCMLKASteeringCmd", float('nan')),
     ]
