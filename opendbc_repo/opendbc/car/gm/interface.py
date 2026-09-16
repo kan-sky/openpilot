@@ -283,9 +283,11 @@ class CarInterface(CarInterfaceBase):
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
 
     elif candidate == CAR.CHEVROLET_TRAILBLAZER:
-      ret.stopAccel = -0.5
-      ret.startingState = True
-      ret.startAccel = 1.0
+      # The Trailblazer ECM faults if camera-long is initially engaged below
+      # 5 km/h without sufficient brake input. GM's event handling still
+      # permits engagement at a true standstill while the brake is held.
+      if ret.openpilotLongitudinalControl:
+        ret.minEnableSpeed = 5 * CV.KPH_TO_MS
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
 
     elif candidate == CAR.CADILLAC_XT6:
