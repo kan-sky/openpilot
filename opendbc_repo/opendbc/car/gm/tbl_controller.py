@@ -11,6 +11,7 @@ carcontroller.py only call into a small, testable interface.
 import copy
 
 from opendbc.car import structs
+from opendbc.car.carlog import carlog
 from opendbc.car.gm.values import CAR
 
 NetworkLocation = structs.CarParams.NetworkLocation
@@ -49,6 +50,13 @@ def update_camera_longitudinal_state(CS, CP, cam_cp):
     CS.cam_ascm_2cb_counter_ts_nanos = cam_cp.ts_nanos["ASCMGasRegenCmd"]["RollingCounter"]
     CS.cam_stock_long_active = bool(active_states[-1])
     CS.cam_stock_long_cancel = previous_stock_long_active is True and not CS.cam_stock_long_active
+
+    # Kans: edge-triggered (not every frame) - the camera revoking/reclaiming
+    # its own ACC authority is the key event this whole port hinges on.
+    if CS.cam_stock_long_active != previous_stock_long_active:
+      carlog.warning(f"[tbl camera-long] stock_long_active {previous_stock_long_active}->{CS.cam_stock_long_active} "
+                      f"cancelSynthesized={CS.cam_stock_long_cancel} counter={CS.cam_ascm_2cb_counter} "
+                      f"vEgo={CS.out.vEgo:.2f}")
 
   # Keep the camera's complete ACC state as the template for the replacement
   # 0x370. This Trailblazer generation expects ACCCruiseState and the two

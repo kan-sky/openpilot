@@ -6,6 +6,7 @@ from math import fabs, exp
 import numpy as np
 from openpilot.common.params import Params
 from opendbc.car import get_safety_config, structs
+from opendbc.car.carlog import carlog
 from opendbc.car.lateral import get_friction
 from opendbc.car.common.basedir import BASEDIR
 from opendbc.car.common.conversions import Conversions as CV
@@ -329,6 +330,11 @@ class CarInterface(CarInterfaceBase):
       # permits engagement at a true standstill while the brake is held.
       if ret.openpilotLongitudinalControl:
         ret.minEnableSpeed = 5 * CV.KPH_TO_MS
+        # Kans: one-time confirmation this build point (custom 0x2CB checksum,
+        # camera-bus sync, cancel-edge synthesis in tbl_controller.py) is live -
+        # not per-frame, just a startup breadcrumb for the first test drive.
+        carlog.warning("[tbl init] Trailblazer camera-longitudinal fix active: "
+                        "minEnableSpeed=5kph, custom 0x2CB checksum, camera-bus sync enabled")
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
 
     elif candidate == CAR.CADILLAC_XT6:

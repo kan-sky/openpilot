@@ -679,6 +679,13 @@ class CarController(CarControllerBase):
     else:
       raise ValueError(f"Unsupported bus: {bus}")
     can_sends.append(gmcan.create_buttons(self.packer_pt, bus, rc, cruise_btn))
+    if self.CP.carFingerprint == CAR.CHEVROLET_TRAILBLAZER:
+      # Kans: correlate every AutoResume/AutoCruise button send with the stock
+      # camera's own ACC authority at that instant, to tell apart "button sent
+      # but stock camera had already revoked ACC" from "button never sent."
+      cloudlog.warning(f"[tbl send_btn] btn={cruise_btn} camStockLongActive={CS.cam_stock_long_active} "
+                        f"camStockLongCancel={CS.cam_stock_long_cancel} pcmAccStatus={CS.pcm_acc_status} "
+                        f"vEgo={CS.out.vEgo:.2f}")
 
   def brake_strength(self) -> float:
     if self.CP.carFingerprint in EV_CAR or self.CP.carFingerprint in SDGM_CAR:
