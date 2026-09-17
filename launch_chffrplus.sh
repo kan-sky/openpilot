@@ -18,6 +18,70 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null && pwd )"
 
 source "$DIR/launch_env.sh"
 
+function ensure_python_package {
+  # Installing/updating this fork always happens over a network connection
+  # (comma devices - C3X, C4 - can't even be set up without WiFi/internet in
+  # the first place, and a later `git pull` needs the same), so there is no
+  # real "must boot with zero network" case to design around here - unlike
+  # carrot-wip, which bundles offline wheels for that scenario. Installs
+  # straight into the running Python's own environment (confirmed writable on
+  # real devices - carrot features have been `pip install`ed directly before).
+  local import_name="$1"
+  local package_name="$2"
+  local required="${3:-0}"
+
+  if python3 -c "import ${import_name}" > /dev/null 2>&1; then
+    echo "${package_name} already installed."
+    return 0
+  fi
+
+  echo "${package_name} not found, installing."
+  if python3 -m pip install --disable-pip-version-check --no-input --timeout 15 --retries 2 \
+       --upgrade "$package_name" && \
+     python3 -c "import ${import_name}" > /dev/null 2>&1; then
+    echo "${package_name} installed."
+    return 0
+  fi
+
+  # Keep the actual import error visible when installation could not repair it.
+  python3 -c "import ${import_name}" >&2
+  if [ "$required" = "1" ]; then
+    echo "Required Python package ${package_name} is unavailable; not starting openpilot."
+    return 1
+  fi
+
+  echo "Optional Python package ${package_name} is unavailable; continuing without it."
+  return 0
+}
+
+function bootstrap_runtime_dependencies {
+  # Full carrot-wip package set, bundled up front so a future carrot feature
+  # port doesn't need its own dependency-install pass. Required (1) packages
+  # block boot on failure - a bare install failure here means something is
+  # actually wrong (not "no WiFi", since getting this code onto the device at
+  # all already required a network connection).
+  local failed=0
+  ensure_python_package serial pyserial 1 || failed=1
+  ensure_python_package msgpack msgpack 1 || failed=1
+  ensure_python_package aiohttp aiohttp 1 || failed=1
+  ensure_python_package av av 1 || failed=1
+  ensure_python_package aiortc "aiortc==1.14.0" 1 || failed=1
+  ensure_python_package psutil psutil 1 || failed=1
+  ensure_python_package crcmod crcmod-plus 1 || failed=1
+  ensure_python_package jsonrpc json-rpc 1 || failed=1
+  ensure_python_package qrcode qrcode 1 || failed=1
+  [ "$failed" = "0" ] || return 1
+
+  ensure_python_package brotli brotli 0
+  ensure_python_package usb pyusb 0
+
+  # carrot-wip pins this for its Xiaoge lane/BSD inference feature (not yet
+  # ported to 196). Optional (0): harmless no-op until then.
+  ensure_python_package cv2 "opencv-python-headless==4.13.0.92" 0
+
+  ensure_python_package shapely shapely 0
+}
+
 function agnos_init {
   # TODO: move this to agnos
   sudo rm -f /data/etc/NetworkManager/system-connections/*.nmmeta
@@ -99,6 +163,14 @@ function launch {
 
   # write tmux scrollback to a file
   tmux capture-pane -pq -S-1000 > /tmp/launch_log
+
+  # SCons imports some of these dependency modules while building Params, so
+  # bootstrap them before the first SCons invocation. Runs unconditionally
+  # (including on prebuilt images) - each package's own already-installed
+  # check makes that a fast no-op when nothing's missing.
+  if ! bootstrap_runtime_dependencies; then
+    while true; do sleep 1; done
+  fi
 
   # start manager
   cd openpilot/system/manager

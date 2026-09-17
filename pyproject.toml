@@ -54,6 +54,21 @@ dependencies = [
   "psutil",
   "shapely",
 
+  # not yet used on 196 - declared ahead of carrot-wip feature ports (webrtcd
+  # live streaming, realtime broker, QR backup, cluster USB display, Xiaoge
+  # lane/BSD inference) so each port doesn't need its own dependency pass.
+  # See launch_chffrplus.sh's bootstrap_runtime_dependencies, which installs
+  # these on-device the same way (plain `pip install`, no bundled wheels -
+  # this fork's install/update flow always has network already).
+  "msgpack",
+  "crcmod-plus",
+  "brotli",
+  "av",
+  "aiortc",
+  "pyusb",
+  "json-rpc",
+  "opencv-python-headless==4.13.0.92",
+
   # these should be removed
   "pyzmq",
   "sentry-sdk",
