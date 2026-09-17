@@ -17,8 +17,25 @@ from opendbc.car.gm.values import CAR
 NetworkLocation = structs.CarParams.NetworkLocation
 ButtonType = structs.CarState.ButtonEvent.Type
 
+# EMERGENCY KILL SWITCH (2026-09-17): a real 2021-22 Trailblazer hit a
+# persistent "CAN Bus Disconnected" (canTimeout) alert immediately after this
+# module's camera-bus RX subscription went live - Bus.cam never expected any
+# traffic for this car before today, and now expects ASCMGasRegenCmd/
+# ASCMActiveCruiseControlStatus on it (opendbc/car/interfaces.py computes
+# canTimeout as `any(cp.bus_timeout for cp in self.can_parsers.values())`, so
+# a cam-bus CANParser that never sees its subscribed messages can flag the
+# whole bus down). User confirmed: the alert appeared only after this change,
+# and is constant, not intermittent - so this is disabled pending a real CAN
+# capture to find out why those messages aren't arriving as expected on this
+# harness. The TX-side checksum fix (compute_gas_regen_checksum) is left
+# enabled - it's independent of this RX subscription and not implicated by a
+# canTimeout symptom. Do not flip this back on by guessing; needs evidence.
+_CAMERA_LONG_RX_DISABLED = True
+
 
 def is_trailblazer_camera_longitudinal(CP):
+  if _CAMERA_LONG_RX_DISABLED:
+    return False
   return (CP.openpilotLongitudinalControl and
           CP.carFingerprint == CAR.CHEVROLET_TRAILBLAZER and
           CP.networkLocation == NetworkLocation.fwdCamera)
@@ -98,7 +115,7 @@ def apply_driver_gas_override(car_fingerprint, gas_pressed, inactive_regen, appl
   # The 2021-22 Trailblazer can sample the accelerator before controls has
   # cleared longActive. Emit a complete inactive command set during that
   # transition so Panda does not drop a counter-matched 0x2CB/0x315 pair.
-  if car_fingerprint == CAR.CHEVROLET_TRAILBLAZER and gas_pressed:
+  if car_fingerprint == CAR.CHEVROLET_TRAILBLAZER and not _CAMERA_LONG_RX_DISABLED and gas_pressed:
     return inactive_regen, 0, False, False
   return apply_gas, apply_brake, at_full_stop, near_stop
 
@@ -108,13 +125,13 @@ def apply_stock_longitudinal_gate(car_fingerprint, stock_long_active, inactive_r
   # The Trailblazer's camera can revoke longitudinal authority before the ECM
   # cruise state changes. Stop actuation on that same stock command cycle so
   # the EBCM never sees an active replacement after the camera has gone idle.
-  if car_fingerprint == CAR.CHEVROLET_TRAILBLAZER and stock_long_active is not True:
+  if car_fingerprint == CAR.CHEVROLET_TRAILBLAZER and not _CAMERA_LONG_RX_DISABLED and stock_long_active is not True:
     return inactive_regen, 0, False, False, False
   return apply_gas, apply_brake, at_full_stop, near_stop, acc_engaged
 
 
 def get_acc_dashboard_enabled(car_fingerprint, enabled, in_drive, stock_long_active, stock_acc_status):
-  if car_fingerprint == CAR.CHEVROLET_TRAILBLAZER:
+  if car_fingerprint == CAR.CHEVROLET_TRAILBLAZER and not _CAMERA_LONG_RX_DISABLED:
     return (enabled and in_drive and stock_long_active is True and stock_acc_status is not None and
             bool(stock_acc_status["ACCCmdActive"]))
   return enabled

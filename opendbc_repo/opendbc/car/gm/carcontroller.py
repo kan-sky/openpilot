@@ -581,7 +581,7 @@ class CarController(CarControllerBase):
 
           # Send dashboard UI commands (ACC status)
           send_fcw = hud_alert == VisualAlert.fcw
-          is_trailblazer = self.CP.carFingerprint == CAR.CHEVROLET_TRAILBLAZER
+          is_trailblazer = tbl_controller.is_trailblazer_camera_longitudinal(self.CP)
           stock_acc_status = CS.cam_acc_status if is_trailblazer else None
           # Reverse/park and a stock ACC veto must retain the Trailblazer
           # camera state instead of reasserting ACCCmdActive from CC.enabled.
