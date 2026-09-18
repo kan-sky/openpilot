@@ -661,7 +661,16 @@ class CarController(CarControllerBase):
 
   def send_btn(self, CS, can_sends, cruise_btn, bus=None):
     if bus is None:
-      if self.CP.carFingerprint in CAMERA_ACC_CAR:
+      # gm.h's safety allowlist for ASCMSteeringButton (0x1E1) depends on
+      # which TX config is active: GM_CAM_TX_MSGS (stock longitudinal via
+      # camera) only allows it on bus 2, but GM_CAM_LONG_TX_MSGS (openpilot
+      # longitudinal, gm_cam_long=true - Trailblazer with alpha_long/
+      # openpilotLongitudinalControl) only allows it on bus 0. Sending on the
+      # wrong bus for the active config gets silently dropped by panda, not
+      # rejected loudly - AutoResume/AutoCruise button spam would just never
+      # reach the vehicle. CAMERA_ACC_CAR membership alone isn't enough to
+      # pick the bus; openpilotLongitudinalControl also has to be checked.
+      if self.CP.carFingerprint in CAMERA_ACC_CAR and not self.CP.openpilotLongitudinalControl:
         bus = CanBus.CAMERA
       else:
         bus = CanBus.POWERTRAIN
