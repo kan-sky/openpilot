@@ -250,7 +250,7 @@ class CarState(CarStateBase):
     cruise_faulted = pt_cp.vl["AcceleratorPedal2"]["CruiseState"] == AccState.FAULTED
     friction_brake_unavailable = pt_cp.vl["EBCMFrictionBrakeStatus"]["FrictionBrakeUnavailable"] == 1
     startup_fault_ignore = (time.monotonic() - self.startup_time) < 60.0
-    ret.accFaulted = ((cruise_faulted and not startup_fault_ignore) or friction_brake_unavailable)
+    ret.accFaulted = (cruise_faulted or friction_brake_unavailable) and not startup_fault_ignore
 
     # Kans: diagnostic - log which condition actually tripped accFaulted, since
     # "Cruise Fault: Restart the Car" doesn't say why on screen.
