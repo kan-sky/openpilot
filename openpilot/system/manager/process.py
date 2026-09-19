@@ -69,6 +69,7 @@ class ManagerProcess(ABC):
   name = ""
   shutting_down = False
   restart_if_crash = False
+  last_restart_mono_time = 0.0
 
   @abstractmethod
   def prepare(self) -> None:
@@ -243,6 +244,15 @@ class DaemonProcess(ManagerProcess):
     pass
 
 
+# Fixed (non-backoff) floor on how often a repeatedly-crashing process gets
+# restarted. A process crashing on import (e.g. a missing dependency) with no
+# floor restarts as fast as manager's own poll loop allows, which can compete
+# for CPU with realtime daemons like card - keep it fixed, not exponential, so
+# a transient cause (network back, dependency installed) recovers just as fast
+# as before once fixed.
+MIN_CRASH_RESTART_INTERVAL = 2.0  # seconds
+
+
 def ensure_running(procs: ValuesView[ManagerProcess], started: bool, params: Params, CP: car.CarParams,
                    not_run: list[str] | None=None) -> list[ManagerProcess]:
   if not_run is None:
@@ -252,8 +262,11 @@ def ensure_running(procs: ValuesView[ManagerProcess], started: bool, params: Par
   for p in procs:
     if p.enabled and p.name not in not_run and p.should_run(started, params, CP):
       if p.restart_if_crash and p.proc is not None and not p.proc.is_alive():
-        cloudlog.error(f'Restarting {p.name} (exitcode {p.proc.exitcode})')
-        p.restart()
+        since_last_restart = time.monotonic() - p.last_restart_mono_time
+        if since_last_restart >= MIN_CRASH_RESTART_INTERVAL:
+          cloudlog.error(f'Restarting {p.name} (exitcode {p.proc.exitcode})')
+          p.last_restart_mono_time = time.monotonic()
+          p.restart()
       running.append(p)
     else:
       p.stop(block=False)
