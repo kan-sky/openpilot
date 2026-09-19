@@ -72,6 +72,7 @@ class CarState(CarStateBase):
     # Kans: accFault delay
     self.startup_time = time.monotonic()
     self._acc_faulted_last = False
+    self._raw_fault_signal_log_time = 0.0
 
     # Kans: TPMS
     self.KPA_TO_PSI = 0.1450377377
@@ -261,6 +262,20 @@ class CarState(CarStateBase):
         f"startup_fault_ignore={startup_fault_ignore}"
       )
     self._acc_faulted_last = ret.accFaulted
+
+    # Kans: 진단용 - 레퍼런스 빌드에선 이 폴트가 전혀 안 뜨는데 196에서는
+    # 항상 뜸. 60초 엣지 로그만으로는 그 전 구간(부팅 직후)의 원시값을 볼 수
+    # 없어서, 2초마다 원시 CruiseState/FrictionBrakeUnavailable 값과
+    # 파워트레인버스 유효성을 그냥 찍음. 원인 확정되면 지울 것.
+    now = time.monotonic()
+    if self.CP.carFingerprint == CAR.CHEVROLET_TRAILBLAZER and now - self._raw_fault_signal_log_time >= 2.0:
+      self._raw_fault_signal_log_time = now
+      carlog.warning(
+        f"[tbl raw-fault-signals] t={now - self.startup_time:.1f}s "
+        f"cruiseStateRaw={pt_cp.vl['AcceleratorPedal2']['CruiseState']} "
+        f"frictionBrakeUnavailableRaw={pt_cp.vl['EBCMFrictionBrakeStatus']['FrictionBrakeUnavailable']} "
+        f"ptCanValid={pt_cp.can_valid} ptBusTimeout={pt_cp.bus_timeout}"
+      )
 
     ret.cruiseState.enabled = pt_cp.vl["AcceleratorPedal2"]["CruiseState"] != AccState.OFF
     ret.cruiseState.standstill = pt_cp.vl["AcceleratorPedal2"]["CruiseState"] == AccState.STANDSTILL
