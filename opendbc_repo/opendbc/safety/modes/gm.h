@@ -252,10 +252,17 @@ static safety_config gm_init(uint16_t param) {
   };
 
   // block PSCMStatus (0x184); forwarded through openpilot to hide an alert from the camera
+  //
+  // EBCMFrictionBrakeCmd (0x315) belongs on bus 0 (pt bus), not bus 2, for
+  // camera-long GM cars - moving it to bus 2 here made panda silently drop
+  // every brake command on a real 2021-22 Trailblazer (fwdCamera, non-SDGM),
+  // which the car then reported as a permanent FrictionBrakeUnavailable
+  // cruise fault from boot. A known-working reference build (pre-dating that
+  // move) sends 0x315 on bus 0 and drives the same vehicle/harness fine.
   static const CanMsg GM_CAM_LONG_TX_MSGS[] = {{0x180, 0, 4, .check_relay = true}, {0x2CB, 0, 8, .check_relay = true},
                                                {0x370, 0, 6, .check_relay = true}, {0x200, 0, 6, .check_relay = true},
-                                               {0x1E1, 0, 7, .check_relay = true},  // pt bus
-                                               {0x184, 2, 8, .check_relay = true}, {0x315, 2, 5, .check_relay = true}};  // camera bus
+                                               {0x1E1, 0, 7, .check_relay = true}, {0x315, 0, 5, .check_relay = true},  // pt bus
+                                               {0x184, 2, 8, .check_relay = true}};  // camera bus
   static RxCheck gm_rx_checks[] = {
     GM_COMMON_RX_CHECKS
     GM_ACC_RX_CHECKS
