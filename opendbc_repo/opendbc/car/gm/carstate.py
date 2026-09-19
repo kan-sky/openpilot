@@ -251,7 +251,26 @@ class CarState(CarStateBase):
     cruise_faulted = pt_cp.vl["AcceleratorPedal2"]["CruiseState"] == AccState.FAULTED
     friction_brake_unavailable = pt_cp.vl["EBCMFrictionBrakeStatus"]["FrictionBrakeUnavailable"] == 1
     startup_fault_ignore = (time.monotonic() - self.startup_time) < 60.0
-    ret.accFaulted = (cruise_faulted or friction_brake_unavailable) and not startup_fault_ignore
+    raw_acc_faulted = (cruise_faulted or friction_brake_unavailable) and not startup_fault_ignore
+
+    # 임시 우회(2026-09-19): 실차 트레일블레이져에서 세이프티모드 활성화
+    # 몇 초 뒤부터 이 폴트가 영구적으로 걸려서 인게이지 자체가 불가능한
+    # 상태였음(원인 미확정, 계속 조사 중). accFaulted는 openpilot 인게이지만
+    # 막을 뿐 운전자의 물리적 브레이크 페달과는 무관하므로, 일단 타보면서
+    # 스티어링/오토리쥼/오토크루즈와 실제 자동제동 여부를 확인할 수 있게
+    # 트레일블레이져만 우회함. 운전자는 항상 브레이크 페달에 발을 올려두고
+    # openpilot의 자동정지를 신뢰하지 말 것. 원인 확정되면 지울 것.
+    if self.CP.carFingerprint == CAR.CHEVROLET_TRAILBLAZER:
+      ret.accFaulted = False
+      if raw_acc_faulted and not self._acc_faulted_last:
+        carlog.warning(
+          f"[tbl accFaulted BYPASSED] cruise_faulted={cruise_faulted} "
+          f"friction_brake_unavailable={friction_brake_unavailable} - "
+          f"would have blocked engage, but bypass is active for this car"
+        )
+    else:
+      ret.accFaulted = raw_acc_faulted
+
 
     # Kans: diagnostic - log which condition actually tripped accFaulted, since
     # "Cruise Fault: Restart the Car" doesn't say why on screen.
