@@ -18,6 +18,24 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null && pwd )"
 
 source "$DIR/launch_env.sh"
 
+function wait_for_network {
+  # Bounded (never hangs boot indefinitely), only called when at least one
+  # currently-used package is actually missing (see bootstrap_runtime_
+  # dependencies) - a fully-set-up device never pays this cost, since its
+  # import checks already pass. DNS lookup, not a full HTTP request, so it's
+  # a fast/cheap readiness probe rather than a real pip attempt.
+  local timeout_s="${1:-30}"
+  local waited=0
+  while [ "$waited" -lt "$timeout_s" ]; do
+    if python3 -c "import socket; socket.setdefaulttimeout(3); socket.gethostbyname('pypi.org')" > /dev/null 2>&1; then
+      return 0
+    fi
+    sleep 2
+    waited=$((waited + 2))
+  done
+  return 1
+}
+
 function ensure_python_package {
   # Never blocks boot. A 2026-09-17 real-world case proved why: at this point
   # in boot, network/DNS may not be up yet even on a device that was fully set
@@ -64,6 +82,22 @@ function bootstrap_runtime_dependencies {
   # on failure - see ensure_python_package) predate this port; the other 8 are
   # pre-staged for carrot features not yet ported here and nothing imports
   # them yet, so install failures for those are true no-ops either way.
+
+  # A fresh clone/reinstall reaching this point doesn't guarantee network is
+  # actually up yet (network-manager can still be negotiating even on a
+  # device that's fully configured for WiFi) - confirmed twice in practice as
+  # "Temporary failure in name resolution" on the very first boot after a
+  # reinstall. Only wait if something currently-used is actually missing, so
+  # a device that's already fully set up never pays this cost.
+  local need_network=0
+  for import_name in serial aiohttp psutil qrcode shapely; do
+    python3 -c "import ${import_name}" > /dev/null 2>&1 || need_network=1
+  done
+  if [ "$need_network" = "1" ]; then
+    echo "A required package is missing - waiting up to 30s for network before installing."
+    wait_for_network 30 || echo "No network after 30s - installs below will likely fail and retry next boot."
+  fi
+
   ensure_python_package serial pyserial 1
   ensure_python_package aiohttp aiohttp 1
   ensure_python_package psutil psutil 1
