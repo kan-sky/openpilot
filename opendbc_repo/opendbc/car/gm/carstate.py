@@ -72,6 +72,7 @@ class CarState(CarStateBase):
     # Kans: accFault delay
     self.startup_time = time.monotonic()
     self._acc_faulted_last = False
+    self._raw_acc_faulted_last = False
     self._raw_fault_signal_log_time = 0.0
 
     # Kans: TPMS
@@ -262,12 +263,13 @@ class CarState(CarStateBase):
     # openpilot의 자동정지를 신뢰하지 말 것. 원인 확정되면 지울 것.
     if self.CP.carFingerprint == CAR.CHEVROLET_TRAILBLAZER:
       ret.accFaulted = False
-      if raw_acc_faulted and not self._acc_faulted_last:
+      if raw_acc_faulted and not self._raw_acc_faulted_last:
         carlog.warning(
           f"[tbl accFaulted BYPASSED] cruise_faulted={cruise_faulted} "
           f"friction_brake_unavailable={friction_brake_unavailable} - "
           f"would have blocked engage, but bypass is active for this car"
         )
+      self._raw_acc_faulted_last = raw_acc_faulted
     else:
       ret.accFaulted = raw_acc_faulted
 
