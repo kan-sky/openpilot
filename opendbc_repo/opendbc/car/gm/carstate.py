@@ -268,7 +268,11 @@ class CarState(CarStateBase):
     # 없어서, 2초마다 원시 CruiseState/FrictionBrakeUnavailable 값과
     # 파워트레인버스 유효성을 그냥 찍음. 원인 확정되면 지울 것.
     now = time.monotonic()
-    if self.CP.carFingerprint == CAR.CHEVROLET_TRAILBLAZER and now - self._raw_fault_signal_log_time >= 2.0:
+    elapsed = now - self.startup_time
+    # 폴트로 넘어가는 순간(대략 t=3~6초 구간)을 정확히 잡으려고, 처음 10초는
+    # 0.2초 간격으로 촘촘하게, 그 이후는 2초 간격으로 찍음.
+    raw_fault_signal_log_interval = 0.2 if elapsed < 10.0 else 2.0
+    if self.CP.carFingerprint == CAR.CHEVROLET_TRAILBLAZER and now - self._raw_fault_signal_log_time >= raw_fault_signal_log_interval:
       self._raw_fault_signal_log_time = now
       carlog.warning(
         f"[tbl raw-fault-signals] t={now - self.startup_time:.1f}s "
