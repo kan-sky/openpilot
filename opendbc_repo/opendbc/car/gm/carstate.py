@@ -73,6 +73,7 @@ class CarState(CarStateBase):
     self.startup_time = time.monotonic()
     self._acc_faulted_last = False
     self._raw_acc_faulted_last = False
+    self._raw_steer_fault_permanent_last = False
     self._raw_fault_signal_log_time = 0.0
 
     # Kans: TPMS
@@ -228,7 +229,24 @@ class CarState(CarStateBase):
     # 0 inactive, 1 active, 2 temporarily limited, 3 failed
     self.lkas_status = pt_cp.vl["PSCMStatus"]["LKATorqueDeliveredStatus"]
     ret.steerFaultTemporary = self.lkas_status == 2
-    ret.steerFaultPermanent = self.lkas_status == 3
+    raw_steer_fault_permanent = self.lkas_status == 3
+
+    # 임시 우회(2026-09-19): accFaulted와 같은 시점(세이프티모드 활성화 몇 초
+    # 뒤)에 PSCMStatus.LKATorqueDeliveredStatus도 3(failed)으로 고정되어
+    # "LKAS Fault: Restart the car to engage"가 영구적으로 뜨는 걸 확인함
+    # (원인 미확정, accFaulted와 동일 패턴 - 계속 조사 중). 이 우회는 스티어링
+    # 자체에 관여하므로 운전자가 항상 핸들을 잡고 있어야 하고, 언제든 직접
+    # 조향으로 즉시 개입할 수 있어야 함. 원인 확정되면 지울 것.
+    if self.CP.carFingerprint == CAR.CHEVROLET_TRAILBLAZER:
+      ret.steerFaultPermanent = False
+      if raw_steer_fault_permanent and not self._raw_steer_fault_permanent_last:
+        carlog.warning(
+          f"[tbl steerFaultPermanent BYPASSED] lkas_status={self.lkas_status} - "
+          f"would have blocked LKAS, but bypass is active for this car"
+        )
+      self._raw_steer_fault_permanent_last = raw_steer_fault_permanent
+    else:
+      ret.steerFaultPermanent = raw_steer_fault_permanent
 
     # 1 - open, 0 - closed
     ret.doorOpen = (pt_cp.vl["BCMDoorBeltStatus"]["FrontLeftDoor"] == 1 or
