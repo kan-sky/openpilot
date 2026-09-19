@@ -256,9 +256,14 @@ class CarController(CarControllerBase):
           # TODO: can we always check the longControlState?
           if self.CP.networkLocation == NetworkLocation.fwdCamera:
             at_full_stop = at_full_stop and stopping
-            friction_brake_bus = CanBus.POWERTRAIN
-            if self.CP.carFingerprint in SDGM_CAR:
-              friction_brake_bus = CanBus.CAMERA
+            # gm.h's GM_CAM_LONG_TX_MSGS (active here, since this whole block
+            # only runs when openpilotLongitudinalControl is True) only allows
+            # EBCMFrictionBrakeCmd (0x315) on bus 2 - sending it on bus 0
+            # (POWERTRAIN) makes panda's safety layer silently drop every
+            # brake command, which the car then reports as
+            # FrictionBrakeUnavailable. Confirmed via a real 2021-22
+            # Trailblazer stuck in a permanent cruise fault from boot.
+            friction_brake_bus = CanBus.CAMERA
 
           # Kans: 크루즈 해제 직후 AutoHold 브레이크 명령 지연(1.5s)
           if CC.enabled or CS.out.cruiseState.enabled:
