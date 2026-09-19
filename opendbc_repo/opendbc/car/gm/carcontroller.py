@@ -88,6 +88,8 @@ class CarController(CarControllerBase):
     self._resume_timing_logged = set()
     self._prev_cruise_standstill = None
     self._prev_lcs_diag = None
+    self._prev_brake_pressed_diag = None
+    self._prev_standstill_diag = None
 
     self.btn_rc_pt = -1
     self.btn_rc_cam = -1
@@ -367,6 +369,22 @@ class CarController(CarControllerBase):
             self._depart_t0_frame = None
             self._resume_timing_logged = set()
           resume_elapsed = (self.frame - self._depart_t0_frame) * DT_CTRL if self._depart_t0_frame is not None else -1.0
+
+          # Kans: diagnostic - raw brakePressed/standstill transitions during a resume
+          # episode, to check whether brakePressed (0xBE, sticky per DBC) lags behind
+          # standstill clearing on AutoResume creep-release - selfdrived.py's pedalPressed
+          # disengage fires on "brakePressed and not standstill", so a lagging brakePressed
+          # right as standstill clears would explain an audio-only disengage with no screen
+          # fault during AutoResume. Full transition log (not edge-once), episode-scoped.
+          if self._depart_t0_frame is not None and CS.out.brakePressed != self._prev_brake_pressed_diag:
+            cloudlog.warning(f"[carcontroller resume-timing] brakePressed {self._prev_brake_pressed_diag}->{CS.out.brakePressed} "
+                              f"t+{resume_elapsed:.2f}s vEgo={CS.out.vEgo:.2f} standstill={CS.out.standstill} brake={CS.out.brake:.1f}")
+          self._prev_brake_pressed_diag = CS.out.brakePressed
+
+          if self._depart_t0_frame is not None and CS.out.standstill != self._prev_standstill_diag:
+            cloudlog.warning(f"[carcontroller resume-timing] standstill {self._prev_standstill_diag}->{CS.out.standstill} "
+                              f"t+{resume_elapsed:.2f}s vEgo={CS.out.vEgo:.2f} brakePressed={CS.out.brakePressed} brake={CS.out.brake:.1f}")
+          self._prev_standstill_diag = CS.out.standstill
 
           if raw_lead_start:
             self.lead_start_count = min(self.lead_start_count + 1, 5)
