@@ -1193,11 +1193,9 @@ class CarrotServ:
         xSpdType = 100
 
       if xSpdType >= 0:
-        offset = 5 if self.is_metric else 5 * CV.MPH_TO_KPH
-        self.xSpdLimit = self.nRoadLimitSpeed + offset
-
+        self.xSpdLimit = self.nRoadLimitSpeed * self.autoNaviSpeedSafetyFactor if self.nRoadLimitSpeed > 0 else 0
         self.xSpdDist = distance
-        self.xSpdType =xSpdType
+        self.xSpdType = xSpdType
 
   def update_navi(self, remote_ip, sm, pm, vturn_speed, coords, distances, route_speed, gps_service):
 
