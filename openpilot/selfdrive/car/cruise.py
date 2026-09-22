@@ -447,6 +447,15 @@ class VCruiseHelper:
             v_cruise_kph = max(self.v_cruise_kph_last, self._current_speed_for_initial_resume())
             self._cruise_speed_initialized = True
             self._add_log(f"{v_cruise_kph} Cruise resume from current speed")
+          # Kans: 0811 백업폴더 포팅(원래 if False로 꺼져있던 걸 되살림) -
+          # 크루즈가 꺼져있는 동안에도 nRoadLimitSpeed는 carrotMan에서 계속
+          # 갱신되니, 재개 시 그냥 현재속도/직전값 말고 도로제한속도를 최소
+          # 목표로 반영한다. autoSpeedUptoRoadSpeedLimit 배율은 196에서 안
+          # 쓰므로 제외.
+          if self._cruise_button_mode in [2, 3]:
+            road_limit_kph = self.nRoadLimitSpeed
+            if road_limit_kph > 1.0:
+              v_cruise_kph = max(v_cruise_kph, road_limit_kph)
         else:
           self._v_cruise_kph_at_brake = 0
           if self._cruise_button_mode == 0:
