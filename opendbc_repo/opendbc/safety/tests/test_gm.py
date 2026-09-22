@@ -164,7 +164,10 @@ class TestGmAscmSafety(GmLongitudinalBase, TestGmSafetyBase):
 
 
 class TestGmAscmEVSafety(TestGmAscmSafety, TestGmEVSafetyBase):
-  pass
+  # Kans: Volt 등 EV는 0xF1(EBCMBrakePedalPosition)을 브레이크 신호로 사용 (threshold=6)
+  def _user_brake_msg(self, brake):
+    values = {"BrakePedalPosition": 6 if brake else 0}
+    return self.packer.make_can_msg_safety("EBCMBrakePedalPosition", 0, values)
 
 
 class TestGmCameraSafetyBase(TestGmSafetyBase):

@@ -38,6 +38,7 @@ static bool gm_has_acc = true;
 static bool gm_pedal_long = false;
 static bool gm_force_ascm = false;
 static bool gm_force_brake_c9 = false;
+static bool gm_ev = false;
 
 static void gm_rx_hook(const CANPacket_t *msg) {
   const int GM_STANDSTILL_THRSLD = 10;  // 0.311kph
@@ -81,9 +82,13 @@ static void gm_rx_hook(const CANPacket_t *msg) {
     // https://github.com/commaai/openpilot/blob/master/selfdrive/car/gm/carstate.py
     // Prefer 0xC9 (ECMEngineStatus) when gm_force_brake_c9 is set, otherwise keep legacy behavior.
     // This allows SDGM/Traverse variants without 0xBE (ECMAcceleratorPos) to report brake correctly.
+    // Kans: EV(Volt 등)는 0xBE(ECMAcceleratorPos)의 threshold=8 근처 노이즈로 brake_pressed가
+    // 튀는 문제가 실제 로그로 확인돼서, EBCM 브레이크 페달 센서(0xF1)로 전환 (opgm/opendbc 참고)
     if ((msg->addr == 0xC9U) && gm_force_brake_c9) {
       brake_pressed = GET_BIT(msg, 40U);
-    } else if ((msg->addr == 0xBEU) && ((gm_hw == GM_ASCM) || (gm_hw == GM_SDGM))) {
+    } else if ((msg->addr == 0xF1U) && (gm_hw == GM_ASCM) && gm_ev) {
+      brake_pressed = msg->data[1] >= 6U;
+    } else if ((msg->addr == 0xBEU) && ((gm_hw == GM_ASCM) || (gm_hw == GM_SDGM)) && !gm_ev) {
       brake_pressed = msg->data[1] >= 8U;
     } else if ((msg->addr == 0xC9U) && (gm_hw == GM_CAM)) {
       brake_pressed = GET_BIT(msg, 40U);
@@ -337,7 +342,7 @@ static safety_config gm_init(uint16_t param) {
     ret = BUILD_SAFETY_CFG(gm_rx_checks, GM_ASCM_TX_MSGS);
   }
 
-  const bool gm_ev = GET_FLAG(param, GM_PARAM_EV);
+  gm_ev = GET_FLAG(param, GM_PARAM_EV);
   if (gm_hw != GM_SDGM) {
     if (enable_gas_interceptor) {
       SET_RX_CHECKS(gm_pedal_rx_checks, ret);

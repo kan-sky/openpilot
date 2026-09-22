@@ -17,6 +17,10 @@ TransmissionType = structs.CarParams.TransmissionType
 NetworkLocation = structs.CarParams.NetworkLocation
 GearShifter = structs.CarState.GearShifter
 STANDSTILL_THRESHOLD = 10 * 0.0311 * CV.KPH_TO_MS
+# Kans: Volt는 0xBE(ECMAcceleratorPos.BrakePedalPos)의 threshold=8 근처에서 노이즈성으로
+# 튀는 게 실제 오토리쥼 스퓨리어스 disengage 로그로 확인됨 (2026-09-22) - EBCM 브레이크
+# 페달 센서(0xF1) 쪽이 더 신뢰도 높다고 보고 전환 (opgm/opendbc 참고)
+VOLT_EBCM_BRAKE_PRESSED_THRESHOLD = 6
 
 BUTTONS_DICT = {CruiseButtons.RES_ACCEL: ButtonType.accelCruise, CruiseButtons.DECEL_SET: ButtonType.decelCruise,
                 CruiseButtons.MAIN: ButtonType.mainCruise, CruiseButtons.CANCEL: ButtonType.cancel,
@@ -202,7 +206,10 @@ class CarState(CarStateBase):
       ret.brake = pt_cp.vl["EBCMBrakePedalPosition"]["BrakePedalPosition"] / 0xd0
     else:
       ret.brake = pt_cp.vl["ECMAcceleratorPos"]["BrakePedalPos"]
-    if self.CP.networkLocation == NetworkLocation.fwdCamera:
+    if self.CP.carFingerprint == CAR.CHEVROLET_VOLT:
+      # Kans: ret.brake(연속값)는 그대로 두고, brakePressed 판정만 EBCM 센서로 전환
+      ret.brakePressed = pt_cp.vl["EBCMBrakePedalPosition"]["BrakePedalPosition"] >= VOLT_EBCM_BRAKE_PRESSED_THRESHOLD
+    elif self.CP.networkLocation == NetworkLocation.fwdCamera:
       ret.brakePressed = pt_cp.vl["ECMEngineStatus"]["BrakePressed"] != 0
     else:
       ret.brakePressed = ret.brake >= 8
