@@ -80,6 +80,7 @@ class VCruiseHelper:
     self._cruise_speed_unit_basic = 5
     self._cruise_button_mode = 3
     self.disengage_on_accelerator = self.params.get_bool("DisengageOnAccelerator")
+    self.speed_from_pcm = self.params.get_int("SpeedFromPCM")
 
     self._gas_pressed_count = 0
     self._gas_pressed_count_last = 0
@@ -162,6 +163,11 @@ class VCruiseHelper:
       self._cruise_button_mode = self.params.get_int("CruiseButtonMode")
       self.disengage_on_accelerator = self.params.get_bool("DisengageOnAccelerator")
       self.cruiseOnDist = self.params.get_float("CruiseOnDist") * 0.01
+      # Kans: controlsd.py는 이미 SpeedFromPCM을 읽어서 hudControl.setSpeed
+      # 결정에 쓰는데(pcmCruise 차량의 클러스터 표시용 계기판 속도 방식
+      # 선택), cruise.py 쪽엔 이 값 자체가 없었다. carrotMan 연동 등 앞으로
+      # 이 값을 참조할 로직을 위해 여기서도 읽어서 속성으로 들고 있는다.
+      self.speed_from_pcm = self.params.get_int("SpeedFromPCM")
   def _update_v_cruise_non_pcm(self, CS, enabled, is_metric):
     # handle button presses. TODO: this should be in state_control, but a decelCruise press
     # would have the effect of both enabling and changing speed is checked after the state transition
@@ -411,7 +417,14 @@ class VCruiseHelper:
             self._v_cruise_kph_at_brake = 0
             self._cruise_speed_initialized = True
           elif not self._cruise_speed_initialized:
-            v_cruise_kph = self._current_speed_for_initial_resume()
+            # Kans: 가스페달 오버라이드나 오토리쥼/오토크루즈 실패처럼
+            # _v_cruise_kph_at_brake가 저장 안 된 채로 이 첫 resume에
+            # 도달하면, 현재속도(주로 정지 직후라 낮음, 최소 5km/h)로
+            # 떨어져서 사용자가 원래 타던 속도를 잃어버렸다.
+            # initialize_v_cruise()와 같은 패턴으로 v_cruise_kph_last(직전
+            # 목표속도)를 우선 써보고, 그게 더 낮으면 기존처럼 현재속도를
+            # 쓴다(max라서 기존보다 낮아지진 않음).
+            v_cruise_kph = max(self.v_cruise_kph_last, self._current_speed_for_initial_resume())
             self._cruise_speed_initialized = True
             self._add_log(f"{v_cruise_kph} Cruise resume from current speed")
         else:
