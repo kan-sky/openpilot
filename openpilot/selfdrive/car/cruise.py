@@ -118,6 +118,8 @@ class VCruiseHelper:
     self.trafficState = 0
     self.trafficState_last = 0
     self.aTarget = 0.0
+    self.nRoadLimitSpeed = 30
+    self.desiredSpeed = 250
 
     # activateCruise ON latch
     self._activate_cruise_raw = 0
@@ -236,6 +238,10 @@ class VCruiseHelper:
     # Kans: longitudinal planner로부터 신호등 상태를 받는다.
     self.xState_last = self.xState
     self.trafficState_last = self.trafficState
+    if sm.alive['carrotMan']:
+      carrot_man = sm['carrotMan']
+      self.nRoadLimitSpeed = carrot_man.nRoadLimitSpeed
+      self.desiredSpeed = carrot_man.desiredSpeed
     if sm.alive['longitudinalPlan']:
       lp = sm['longitudinalPlan']
       self.xState = lp.xState
@@ -288,7 +294,7 @@ class VCruiseHelper:
       if not self.CP.pcmCruise:
         self.v_cruise_kph = np.clip(v_cruise_kph, self._cruise_speed_min, self._cruise_speed_max)
         self.v_cruise_cluster_kph = self.v_cruise_kph
-      else:
+      elif self.speed_from_pcm == 1:
         # latest comma PCM ownership
         self.v_cruise_kph = CS.cruiseState.speed * CV.MS_TO_KPH
         self.v_cruise_cluster_kph = CS.cruiseState.speedCluster * CV.MS_TO_KPH
@@ -299,6 +305,14 @@ class VCruiseHelper:
         elif CS.cruiseState.speed == -1:
           self.v_cruise_kph = -1
           self.v_cruise_cluster_kph = -1
+      else:
+        # Kans: 0811 백업폴더 포팅 - SpeedFromPCM이 1이 아니면(기본값 0), PCM
+        # 표시속도를 그대로 따라가지 않고 carrot 자체 로직(커브/카메라 감속,
+        # 도로제한속도 등)이 반영된 v_cruise_kph를 그대로 쓴다. 최저 30km/h로
+        # 클립하는 건 레퍼런스와 동일 - pcmCruise 차량에서 우리 계산값이
+        # 너무 낮게 나오는 걸 방지.
+        self.v_cruise_kph = np.clip(v_cruise_kph, 30, self._cruise_speed_max)
+        self.v_cruise_cluster_kph = self.v_cruise_kph
     else:
       self.v_cruise_kph = np.clip(v_cruise_kph, self._cruise_speed_min, self._cruise_speed_max)
       self.v_cruise_cluster_kph = self.v_cruise_kph
@@ -309,7 +323,13 @@ class VCruiseHelper:
   def initialize_v_cruise(self, CS, experimental_mode: bool) -> None:
     # Initial set/resume speed is handled in update_v_cruise/_update_cruise_buttons.
 
-    if self.CP.pcmCruise:
+    # Kans: 0811 백업폴더는 pcmCruise 여부와 무관하게 speed_from_pcm==1일
+    # 때만 PCM이 초기화를 맡도록 되어 있었다(다만 그 코드는 함수 맨 위에
+    # 무조건 return이 있어서 이 조건 자체가 죽은 코드였다 - 그대로 포팅하지
+    # 않음). speed_from_pcm!=1인 pcmCruise 차량은 update_v_cruise에서도
+    # PCM 표시값 대신 우리 자체 v_cruise_kph를 쓰므로, 여기서도 초기화를
+    # 건너뛰지 않고 정상적으로 값을 잡아줘야 한다.
+    if self.CP.pcmCruise and self.speed_from_pcm == 1:
       return
 
     initial = V_CRUISE_INITIAL_EXPERIMENTAL_MODE if experimental_mode else CS.vEgoCluster * CV.MS_TO_KPH
