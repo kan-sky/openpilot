@@ -7,7 +7,8 @@ import numpy as np
 from openpilot.common.realtime import DT_MDL
 from openpilot.common.constants import CV
 from openpilot.common.filter_simple import MyMovingAverage
-from openpilot.selfdrive.carrot.traffic_stop import is_traffic_stop_entry_allowed
+from openpilot.selfdrive.carrot.traffic_stop import TrafficStopModelLeadMatcher, is_traffic_stop_entry_allowed
+from openpilot.selfdrive.controls.radard import RADAR_TO_CAMERA
 from openpilot.selfdrive.selfdrived.events import Events
 from openpilot.common.swaglog import cloudlog
 
@@ -137,6 +138,8 @@ class CarrotPlanner:
     self.carrotManAlive = False
 
     self._stop_x_rl = None
+    self._traffic_stop_model_lead_matcher = TrafficStopModelLeadMatcher()
+    self.trafficStopModelLeadOffset = 0.0
     self.last_event_time = 0.0
 
   def _params_update(self):
@@ -437,10 +440,11 @@ class CarrotPlanner:
           self.trafficStopAdjustRatio = np.interp(v_ego_kph, [0, 100], [1.0, 0.7])
           # 속도가 높을수록 먼 정지거리 추정값을 줄여 보정함.
           stop_dist = stop_model_x_rl * np.interp(stop_model_x_rl, [0, 50], [1.0, self.trafficStopAdjustRatio])
-          # Kans: 신호정지선을 기준으로 정지 위치를 앞/뒤로 보정
-          stop_dist = max(0.0, stop_dist - self.trafficStopDistanceAdjust)
-          # Kans: 신호정지 목표거리 항상 갱신
-          self.actual_stop_distance = stop_dist
+          # Kans: trafficStopDistanceAdjust는 여기서 더 이상 빼지 않는다 - long_mpc.py
+          # 한 곳에서만 (get_traffic_stop_distance_adjust로) 적용하도록 통일했다.
+          # 신호정지 목표거리 항상 갱신
+          if stop_dist > 10.0:
+            self.actual_stop_distance = stop_dist
           stop_model_x = 0
           self.fakeCruiseDistance = 0 if self.actual_stop_distance > 10.0 else 10.0
           if v_ego < 0.3:
@@ -466,8 +470,8 @@ class CarrotPlanner:
           self.xState = XState.e2eCruise
       elif v_ego_kph < 5.0 and self.trafficState != TrafficState.green:
         self.xState = XState.e2eStop
-        # Kans: 실제 신호정지거리
-        self.actual_stop_distance = max(0.0, 5.0 - self.trafficStopDistanceAdjust) # 5.0
+        # Kans: 실제 신호정지거리 (trafficStopDistanceAdjust는 long_mpc.py에서만 적용)
+        self.actual_stop_distance = 5.0
       elif v_ego_kph > 5.0:
         self.xState = XState.e2eCruise
     else: #XState.lead, XState.cruise, XState.e2eCruise
@@ -478,8 +482,8 @@ class CarrotPlanner:
       elif self.trafficState == TrafficState.red and is_traffic_stop_entry_allowed(carstate.steeringAngleDeg) and self.traffic_starting_count == 0:
         self.add_event(EventName.trafficStopping)
         self.xState = XState.e2eStop
-        # Kans: 실제 빨간불 정지거리에서 신호정지거리만큼 빼서 미리 정지하게 함.
-        self.actual_stop_distance = max(0.0, stop_model_x_rl - self.trafficStopDistanceAdjust)
+        # Kans: 실제 빨간불 정지거리 (trafficStopDistanceAdjust는 long_mpc.py에서만 적용)
+        self.actual_stop_distance = stop_model_x_rl
         # Kans: 진단용 - XState.e2eStopped로 들어갈 때 찍히는 LOCKED 로그와 짝을
         # 이룬다; ENTER와 LOCKED를 비교하면 접근하는 동안 stop_model_x_rl이
         # 얼마나 움직였는지(급상승 vs 서서히-감소) 알 수 있다.
@@ -524,6 +528,31 @@ class CarrotPlanner:
     stop_dist = max(stop_dist, 0.0)
 
     stopping_active = (self.xState in [XState.e2eStop, XState.e2eStopped])
+
+    # Kans (carrot-wip-0913): 레이더 lead가 없을 때, 모델이 영상만으로 인식하는
+    # lead(model.leadsV3[0])가 정지 지점 바로 앞(0~3m)에 안정적으로 서 있으면
+    # "진짜 대기 차량"으로 확정한다. stop_model_x_rl(모델 자체 정지선 추정치)이
+    # 그날그날 크게 틀어져도, 확정되면 그 실제 차량 뒤 2m를 기준으로 정지거리를
+    # 다시 잡아준다(적용은 long_mpc.py의 get_traffic_stop_distance_adjust에서).
+    model_lead = model.leadsV3[0] if stopping_active and not lead_detected and len(model.leadsV3) > 0 else None
+    model_lead_x = float(model_lead.x[0]) - RADAR_TO_CAMERA if model_lead is not None and len(model_lead.x) > 0 else np.nan
+    model_lead_v = float(model_lead.v[0]) if model_lead is not None and len(model_lead.v) > 0 else np.nan
+    model_lead_x_std = float(model_lead.xStd[0]) if model_lead is not None and len(model_lead.xStd) > 0 else np.nan
+    model_lead_y_std = float(model_lead.yStd[0]) if model_lead is not None and len(model_lead.yStd) > 0 else np.nan
+    model_lead_v_std = float(model_lead.vStd[0]) if model_lead is not None and len(model_lead.vStd) > 0 else np.nan
+    self.trafficStopModelLeadOffset = self._traffic_stop_model_lead_matcher.update(
+      stop_active=stopping_active and stop_dist < 300.0,
+      allow_confirmation=self.trafficState == TrafficState.red and v_ego > 0.3,
+      active_lead=lead_detected,
+      stop_distance=stop_dist,
+      lead_probability=float(model_lead.prob) if model_lead is not None else np.nan,
+      lead_distance=model_lead_x,
+      lead_velocity=model_lead_v,
+      lead_x_std=model_lead_x_std,
+      lead_y_std=model_lead_y_std,
+      lead_v_std=model_lead_v_std,
+    )
+
     if stopping_active and stop_dist < 300.0:
       stop_dist_soft = max(stop_dist - 1.0, 0.0)
       v_soft = float(np.sqrt(max(0.0, 2.0 * self.comfort_brake * stop_dist_soft)))

@@ -9,6 +9,7 @@ from openpilot.common.swaglog import cloudlog
 # WARNING: imports outside of constants will not trigger a rebuild
 from openpilot.selfdrive.modeld.constants import index_function
 from openpilot.selfdrive.controls.radard import _LEAD_ACCEL_TAU
+from openpilot.selfdrive.carrot.traffic_stop import get_traffic_stop_distance_adjust, get_traffic_stop_obstacle_distance
 
 if __name__ == '__main__':  # generating code
   from acados.acados_template import AcadosModel, AcadosOcp, AcadosOcpSolver
@@ -427,19 +428,30 @@ class LongitudinalMpc:
 
       cruise_obstacle = np.cumsum(T_DIFFS * v_cruise_clipped) + get_safe_obstacle_distance(v_cruise_clipped, t_follow, comfort_brake, stop_distance)
 
-      # Kans: 예전엔 v_ego<=0.1이 되는 순간 -2.0으로 하드 전환했는데, 차가
-      # 정지선에 다가가는 하필 최악의 순간에 불연속적으로 ~1.2m가
-      # 점프하면서(TrafficStopDistanceAdjust 기본값은 -0.8) 신호정지
-      # 장애물(x2)을 더 뒤로 재타겟팅해버렸다 - 실제 정지선보다 ~10m
-      # 못 미쳐 멈추는 현상의 원인으로 의심됨. 항상 같은 조절 가능한
-      # 값을 쓰도록 했다.
-      adjust_dist = np.clip(carrot.trafficStopDistanceAdjust, -2.0, 0.0)
+      # Kans (carrot-wip-0913): trafficStopDistanceAdjust 적용 지점을 여기 한
+      # 곳으로 통일했다 - carrot_functions.py 쪽 3곳에서 중복 적용하던 걸 없앴다.
+      # get_traffic_stop_distance_adjust는 정지 접근 중엔 설정값을, 완전
+      # 정지 후엔 -2.0을, 그리고 TrafficStopModelLeadMatcher가 정지 지점 바로
+      # 앞의 모델 lead를 "진짜 대기 차량"으로 확정했을 땐 그 차량 기준 +2m를
+      # 최우선으로 쓴다 - stop_model_x_rl(모델 자체 정지선 추정치) 자체가
+      # 크게 틀어져도 실제 보이는 차 위치로 보정된다.
+      adjust_dist = get_traffic_stop_distance_adjust(
+        carrot.trafficStopDistanceAdjust,
+        v_ego,
+        getattr(carrot, "trafficStopModelLeadOffset", 0.0),
+      )
+      traffic_stop_obstacle = get_traffic_stop_obstacle_distance(stop_x, cruise_obstacle[0], adjust_dist)
 
+      # Kans: 196 자체 안전장치 - 정지선에 다가가는 하필 최악의 순간에
+      # traffic_stop_obstacle이 d_min(현재 속도 기준 안전거리)과 cruise_obstacle
+      # 사이의 애매한 구간에 걸리면, 실제 정지선보다 못 미쳐 멈추는 원인이
+      # 됐던 적이 있어 cruise_obstacle 쪽으로 밀어낸다. get_traffic_stop_obstacle_distance
+      # 자체의 50m 완화 구간과는 별개의, 속도 기반 하한선이다.
       d_min = np.interp(v_ego, [0.0, 10.0, 15.0, 20.0], [5.0, 45.0, 65.0, 75.0])
-      if d_min < stop_x + adjust_dist < cruise_obstacle[0]:
-        stop_x = cruise_obstacle[0] - adjust_dist
+      if d_min < traffic_stop_obstacle < cruise_obstacle[0]:
+        traffic_stop_obstacle = cruise_obstacle[0]
 
-      x2 = stop_x * np.ones(N + 1) + adjust_dist
+      x2 = traffic_stop_obstacle * np.ones(N + 1)
 
       # Kans: v_ego가 낮아지면 t=0에서 cruise_obstacle이 그냥
       # stop_distance(~5.5m)로 퇴화해버리는데, 그 지점에서
@@ -509,7 +521,8 @@ class LongitudinalMpc:
         binding_names = ['lead0', 'lead1', 'cruise', 'trafficstop']
         binding_idx = int(np.argmin(x_obstacles[0]))
         cloudlog.warning(f"[long_mpc stop-dist] vEgo={v_ego:.2f} vCruise={v_cruise:.2f} binding={binding_names[binding_idx]} "
-              f"carrotStopDist={carrot.stop_dist:.2f} stopX(clamped)={stop_x:.2f} adjustDist={adjust_dist:.2f} "
+              f"carrotStopDist={carrot.stop_dist:.2f} trafficStopObstacle={traffic_stop_obstacle:.2f} adjustDist={adjust_dist:.2f} "
+              f"modelLeadOffset={getattr(carrot, 'trafficStopModelLeadOffset', 0.0):.2f} "
               f"dMin={d_min:.2f} cruiseObstacle0={cruise_obstacle[0]:.2f} lead0Obstacle0={lead_0_obstacle[0]:.2f} "
               f"x2_0={x2[0]:.2f} finalObstacle0={x_obstacles[0][binding_idx]:.2f} "
               f"comfortBrake={comfort_brake:.2f} stopDistance={stop_distance:.2f} carrotMode={mode} "
