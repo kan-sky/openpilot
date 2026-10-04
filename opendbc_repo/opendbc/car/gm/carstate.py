@@ -31,6 +31,10 @@ class CarState(CarStateBase):
 
     self.distance_button = 0
 
+    # Kans: accFault delay
+    self.startup_time = time.monotonic()
+    self._acc_faulted_last = False
+
   def update_button_enable(self, buttonEvents: list[structs.CarState.ButtonEvent]):
     if not self.CP.pcmCruise:
       for b in buttonEvents:
@@ -120,10 +124,18 @@ class CarState(CarStateBase):
     ret.rightBlinker = pt_cp.vl["BCMTurnSignals"]["TurnSignals"] == 2
 
     ret.parkingBrake = pt_cp.vl["BCMGeneralPlatformStatus"]["ParkBrakeSwActive"] == 1
-    ret.cruiseState.available = pt_cp.vl["ECMEngineStatus"]["CruiseMainOn"] != 0
+    # Kans:
+    ecu_cruise_main = pt_cp.vl["ECMEngineStatus"]["CruiseMainOn"] != 0
+    ret.cruiseState.available = ecu_cruise_main
+    self.cruiseMain_on = ret.cruiseState.available
     ret.espDisabled = pt_cp.vl["ESPStatus"]["TractionControlOn"] != 1
-    ret.accFaulted = (pt_cp.vl["AcceleratorPedal2"]["CruiseState"] == AccState.FAULTED or
-                      pt_cp.vl["EBCMFrictionBrakeStatus"]["FrictionBrakeUnavailable"] == 1)
+
+    # Kans: 부팅초기 레이더/ACC 웜업 중 Cruise FAULT 무시
+    cruise_faulted = pt_cp.vl["AcceleratorPedal2"]["CruiseState"] == AccState.FAULTED
+    friction_brake_unavailable = pt_cp.vl["EBCMFrictionBrakeStatus"]["FrictionBrakeUnavailable"] == 1
+    startup_fault_ignore = (time.monotonic() - self.startup_time) < 60.0
+    ret.accFaulted = ((cruise_faulted and not startup_fault_ignore) or friction_brake_unavailable)
+    self._acc_faulted_last = ret.accFaulted
 
     ret.cruiseState.enabled = pt_cp.vl["AcceleratorPedal2"]["CruiseState"] != AccState.OFF
     ret.cruiseState.standstill = pt_cp.vl["AcceleratorPedal2"]["CruiseState"] == AccState.STANDSTILL
