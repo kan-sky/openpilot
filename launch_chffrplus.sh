@@ -58,7 +58,7 @@ function ensure_python_package {
   fi
 
   echo "${package_name} not found, installing."
-  if python3 -m pip install --disable-pip-version-check --no-input --timeout 15 --retries 2 \
+  if mkdir -p /data/tmp && TMPDIR=/data/tmp python3 -m pip install --no-cache-dir --target /data/pylibs $4 --disable-pip-version-check --no-input --timeout 15 --retries 2 \
        --upgrade "$package_name" && \
      python3 -c "import ${import_name}" > /dev/null 2>&1; then
     echo "${package_name} installed."
@@ -102,7 +102,7 @@ function bootstrap_runtime_dependencies {
   ensure_python_package aiohttp aiohttp 1
   ensure_python_package psutil psutil 1
   ensure_python_package qrcode qrcode 1
-  ensure_python_package shapely shapely 1
+  ensure_python_package shapely shapely 1 --no-deps
 
   ensure_python_package msgpack msgpack 0
   ensure_python_package av av 0
@@ -114,7 +114,7 @@ function bootstrap_runtime_dependencies {
 
   # carrot-wip pins this for its Xiaoge lane/BSD inference feature (not yet
   # ported to 196).
-  ensure_python_package cv2 "opencv-python-headless==4.13.0.92" 0
+  ensure_python_package cv2 "opencv-python-headless==4.13.0.92" 0 --no-deps
 }
 
 function agnos_init {
@@ -181,7 +181,7 @@ function launch {
 
   # handle pythonpath
   ln -sfn $(pwd) /data/pythonpath
-  export PYTHONPATH="$PWD"
+  export PYTHONPATH="$PWD:/data/pylibs"
 
   # submodule package symlinks for PYTHONPATH imports on device.
   # on PC these come from editable installs via pyproject.toml / uv.

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+export PYTHONPATH="/data/pylibs:$PYTHONPATH"
 
 export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
@@ -16,7 +17,7 @@ export VECLIB_MAXIMUM_THREADS=1
 export QCOM_PRIORITY=12
 
 if [ -z "$AGNOS_VERSION" ]; then
-  export AGNOS_VERSION="19.6"
+  export AGNOS_VERSION="19.9"
 fi
 
 export STAGING_ROOT="/data/safe_staging"
