@@ -77,9 +77,9 @@ function bootstrap_runtime_dependencies {
 
   # carrot-wip pins this for its Xiaoge lane/BSD inference feature (not yet
   # ported to 196). Optional (0): harmless no-op until then.
-  ensure_python_package cv2 "opencv-python-headless==4.13.0.92" 0
+  ensure_python_package cv2 "opencv-python-headless==4.13.0.92" 0 --no-deps
 
-  ensure_python_package shapely shapely 0
+  ensure_python_package shapely shapely 1 --no-deps
 }
 
 function agnos_init {
@@ -148,7 +148,7 @@ function launch {
 
   # handle pythonpath
   ln -sfn "$(pwd)" /data/pythonpath
-  export PYTHONPATH="$PWD"
+  export PYTHONPATH="$PWD:/data/pylibs"
 
   # submodule package symlinks for PYTHONPATH imports on device.
   # on PC these come from editable installs via pyproject.toml / uv.
