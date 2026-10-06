@@ -53,6 +53,10 @@ class RadarInterface(RadarInterfaceBase):
     self.radar_valid_cnt = 0
     self.radar_valid_threshold = 10  # 연속 10회 정상수신시 warmup 종료
 
+    # 레이더 메시지를 한 번이라도 받았는지 (부팅 후 늦게 켜지는 LRR 대응)
+    # 받기 전까지는 빈 RadarData를 내보내 비전 단독으로 주행 (radarUnavailable=True와 동일 동작)
+    self.radar_seen = False
+
   def update(self, can_strings):
     # 레이더가 완전히 비활성(CP.radarUnavailable=True)인 경우
     if self.rcp is None:
@@ -60,6 +64,13 @@ class RadarInterface(RadarInterfaceBase):
 
     vls = self.rcp.update(can_strings)
     self.updated_messages.update(vls)
+
+    # 레이더 미수신 동안은 비전 대체 (오류 없이 빈 트랙 20Hz), 수신되는 순간 레이더 사용으로 전환
+    if not self.radar_seen:
+      if not self.updated_messages:
+        return super().update(None)
+      self.radar_seen = True
+      print(f"GM_RADAR first message seen frame={self.frame} -> radar on")
 
     # 아직 헤더를 못 받았으면 프레임 미완성
     if self.trigger_msg not in self.updated_messages:
