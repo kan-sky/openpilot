@@ -1,10 +1,13 @@
 import numpy as np
+from openpilot.common.params import Params
+from openpilot.common.swaglog import cloudlog
 from opendbc.can import CANPacker
-from opendbc.car import Bus, DT_CTRL, structs
+from opendbc.car import Bus, DT_CTRL, structs, ACCELERATION_DUE_TO_GRAVITY
+from opendbc.car.common.filter_simple import FirstOrderFilter
 from opendbc.car.lateral import apply_driver_steer_torque_limits
 from opendbc.car.gm import gmcan
 from opendbc.car.common.conversions import Conversions as CV
-from opendbc.car.gm.values import DBC, CanBus, CarControllerParams, CruiseButtons
+from opendbc.car.gm.values import DBC, CanBus, CarControllerParams, CruiseButtons, EV_CAR
 from opendbc.car.interfaces import CarControllerBase
 
 VisualAlert = structs.CarControl.HUDControl.VisualAlert
@@ -15,6 +18,22 @@ LongCtrlState = structs.CarControl.Actuators.LongControlState
 CAMERA_CANCEL_DELAY_FRAMES = 10
 # Enforce a minimum interval between steering messages to avoid a fault
 MIN_STEER_MSG_INTERVAL_MS = 15
+
+# Kans: 경사(피치)보상 상수
+PITCH_DEADZONE = 0.01 # [radians] 0.01 ≈ 1% 경사, 이하 무시
+BRAKE_PITCH_FACTOR_BP = [5., 10.] # [m/s] 저속에서는 브레이크측 경사보상을 서서히 제거 (계획 감속 그대로)
+BRAKE_PITCH_FACTOR_V = [0., 1.] # [0~1 배율]; 건드리지 말 것
+
+
+def apply_deadzone(error, deadzone):
+  # Kans: 데드존 밖의 값만 남김 (drive_helpers.apply_deadzone와 동일)
+  if error > deadzone:
+    error -= deadzone
+  elif error < - deadzone:
+    error += deadzone
+  else:
+    error = 0.
+  return error
 
 
 class CarController(CarControllerBase):
@@ -32,6 +51,14 @@ class CarController(CarControllerBase):
     self.lka_icon_status_last = (False, False)
 
     self.params = CarControllerParams(self.CP)
+    self.params_ = Params()
+
+    # Kans: 롱피치(경사보상) / EV 리젠·브레이크 경계표 - 파라미터 LongPitch, EVTable
+    self.long_pitch = self.params_.get_bool("LongPitch")
+    self.use_ev_tables = self.params_.get_bool("EVTable")
+    self.pitch = FirstOrderFilter(0., 0.09 * 4, DT_CTRL * 4)  # 25Hz로 갱신
+    self.accel_g = 0.0
+    self.launch_release_active = False
 
     self.packer_pt = CANPacker(DBC[self.CP.carFingerprint][Bus.pt])
     self.packer_obj = CANPacker(DBC[self.CP.carFingerprint][Bus.radar])
@@ -85,13 +112,33 @@ class CarController(CarControllerBase):
       # Gas/regen, brakes, and UI commands - all at 25Hz
       if self.frame % 4 == 0:
         stopping = actuators.longControlState == LongCtrlState.stopping
+
+        # Kans: 파라미터는 1초마다 갱신
+        if self.frame % 100 == 0:
+          self.long_pitch = self.params_.get_bool("LongPitch")
+          self.use_ev_tables = self.params_.get_bool("EVTable")
+
+        # Kans: 롱피치 - 오르막(+)/내리막(-) 중력성분을 가스측에 더해 PID 적분항 부담을 덜어줌
+        accel = brake_accel = actuators.accel
+        if self.long_pitch and len(CC.orientationNED) == 3:
+          self.pitch.update(CC.orientationNED[1])
+          self.accel_g = ACCELERATION_DUE_TO_GRAVITY * apply_deadzone(self.pitch.x, PITCH_DEADZONE)
+          accel += self.accel_g
+          brake_accel = actuators.accel + self.accel_g * np.interp(CS.out.vEgo, BRAKE_PITCH_FACTOR_BP, BRAKE_PITCH_FACTOR_V)
+
         if not CC.longActive:
           # ASCM sends max regen when not enabled
           self.apply_gas = self.params.INACTIVE_REGEN
           self.apply_brake = 0
         else:
-          self.apply_gas = float(np.interp(actuators.accel, self.params.GAS_LOOKUP_BP, self.params.GAS_LOOKUP_V))
-          self.apply_brake = int(round(np.interp(actuators.accel, self.params.BRAKE_LOOKUP_BP, self.params.BRAKE_LOOKUP_V)))
+          # Kans: EV는 속도별 리젠/브레이크 경계 사용
+          if self.CP.carFingerprint in EV_CAR and self.use_ev_tables:
+            self.params.update_ev_gas_brake_threshold(CS.out.vEgo)
+            gas_bp, brake_bp = self.params.EV_GAS_LOOKUP_BP, self.params.EV_BRAKE_LOOKUP_BP
+          else:
+            gas_bp, brake_bp = self.params.GAS_LOOKUP_BP, self.params.BRAKE_LOOKUP_BP
+          self.apply_gas = float(np.interp(accel, gas_bp, self.params.GAS_LOOKUP_V))
+          self.apply_brake = int(round(np.interp(brake_accel, brake_bp, self.params.BRAKE_LOOKUP_V)))
           # Don't allow any gas above inactive regen while stopping
           # FIXME: brakes aren't applied immediately when enabling at a stop
           if stopping:
@@ -100,6 +147,18 @@ class CarController(CarControllerBase):
         idx = (self.frame // 4) % 4
 
         at_full_stop = CC.longActive and CS.out.standstill
+
+        # Kans: 출발 중에는 GM 정지유지(GasRegenFullStopActive) 해제 (= at_full_stop and not resume)
+        # 바퀴가 굴러야만 풀리는 구조라 언덕에서는 크리핑이 경사를 못 이겨 최대가스도 무시되고 출발 불가였음
+        launching = CC.longActive and not stopping and (CC.cruiseControl.resume or actuators.accel > 0.)
+        launch_release = launching and at_full_stop
+        if launch_release:
+          at_full_stop = False
+        if launch_release != self.launch_release_active:
+          self.launch_release_active = launch_release
+          cloudlog.warning(f"[gm launch] fullStop release {'START' if launch_release else 'END'} accelG={self.accel_g:.2f} "
+                           f"accel={actuators.accel:.2f} gas={self.apply_gas:.0f} vEgo={CS.out.vEgo:.2f} "
+                           f"resume={int(CC.cruiseControl.resume)} cstill={int(CS.out.cruiseState.standstill)}")
         near_stop = CC.longActive and (abs(CS.out.vEgo) < self.params.NEAR_STOP_BRAKE_PHASE)
         friction_brake_bus = CanBus.CHASSIS
         # GM Camera exceptions
