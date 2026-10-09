@@ -107,7 +107,7 @@ static void gm_rx_hook(const CANPacket_t *msg) {
 
   if (msg_matches(msg, 0xBDU, 0U)) {
     regen_braking = (msg->data[0] >> 4) != 0U;
-    }
+  }
 
     // Pedal Interceptor
   if (msg_matches(msg, 0x201U, 0U) && enable_gas_interceptor) {
