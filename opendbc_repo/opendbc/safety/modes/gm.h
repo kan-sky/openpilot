@@ -110,13 +110,12 @@ static void gm_rx_hook(const CANPacket_t *msg) {
     }
 
     // Pedal Interceptor
-    if (msg_matches(msg, 0x201U, 0U) && enable_gas_interceptor) {
-      // Pedal Interceptor: average between 2 tracks
-      int track1 = ((msg->data[0] << 8) + msg->data[1]);
-      int track2 = ((msg->data[2] << 8) + msg->data[3]);
-      int gas_interceptor = (track1 + track2) / 2;
-      gas_pressed = gas_interceptor > GM_GAS_INTERCEPTOR_THRESHOLD;
-    }
+  if (msg_matches(msg, 0x201U, 0U) && enable_gas_interceptor) {
+    // Pedal Interceptor: average between 2 tracks
+    int track1 = ((msg->data[0] << 8) + msg->data[1]);
+    int track2 = ((msg->data[2] << 8) + msg->data[3]);
+    int gas_interceptor = (track1 + track2) / 2;
+    gas_pressed = gas_interceptor > GM_GAS_INTERCEPTOR_THRESHOLD;
   }
 
   // ACC engaged status from camera/SDGM
