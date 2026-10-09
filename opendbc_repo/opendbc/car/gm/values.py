@@ -72,9 +72,17 @@ class CarControllerParams:
 
 
 class GMSafetyFlags(IntFlag):
+  # Kans: safety/modes/gm.h의 GM_PARAM_* 와 반드시 일치 (196과 동일)
   HW_CAM = 1
   HW_CAM_LONG = 2
-  EV = 4
+  HW_ASCM_LONG = 4
+  NO_ACC = 8
+  PEDAL_LONG = 16
+  GAS_INTERCEPTOR = 32
+  EV = 64
+  HW_SDGM = 128
+  ASCM_INT = 256
+  FORCE_BRAKE_C9 = 512
 
 
 class GMFlags(IntFlag):

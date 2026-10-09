@@ -61,7 +61,9 @@ bool steer_torque_cmd_checks(int desired_torque, int steer_req, const TorqueStee
   bool violation = false;
   uint32_t ts = microsecond_timer_get();
 
-  if (controls_allowed) {
+  bool aol_allowed = true;
+  if (controls_allowed || aol_allowed) {
+    acc_main_on = true;
     // Some safety models support variable torque limit based on vehicle speed
     int max_torque = limits.max_torque;
     if (limits.dynamic_max_torque) {
@@ -96,7 +98,7 @@ bool steer_torque_cmd_checks(int desired_torque, int steer_req, const TorqueStee
   }
 
   bool torque_requested = desired_torque != 0;
-  if (!controls_allowed && torque_requested) {
+  if (!(aol_allowed || controls_allowed) && torque_requested) {
     violation = true;
   }
 
@@ -138,7 +140,7 @@ bool steer_torque_cmd_checks(int desired_torque, int steer_req, const TorqueStee
   }
 
   // reset to 0 if either controls is not allowed or there's a violation
-  if (violation || !controls_allowed) {
+  if (violation || !(aol_allowed || controls_allowed)) {
     valid_steer_req_count = 0;
     invalid_steer_req_count = 0;
     desired_torque_last = 0;
@@ -204,7 +206,9 @@ static bool steer_angle_cmd_inactive_check(int desired_angle, int max_angle) {
 bool steer_angle_cmd_checks(int desired_angle, bool steer_control_enabled, const AngleSteeringLimits limits) {
   bool violation = false;
 
-  if (controls_allowed && steer_control_enabled) {
+  bool aol_allowed = true;
+  if ((aol_allowed || controls_allowed) && steer_control_enabled) {
+    acc_main_on = true;
     // convert floating point angle rate limits to integers in the scale of the desired angle on CAN,
     // add 1 to not false trigger the violation. also fudge the speed by 1 m/s so rate limits are
     // always slightly above openpilot's in case we read an updated speed in between angle commands
@@ -229,12 +233,12 @@ bool steer_angle_cmd_checks(int desired_angle, bool steer_control_enabled, const
   }
 
   // No angle control allowed when controls are not allowed
-  if (!controls_allowed) {
+  if (!(aol_allowed || controls_allowed)) {
     violation |= steer_control_enabled;
   }
 
   // reset to current angle if either controls is not allowed or there's a violation
-  if (violation || !controls_allowed) {
+  if (violation || !(aol_allowed || controls_allowed)) {
     desired_angle_last = SAFETY_CLAMP(angle_meas.values[0], -limits.max_angle, limits.max_angle);
   }
 

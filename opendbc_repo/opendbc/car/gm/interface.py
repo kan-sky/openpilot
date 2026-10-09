@@ -123,6 +123,7 @@ class CarInterface(CarInterfaceBase):
         ret.minEnableSpeed = -1.  # engage speed is decided by PCM
 
     else:  # ASCM, OBD-II harness
+      ret.safetyConfigs[0].safetyParam |= GMSafetyFlags.HW_ASCM_LONG.value
       ret.openpilotLongitudinalControl = True
       ret.networkLocation = NetworkLocation.gateway
       # LRR messages can take up to a few seconds to start sending after ignition, check camera data as well which starts earlier

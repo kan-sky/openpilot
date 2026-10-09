@@ -249,6 +249,7 @@ bool longitudinal_accel_checks(int desired_accel, const LongitudinalLimits limit
 bool longitudinal_speed_checks(int desired_speed, const LongitudinalLimits limits);
 bool longitudinal_gas_checks(int desired_gas, const LongitudinalLimits limits);
 bool longitudinal_brake_checks(int desired_brake, const LongitudinalLimits limits);
+bool longitudinal_interceptor_checks(const CANPacket_t *msg);
 void pcm_cruise_check(bool cruise_engaged);
 void speed_mismatch_check(const float speed_2);
 
@@ -257,6 +258,7 @@ void safety_tick(void);
 // This can be set by the safety hooks
 extern bool controls_allowed;
 extern bool relay_malfunction;
+extern bool enable_gas_interceptor;
 extern bool gas_pressed;
 extern bool gas_pressed_prev;
 extern bool brake_pressed;
@@ -272,6 +274,8 @@ extern bool vehicle_moving;
 extern bool acc_main_on; // referred to as "ACC off" in ISO 15622:2018
 extern int cruise_button_prev;
 extern bool safety_rx_checks_invalid;
+// AOL
+extern bool aol_allowed;
 
 // for safety modes with torque steering control
 extern int desired_torque_last;       // last desired steer torque
