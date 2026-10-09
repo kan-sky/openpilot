@@ -20,6 +20,7 @@ from opendbc.car.car_helpers import get_car, interfaces
 from opendbc.car.interfaces import CarInterfaceBase, RadarInterfaceBase
 from openpilot.selfdrive.pandad import can_capnp_to_list, can_list_to_can_capnp
 from openpilot.selfdrive.car.cruise import VCruiseHelper
+from openpilot.selfdrive.car.alternative_experience import get_alternative_experience
 
 REPLAY = "REPLAY" in os.environ
 
@@ -80,7 +81,7 @@ class Car:
 
     self.can_callbacks = can_comm_callbacks(self.can_sock, self.pm.sock['sendcan'])
 
-    is_release = self.params.get_bool("IsReleaseBranch")
+    is_release = True # Carrot: self.params.get_bool("IsReleaseBranch")
 
     if CI is None:
       # wait for one pandaState and one CAN packet
@@ -109,6 +110,7 @@ class Car:
       self.RI = RI
 
     self.CP.alternativeExperience = 0
+    self.CP.alternativeExperience = get_alternative_experience(self.params.get_bool("DisengageOnAccelerator"))
     openpilot_enabled_toggle = self.params.get_bool("OpenpilotEnabledToggle")
     controller_available = self.CI.CC is not None and openpilot_enabled_toggle and not self.CP.dashcamOnly
     self.CP.passive = not controller_available or self.CP.dashcamOnly
@@ -272,7 +274,7 @@ class Car:
 
 
 def main():
-  config_realtime_process(4, Priority.CTRL_HIGH)
+  config_realtime_process(4, Priority.CTRL_LOW)
   car = Car()
   car.card_thread()
 
