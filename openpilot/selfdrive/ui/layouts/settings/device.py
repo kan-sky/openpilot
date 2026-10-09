@@ -87,7 +87,7 @@ class DeviceLayout(Widget):
       self._select_language_dialog = None
 
     self._select_language_dialog = MultiOptionDialog(tr("Select a language"), multilang.languages, multilang.codes[multilang.language],
-                                                     option_font_weight=FontWeight.UNIFONT, callback=handle_language_selection)
+                                                     option_font_weight=FontWeight.DISPLAY, callback=handle_language_selection)
     gui_app.push_widget(self._select_language_dialog)
 
   def _reset_calibration_prompt(self):
