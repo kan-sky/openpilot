@@ -303,7 +303,7 @@ static safety_config gm_init(uint16_t param) {
   };
 
   static const CanMsg GM_CAM_TX_MSGS[] = {{0x180, 0, 4, .check_relay = true}, {0x200, 0, 6, .check_relay = false},  // pt bus
-                                          {0x184, 2, 8, .check_relay = true}, {0x1E1, 2, 7, .check_relay = false}};  // camera bus
+                                          {0x1E1, 2, 7, .check_relay = false}, {0x184, 2, 8, .check_relay = true}};  // camera bus
 
   //gm_hw = GET_FLAG(param, GM_PARAM_HW_CAM) ? GM_CAM : GM_ASCM;
   const bool gm_ascm_int = GET_FLAG(param, GM_PARAM_ASCM_INT);  

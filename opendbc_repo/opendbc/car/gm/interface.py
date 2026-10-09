@@ -13,7 +13,7 @@ from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.gm.carcontroller import CarController
 from opendbc.car.gm.carstate import CarState
 from opendbc.car.gm.radar_interface import RadarInterface, RADAR_HEADER_MSG, CAMERA_DATA_HEADER_MSG
-from opendbc.car.gm.values import CAR, CarControllerParams, EV_CAR, CAMERA_ACC_CAR, CanBus, GMFlags, SDGM_CAR, GMSafetyFlags, ALT_ACCS, ASCM_INT, SASCM_CAR
+from opendbc.car.gm.values import CAR, CarControllerParams, EV_CAR, CAMERA_ACC_CAR, SDGM_CAR, ALT_ACCS, CanBus, GMFlags, GMSafetyFlags, ASCM_INT, SASCM_CAR
 from opendbc.car.interfaces import CarInterfaceBase, TorqueFromLateralAccelCallbackType, LateralAccelFromTorqueCallbackType
 
 TransmissionType = structs.CarParams.TransmissionType
@@ -214,7 +214,7 @@ class CarInterface(CarInterfaceBase):
       ret.openpilotLongitudinalControl = True
       ret.networkLocation = NetworkLocation.gateway
       # LRR messages can take up to a few seconds to start sending after ignition, check camera data as well which starts earlier
-      ret.radarUnavailable = RADAR_HEADER_MSG not in fingerprint[CanBus.OBSTACLE] and CAMERA_DATA_HEADER_MSG not in fingerprint[CanBus.OBSTACLE] and not docs
+      ret.radarUnavailable = False # RADAR_HEADER_MSG not in fingerprint[CanBus.OBSTACLE] and CAMERA_DATA_HEADER_MSG not in fingerprint[CanBus.OBSTACLE] and not docs
       ret.pcmCruise = False  # stock non-adaptive cruise control is kept off
       # supports stop and go, but initial engage must (conservatively) be above 18mph
       ret.minEnableSpeed = -1 * CV.MPH_TO_MS
@@ -330,11 +330,6 @@ class CarInterface(CarInterfaceBase):
       # permits engagement at a true standstill while the brake is held.
       if ret.openpilotLongitudinalControl:
         ret.minEnableSpeed = 5 * CV.KPH_TO_MS
-        # Kans: one-time confirmation this build point (custom 0x2CB checksum,
-        # camera-bus sync, cancel-edge synthesis in tbl_controller.py) is live -
-        # not per-frame, just a startup breadcrumb for the first test drive.
-        carlog.warning("[tbl init] Trailblazer camera-longitudinal fix active: "
-                        "minEnableSpeed=5kph, custom 0x2CB checksum, camera-bus sync enabled")
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
 
     elif candidate == CAR.CADILLAC_XT6:
