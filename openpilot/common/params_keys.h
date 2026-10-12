@@ -143,4 +143,6 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"ChestnutLoading", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION | CLEAR_ON_IGNITION_ON, BOOL}},
     {"Version", {PERSISTENT, STRING}},
     {"AlwaysLateral", {PERSISTENT, INT, "1"} },
+    {"MuteDoor", {PERSISTENT, INT, "1"}},
+    {"MuteSeatbelt", {PERSISTENT, INT, "1"}},
 };
