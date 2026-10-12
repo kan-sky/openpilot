@@ -38,6 +38,7 @@ class CarState(CarStateBase):
     self.autoHoldActivated = False
 
     self.distance_button = 0
+    self.lfa_button = None  # Kans: 현대 LFA 버튼과 같은 역할 (GM DBC: ASCMSteeringButton.LKAButton, 토글 상태값)
 
     # Kans: accFault delay
     self.startup_time = time.monotonic()
@@ -61,8 +62,10 @@ class CarState(CarStateBase):
 
     prev_cruise_buttons = self.cruise_buttons
     prev_distance_button = self.distance_button
+    prev_lfa_button = self.lfa_button
     self.cruise_buttons = pt_cp.vl["ASCMSteeringButton"]["ACCButtons"]
     self.distance_button = pt_cp.vl["ASCMSteeringButton"]["DistanceButton"]
+    self.lfa_button = pt_cp.vl["ASCMSteeringButton"]["LKAButton"]  # Kans: LKA 버튼 → 캐럿 LFA 버튼으로 사용
     self.buttons_counter = pt_cp.vl["ASCMSteeringButton"]["RollingCounter"]
     self.pscm_status = copy.copy(pt_cp.vl["PSCMStatus"])
 
@@ -118,7 +121,9 @@ class CarState(CarStateBase):
     if self.CP.transmissionType == TransmissionType.direct:
       ret.regenBraking = pt_cp.vl["EBCMRegenPaddle"]["RegenPaddle"] != 0
 
-    ret.gasPressed = pt_cp.vl["AcceleratorPedal2"]["AcceleratorPedal2"] / 254. > 1e-5
+    # Kans: 가스페달 위치 (캐럿 크루즈 가스톡 판정용)
+    ret.gas = pt_cp.vl["AcceleratorPedal2"]["AcceleratorPedal2"] / 254.
+    ret.gasPressed = ret.gas > 1e-5
 
     ret.steeringAngleDeg = pt_cp.vl["PSCMSteeringAngle"]["SteeringWheelAngle"]
     ret.steeringRateDeg = pt_cp.vl["PSCMSteeringAngle"]["SteeringWheelRate"]
@@ -177,13 +182,24 @@ class CarState(CarStateBase):
       ret.rightBlindspot = pt_cp.vl["BCMBlindSpotMonitor"]["RightBSM"] == 1
 
     # Don't add event if transitioning from INIT, unless it's to an actual button
+    button_events = []
     if self.cruise_buttons != CruiseButtons.UNPRESS or prev_cruise_buttons != CruiseButtons.INIT:
-      ret.buttonEvents = [
+      button_events = [
         *create_button_events(self.cruise_buttons, prev_cruise_buttons, BUTTONS_DICT,
                               unpressed_btn=CruiseButtons.UNPRESS),
         *create_button_events(self.distance_button, prev_distance_button,
-                              {1: ButtonType.gapAdjustCruise})
+                              {1: ButtonType.gapAdjustCruise}),
       ]
+
+    # Kans: Volt LKA 버튼은 켜짐/꺼짐이 유지되는 토글 상태값(오파 연결시 기본 1) →
+    # 상태가 바뀔 때마다 LFA 버튼 '눌렀다 뗌' 1회로 변환 (Toyota lkas와 같은 방식).
+    # 첫 값은 기준값으로만 사용. 눌린 채로 두면 cruise.py가 다른 버튼을 모두 무시함.
+    if prev_lfa_button is not None and self.lfa_button != prev_lfa_button:
+      button_events += create_button_events(1, 0, {1: ButtonType.lfaButton}) + \
+                       create_button_events(0, 1, {1: ButtonType.lfaButton})
+
+    if button_events:
+      ret.buttonEvents = button_events
 
     if ret.vEgo < self.CP.minSteerSpeed:
       ret.lowSpeedAlert = True

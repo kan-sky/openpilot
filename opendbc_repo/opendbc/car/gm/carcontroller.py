@@ -165,7 +165,7 @@ class CarController(CarControllerBase):
         # Kans hook: 오토홀드
         auto_hold_cmd = self.auto_hold.update(CC, CS, self.frame)
 
-        # Kans hook: 오토리쥼 (196 AutoResume 그대로 - auto_resume.py)
+        # Kans hook: 오토리쥼/오토크루즈 (auto_resume.py)
         send_gas, self.apply_brake, at_full_stop, acc_engaged = self.auto_resume.update(
           CC, CS, self.frame, self.apply_gas, self.apply_brake, at_full_stop, lambda btn: self.send_btn(CS, can_sends, btn))
 
@@ -211,9 +211,12 @@ class CarController(CarControllerBase):
       # A delayed cancellation allows camera to cancel and avoids a fault when user depresses brake quickly
       self.cancel_counter = self.cancel_counter + 1 if CC.cruiseControl.cancel else 0
 
+      # Kans: 오토크루즈 '진입시도'중엔 CANCEL 송신금지
+      auto_cruise_trying = (CS.out.activateCruise and not CS.out.cruiseState.enabled)
+
       # Stock longitudinal, integrated at camera
       if (self.frame - self.last_button_frame) * DT_CTRL > 0.04:
-        if self.cancel_counter > CAMERA_CANCEL_DELAY_FRAMES:
+        if self.cancel_counter > CAMERA_CANCEL_DELAY_FRAMES and (not auto_cruise_trying):
           self.last_button_frame = self.frame
           can_sends.append(gmcan.create_buttons(self.packer_pt, CanBus.CAMERA, CS.buttons_counter, CruiseButtons.CANCEL))
 
@@ -231,7 +234,7 @@ class CarController(CarControllerBase):
     self.frame += 1
     return new_actuators, can_sends
 
-  # Kans: 버튼 송신 (184/196 send_btn과 동일 - 첫 송신때만 BCM 카운터를 읽고 이후 자체 증가)
+  # Kans: 버튼 송신 (첫 송신때만 BCM 카운터를 읽고 이후 자체 증가)
   def send_btn(self, CS, can_sends, cruise_btn, bus=None):
     if bus is None:
       bus = self.auto_resume.button_bus()

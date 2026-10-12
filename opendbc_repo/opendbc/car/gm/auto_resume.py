@@ -9,10 +9,10 @@ from opendbc.car.gm.auto_hold import is_auto_hold
 
 LongCtrlState = structs.CarControl.Actuators.LongControlState
 
-# Kans: GM 오토리쥼 모듈 - 196 carcontroller의 AutoResume 로직을 그대로 옮김 (오토크루즈 제외)
+# Kans: GM 오토리쥼/오토크루즈 모듈
 # - carcontroller 25Hz 블록에서 가스/브레이크 계산 직후, 2CB/브레이크 송신 직전에 호출
-# - 196 carstate가 radarState에서 읽던 앞차 정보는 이 모듈에서 직접 구독
-# - 196 softHold(carrot)는 아직 미이식이라 제외
+# - 앞차 정보는 이 모듈에서 radarState를 직접 구독
+# - softHold(carrot)는 아직 미이식이라 제외
 
 
 class GMAutoResume:
@@ -23,6 +23,8 @@ class GMAutoResume:
     self.sm = messaging.SubMaster(['radarState'])
 
     self.auto_resume_enabled = False
+    self.auto_cruise_enabled = False
+    self.cruiseDelay_time = 0.0
     self.resumeDelay_time = 0.0
     self.accel_force = 0
     self._update_params()
@@ -34,13 +36,21 @@ class GMAutoResume:
     self.activateCruise_after_brake = False
     self.last_button_frame = 0
 
-    # 앞차 정보 (196 carstate와 동일)
+    # GM AutoCruise
+    self.autoCruise_activate = False
+    self.autoCruise_frame = 0
+    self.autoCruise_try_count = 0  # 오토크루즈 버튼 재시도 횟수
+    self._pending_activateCruise = False
+
+    # 앞차 정보
     self.lead_present = False
     self.lead_distance = float('inf')
     self.lead_vrel = 0.0
 
   def _update_params(self):
+    self.cruiseDelay_time = self.params_.get_float("CruiseDelay") * 0.01
     self.resumeDelay_time = self.params_.get_float("ResumeDelay") * 0.01
+    self.auto_cruise_enabled = self.params_.get_int("AutoCruiseControl") > 0
     self.auto_resume_enabled = self.params_.get_int("AutoEngage") == 2
     self.accel_force = self.params_.get_int("AccelForce")
 
@@ -60,15 +70,16 @@ class GMAutoResume:
       self.lead_vrel = 0.0
 
   def update(self, CC, CS, frame, apply_gas, apply_brake, at_full_stop, send_btn):
-    """반환: (send_gas, apply_brake, at_full_stop, acc_engaged) - 196과 동일한 계산"""
+    """반환: (send_gas, apply_brake, at_full_stop, acc_engaged)"""
     actuators = CC.actuators
     if frame % 100 == 0:
       self._update_params()
     self._update_lead()
 
+    auto_cruise_enabled = self.auto_cruise_enabled
     auto_resume_enabled = self.auto_resume_enabled
-    auto_longcontrol = auto_resume_enabled  # 196: auto_cruise_enabled or auto_resume_enabled (오토크루즈 미이식)
-    pcm_standstill = CS.out.cruiseState.standstill  # 196: CS.pcm_acc_status == AccState.STANDSTILL
+    auto_longcontrol = auto_cruise_enabled or auto_resume_enabled
+    pcm_standstill = CS.out.cruiseState.standstill  # == AccState.STANDSTILL
 
     if self.CP.autoResumeSng:
       resume = actuators.longControlState == LongCtrlState.starting or CC.cruiseControl.resume
@@ -92,13 +103,25 @@ class GMAutoResume:
       acc_engaged = True
       at_full_stop = False
 
-    # 오토홀드 중(브레이크로 정지해 크루즈가 꺼지고 정지 유지)이면 오토리쥼 차단
+    # 오토홀드 중(브레이크로 정지해 크루즈가 꺼지고 정지 유지)이면 오토크루즈/오토리쥼 차단
     manual_auto_hold = is_auto_hold(CC, CS)
     if manual_auto_hold:
+      self._pending_activateCruise = False
+      self.autoCruise_activate = False
+      self.autoCruise_frame = 0
+      self.autoCruise_try_count = 0
+
       self.resume_frame = 0
       self.resume_activate = False
       self.resume_fault_guard = 0
       self.activateCruise_after_brake = False
+
+    if CS.out.activateCruise > 0 and not self._pending_activateCruise:
+      cloudlog.warning(f"[gm autocruise] activateCruise request: auto_hold_block_cruise={manual_auto_hold} "
+                       f"brakePressed={CS.out.brakePressed} cruiseState.enabled={CS.out.cruiseState.enabled}")
+
+    if CS.out.activateCruise > 0 and not manual_auto_hold and not CS.out.brakePressed:
+      self._pending_activateCruise = True
 
     # Kans: 리쥼 + 가속펄스
     lead_drel = self.lead_distance
@@ -149,8 +172,37 @@ class GMAutoResume:
       else:
         self.resume_fault_guard = 0
 
+    # AutoCruise: 크루즈 OFF 상태에서, 메인 활성(activateCruise) 신호가 있을 때
+    if auto_cruise_enabled and self._pending_activateCruise and not CS.out.cruiseState.enabled:
+      # Kans: AutoCruise (0.25초 윈도 안에 최대 2회 버튼 시도)
+      if not self.autoCruise_activate:
+        self.autoCruise_activate = True
+        self.autoCruise_frame = frame
+        self.autoCruise_try_count = 0
+
+      if self.autoCruise_activate:
+        within_window = (frame - self.autoCruise_frame) * DT_CTRL <= self.cruiseDelay_time  # 예: 0.25초
+
+        if within_window and self.autoCruise_try_count < 2:
+          if (frame - self.last_button_frame) * DT_CTRL >= 0.12:
+            # Kans: GM의 RESUME은 완전 정지 후 크루즈를 복구하지 못하고 SET만 된다 (실차 확인) - 자동체결은 DECEL_SET
+            btn = CruiseButtons.DECEL_SET if CS.out.activateCruise == 1 else CruiseButtons.RES_ACCEL
+            cloudlog.warning(f"[gm autocruise] send btn={btn} try={self.autoCruise_try_count} activateCruise={CS.out.activateCruise}")
+            send_btn(btn)
+            self.last_button_frame = frame
+            self.autoCruise_try_count += 1
+
+        # 종료 조건: 시간 초과 / 2회 시도 완료 / 크루즈 실제 ON
+        if (not within_window) or (self.autoCruise_try_count >= 2) or CS.out.cruiseState.enabled:
+          cloudlog.warning(f"[gm autocruise] window closed: tries={self.autoCruise_try_count} "
+                           f"cruiseState.enabled={CS.out.cruiseState.enabled} timed_out={not within_window}")
+          self.autoCruise_activate = False
+          self.autoCruise_frame = 0
+          self.autoCruise_try_count = 0
+          self._pending_activateCruise = False
+
     # Kans: Auto Resume (RES only)
-    if auto_resume_enabled and starting and not manual_auto_hold:
+    elif auto_resume_enabled and starting and not manual_auto_hold:
       if self.resume_frame == 0 or self.resume_activate:
         self.resume_frame = frame
         self.resume_activate = False
@@ -211,6 +263,10 @@ class GMAutoResume:
           self.resume_frame = 0
           self.resume_activate = False
           self.resume_fault_guard = 0
+      # 오토크루즈 초기화도 여기서(오토크루즈 분기 진입 안 했을 때)
+      self.autoCruise_try_count = 0
+      self.autoCruise_frame = 0
+      self.autoCruise_activate = False
 
     # RES 로직 이후에 dt/lead_ok/resume_active 계산 (윈도우 갱신 반영)
     resume_dt = (frame - self.resume_frame) * DT_CTRL if (self.resume_frame != 0) else 999.0

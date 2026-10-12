@@ -59,7 +59,7 @@ class CarControllerParams:
     self.BRAKE_LOOKUP_BP = [self.ACCEL_MIN, max_regen_acceleration]
     self.BRAKE_LOOKUP_V = [self.MAX_BRAKE, 0.]
 
-  # Kans: EV 속도별 리젠/마찰브레이크 경계 (196에서 이식)
+  # Kans: EV 속도별 리젠/마찰브레이크 경계
   # Volt를 L기어 리젠으로 89mph부터 정지시켜 측정, 극저속 양(+)의 값은 크리핑으로 측정
   # 1.29m/s 이하에서는 경계 0 → 감속요청이 있으면 즉시 마찰브레이크 사용 (정지직전 리젠만으로 다시 굴러가는 현상 방지)
   EV_GAS_BRAKE_THRESHOLD_BP = [1.29, 1.52, 1.55, 1.6, 1.7, 1.8, 2.0, 2.2, 2.5, 5.52, 9.6, 20.5, 23.5, 35.0] # [m/s]

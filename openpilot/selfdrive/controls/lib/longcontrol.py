@@ -11,7 +11,7 @@ LongCtrlState = car.CarControl.Actuators.LongControlState
 
 
 def long_control_state_trans(CP, active, long_control_state, v_ego, should_stop, brake_pressed, cruise_standstill):
-  # Kans: 196과 동일하게 starting 상태 추가 (CP.startingState인 차량만, GM 오토리쥼이 이 상태를 출발 신호로 사용)
+  # Kans: starting 상태 추가 (CP.startingState인 차량만, GM 오토리쥼이 이 상태를 출발 신호로 사용)
   starting_condition = (not should_stop and
                         not cruise_standstill and
                         not brake_pressed)
@@ -75,7 +75,7 @@ class LongControl:
       self.reset()
 
     elif self.long_control_state == LongCtrlState.starting:
-      # Kans: 196과 동일 - 출발 가속
+      # Kans: 출발 가속
       output_accel = self.CP.startAccel
       self.reset()
 

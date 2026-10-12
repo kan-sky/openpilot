@@ -254,6 +254,10 @@ class SelfdriveD:
         (CS.regenBraking and (not self.CS_prev.regenBraking or not CS.standstill)):
         self.events.add(EventName.pedalPressed)
 
+      # Kans: 캐럿 크루즈 횡제어 on/off 안내음
+      if CS.latEnabled != self.CS_prev.latEnabled:
+        self.events.add(EventName.audioPrompt)
+
       # Kans: GM 오토홀드
       if CS.autoHoldActivated:
         self.events.add(EventName.autoHold)

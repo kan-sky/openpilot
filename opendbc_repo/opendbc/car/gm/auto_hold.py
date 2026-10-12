@@ -55,7 +55,7 @@ class GMAutoHold:
     self.autoHold_cruise_cancel_frame = -1
 
   def update(self, CC, CS, frame):
-    """반환: auto_hold_cmd (True면 carcontroller가 홀드 브레이크 명령 송신) - 196과 동일"""
+    """반환: auto_hold_cmd (True면 carcontroller가 홀드 브레이크 명령 송신)"""
     # Kans: 크루즈 해제 직후 AutoHold 브레이크 명령 지연(1.5s)
     if CC.enabled or CS.out.cruiseState.enabled:
       self.autoHold_cruise_cancel_frame = frame

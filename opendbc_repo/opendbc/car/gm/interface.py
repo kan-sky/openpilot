@@ -160,7 +160,7 @@ class CarInterface(CarInterfaceBase):
       ret.lateralTuning.pid.kiV = [0.]
       ret.lateralTuning.pid.kf = 1.  # get_steer_feedforward_volt()
       ret.steerActuatorDelay = 0.2
-      # Kans: 오토리쥼 (196과 동일) - starting 상태로 출발, RES/가스펄스는 auto_resume.py
+      # Kans: 오토리쥼 - starting 상태로 출발, RES/가스펄스는 auto_resume.py
       ret.autoResumeSng = True
       ret.startingState = True
       ret.vEgoStarting = 0.3  # 출발상태로 판단하는 속도(값이 클수록 더 높은 속도까지 내주어서 출발가속이 강해질 수 있음)

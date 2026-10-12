@@ -200,4 +200,12 @@ class CarEvents:
       elif not CS.cruiseState.enabled:
         events.add(EventName.pcmDisable)
 
+    # Kans: 오토크루즈 - cruise.py의 activateCruise로 오픈파일럿 체결/해제
+    if not self.CP.pcmCruise:
+      if CS.activateCruise > 0 and CS_prev.activateCruise <= 0:
+        if not events.contains(ET.NO_ENTRY):
+          events.add(EventName.buttonEnable)
+      elif CS.activateCruise < 0 and CS_prev.activateCruise >= 0:
+        events.add(EventName.buttonCancel)
+
     return events
