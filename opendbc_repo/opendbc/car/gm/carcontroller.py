@@ -1,11 +1,11 @@
 import numpy as np
 from openpilot.common.params import Params
-from openpilot.common.swaglog import cloudlog
 from opendbc.can import CANPacker
 from opendbc.car import Bus, DT_CTRL, structs, ACCELERATION_DUE_TO_GRAVITY
 from opendbc.car.common.filter_simple import FirstOrderFilter
 from opendbc.car.lateral import apply_driver_steer_torque_limits
 from opendbc.car.gm import gmcan
+from opendbc.car.gm.auto_resume import GMAutoResume
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.gm.values import DBC, CanBus, CarControllerParams, CruiseButtons, EV_CAR
 from opendbc.car.interfaces import CarControllerBase
@@ -58,7 +58,11 @@ class CarController(CarControllerBase):
     self.use_ev_tables = self.params_.get_bool("EVTable")
     self.pitch = FirstOrderFilter(0., 0.09 * 4, DT_CTRL * 4)  # 25Hz로 갱신
     self.accel_g = 0.0
-    self.launch_release_active = False
+
+    # Kans hook: 오토리쥼 모듈
+    self.auto_resume = GMAutoResume(self.CP, self.params)
+    self.btn_rc_pt = -1
+    self.btn_rc_cam = -1
 
     self.packer_pt = CANPacker(DBC[self.CP.carFingerprint][Bus.pt])
     self.packer_obj = CANPacker(DBC[self.CP.carFingerprint][Bus.radar])
@@ -148,17 +152,6 @@ class CarController(CarControllerBase):
 
         at_full_stop = CC.longActive and CS.out.standstill
 
-        # Kans: 출발 중에는 GM 정지유지(GasRegenFullStopActive) 해제 (= at_full_stop and not resume)
-        # 바퀴가 굴러야만 풀리는 구조라 언덕에서는 크리핑이 경사를 못 이겨 최대가스도 무시되고 출발 불가였음
-        launching = CC.longActive and not stopping and (CC.cruiseControl.resume or actuators.accel > 0.)
-        launch_release = launching and at_full_stop
-        if launch_release:
-          at_full_stop = False
-        if launch_release != self.launch_release_active:
-          self.launch_release_active = launch_release
-          cloudlog.warning(f"[gm launch] fullStop release {'START' if launch_release else 'END'} accelG={self.accel_g:.2f} "
-                           f"accel={actuators.accel:.2f} gas={self.apply_gas:.0f} vEgo={CS.out.vEgo:.2f} "
-                           f"resume={int(CC.cruiseControl.resume)} cstill={int(CS.out.cruiseState.standstill)}")
         near_stop = CC.longActive and (abs(CS.out.vEgo) < self.params.NEAR_STOP_BRAKE_PHASE)
         friction_brake_bus = CanBus.CHASSIS
         # GM Camera exceptions
@@ -167,8 +160,12 @@ class CarController(CarControllerBase):
           at_full_stop = at_full_stop and stopping
           friction_brake_bus = CanBus.POWERTRAIN
 
+        # Kans hook: 오토리쥼 (196 AutoResume 그대로 - auto_resume.py)
+        send_gas, self.apply_brake, at_full_stop, acc_engaged = self.auto_resume.update(
+          CC, CS, self.frame, self.apply_gas, self.apply_brake, at_full_stop, lambda btn: self.send_btn(CS, can_sends, btn))
+
         # GasRegenCmdActive needs to be 1 to avoid cruise faults. It describes the ACC state, not actuation
-        can_sends.append(gmcan.create_gas_regen_command(self.packer_pt, CanBus.POWERTRAIN, self.apply_gas, idx, CC.enabled, at_full_stop))
+        can_sends.append(gmcan.create_gas_regen_command(self.packer_pt, CanBus.POWERTRAIN, send_gas, idx, acc_engaged, at_full_stop))
         can_sends.append(gmcan.create_friction_brake_command(self.packer_ch, friction_brake_bus, self.apply_brake,
                                                              idx, CC.enabled, near_stop, at_full_stop, self.CP))
 
@@ -220,3 +217,22 @@ class CarController(CarControllerBase):
 
     self.frame += 1
     return new_actuators, can_sends
+
+  # Kans: 버튼 송신 (184/196 send_btn과 동일 - 첫 송신때만 BCM 카운터를 읽고 이후 자체 증가)
+  def send_btn(self, CS, can_sends, cruise_btn, bus=None):
+    if bus is None:
+      bus = self.auto_resume.button_bus()
+
+    if bus == CanBus.CAMERA:
+      if self.btn_rc_cam < 0:
+        self.btn_rc_cam = int(CS.buttons_counter) & 0x3
+      self.btn_rc_cam = (self.btn_rc_cam + 1) & 0x3
+      rc = self.btn_rc_cam
+    elif bus == CanBus.POWERTRAIN:
+      if self.btn_rc_pt < 0:
+        self.btn_rc_pt = int(CS.buttons_counter) & 0x3
+      self.btn_rc_pt = (self.btn_rc_pt + 1) & 0x3
+      rc = self.btn_rc_pt
+    else:
+      raise ValueError(f"Unsupported bus: {bus}")
+    can_sends.append(gmcan.create_buttons(self.packer_pt, bus, rc, cruise_btn))

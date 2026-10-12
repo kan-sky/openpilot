@@ -165,7 +165,13 @@ class Controls:
 
     CC.cruiseControl.override = CC.enabled and not CC.longActive and self.CP.openpilotLongitudinalControl
     CC.cruiseControl.cancel = CS.cruiseState.enabled and (not CC.enabled or not self.CP.pcmCruise)
-    CC.cruiseControl.resume = CC.enabled and CS.cruiseState.standstill and not self.sm['longitudinalPlan'].shouldStop
+    # Kans: 리쥼조건을 플래너 미래속도의 마지막값[-1]으로 판단 (GM 오토리쥼)
+    # 스톡 플래너는 speeds[-1]이 0.1 근처에서 흔들리는 동안에도 shouldStop이 유지될 수 있어 not shouldStop을 함께 확인
+    # (rlog11: shouldStop=1인데 speeds[-1]=0.12로 리쥼 → ECM ACTIVE 후 롱컨이 stopping에 머물러 0.5초 뒤 Cruise Fault)
+    long_plan = self.sm['longitudinalPlan']
+    speeds = long_plan.speeds
+    CC.cruiseControl.resume = (CC.enabled and CS.cruiseState.standstill and len(speeds) > 0 and speeds[-1] > 0.1 and
+                               not long_plan.shouldStop)
 
     hudControl = CC.hudControl
     hudControl.setSpeed = float(CS.vCruiseCluster * CV.KPH_TO_MS)
