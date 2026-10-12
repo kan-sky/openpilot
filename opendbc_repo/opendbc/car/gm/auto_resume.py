@@ -5,13 +5,14 @@ from openpilot.common.params import Params
 from openpilot.common.swaglog import cloudlog
 from opendbc.car import DT_CTRL, structs
 from opendbc.car.gm.values import CanBus, CruiseButtons, CAMERA_ACC_CAR, EV_CAR, SDGM_CAR
+from opendbc.car.gm.auto_hold import is_auto_hold
 
 LongCtrlState = structs.CarControl.Actuators.LongControlState
 
 # Kans: GM 오토리쥼 모듈 - 196 carcontroller의 AutoResume 로직을 그대로 옮김 (오토크루즈 제외)
 # - carcontroller 25Hz 블록에서 가스/브레이크 계산 직후, 2CB/브레이크 송신 직전에 호출
 # - 196 carstate가 radarState에서 읽던 앞차 정보는 이 모듈에서 직접 구독
-# - 196 softHold/오토홀드(carrot)는 아직 미이식이라 제외
+# - 196 softHold(carrot)는 아직 미이식이라 제외
 
 
 class GMAutoResume:
@@ -91,8 +92,13 @@ class GMAutoResume:
       acc_engaged = True
       at_full_stop = False
 
-    # AutoHold(수동) 차단 - 196 오토홀드는 미이식이라 항상 False
-    manual_auto_hold = False
+    # 오토홀드 중(브레이크로 정지해 크루즈가 꺼지고 정지 유지)이면 오토리쥼 차단
+    manual_auto_hold = is_auto_hold(CC, CS)
+    if manual_auto_hold:
+      self.resume_frame = 0
+      self.resume_activate = False
+      self.resume_fault_guard = 0
+      self.activateCruise_after_brake = False
 
     # Kans: 리쥼 + 가속펄스
     lead_drel = self.lead_distance

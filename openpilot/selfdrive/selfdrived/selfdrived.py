@@ -254,6 +254,10 @@ class SelfdriveD:
         (CS.regenBraking and (not self.CS_prev.regenBraking or not CS.standstill)):
         self.events.add(EventName.pedalPressed)
 
+      # Kans: GM 오토홀드
+      if CS.autoHoldActivated:
+        self.events.add(EventName.autoHold)
+
     # Create events for temperature, disk space, and memory
     if self.sm['deviceState'].thermalStatus >= ThermalStatus.overheated:
       self.events.add(EventName.overheat)

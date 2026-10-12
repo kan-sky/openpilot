@@ -32,6 +32,11 @@ class CarState(CarStateBase):
     self.cam_lka_steering_cmd_counter = 0
     self.buttons_counter = 0
 
+    # Kans: autoHold
+    self.autoHold = True
+    self.autoHoldActive = False
+    self.autoHoldActivated = False
+
     self.distance_button = 0
 
     # Kans: accFault delay
@@ -88,6 +93,12 @@ class CarState(CarStateBase):
       ret.gearShifter = self.parse_gear_shifter("T")
     else:
       ret.gearShifter = self.parse_gear_shifter(self.shifter_values.get(pt_cp.vl["ECMPRDNL2"]["PRNDL2"], None))
+
+    # Kans: 브레이크 페달 위치
+    if self.CP.flags & GMFlags.NO_ACCELERATOR_POS_MSG.value:
+      ret.brake = pt_cp.vl["EBCMBrakePedalPosition"]["BrakePedalPosition"] / 0xd0
+    else:
+      ret.brake = pt_cp.vl["ECMAcceleratorPos"]["BrakePedalPos"]
 
     if self.CP.networkLocation == NetworkLocation.fwdCamera:
       ret.brakePressed = pt_cp.vl["ECMEngineStatus"]["BrakePressed"] != 0
@@ -176,6 +187,10 @@ class CarState(CarStateBase):
 
     if ret.vEgo < self.CP.minSteerSpeed:
       ret.lowSpeedAlert = True
+
+    # Kans: autoHold
+    self.autoHold = True
+    ret.autoHoldActivated = self.autoHoldActivated
 
     return ret
 

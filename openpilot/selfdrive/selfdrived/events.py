@@ -1012,6 +1012,15 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
   EventName.userBookmarkNotPaired: {
     ET.PERMANENT: NormalPermanentAlert("Bookmark Saved", "pair to connect\nto view", duration=1.5),
   },
+
+  # Kans: GM 오토홀드
+  EventName.autoHold: {
+    ET.WARNING: Alert(
+      "AutoHold Activated.",
+      "",
+      AlertStatus.normal, AlertSize.small,
+      Priority.LOW, VisualAlert.none, AudibleAlert.autoHold, 2.),
+  },
 }
 
 

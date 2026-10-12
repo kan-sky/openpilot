@@ -6,12 +6,14 @@ from opendbc.car import get_safety_config, structs
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.gm.carcontroller import CarController
 from opendbc.car.gm.carstate import CarState
+from opendbc.car.gm.auto_hold import update_auto_hold
 from opendbc.car.gm.radar_interface import RadarInterface, RADAR_HEADER_MSG, CAMERA_DATA_HEADER_MSG
 from opendbc.car.gm.values import CAR, CarControllerParams, EV_CAR, CAMERA_ACC_CAR, SDGM_CAR, ALT_ACCS, CanBus, GMFlags, GMSafetyFlags
 from opendbc.car.interfaces import CarInterfaceBase, TorqueFromLateralAccelCallbackType, LateralAccelFromTorqueCallbackType
 
 TransmissionType = structs.CarParams.TransmissionType
 NetworkLocation = structs.CarParams.NetworkLocation
+ACCELERATOR_POS_MSG = 0xbe
 
 NON_LINEAR_TORQUE_PARAMS = {
   CAR.CHEVROLET_BOLT_EUV: [2.6531724862969748, 1.0, 0.1919764879840985, 0.009054123646805178],
@@ -224,4 +226,12 @@ class CarInterface(CarInterfaceBase):
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
       ret.dashcamOnly = True  # Needs steerRatio, tireStiffness, and lat accel factor tuning
 
+    # Kans: 0xBE(ECMAcceleratorPos) 없는 차량 표시 (오토홀드 브레이크 압력 기준)
+    if ACCELERATOR_POS_MSG not in fingerprint[CanBus.POWERTRAIN]:
+      ret.flags |= GMFlags.NO_ACCELERATOR_POS_MSG.value
     return ret
+
+  def apply(self, c, now_nanos=None):
+    # Kans hook: 오토홀드 판정(auto_hold.py) 후 carcontroller
+    update_auto_hold(self.CS, self.CP)
+    return super().apply(c, now_nanos)

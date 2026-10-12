@@ -6,6 +6,7 @@ from opendbc.car.common.filter_simple import FirstOrderFilter
 from opendbc.car.lateral import apply_driver_steer_torque_limits
 from opendbc.car.gm import gmcan
 from opendbc.car.gm.auto_resume import GMAutoResume
+from opendbc.car.gm.auto_hold import GMAutoHold
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.gm.values import DBC, CanBus, CarControllerParams, CruiseButtons, EV_CAR
 from opendbc.car.interfaces import CarControllerBase
@@ -61,6 +62,7 @@ class CarController(CarControllerBase):
 
     # Kans hook: 오토리쥼 모듈
     self.auto_resume = GMAutoResume(self.CP, self.params)
+    self.auto_hold = GMAutoHold()  # Kans hook: 오토홀드 모듈
     self.btn_rc_pt = -1
     self.btn_rc_cam = -1
 
@@ -160,14 +162,25 @@ class CarController(CarControllerBase):
           at_full_stop = at_full_stop and stopping
           friction_brake_bus = CanBus.POWERTRAIN
 
+        # Kans hook: 오토홀드
+        auto_hold_cmd = self.auto_hold.update(CC, CS, self.frame)
+
         # Kans hook: 오토리쥼 (196 AutoResume 그대로 - auto_resume.py)
         send_gas, self.apply_brake, at_full_stop, acc_engaged = self.auto_resume.update(
           CC, CS, self.frame, self.apply_gas, self.apply_brake, at_full_stop, lambda btn: self.send_btn(CS, can_sends, btn))
 
         # GasRegenCmdActive needs to be 1 to avoid cruise faults. It describes the ACC state, not actuation
         can_sends.append(gmcan.create_gas_regen_command(self.packer_pt, CanBus.POWERTRAIN, send_gas, idx, acc_engaged, at_full_stop))
-        can_sends.append(gmcan.create_friction_brake_command(self.packer_ch, friction_brake_bus, self.apply_brake,
-                                                             idx, CC.enabled, near_stop, at_full_stop, self.CP))
+        if auto_hold_cmd:
+          # Kans hook: 오토홀드 브레이크
+          hold_brake = max(self.apply_brake, self.params.NEAR_STOP_BRAKE_PHASE)
+          hold_near_stop = CS.out.vEgo < self.params.NEAR_STOP_BRAKE_PHASE
+          can_sends.append(gmcan.create_friction_brake_command(self.packer_ch, friction_brake_bus, hold_brake, idx, False, hold_near_stop, False, self.CP))
+          CS.autoHoldActivated = True
+        else:
+          can_sends.append(gmcan.create_friction_brake_command(self.packer_ch, friction_brake_bus, self.apply_brake,
+                                                               idx, CC.enabled, near_stop, at_full_stop, self.CP))
+          CS.autoHoldActivated = False
 
         # Send dashboard UI commands (ACC status)
         send_fcw = hud_alert == VisualAlert.fcw

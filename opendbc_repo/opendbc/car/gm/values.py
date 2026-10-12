@@ -72,7 +72,7 @@ class CarControllerParams:
 
 
 class GMSafetyFlags(IntFlag):
-  # Kans: safety/modes/gm.h의 GM_PARAM_* 와 반드시 일치 (196과 동일)
+  # Kans: safety/modes/gm.h의 GM_PARAM_* 와 반드시 일치
   HW_CAM = 1
   HW_CAM_LONG = 2
   HW_ASCM_LONG = 4
@@ -88,6 +88,7 @@ class GMSafetyFlags(IntFlag):
 class GMFlags(IntFlag):
   # Detected flags
   HAS_BSM = 1  # blind spot monitoring
+  NO_ACCELERATOR_POS_MSG = 2  # Kans: 0xBE(ECMAcceleratorPos) 없는 차량
 
 
 class Footnote(Enum):
