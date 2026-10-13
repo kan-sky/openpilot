@@ -40,7 +40,7 @@ class Controls:
 
     self.sm = messaging.SubMaster(['lateralDelay', 'vehicleParameters', 'lateralTorqueParameters', 'modelV2', 'selfdriveState',
                                    'extrinsicsCalibration', 'deviceMotion', 'longitudinalPlan', 'lateralManeuverPlan', 'carState', 'carOutput',
-                                   'driverMonitoringState', 'onroadEvents', 'driverAssistance'], poll='selfdriveState')
+                                   'driverMonitoringState', 'onroadEvents', 'driverAssistance', 'carrotMan'], poll='selfdriveState')
     self.pm = messaging.PubMaster(['carControl', 'controlsState'])
 
     self.steer_limited_by_safety = False
@@ -174,8 +174,27 @@ class Controls:
     CC.cruiseControl.resume = (CC.enabled and CS.cruiseState.standstill and len(speeds) > 0 and speeds[-1] > 0.1 and
                                not long_plan.shouldStop)
 
+    # Kans: 클러스터 설정속도 표시 - carrotMan 목표속도 반영, 신호정지(xState 3) 중엔 플래너 목표속도
+    desired_kph = min(CS.vCruiseCluster, self.sm['carrotMan'].desiredSpeed)
+    setSpeed = float(desired_kph * CV.KPH_TO_MS)
+    if len(speeds):
+      vCluRatio = CS.vCluRatio if CS.vCluRatio > 0.5 else 1.0
+      setSpeed = speeds[-1] / vCluRatio
+
     hudControl = CC.hudControl
-    hudControl.setSpeed = float(CS.vCruiseCluster * CV.KPH_TO_MS)
+    lp = long_plan
+    if self.CP.pcmCruise:
+      speed_from_pcm = self.params.get_int("SpeedFromPCM")
+      if speed_from_pcm == 1:  # toyota
+        hudControl.setSpeed = float(CS.vCruiseCluster * CV.KPH_TO_MS)
+      elif speed_from_pcm == 2:
+        hudControl.setSpeed = float(max(30 / 3.6, desired_kph * CV.KPH_TO_MS))
+      elif speed_from_pcm == 3:  # honda
+        hudControl.setSpeed = setSpeed if lp.xState == 3 else float(desired_kph * CV.KPH_TO_MS)
+      else:
+        hudControl.setSpeed = float(max(30 / 3.6, setSpeed))
+    else:
+      hudControl.setSpeed = setSpeed if lp.xState == 3 else float(desired_kph * CV.KPH_TO_MS)
     hudControl.speedVisible = CC.enabled
     hudControl.lanesVisible = CC.enabled
     hudControl.leadVisible = self.sm['longitudinalPlan'].hasLead

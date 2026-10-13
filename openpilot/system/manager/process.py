@@ -66,10 +66,16 @@ class ManagerProcess(ABC):
   enabled = True
   name = ""
   shutting_down = False
+  restart_if_crash = False
+  last_restart_mono_time = 0.0
 
   @abstractmethod
   def start(self) -> None:
     pass
+
+  def restart(self) -> None:
+    self.stop(sig=signal.SIGKILL)
+    self.start()
 
   def stop(self, retry: bool = True, block: bool = True, sig: signal.Signals | None = None) -> int | None:
     if self.proc is None:
@@ -155,13 +161,14 @@ class NativeProcess(ManagerProcess):
 
 
 class PythonProcess(ManagerProcess):
-  def __init__(self, name, module, should_run, enabled=True, sigkill=False):
+  def __init__(self, name, module, should_run, enabled=True, sigkill=False, restart_if_crash=False):
     self.name = name
     self.module = module
     self.should_run = should_run
     self.enabled = enabled
     self.sigkill = sigkill
     self.launcher = launcher
+    self.restart_if_crash = restart_if_crash
 
   def start(self) -> None:
     # In case we only tried a non blocking stop we need to stop it before restarting
@@ -220,6 +227,10 @@ class DaemonProcess(ManagerProcess):
     pass
 
 
+# Kans: 반복 크래시 프로세스의 최소 재시작 간격 (고정값, card 등 실시간 데몬과 CPU 경쟁 방지)
+MIN_CRASH_RESTART_INTERVAL = 2.0  # seconds
+
+
 def ensure_running(procs: ValuesView[ManagerProcess], started: bool, params: Params, CP: car.CarParams,
                    not_run: list[str] | None=None) -> list[ManagerProcess]:
   if not_run is None:
@@ -228,6 +239,12 @@ def ensure_running(procs: ValuesView[ManagerProcess], started: bool, params: Par
   running = []
   for p in procs:
     if p.enabled and p.name not in not_run and p.should_run(started, params, CP):
+      if p.restart_if_crash and p.proc is not None and not p.proc.is_alive():
+        since_last_restart = time.monotonic() - p.last_restart_mono_time
+        if since_last_restart >= MIN_CRASH_RESTART_INTERVAL:
+          cloudlog.error(f'Restarting {p.name} (exitcode {p.proc.exitcode})')
+          p.last_restart_mono_time = time.monotonic()
+          p.restart()
       running.append(p)
     else:
       p.stop(block=False)
