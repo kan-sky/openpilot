@@ -104,6 +104,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"ResumeDelay", {PERSISTENT, INT, "6"}},
     {"EVTable", {PERSISTENT, BOOL, "1"}},
     {"LongPitch", {PERSISTENT, BOOL, "1"}},
+    {"DisableDM", {PERSISTENT, INT, "1"}},
     {"AutoCurveSpeedFactor", {PERSISTENT, INT, "110"}},
     {"AutoCurveSpeedLowerLimit", {PERSISTENT, INT, "30"}},
     {"AutoNaviCountDownMode", {PERSISTENT, INT, "2"}},
