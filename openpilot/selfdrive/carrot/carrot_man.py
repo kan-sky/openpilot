@@ -1267,7 +1267,7 @@ class CarrotMan:
         self.remote_addr = None
 
   def carrot_navi_http_thread(self):
-    # Kans (carrot-wip-0721): 이 메서드들이 사용하는 상수(NAVI_HTTP_PORT/
+    # Kans: 이 메서드들이 사용하는 상수(NAVI_HTTP_PORT/
     # NAVI_HTTP_MAX_BODY_SIZE)와 _dispatch_obj()는 tz에 이미 있었지만, 이
     # 네 메서드 자체와 아래 스레드 시작 부분이 빠져 있었다 - 그래서 HTTP
     # POST 경로(일부 안드로이드 내비-브릿지 앱이 원시 TCP-7712 소켓 대신

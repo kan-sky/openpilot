@@ -248,6 +248,10 @@ class SelfdriveD:
       car_events = self.car_events.update(CS, self.CS_prev, self.sm['carControl']).to_msg()
       self.events.add_from_msg(car_events)
 
+      # Kans: 캐럿 플래너 알림(신호정지/출발 등)은 longitudinalPlan.events로 전달됨
+      if self.sm.alive['longitudinalPlan']:
+        self.events.add_from_msg(self.sm['longitudinalPlan'].events)
+
       if self.CP.notCar:
         # wait for everything to init first
         if self.sm.frame > int(2. / DT_CTRL) and self.initialized:

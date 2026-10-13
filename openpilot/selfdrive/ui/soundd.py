@@ -53,6 +53,10 @@ sound_list: dict[int, tuple[str, int | None, float]] = {
   CRITICAL_MAX: ("dm_critical_max.wav", None, MAX_VOLUME),
 
   AudibleAlert.autoHold: ("audio_auto_hold.wav", 1, MAX_VOLUME),  # Kans: GM 오토홀드
+  # Kans: 캐럿 신호정지/출발 안내음
+  AudibleAlert.trafficSignGreen: ("traffic_sign_green.wav", 1, MAX_VOLUME),
+  AudibleAlert.trafficSignChanged: ("traffic_sign_changed.wav", 1, MAX_VOLUME),
+  AudibleAlert.stopping: ("audio_stopping.wav", 1, MAX_VOLUME),
 }
 
 def check_selfdrive_timeout_alert(sm):
