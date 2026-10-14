@@ -48,12 +48,19 @@ class ET:
 # get event name from enum
 EVENT_NAME = {v: k for k, v in EventName.schema.enumerants.items()}
 
+# Kans: 일시적 조향불가 경고는 결함이 120ms 이상 누적될 때만 표시 (1초 정상이면 누적 초기화)
+TEMP_STEER_EVENTS = (EventName.steerTempUnavailable, EventName.steerTempUnavailableSilent)
+TEMP_STEER_WARNING_DELAY_FRAMES = round(0.12 / DT_CTRL)
+TEMP_STEER_WARNING_RESET_FRAMES = round(1.0 / DT_CTRL)
+
 
 class Events:
   def __init__(self):
     self.events: list[int] = []
     self.static_events: list[int] = []
     self.event_counters = dict.fromkeys(EVENTS.keys(), 0)
+    self._steer_warning_fault_frames = 0
+    self._steer_warning_clear_frames = 0
 
   @property
   def names(self) -> list[int]:
@@ -68,6 +75,14 @@ class Events:
     bisect.insort(self.events, event_name)
 
   def clear(self) -> None:
+    # 소리 있는/없는 변형을 합쳐서 누적, 짧은 정상 구간이 반복 끊김을 계속 숨기지 못하게 함
+    if any(e in self.events for e in TEMP_STEER_EVENTS):
+      self._steer_warning_fault_frames = min(self._steer_warning_fault_frames + 1, TEMP_STEER_WARNING_DELAY_FRAMES)
+      self._steer_warning_clear_frames = 0
+    else:
+      self._steer_warning_clear_frames = min(self._steer_warning_clear_frames + 1, TEMP_STEER_WARNING_RESET_FRAMES)
+      if self._steer_warning_clear_frames >= TEMP_STEER_WARNING_RESET_FRAMES:
+        self._steer_warning_fault_frames = 0
     self.event_counters = {k: (v + 1 if k in self.events else 0) for k, v in self.event_counters.items()}
     self.events = self.static_events.copy()
 
@@ -86,6 +101,12 @@ class Events:
           alert = EVENTS[e][et]
           if not isinstance(alert, Alert):
             alert = alert(*callback_args)
+
+          # 표시만 지연: 이벤트, 진입불가, 상태머신 데드라인은 즉시 유지. critical 경고는 지연 없음
+          if (e in TEMP_STEER_EVENTS and et in (ET.SOFT_DISABLE, ET.WARNING) and
+              alert.alert_status != AlertStatus.critical and
+              self._steer_warning_fault_frames < TEMP_STEER_WARNING_DELAY_FRAMES):
+            continue
 
           if DT_CTRL * (self.event_counters[e] + 1) >= alert.creation_delay:
             alert.alert_type = f"{EVENT_NAME[e]}/{et}"

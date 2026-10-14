@@ -181,10 +181,11 @@ class CarEvents:
         # if the user overrode recently, show a less harsh alert
         if self.silent_steer_warning or CS.standstill or self.steering_unpressed < int(1.5 / DT_CTRL):
           self.silent_steer_warning = True
-          if CS.vEgo < self.CP.minSteerSpeed:
+          # Kans: minSteerSpeed 미만(원래 조향 해제 구간)의 일시적 조향불가 경고는 숨김
+          if CS.vEgo >= self.CP.minSteerSpeed:
             events.add(EventName.steerTempUnavailableSilent)
         else:
-          if CS.vEgo < self.CP.minSteerSpeed:
+          if CS.vEgo >= self.CP.minSteerSpeed:
             events.add(EventName.steerTempUnavailable)
     else:
       self.no_steer_warning = False

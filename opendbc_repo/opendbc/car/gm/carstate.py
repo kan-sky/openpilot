@@ -201,8 +201,9 @@ class CarState(CarStateBase):
     if button_events:
       ret.buttonEvents = button_events
 
-    if ret.vEgo < self.CP.minSteerSpeed:
-      ret.lowSpeedAlert = True
+    # Kans: 저속(minSteerSpeed 미만) 조향불가 경고 끔 - 조향 해제는 controlsd에서 그대로 처리
+    #if ret.vEgo < self.CP.minSteerSpeed:
+    #  ret.lowSpeedAlert = True
 
     # Kans: autoHold
     self.autoHold = True
