@@ -765,19 +765,27 @@ class CarrotServ:
 
   def _apply_carrot_navi_vehicle(self, navi: CarrotNaviControl):
     vehicle = navi.vehicle
-    self.carrot_navi_vehicle_sequence = vehicle.sequence
     if not vehicle.present:
       self.last_update_gps_time_navi = 0
       self.szPosRoadName = ""
       return
 
+    # Kans: 2Hz 하트비트로 같은 위치(sequence 동일)가 재발행되면 무시
+    # (매번 적용하면 추정위치가 0.5초마다 이전 GPS 위치로 되돌아가 route 커브속도가 흔들림)
+    if vehicle.sequence == self.carrot_navi_vehicle_sequence:
+      return
     now = time.monotonic()
+    # 실제 수신 시각 기준으로 위치 추정 (수신 메타가 없으면 처음 본 시각)
+    received = vehicle.received_mono_time_ns / 1e9 if vehicle.received_mono_time_ns else now
+    if received > now:
+      return
+    self.carrot_navi_vehicle_sequence = vehicle.sequence
     self.vpPosPointLatNavi = vehicle.latitude
     self.vpPosPointLonNavi = vehicle.longitude
     self.nPosAngle = vehicle.heading_deg
     self.nPosSpeed = vehicle.speed_kph
     self.szPosRoadName = vehicle.road_name
-    self.last_update_gps_time_navi = self.last_calculate_gps_time = now
+    self.last_update_gps_time_navi = self.last_calculate_gps_time = received
 
   def _apply_carrot_navi_route(self, navi: CarrotNaviControl):
     route = navi.route
@@ -878,8 +886,7 @@ class CarrotServ:
       self.carrot_navi_speed_sequence = navi.speed.sequence
       self._apply_carrot_navi_speed(navi)
 
-    # The cereal service repeats at 2 Hz even when item sequences do not change.
-    # Refresh GPS and Params freshness from that heartbeat.
+    # 신호등 Params는 하트비트로 갱신, GPS는 새 위치만 적용
     self._apply_carrot_navi_vehicle(navi)
     self._apply_carrot_navi_traffic(navi)
     if new_session or navi.route.sequence != self.carrot_navi_route_sequence:
