@@ -143,6 +143,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"CarrotNaviDebug", {CLEAR_ON_MANAGER_START, STRING}},
     {"CarrotNaviImage", {CLEAR_ON_MANAGER_START, STRING}},
     {"MapTurnSpeedFactor", {PERSISTENT, INT, "90"}},
+    {"ModelTurnSpeedFactor", {PERSISTENT, INT, "30"}},
     {"MapboxPublicKey", {PERSISTENT, STRING}},
     {"NavDestination", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION, STRING}},
     {"NavDestinationWaypoints", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION, STRING}},

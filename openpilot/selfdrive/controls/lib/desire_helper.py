@@ -1,5 +1,7 @@
+import numpy as np
 from openpilot.cereal import log
 from openpilot.common.constants import CV
+from openpilot.common.params import Params
 from openpilot.common.realtime import DT_MDL
 
 LaneChangeState = log.LaneChangeState
@@ -16,6 +18,27 @@ class DesireHelper:
     self.lane_change_timer = 0.0
     self.prev_one_blinker = False
     self.desire = log.Desire.none
+
+    # Kans: 196에서 이식 - 모델 예측속도 기반 커브감속 (modelV2.meta.modelTurnSpeed)
+    # 값을 채우지 않으면 0이 나가고, carrot_serv에서 max(0, AutoCurveSpeedLowerLimit)=30으로
+    # 완만한 커브마다 목표속도가 30으로 급감했다.
+    self.params = Params()
+    self.frame = 0
+    self.modelTurnSpeedFactor = 0.0
+    self.model_turn_speed = 200.0
+
+  def update_model_turn_speed(self, modeldata):
+    if self.frame % 100 == 0:
+      self.modelTurnSpeedFactor = self.params.get_float("ModelTurnSpeedFactor") * 0.1
+    self.frame += 1
+
+    if self.modelTurnSpeedFactor > 0:
+      model_turn_speed = np.interp(self.modelTurnSpeedFactor,
+                                   modeldata.velocity.t,
+                                   modeldata.velocity.x) * CV.MS_TO_KPH * 1.2
+      self.model_turn_speed = self.model_turn_speed * 0.9 + model_turn_speed * 0.1
+    else:
+      self.model_turn_speed = 200.0
 
   @staticmethod
   def get_lane_change_direction(CS):
