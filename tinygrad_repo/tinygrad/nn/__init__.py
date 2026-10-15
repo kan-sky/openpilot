@@ -2,7 +2,7 @@ from __future__ import annotations
 import math, functools
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import prod, make_tuple, flatten, USE_ATOMICS, TRAINING
+from tinygrad.helpers import prod, make_tuple, flatten, USE_ATOMICS, TRAINING, to_tuple
 from tinygrad.nn import optim, state, datasets  # noqa: F401
 
 class BatchNorm:
@@ -297,15 +297,13 @@ class RMSNorm:
     self.eps = eps
     self.weight = Tensor.ones(dim) if elementwise_affine else None
 
-  def _norm(self, x:Tensor) -> Tensor: return x * (x.square().mean(-1, keepdim=True) + self.eps).rsqrt()
-
   def __call__(self, x:Tensor) -> Tensor:
-    x = self._norm(x.float()).cast(x.dtype)
+    x = x.float().rmsnorm(eps=self.eps).cast(x.dtype)
     return x if self.weight is None else x * self.weight
 
 from tinygrad.uop.ops import UOp, KernelInfo, Ops, AxisType
 def _embedding_bwd(grad_emb:UOp, call:UOp) -> tuple:
-  weight, idx = (a for a in call.src[1:] if not a.unsharded_base.is_unbound)
+  weight, idx = (a for a in call.src[1:] if (b:=a.unsharded_base).op is not Ops.ALLOC or b.arg.bind_on_realize)
   is_vocab_sharded = isinstance(weight.device, tuple) and weight.axis == 0
   # for multi-device: replicate grad_emb and idx on all devices
   if isinstance(weight.device, tuple):
@@ -326,8 +324,7 @@ def _embedding_bwd(grad_emb:UOp, call:UOp) -> tuple:
     return out.flatten()[i].store(0).end(i).sink(arg=KernelInfo(name="zero"))
   grad_weight_uop = grad_weight_uop.custom_kernel(fxn=_zero_kernel)[0]
 
-  # TODO: do we have a universal helper for this?
-  device = call.device.split(":")[0] if not isinstance(call.device, tuple) else call.device[0].split(":")[0]
+  device = to_tuple(call.device)[0].split(":")[0]
 
   # this is the real atomic kernel
   def _embedding_bwd_kernel(grad_weight:UOp, grad_emb:UOp, idx:UOp) -> UOp:
@@ -346,7 +343,7 @@ def _embedding_bwd(grad_emb:UOp, call:UOp) -> tuple:
 
     if is_vocab_sharded:
       # each device owns [offset, offset+local_vocab_size) of the global vocabulary
-      dnum = UOp.range(ndev, -1, AxisType.DEVICE)
+      dnum = UOp.range(ndev, 0, AxisType.DEVICE)
       offset = dnum * local_vocab_size
       global_token_id = idx_flat[i].cast(dtypes.weakint)
       local_token_id = (global_token_id - offset).clip(0, grad_weight.shape[0]-1)

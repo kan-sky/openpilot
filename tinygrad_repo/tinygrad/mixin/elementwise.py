@@ -60,10 +60,9 @@ class ElementwiseMixin(CreationMixin):
     """
     Returns a contiguous tensor.
     """
-    if self.dtype in dtypes.weaks: return self
     uop = self._uop
-    if uop.is_self_copy or self.device is None or uop.has_buffer_identity(): return self._wrap_uop(uop)
-    return self._wrap_uop(uop.copy_to_device(uop.device))
+    if self.dtype in dtypes.weaks or uop.op is Ops.STAGE or self.device is None or uop.has_buffer_identity(): return self
+    return self._wrap_uop(uop.alu(Ops.STAGE))
 
   def contiguous_backward(self) -> Self:
     """
@@ -433,8 +432,7 @@ class ElementwiseMixin(CreationMixin):
     print(cond.where(1, 3).numpy())
     ```
     """
-    ref = x if isinstance(x, type(self)) else y if isinstance(y, type(self)) else self
-    x, y = ref.ufix(x)._broadcasted(y)
+    x, y = self.ufix(x)._broadcasted(y)
     return self.alu(Ops.WHERE, x, y)
 
   def masked_fill(self, mask:Self, value:Self|PyConst) -> Self:
@@ -562,9 +560,8 @@ class ElementwiseMixin(CreationMixin):
     ```
     """
     base, exponent = self._broadcasted(x, reverse=reverse)
-    # TODO: int pow
-    if not dtypes.is_float(least_upper_dtype(base.dtype, exponent.dtype)) and isinstance(x, ConstType) and not (isinstance(x, int) and x >= 0):
-      raise RuntimeError("base needs to be float")
+    if not reverse and isinstance(x, int) and x < 0 and not dtypes.is_float(least_upper_dtype(base.dtype, exponent.dtype)):
+      raise RuntimeError("integers to negative integer powers are not allowed")
     return base.alu(Ops.POW, exponent)
 
   def __pow__(self, x: Self | ConstType) -> Self:
@@ -896,6 +893,7 @@ class ElementwiseMixin(CreationMixin):
     print(Tensor([-3.5, -2.5, -1.5, -0.5, 0.5, 1.5, 2.5, 3.5]).round().numpy())
     ```
     """
+    if not self.is_floating_point(): return self
     return ((self > 0).eq((b := self.trunc() / 2.0).trunc().eq(b))).where((self - 0.5).ceil(), (self + 0.5).floor())
 
   def sign(self) -> Self:
@@ -985,7 +983,7 @@ class ElementwiseMixin(CreationMixin):
     """
     return alpha * (self / alpha).elu()
 
-  def selu(self, alpha=1.67326, gamma=1.0507) -> Self:
+  def selu(self, alpha=1.6732632423543772, gamma=1.0507009873554805) -> Self:
     """
     Applies the Scaled Exponential Linear Unit (SELU) function element-wise.
 

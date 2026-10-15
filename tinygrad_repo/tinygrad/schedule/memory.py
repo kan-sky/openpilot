@@ -1,5 +1,5 @@
 from collections import defaultdict
-from tinygrad.helpers import NO_MEMORY_PLANNER, DEBUG, round_up
+from tinygrad.helpers import NO_MEMORY_PLANNER, DEBUG, round_up, to_tuple
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.dtype import dtypes
 from tinygrad.runtime.support.memory import TLSFAllocator
@@ -11,9 +11,8 @@ def _collect_bufs(u:UOp) -> list[UOp]:
 
 def _can_plan(b:UOp, held_bufs:set[UOp]) -> bool:
   if b in held_bufs: return False
-  devs = (b.device,) if isinstance(b.device, str) else b.device
   # CL and WEBGPU do not support views, see explanation in contiguous_view_offset
-  return all(not d.startswith(("DISK", "CL", "WEBGPU")) for d in devs)
+  return all(not d.startswith(("DISK", "CL", "WEBGPU")) for d in to_tuple(b.device))
 
 LaneKey = tuple[str, int]
 
@@ -30,7 +29,7 @@ def memory_plan_rewrite(linear:UOp, held_bufs:set[UOp]|None=None) -> UOp:
     for b in si_bufs:
       if b not in first_appearance: first_appearance[b] = i
       last_appearance[b] = i
-    if si.src[0].op is Ops.COPY: copy_bufs.update(si_bufs)
+    if si.src[0].op is Ops.STORE: copy_bufs.update(si_bufs)
   if not first_appearance: return linear
 
   # separate copy and compute buffers into different lanes to avoid introducing dependencies (copy->compute->copy)

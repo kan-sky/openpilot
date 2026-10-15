@@ -77,7 +77,8 @@ amd_rdna3 = [TensorCore(dtype_in=di, dtype_out=do, frag_a=(("m0", "m1", "m2", "m
 # (16,16,16)
 amd_rdna4 = [TensorCore(dtype_in=di, dtype_out=do, frag_a=(("m0", "m1", "m2", "m3", "k2"), ("k0", "k1", "k3")),
   frag_b=(("n0", "n1", "n2", "n3", "k2"), ("k0", "k1", "k3")), frag_c=(("n0", "n1", "n2", "n3", "m3"), ("m0", "m1", "m2")))
-  for di,do in [(dtypes.half,dtypes.float),(dtypes.half,dtypes.half),(dtypes.bfloat16,dtypes.float),(dtypes.bfloat16,dtypes.bfloat16)]]
+  for di,do in [(dtypes.half,dtypes.float),(dtypes.half,dtypes.half),(dtypes.bfloat16,dtypes.float),(dtypes.bfloat16,dtypes.bfloat16),
+                (dtypes.fp8e4m3,dtypes.float),(dtypes.fp8e5m2,dtypes.float),(dtypes.int8,dtypes.int32)]]
 
 # https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-cdna4-instruction-set-architecture.pdf
 def mfma(K:int, di:DType, do:DType) -> TensorCore:
@@ -91,7 +92,8 @@ def mfma(K:int, di:DType, do:DType) -> TensorCore:
 amd_cdna_161616 = [mfma(16,di,dtypes.float) for di in [dtypes.half, dtypes.bfloat16]]
 amd_cdna_161632 = [mfma(32,di,dtypes.float) for di in [dtypes.fp8e5m2, dtypes.fp8e4m3, dtypes.half, dtypes.bfloat16]]
 amd_cdna_1616128 = [mfma(128,di,dtypes.float) for di in [dtypes.fp8e5m2, dtypes.fp8e4m3]]
-amd_cdna3 = amd_cdna_161632[:2] + amd_cdna_161616
+amd_cdna3_161632 = [mfma(32,di,dtypes.float) for di in [dtypes.fp8e5m2fnuz, dtypes.fp8e4m3fnuz]]
+amd_cdna3 = amd_cdna3_161632 + amd_cdna_161616
 amd_cdna4 = amd_cdna_1616128 + amd_cdna_161632 + amd_cdna_161616
 
 def get_amd(arch): return {"gfx942": amd_cdna3, "gfx950": amd_cdna4, "gfx1200": amd_rdna4, "gfx1201": amd_rdna4}.get(arch, amd_rdna3)
@@ -103,34 +105,40 @@ pm_validate_wmma_rdna3 = PatternMatcher([
   (UPat(Ops.WMMA, name="x", dtype=dtypes.half), lambda x: UOp(Ops.STACK, src=tuple(x.replace(
       src=(x.src[0], x.src[1], UOp(Ops.STACK, src=tuple(x.src[2].index(UOp.const(j//2, dtypes.int16))
       if j%2 == 0 else UOp.const(0.0, x.src[2].dtype)
-      for j in range(x.max_numel()*2)))),
-      arg=(*x.arg[:3], None)).index(UOp.const(i*2, dtypes.int16))
+      for j in range(x.max_numel()*2))))).index(UOp.const(i*2, dtypes.int16))
       for i in range(x.max_numel()))) if x.max_numel() == 8 else None),
   (UPat(Ops.WMMA, name="x"), lambda x: x.replace(
     src=(x.src[0].bitcast(dtypes.uint16), x.src[1].bitcast(dtypes.uint16), x.src[2]))
     if x.src[0].dtype == dtypes.bfloat16 and x.src[0].max_numel() == 16 else None),
 ])
 
+def pm_wmma_fp8(dtype:DType) -> PatternMatcher:
+  return PatternMatcher([
+    (UPat(Ops.WMMA, name="x", dtype=dtypes.float),
+      lambda x, dtype=dtype: x.replace(src=(x.src[0].bitcast(dtype), x.src[1].bitcast(dtype), x.src[2]))
+      if x.src[0].dtype in dtypes.fp8s and x.src[0].max_numel() == 8 else None),
+  ])
+
 pm_validate_wmma_rdna4 = PatternMatcher([
+  (UPat(Ops.WMMA, name="x", dtype=dtypes.int32), lambda x: x.replace(
+    src=(x.src[0].bitcast(dtypes.int32), x.src[1].bitcast(dtypes.int32), x.src[2]))
+    if x.src[0].dtype == dtypes.int8 and x.src[0].max_numel() == 8 else None),
   (UPat(Ops.WMMA, name="x", dtype=dtypes.bfloat16), lambda x: x.replace(
     src=(x.src[0].bitcast(dtypes.uint16), x.src[1].bitcast(dtypes.uint16), x.src[2].bitcast(dtypes.uint16)))
       .bitcast(dtypes.bfloat16) if x.max_numel() == 8 and x.src[0].dtype == dtypes.bfloat16 and x.src[0].max_numel() == 8 else None),
   (UPat(Ops.WMMA, name="x", dtype=dtypes.float),
     lambda x: x.replace(src=(x.src[0].bitcast(dtypes.uint16), x.src[1].bitcast(dtypes.uint16), x.src[2]))
-    if x.max_numel() == 8 and x.src[0].dtype == dtypes.bfloat16 and x.src[0].max_numel() == 8 else None)
-])
+    if x.max_numel() == 8 and x.src[0].dtype == dtypes.bfloat16 and x.src[0].max_numel() == 8 else None),
+]) + pm_wmma_fp8(dtypes.uint32)
 
 pm_validate_wmma_cdna = PatternMatcher([
   (UPat(Ops.WMMA, name="x", dtype=dtypes.float),
     lambda x: x.replace(src=(x.src[0].bitcast(dtypes.uint32), x.src[1].bitcast(dtypes.uint32), x.src[2]))
-    if x.arg[0][2] == 128 and x.src[0].dtype.itemsize <= 8 else None),
+    if x.arg[0][2] == 128 else None),
   (UPat(Ops.WMMA, name="x", dtype=dtypes.float),
     lambda x: x.replace(src=(x.src[0].bitcast(dtypes.uint16), x.src[1].bitcast(dtypes.uint16), x.src[2]))
     if x.max_numel() == 4 and x.src[0].dtype == dtypes.bfloat16 and x.src[0].max_numel() == 4 else None),
-  (UPat(Ops.WMMA, name="x", dtype=dtypes.float),
-    lambda x: x.replace(src=(x.src[0].bitcast(dtypes.uint64), x.src[1].bitcast(dtypes.uint64), x.src[2]))
-    if x.max_numel() == 4 and x.src[0].dtype in dtypes.fp8_ocp and x.src[0].max_numel() == 8 else None),
-])
+]) + pm_wmma_fp8(dtypes.uint64)
 
 # ***** Apple Metal *****
 

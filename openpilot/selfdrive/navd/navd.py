@@ -54,8 +54,16 @@ class RouteEngine:
 
     self.params = Params()
 
-    # Get last gps position from params
-    self.last_position,_ = coordinate_from_param("LastGPSPosition", self.params)
+    # Kans: LastGPSPosition은 ubloxd가 저장하는 gpsLocationExternal 이벤트(capnp 바이트)
+    self.last_position = None
+    if (dat := self.params.get("LastGPSPosition")):
+      try:
+        with log.Event.from_bytes(dat) as evt:
+          gps = evt.gpsLocationExternal
+          if gps.hasFix:
+            self.last_position = Coordinate(gps.latitude, gps.longitude)
+      except Exception:
+        cloudlog.exception("navd.last_gps_position_parse_failed")
     self.last_bearing = None
 
     self.gps_ok = False

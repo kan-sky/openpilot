@@ -3,9 +3,9 @@ import unittest, pickle, functools, math
 import z3
 
 from tinygrad.dtype import dtypes, ConstType, DType, Invalid
-from tinygrad.uop.ops import UOp, Ops, graph_rewrite, sym_infer
+from tinygrad.uop.ops import UOp, Ops, KernelInfo, graph_rewrite, sym_infer
 from tinygrad.uop.spec import spec_shared, type_verify
-from tinygrad.uop.symbolic import sym, commutative, pm_simplify_valid, pm_move_where_on_load, symbolic_simple
+from tinygrad.uop.symbolic import sym, symbolic, commutative, pm_simplify_valid, pm_move_where_on_load, symbolic_simple
 from tinygrad.uop.validate import uops_to_z3
 
 def check_uop_against_string(self, v:UOp, s:str):
@@ -16,7 +16,7 @@ def check_uop_against_string(self, v:UOp, s:str):
   self.assertIs(s_eval, v, f"eval did not match simplified: {s_eval} != {v.render()} for {s}")
 
 def Variable(name: str, min_val: ConstType, max_val: ConstType, dtype: DType=dtypes.weakint):
-  return UOp.variable(name, min_val, max_val, dtype, param=True)
+  return UOp.variable(name, min_val, max_val, dtype)
 def uconst(val): return UOp.const(val)
 def usum(ops): return functools.reduce(lambda x,y: x+y, ops)
 def uand(ops): return functools.reduce(lambda x,y: x*y, ops)
@@ -105,6 +105,25 @@ class TestSymbolic(unittest.TestCase):
     self.assertEqual(UOp.gcd(a*a*10, b*a*5, a*a*5).simplify(), a*5)
     self.assertEqual(UOp.gcd(a*10, b*5, a*5).simplify(), uconst(5))
     self.assertEqual(UOp.gcd(a, b*5, a*5).simplify(), uconst(1))
+
+  def test_multiple_of_cancellation(self):
+    for multiple in (1, 2, 3, 4, 8):
+      var = UOp.variable("n", multiple, 8*multiple, multiple_of=multiple)
+      for n in (var, var.bind(2*multiple)):
+        for factor in (-multiple, -1, 2, multiple, multiple+1):
+          with self.subTest(multiple=multiple, bound=n.is_bound_var, factor=factor):
+            self.assertEqual((n*factor//n).ssimplify(), factor)
+            self.assertEqual((n*factor%n).ssimplify(), 0)
+            self.assertEqual(((-n*factor)//(-n)).ssimplify(), factor)
+            self.assertIs(UOp.gcd(n*factor, n).simplify(), n)
+
+  def test_gcd_multiple_of_without_shared_factors(self):
+    n = UOp.variable("n", 6, 60, multiple_of=6)
+    m = UOp.variable("m", 4, 40, multiple_of=4)
+    self.assertEqual(UOp.gcd(n, m).ssimplify(), 2)
+    self.assertEqual((n%3).ssimplify(), 0)
+    self.assertEqual((m%2).ssimplify(), 0)
+    self.assertIs((n<12).simplify(), n<12)
 
   def test_divides_exact(self):
     a = Variable("a", 1, 8)
@@ -432,7 +451,10 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Variable("a", 0, 6) + 2 < 3, 0, 1, "(a<1)")
 
   def test_lt_simple_factor(self):
-    self.helper_test_variable((Variable("a", 0, 6)*6+Variable("b", 0, 6)*6) < 8, 0, 1, "(((a*3)+(b*3))<4)")
+    self.helper_test_variable((Variable("a", 0, 6)*6+Variable("b", 0, 6)*6) < 8, 0, 1, "((a+b)<2)")
+    self.helper_test_variable((Variable("g", 0, 1)*128+Variable("l", 0, 31)*4) < 101, 0, 1, "((l+(g*32))<26)")
+    self.helper_test_variable((Variable("a", -6, 6)*4+Variable("b", -6, 6)*8) < -3, 0, 1, "((a+(b*2))<0)")
+    self.helper_test_variable((Variable("a", 0, 6)*4+Variable("b", -1, 0)) < 3, 0, 1, "(a<1)")
 
   def test_lt_sum_factor_rhs_partial(self):
     self.helper_test_variable((Variable("a", 0, 6)*6 + Variable("b", 0, 6)*4 + Variable("c", 0, 6)*8) < 4, 0, 1,
@@ -455,11 +477,11 @@ class TestSymbolic(unittest.TestCase):
     self.assertTrue(math.isnan(graph_rewrite(z/z, symbolic_simple, bottom_up=True).arg))
 
   def test_masked_shr_fold(self):
-    x = UOp.variable('x', 0, 255, dtype=dtypes.uint32, param=True)
+    x = UOp.variable('x', 0, 255, dtype=dtypes.uint32)
     self.helper_test_variable((x & -4) >> 2, 0, 63, "(x>>2)")
 
   def test_masked_idiv_fold(self):
-    x = UOp.variable('x', 0, 255, dtype=dtypes.uint32, param=True)
+    x = UOp.variable('x', 0, 255, dtype=dtypes.uint32)
     self.helper_test_variable((x & -4) // 4, 0, 63, "(x//4)")
 
   def test_bool_or_not_tautology(self):
@@ -500,12 +522,12 @@ class TestSymbolic(unittest.TestCase):
 
   def test_div_drop_small_terms(self):
     # from openpilot, shouldnt simplify
-    gidx0 = UOp.variable("gidx0", 0, 10, param=True)
-    gidx1 = UOp.variable("gidx1", 0, 10, param=True)
-    lidx0 = UOp.variable("lidx0", 0, 1, param=True)
-    lidx1 = UOp.variable("lidx1", 0, 1, param=True)
-    ridx1005 = UOp.variable("ridx1005", 0, 2, param=True)
-    ridx1006 = UOp.variable("ridx1006", 0, 2, param=True)
+    gidx0 = UOp.variable("gidx0", 0, 10)
+    gidx1 = UOp.variable("gidx1", 0, 10)
+    lidx0 = UOp.variable("lidx0", 0, 1)
+    lidx1 = UOp.variable("lidx1", 0, 1)
+    ridx1005 = UOp.variable("ridx1005", 0, 2)
+    ridx1006 = UOp.variable("ridx1006", 0, 2)
     self.helper_test_variable((lidx1+((gidx1*18)+(ridx1005*18)+(lidx0*162))+(gidx0*2)+(ridx1006*2)+-40)//18, -3, 20,
       "(gidx1+ridx1005+lidx0*9+(gidx0+ridx1006+7)//9+-3)")
 
@@ -1024,7 +1046,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(cond.ne(False), 0, 1, "(x<2)")
 
   def test_bitcast_chain(self):
-    a = UOp.variable("a", 0, 3, dtype=dtypes.int32, param=True)
+    a = UOp.variable("a", 0, 3, dtype=dtypes.int32)
     self.assertIs(graph_rewrite(a.bitcast(dtypes.float32).bitcast(a.dtype), sym), a)
     # a const of an emulated float dtype bitcasts to its storage bits and back
     for dt, sdt, bits in ((dtypes.bfloat16, dtypes.ushort, 16256), (dtypes.fp8e4m3, dtypes.uchar, 56), (dtypes.fp8e5m2, dtypes.uchar, 60)):
@@ -1108,6 +1130,13 @@ class TestSymbolic(unittest.TestCase):
     expr = (x<5).where((x<5).logical_not().where(a, b)*2, c)
     self.helper_test_variable(expr, 0, 6, "(x<5).where((b*2), c)")
 
+  def test_where_closure_folding_before_gate_merge(self):
+    # the outer cond folds inside the inner gate before the two gates merge, so the merged gate carries no redundant conjunct
+    x = Variable("x", 0, 10)
+    a = Variable("a", 0, 3)
+    cond, gate = x < 5, Variable("y", 0, 10) < 7
+    check_uop_against_string(self, graph_rewrite(cond.where((cond & gate).where(a, 0), 0), symbolic), "((x<5)&(y<7)).where(a, 0)")
+
   def test_where_closure_folding_valid(self):
     # a valid gate on the same cond folds in the true branch, the live else value is kept
     x = Variable("x", 0, 10)
@@ -1145,8 +1174,8 @@ class TestSymbolic(unittest.TestCase):
   def test_do_math_in_int32(self):
     a = Variable("a", 1, 10, dtypes.int)
     b = Variable("b", 1, 10, dtypes.int)
-    self.assertIn((a.cast(dtypes.long)+b.cast(dtypes.long)).render(), "(long)((a+b))")
-    self.assertIn((a.cast(dtypes.long)*b.cast(dtypes.long)).render(), "(long)((a*b))")
+    self.assertIn((a.cast(dtypes.long)+b.cast(dtypes.long)).render(), "(i64)((a+b))")
+    self.assertIn((a.cast(dtypes.long)*b.cast(dtypes.long)).render(), "(i64)((a*b))")
 
   def test_nested_mod_negative_range(self):
     # (x%(k*c))%c = x%c for positive c
@@ -1255,6 +1284,9 @@ class TestSymInfer(unittest.TestCase):
     assert sym_infer(c.bitcast(dtypes.int), {c.expr: 0xFFFFFFFF}) == -1
 
     assert sym_infer(UOp.const(1.5).cast(dtypes.float).bitcast(dtypes.uint), {}) == 1069547520
+  def test_sym_infer_tagged(self):
+    a = Variable("a", 0, 10)
+    assert sym_infer((a*3+1).rtag("t"), {a.expr: 2}) == 7
 
   def test_sym_infer_deeply_nested(self):
     # build an expression that exceeds Python's nested parentheses limit for eval
@@ -1466,6 +1498,7 @@ class TestGatedUopGivenValid(unittest.TestCase):
     idx = graph_rewrite(idx, pm_simplify_valid)
     # (r0-1)//3 = (r0+2)//3 - 1 (constant offset split)
     self.assertEqual(idx, (r0 < 3).where((r0 + uconst(2)) // uconst(3) + uconst(-1), UOp.invalid()))
+    self.assertEqual(graph_rewrite((r0 <= 1).where(r0//2, UOp.invalid()), pm_simplify_valid), (r0 <= 1).where(uconst(0), UOp.invalid()))
 
   def test_invalid_gate_simplifies_vectorize(self):
     r0 = Variable("r0", 0, 2)
@@ -1479,10 +1512,11 @@ class TestGatedUopGivenValid(unittest.TestCase):
     self.assertEqual(idx, (r0 < 3).where(expected_vec, UOp.invalid()))
 
 class TestRangeSplitting(unittest.TestCase):
-  def test_end_preserves_constant_backedge(self):
-    loop, backedge = UOp.loop(0), UOp.const(False)
-    end = graph_rewrite(UOp(Ops.NOOP).end(loop, backedge), sym)
-    self.assertEqual(end.src, (UOp(Ops.NOOP), loop, backedge))
+  def test_backedge_preserves_constant_condition(self):
+    loop, cond = UOp.loop(0), UOp.const(False)
+    end = graph_rewrite(UOp(Ops.NOOP).backedge(loop, cond), sym)
+    self.assertEqual(end.op, Ops.BACKEDGE)
+    self.assertEqual(end.src, (UOp(Ops.NOOP), loop, cond))
 
   def test_range_split_on_mod(self):
     # test that mark_range_mod splits RANGE(8) into RANGE(4)*2 + RANGE(2) when used with %2
@@ -1492,7 +1526,7 @@ class TestRangeSplitting(unittest.TestCase):
     buf = UOp.param(0, dtypes.int, 1)
     val = (r0 % uconst(2)).cast(dtypes.int)
     store = UOp(Ops.STORE, src=(buf.index(uconst(0)), val))
-    sink = UOp(Ops.SINK, src=(UOp(Ops.END, src=(store, r0)),))
+    sink = store.sink().end(r0).sink(arg=KernelInfo())  # nested SINK must not split the range independently of END
     # count RANGEs before
     ranges_before = len([u for u in sink.toposort() if u.op is Ops.RANGE])
     # apply the range splitting optimization
@@ -1500,6 +1534,7 @@ class TestRangeSplitting(unittest.TestCase):
     # count RANGEs after - should have more due to splitting
     ranges_after = len([u for u in sink_after.toposort() if u.op is Ops.RANGE])
     self.assertGreater(ranges_after, ranges_before, "RANGE should be split when used with mod of divisible constant")
+    self.assertFalse(sink_after.ranges, "split ranges must still be closed by END")
 
 class TestBounds(unittest.TestCase):
   def test_unrolled_arange(self):

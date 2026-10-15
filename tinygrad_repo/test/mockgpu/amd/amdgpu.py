@@ -284,7 +284,7 @@ class SDMAExecutor(AMDQueue):
 
   def _execute_fence(self):
     struct = sdma_pkts.fence.from_address(self.base + self.rptr[0] % self.size)
-    to_mv(self.gpu.translate_addr(struct.addr), 8).cast('Q')[0] = struct.data
+    to_mv(self.gpu.translate_addr(struct.addr), 4).cast('I')[0] = struct.data
     self.rptr[0] += ctypes.sizeof(struct)
 
   def _execute_trap(self):
@@ -341,7 +341,7 @@ class AMDGPURegisters:
     self.regs: dict[tuple[int, int], int] = {}
   def __getitem__(self, addr:int) -> int:
     if addr == regGRBM_GFX_INDEX: return self.grbm_index
-    if regCPG_PERFCOUNTER1_LO < addr < regGUS_PERFCOUNTER_HI:
+    if regCPG_PERFCOUNTER1_LO <= addr <= regGUS_PERFCOUNTER_HI:
       assert self.regs[(regCP_PERFMON_CNTL, 0)] == 0x401, "read mode should be enabled"
       return addr << 16 | self.grbm_index
     return self.regs[(addr, getbits(self.grbm_index, 16, 23))]

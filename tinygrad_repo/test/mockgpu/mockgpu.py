@@ -1,6 +1,8 @@
 import ctypes, time, os, builtins, fcntl, typing
-from tinygrad.helpers import DEV
-from tinygrad.runtime.support.hcq import FileIOInterface
+from tinygrad.helpers import DEV, dedup, to_tuple
+from tinygrad.device import Compiled
+from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher
+from tinygrad.runtime.support.system import FileIOInterface, System
 from tinygrad.runtime.autogen import libc
 from test.mockgpu.nv.nvdriver import NVDriver
 from test.mockgpu.amd.amddriver import AMDDriver
@@ -10,6 +12,19 @@ start = time.perf_counter()
 drivers = [cls() for t in DEV.value if (cls:={"MOCKPCI+AMD": AMDriver, "MOCKKFD+AMD": AMDDriver, "MOCK+AMD": AMDDriver, "MOCKUSB+AMD": AMUSBDriver,
                                               "MOCK+NV": NVDriver}.get(f"{t.interface}+{t.device}"))]
 tracked_fds: dict[int, typing.Any] = {}
+
+@ctypes.CFUNCTYPE(None, ctypes.c_uint64)
+def mockgpu_doorbell(addr:int): # compiled stores aren't tracked, so the submits report their doorbells
+  for st,en,_,wcb in [x for d in drivers for x in d.tracked_addresses]:
+    if st <= addr < en: wcb(None, addr - st)
+setattr(libc.dll, "mockgpu_doorbell", mockgpu_doorbell)
+
+mocked = {t.device for t in DEV.value if t.interface.startswith("MOCK")}
+def hook_doorbells(s:UOp) -> UOp|None:
+  hooks = tuple(UOp.custom_function("mockgpu_doorbell").call(b.after(c).getaddr("CPU")) for c in s.toposort() if c.op is Ops.CALL
+                for b in c.src[1:] if b.op is Ops.ALLOC and "doorbell" in str(b.tag) and to_tuple(b.device)[0].split(":")[0] in mocked)
+  return None if all(h in s.src for h in hooks) else s.replace(src=tuple(dedup(s.src + hooks)))
+Compiled.pm_lower = PatternMatcher([(UPat(Ops.SINK, name="s"), hook_doorbells)])
 
 original_memoryview = builtins.memoryview
 class TrackedMemoryView:
@@ -39,7 +54,7 @@ def _memoryview(cls, mem):
     addr = ctypes.addressof(mem) if isinstance(mem, ctypes.Array) else mem
     for d in drivers:
       for st,en,rcb,wcb in d.tracked_addresses:
-        if st <= addr <= en: return TrackedMemoryView(mem, rcb, wcb)
+        if st <= addr < en: return TrackedMemoryView(mem, rcb, wcb)
   return original_memoryview(mem)
 class _MockMemoryviewMeta(type):
   def __instancecheck__(cls, instance): return isinstance(instance, (original_memoryview, TrackedMemoryView))
@@ -108,3 +123,5 @@ class MockFileIOInterface(FileIOInterface):
   def readlink(path): raise NotImplementedError()
   @staticmethod
   def eventfd(initval, flags=None): NotImplementedError()
+
+System.lock_memory = lambda addr, size: None # type: ignore[method-assign,has-type] # nothing dmas from host memory, like MAP_LOCKED in anon_mmap
