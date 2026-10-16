@@ -302,7 +302,7 @@ def main(demo=False):
   pub_socks = ["modelV2", "drivingModelData", "cameraOdometry"] + (["chestnutGpuState"] if CHESTNUT else [])
   pm = PubMaster(pub_socks)
   sm = SubMaster(["deviceState", "carState", "narrowRoadCameraState", "extrinsicsCalibration", "driverMonitoringState",
-                  "carControl", "controlsState", "lateralDelay"])
+                  "carControl", "controlsState", "lateralDelay", "carrotMan", "radarState"])
 
   publish_state = PublishState()
   params = Params()
@@ -369,6 +369,13 @@ def main(demo=False):
 
     sm.update(0)
     desire = DH.desire
+    # Kans: DH.desire는 laneChangeStarting에서야 laneChangeLeft/Right가 되므로,
+    # 차선변경 FSM이 off를 벗어나는 즉시(preLaneChange 포함) 모델에 미리 desire를 준다.
+    if DH.lane_change_state != log.LaneChangeState.off:
+      if DH.lane_change_direction == log.LaneChangeDirection.left:
+        desire = log.Desire.laneChangeLeft
+      elif DH.lane_change_direction == log.LaneChangeDirection.right:
+        desire = log.Desire.laneChangeRight
     is_rhd = sm["driverMonitoringState"].isRHD
     frame_id = sm["narrowRoadCameraState"].frameId
     v_ego = max(sm["carState"].vEgo, 0.)
@@ -449,12 +456,21 @@ def main(demo=False):
       l_lane_change_prob = desire_state[log.Desire.laneChangeLeft]
       r_lane_change_prob = desire_state[log.Desire.laneChangeRight]
       lane_change_prob = l_lane_change_prob + r_lane_change_prob
-      DH.update(sm['carState'], sm['carControl'].latActive, lane_change_prob)
+      # Kans: 캐럿 ATC/차선변경 (carrotMan 회전정보, 측면 레이더)
+      DH.update(sm['carState'], modelv2_send.modelV2, sm['carControl'].latActive, lane_change_prob, sm['carrotMan'], sm['radarState'])
       modelv2_send.modelV2.meta.laneChangeState = DH.lane_change_state
       modelv2_send.modelV2.meta.laneChangeDirection = DH.lane_change_direction
+      modelv2_send.modelV2.meta.desireLog = DH.desireLog
+      modelv2_send.modelV2.meta.laneWidthLeft = float(DH.left.lane_width)
+      modelv2_send.modelV2.meta.laneWidthRight = float(DH.right.lane_width)
+      modelv2_send.modelV2.meta.distanceToRoadEdgeLeft = float(DH.left.dist_to_edge)
+      modelv2_send.modelV2.meta.distanceToRoadEdgeRight = float(DH.right.dist_to_edge)
+      modelv2_send.modelV2.meta.desire = DH.desire
+      modelv2_send.modelV2.meta.laneChangeProb = DH.lane_change_ll_prob
       # Kans: 모델 기반 커브 목표속도 (carrot_serv의 "model" 소스)
-      DH.update_model_turn_speed(modelv2_send.modelV2)
       modelv2_send.modelV2.meta.modelTurnSpeed = float(DH.model_turn_speed)
+      modelv2_send.modelV2.meta.laneChangeAvailableLeft = DH.lane_change_available_left
+      modelv2_send.modelV2.meta.laneChangeAvailableRight = DH.lane_change_available_right
 
       fill_driving_model_data(drivingdata_send, modelv2_send)
       fill_pose_msg(posenet_send, model_output, meta_main.frame_id, vipc_dropped_frames, meta_main.timestamp_eof, extrinsics_calibration_seen)
