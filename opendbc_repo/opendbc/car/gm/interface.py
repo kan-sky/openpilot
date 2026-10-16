@@ -165,6 +165,8 @@ class CarInterface(CarInterfaceBase):
       ret.startingState = True
       ret.vEgoStarting = 0.3  # 출발상태로 판단하는 속도(값이 클수록 더 높은 속도까지 내주어서 출발가속이 강해질 수 있음)
       ret.startAccel = 1.9
+      # Kans: 정지 직후 정지유지 감속(StoppingAccel)까지 끌어내리는 속도 (m/s^2/s)
+      ret.stoppingDecelRate = 1.2
 
     elif candidate == CAR.GMC_ACADIA:
       ret.minEnableSpeed = -1.  # engage speed is decided by pcm

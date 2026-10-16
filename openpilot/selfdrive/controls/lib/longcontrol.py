@@ -4,6 +4,7 @@ from openpilot.common.realtime import DT_CTRL
 from openpilot.selfdrive.controls.lib.drive_helpers import CONTROL_N
 from openpilot.common.pid import PIDController
 from openpilot.selfdrive.modeld.constants import ModelConstants
+from openpilot.common.params import Params
 
 CONTROL_N_T_IDX = ModelConstants.T_IDXS[:CONTROL_N]
 
@@ -52,11 +53,21 @@ class LongControl:
                              rate=1 / DT_CTRL)
     self.last_output_accel = 0.0
 
+    # Kans: 정지 유지 감속 (StoppingAccel, 0.01 m/s^2 단위)
+    self.params = Params()
+    self.readParamCount = 0
+    self.stopping_accel = 0.0
+
   def reset(self):
     self.pid.reset()
 
   def update(self, active, CS, a_target, should_stop, accel_limits):
     """Update longitudinal control. This updates the state machine and runs a PID loop"""
+    self.readParamCount += 1
+    if self.readParamCount >= 100:
+      self.readParamCount = 0
+      self.stopping_accel = self.params.get_float("StoppingAccel") * 0.01
+
     self.pid.neg_limit = accel_limits[0]
     self.pid.pos_limit = accel_limits[1]
 
@@ -68,10 +79,13 @@ class LongControl:
 
     elif self.long_control_state == LongCtrlState.stopping:
       output_accel = self.last_output_accel
-      if output_accel > self.CP.stopAccel:
+      # Kans: StoppingAccel이 음수면 정지 유지 감속으로 사용 (기본 -1.0, -2.0은 정지 중 차가 흔들림)
+      stopAccel = self.stopping_accel if self.stopping_accel < 0.0 else self.CP.stopAccel
+      if output_accel > stopAccel:
         output_accel = min(output_accel, 0.0)
-        # TODO: can we just go straight to stopAccel?
-        output_accel -= 1.0 * DT_CTRL  # m/s^2/s while trying to stop
+        # Kans: 차종별 stoppingDecelRate (미설정 차종은 기존 1.0)
+        stopping_decel_rate = self.CP.stoppingDecelRate if self.CP.stoppingDecelRate > 0. else 1.0
+        output_accel -= stopping_decel_rate * DT_CTRL  # m/s^2/s while trying to stop
       self.reset()
 
     elif self.long_control_state == LongCtrlState.starting:
