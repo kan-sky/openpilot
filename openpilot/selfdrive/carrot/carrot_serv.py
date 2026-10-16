@@ -234,6 +234,7 @@ class CarrotServ:
     self.autoTurnMapChange = self.params.get_int("AutoTurnMapChange")
     self.autoTurnControl = self.params.get_int("AutoTurnControl")
     self.autoTurnControlTurnEnd = self.params.get_int("AutoTurnControlTurnEnd")
+    self.autoTurnDistOffset = self.params.get_int("AutoTurnDistOffset")
     #self.autoNaviSpeedDecelRate = float(self.params.get_int("AutoNaviSpeedDecelRate")) * 0.01
     self.autoCurveSpeedLowerLimit = int(self.params.get("AutoCurveSpeedLowerLimit"))
     self.is_metric = self.params.get_bool("IsMetric")
@@ -986,6 +987,12 @@ class CarrotServ:
     is_tg = x_turn_info == 6
     is_highway_like = self.roadcate in [0, 1] or self.nRoadLimitSpeed >= 70
 
+    # Kans: 네비 좌/우회전 지점은 교차로 중앙이 아니라 회전 후 도로 시작점이다.
+    # 좌/우회전은 AutoTurnDistOffset만큼 앞당긴 거리(교차로 중앙 기준)로 감속/회전 시점을 판단한다.
+    x_dist_raw = x_dist_to_turn
+    if is_turn:
+      x_dist_to_turn = x_dist_to_turn - self.autoTurnDistOffset
+
     if self.autoTurnControlSpeedTurn > 0:
       turn_ratio = max(0.90, self.autoTurnControlSpeedTurn)
       apply_speed = v_ego_kph * turn_ratio
@@ -994,7 +1001,8 @@ class CarrotServ:
       if is_turn:
         # 일반 좌/우회전: 접근 중에는 현재속도 비율, 턴 직전에는 15km/h
         approach_speed = max(15.0, min(35.0, apply_speed))
-        turn_speed = 15.0 if 0 < x_dist_to_turn <= 15.0 else approach_speed  #Kans: 턴시도가 빨라서 속도를 높임.
+        # 교차로 중앙 15m 전부터 회전이 끝나는 네비 지점까지 15km/h
+        turn_speed = 15.0 if x_dist_raw > 0 and x_dist_to_turn <= 15.0 else approach_speed
 
       elif is_rotary:
         # 로터리: 너무 느리면 후속차 방해
@@ -1061,7 +1069,7 @@ class CarrotServ:
         f"ATC:{atc_debug} "
         f"TYP:{self.navType} "
         f"TI:{x_turn_info} "
-        f"D:{x_dist_to_turn:.0f} "
+        f"D:{x_dist_to_turn:.0f}({x_dist_raw:.0f}) "
         f"FD:{start_fork_dist:.0f} "
         f"TD:{start_turn_dist:.0f}"
       )
@@ -1137,7 +1145,7 @@ class CarrotServ:
         atc_type += " canceled"
 
     atc_desired = 250
-    if atc_speed > 0 and x_dist_to_turn > 0:
+    if atc_speed > 0 and x_dist_raw > 0:
       decel = self.autoNaviSpeedDecelRate
       safe_sec = 2.0
       atc_desired = min(atc_desired, self.calculate_current_speed(x_dist_to_turn - atc_dist, atc_speed, safe_sec, decel))
