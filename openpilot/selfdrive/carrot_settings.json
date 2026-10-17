@@ -161,8 +161,7 @@
                     "LateralTorqueFriction",
                     "LateralTorqueKpV",
                     "LateralTorqueKiV",
-                    "LateralTorqueKf",
-                    "LateralTorqueKd"
+                    "LateralTorqueKf"
                   ]
                 },
                 {
@@ -711,22 +710,6 @@
       "max": 200,
       "default": 100,
       "unit": 1
-    },
-    {
-      "group": "조향토크",
-      "name": "LateralTorqueKd",
-      "title": "_LateralTorqueKd*0.01(0)",
-      "descr": "조향 미분 계수(급격한 변화에 저항) \n\n 0 권장",
-      "egroup": "LAT_TQ",
-      "etitle": "_LateralTorqueKd*0.01(0)",
-      "edescr": "Steering Derivative Gain, 0 Recommended",
-      "cgroup": "转向",
-      "ctitle": "转向力矩 Kd*0.01(0)",
-      "cdescr": "转向微分增益，推荐 0",
-      "min": 0,
-      "max": 10000,
-      "default": 0,
-      "unit": 10
     },
     {
       "group": "레인모드",
