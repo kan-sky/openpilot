@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import datetime
+import importlib
 import os
 import signal
 import sys
@@ -20,6 +21,22 @@ from openpilot.common.swaglog import cloudlog, add_file_handler
 from openpilot.common.version import get_build_metadata
 from openpilot.common.hardware.hw import Paths
 
+
+# Kans: 웹 서버 차량 선택 목록 (/data/params/d/SupportedCars_gm)
+def write_supported_cars_files() -> None:
+  params_path = Params().get_param_path()
+  for brand, filename in (
+    ("gm", "SupportedCars_gm"),
+  ):
+    try:
+      values = importlib.import_module(f"opendbc.car.{brand}.values")
+      cars = sorted(doc.name for platform in values.CAR for doc in platform.config.car_docs)
+      with open(os.path.join(params_path, filename), "w") as f:
+        f.write("\n".join(cars))
+        if cars:
+          f.write("\n")
+    except Exception:
+      cloudlog.exception(f"failed to write {filename} from opendbc.car.{brand}.values")
 
 def manager_init() -> None:
   save_bootlog()
@@ -175,6 +192,7 @@ def manager_thread() -> None:
 
 def main() -> None:
   manager_init()
+  write_supported_cars_files()
   if os.getenv("PREPAREONLY") is not None:
     return
 

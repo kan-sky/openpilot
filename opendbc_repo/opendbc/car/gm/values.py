@@ -129,15 +129,17 @@ class GMPlatformConfig(PlatformConfig):
 @dataclass
 class GMASCMPlatformConfig(GMPlatformConfig):
   def init(self):
-    # ASCM is supported, but due to a janky install and hardware configuration, we are not showing in the car docs
-    self.car_docs = []
+    # Kans: 차량 선택(SupportedCars_gm) 목록에 나오도록 docs 유지
+    #self.car_docs = []
+    pass
 
 
 @dataclass
 class GMSDGMPlatformConfig(GMPlatformConfig):
   def init(self):
-    # Don't show in docs until the harness is sold. See https://github.com/commaai/openpilot/issues/32471
-    self.car_docs = []
+    # Kans: 차량 선택(SupportedCars_gm) 목록에 나오도록 docs 유지
+    #self.car_docs = []
+    pass
 
 
 class CAR(Platforms):
@@ -311,3 +313,14 @@ SDGM_CAR = {CAR.CADILLAC_XT4, CAR.CHEVROLET_VOLT_2019, CAR.CHEVROLET_TRAVERSE}
 STEER_THRESHOLD = 1.0
 
 DBC = CAR.create_dbc_map()
+
+
+# Kans: 차량 선택 목록 출력 (python values.py)
+if __name__ == "__main__":
+  cars = []
+  for platform in CAR:
+    for doc in platform.config.car_docs:
+      cars.append(doc.name)
+  cars.sort()
+  for c in cars:
+    print(c)
