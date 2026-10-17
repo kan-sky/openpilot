@@ -49,8 +49,32 @@ MIN_LAT_CONTROL_SPEED = 0.3
 BIG_MODEL_TIMEOUT = 60
 
 
+# Kans: 조향 스무딩(LatSmoothSec) - 모델 1초 뒤 횡위치 불확실성(std) 기반 동적 스무딩
+# LatSmoothSec=0.08 기준: std 0.15까지 0.08 유지, 0.15~0.30에서 증가, 0.20초에서 고정
+def get_lat_smooth_seconds_dynamic(model_output: dict[str, np.ndarray],
+                                   base_lat_smooth_seconds: float) -> tuple[float, float, float]:
+  if base_lat_smooth_seconds <= 0.0:
+    return 0.0, 0.0, 0.0
+
+  try:
+    y_std_1s = float(model_output['plan_stds'][0, 10, Plan.POSITION, 1])
+  except Exception:
+    y_std_1s = 0.0
+
+  max_lat_smooth_seconds = 0.20
+  extra_max = max(0.0, max_lat_smooth_seconds - base_lat_smooth_seconds)
+
+  extra_smooth_seconds = float(np.interp(y_std_1s, [0.15, 0.30], [0.0, extra_max]))
+  extra_smooth_seconds = float(np.clip(extra_smooth_seconds, 0.0, extra_max))
+
+  dynamic_lat_smooth_seconds = float(np.clip(base_lat_smooth_seconds + extra_smooth_seconds, 0.0, max_lat_smooth_seconds))
+
+  return dynamic_lat_smooth_seconds, y_std_1s, extra_smooth_seconds
+
+
 def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.ModelDataV2.Action,
-                          lat_action_t: float, long_action_t: float, v_ego: float) -> log.ModelDataV2.Action:
+                          lat_action_t: float, long_action_t: float, v_ego: float,
+                          lat_smooth_seconds: float = LAT_SMOOTH_SECONDS) -> log.ModelDataV2.Action:
   if 'action' not in model_output:
     plan = model_output['plan'][0]
     desired_accel, _, _, _ = get_accel_from_plan(plan[:,Plan.VELOCITY][:,0],
@@ -67,10 +91,34 @@ def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.
     desired_curvature = model_output['action'][0,0] / (max(1.0, v_ego))**2
   stop = should_stop(v_ego, desired_accel)
   desired_accel = smooth_value(desired_accel, prev_action.desiredAcceleration, LONG_SMOOTH_SECONDS)
+
+  applied_lat_smooth_seconds = 0.0
+  if lat_smooth_seconds > 0.0:
+    # Kans: 깊은 커브에서 모델 곡률이 갑자기 줄어들 때 핸들 급풀림 방지
+    # 같은 방향 곡률 0.0025 이상(램프 등)에서 70% 아래로 떨어지면 80%는 직전값 유지
+    raw_desired_curvature = float(desired_curvature)
+    prev_curvature = float(prev_action.desiredCurvature)
+    same_curve = raw_desired_curvature * prev_curvature > 0.0
+    deep_curve = abs(prev_curvature) > 0.0025
+    curv_drop = abs(raw_desired_curvature) < abs(prev_curvature) * 0.70
+    if same_curve and deep_curve and curv_drop:
+      desired_curvature = prev_curvature * 0.8 + raw_desired_curvature * 0.2
+
+    # Kans: 곡률별/속도별 스무딩 상한 (큰 곡률·저속일수록 짧게)
+    curve_smooth_max = float(np.interp(abs(desired_curvature), [0.0005, 0.0015, 0.0040], [0.13, 0.11, 0.10]))
+    speed_smooth_max = float(np.interp(v_ego, [5.0, 15.0, 30.0], [0.08, 0.10, 0.18]))
+    applied_lat_smooth_seconds = float(np.clip(min(lat_smooth_seconds, curve_smooth_max, speed_smooth_max), 0.08, 0.18))
+
   if v_ego > MIN_LAT_CONTROL_SPEED:
-    desired_curvature = smooth_value(desired_curvature, prev_action.desiredCurvature, LAT_SMOOTH_SECONDS)
+    desired_curvature = smooth_value(desired_curvature, prev_action.desiredCurvature, applied_lat_smooth_seconds)
   else:
     desired_curvature = prev_action.desiredCurvature
+
+  # Kans: NaN 보호
+  desired_curvature = float(np.nan_to_num(desired_curvature, nan=prev_action.desiredCurvature,
+                                          posinf=prev_action.desiredCurvature, neginf=prev_action.desiredCurvature))
+  desired_accel = float(np.nan_to_num(desired_accel, nan=prev_action.desiredAcceleration,
+                                      posinf=prev_action.desiredAcceleration, neginf=prev_action.desiredAcceleration))
 
   return log.ModelDataV2.Action(desiredCurvature=float(desired_curvature),
                                 desiredAcceleration=float(desired_accel),
@@ -334,6 +382,10 @@ def main(demo=False):
 
   DH = DesireHelper()
 
+  # Kans: LatSmoothSec(0.01초 단위)은 1초마다 읽음
+  lat_smooth_seconds = LAT_SMOOTH_SECONDS
+  lat_smooth_param_frame = 0
+
   while True:
     # Keep receiving frames until we are at least 1 frame ahead of previous extra frame
     while meta_main.timestamp_sof < meta_extra.timestamp_sof + 25000000:
@@ -379,7 +431,11 @@ def main(demo=False):
     is_rhd = sm["driverMonitoringState"].isRHD
     frame_id = sm["narrowRoadCameraState"].frameId
     v_ego = max(sm["carState"].vEgo, 0.)
-    lat_delay = sm["lateralDelay"].lateralDelay + LAT_SMOOTH_SECONDS
+    if lat_smooth_param_frame % int(1. / DT_MDL) == 0:
+      lat_smooth_seconds = params.get_float("LatSmoothSec") * 0.01
+    lat_smooth_param_frame += 1
+    # Kans: 모델 입력 action_t에는 스무딩을 넣지 않음 (스무딩 보상은 곡률 계산에서만)
+    lat_delay = sm["lateralDelay"].lateralDelay
     if sm.updated["extrinsicsCalibration"] and sm.seen['narrowRoadCameraState'] and sm.seen['deviceState']:
       device_from_calib_euler = np.array(sm["extrinsicsCalibration"].rpyCalib, dtype=np.float32)
       dc = DEVICE_CAMERAS[(str(sm['deviceState'].deviceType), str(sm['narrowRoadCameraState'].sensor))]
@@ -445,7 +501,9 @@ def main(demo=False):
 
       if not sm['carControl'].latActive:
         prev_action.desiredCurvature = sm['controlsState'].curvature
-      action = get_action_from_model(model_output, prev_action, lat_action_t, long_action_t, v_ego)
+      lat_smooth_seconds_dynamic, _, _ = get_lat_smooth_seconds_dynamic(model_output, lat_smooth_seconds)
+      lat_action_t_smooth = lat_delay + lat_smooth_seconds_dynamic + frame_delay + action_delay
+      action = get_action_from_model(model_output, prev_action, lat_action_t_smooth, long_action_t, v_ego, lat_smooth_seconds_dynamic)
       prev_action = action
       fill_model_msg(modelv2_send, model_output, action,
                      publish_state, meta_main.frame_id, meta_extra.frame_id, frame_id,

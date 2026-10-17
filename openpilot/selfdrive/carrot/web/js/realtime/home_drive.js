@@ -3757,6 +3757,11 @@ window.HomeDrive = (() => {
     hudCtx.restore();
   }
 
+  // Kans: 198은 레인모드 없음(콤마 모델 경로만 사용) - 항상 Laneless
+  function isLaneMode(_hudState) {
+    return false;
+  }
+
   function laneModeLabel(hudState) {
     return isLaneMode(hudState) ? "LaneMode" : "Laneless";
   }

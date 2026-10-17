@@ -105,6 +105,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"EVTable", {PERSISTENT, BOOL, "1"}},
     {"LongPitch", {PERSISTENT, BOOL, "1"}},
     {"DisableDM", {PERSISTENT, INT, "1"}},
+    {"LatSmoothSec", {PERSISTENT, INT, "8"}},
     {"LateralTorqueCustom", {PERSISTENT, BOOL, "1"}},
     {"LateralTorqueAccelFactor", {PERSISTENT, INT, "2100"}},
     {"LateralTorqueFriction", {PERSISTENT, INT, "150"}},
