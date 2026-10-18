@@ -160,6 +160,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"AutoTurnControlSpeedTurn", {PERSISTENT, INT, "95"}},
     {"AutoTurnControlTurnEnd", {PERSISTENT, INT, "10"}},
     {"AutoTurnDistOffset", {PERSISTENT, INT, "12"}},
+    {"AutoTurnPassSpeed", {PERSISTENT, INT, "23"}},
     {"AutoTurnMapChange", {PERSISTENT, INT, "0"}},
     {"CarrotException", {CLEAR_ON_MANAGER_START, STRING}},
     {"CarrotNaviDebug", {CLEAR_ON_MANAGER_START, STRING}},

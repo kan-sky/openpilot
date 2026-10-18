@@ -121,6 +121,7 @@
                 "AutoTurnControlSpeedTurn",
                 "AutoTurnControlTurnEnd",
                 "AutoTurnDistOffset",
+                "AutoTurnPassSpeed",
                 "AutoTurnMapChange"
               ]
             },
@@ -1245,6 +1246,22 @@
       "min": 0,
       "max": 40,
       "default": 12,
+      "unit": 1
+    },
+    {
+      "group": "조향일반",
+      "name": "AutoTurnPassSpeed",
+      "title": "ATC: 턴 통과속도(23)km/h",
+      "descr": "교차로 좌/우회전 지점을 통과하는 목표속도. 낮으면 회전이 안정적, 높으면 도로흐름에 맞음",
+      "egroup": "LATSET",
+      "etitle": "ATC: Turn Pass Speed(23)km/h",
+      "edescr": "Target speed through the left/right turn point. Lower is steadier, higher keeps up with traffic",
+      "cgroup": "转向设置",
+      "ctitle": "ATC: 转弯通过速度(23)km/h",
+      "cdescr": "路口左/右转通过目标速度。低更稳定，高更跟得上车流",
+      "min": 10,
+      "max": 40,
+      "default": 23,
       "unit": 1
     },
     {

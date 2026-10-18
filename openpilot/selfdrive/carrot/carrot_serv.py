@@ -235,6 +235,10 @@ class CarrotServ:
     self.autoTurnControl = self.params.get_int("AutoTurnControl")
     self.autoTurnControlTurnEnd = self.params.get_int("AutoTurnControlTurnEnd")
     self.autoTurnDistOffset = self.params.get_int("AutoTurnDistOffset")
+    # Kans: ATC 좌/우회전 통과속도(km/h), 0 이하면 15
+    self.autoTurnPassSpeed = self.params.get_int("AutoTurnPassSpeed")
+    if self.autoTurnPassSpeed <= 0:
+      self.autoTurnPassSpeed = 15
     #self.autoNaviSpeedDecelRate = float(self.params.get_int("AutoNaviSpeedDecelRate")) * 0.01
     self.autoCurveSpeedLowerLimit = int(self.params.get("AutoCurveSpeedLowerLimit"))
     self.is_metric = self.params.get_bool("IsMetric")
@@ -999,10 +1003,11 @@ class CarrotServ:
       fork_speed = turn_speed
 
       if is_turn:
-        # 일반 좌/우회전: 접근 중에는 현재속도 비율, 턴 직전에는 15km/h
-        approach_speed = max(15.0, min(35.0, apply_speed))
-        # 교차로 중앙 15m 전부터 회전이 끝나는 네비 지점까지 15km/h
-        turn_speed = 15.0 if x_dist_raw > 0 and x_dist_to_turn <= 15.0 else approach_speed
+        # 일반 좌/우회전: 접근 중에는 현재속도 비율, 턴 직전에는 통과속도(AutoTurnPassSpeed, 기본 23km/h)
+        pass_speed = float(self.autoTurnPassSpeed)
+        approach_speed = max(pass_speed, min(35.0, apply_speed))
+        # 교차로 중앙 15m 전부터 회전이 끝나는 네비 지점까지 통과속도
+        turn_speed = pass_speed if x_dist_raw > 0 and x_dist_to_turn <= 15.0 else approach_speed
 
       elif is_rotary:
         # 로터리: 너무 느리면 후속차 방해
