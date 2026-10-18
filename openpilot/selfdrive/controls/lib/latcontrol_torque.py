@@ -54,6 +54,10 @@ class LatControlTorque(LatControl):
     self.frame = 0
     self.params = Params()
     self.lateralTorqueCustom = self.params.get_bool("LateralTorqueCustom")
+    # Kans: 실시간 튜닝 중에도 가속계수/마찰은 torqued 학습값 사용 (LateralTorqueLiveFriction), Kp/Ki/Kf는 설정값 유지
+    self.lateralTorqueLiveFriction = self.params.get_bool("LateralTorqueLiveFriction")
+    self.live_lat_accel_factor = None
+    self.live_friction = None
 
     self.latAccelFactor_default = self.torque_params.latAccelFactor
     self.latAccelOffset_default = self.torque_params.latAccelOffset
@@ -66,8 +70,14 @@ class LatControlTorque(LatControl):
     # (예측 성분은 피드포워드/NNFF와 저크 기반 마찰보상이 담당)
 
   def update_torque_parameters(self, latAccelFactor, latAccelOffset, friction):
-    # Kans: 실시간 튜닝 중에는 torqued 학습값으로 덮어쓰지 않음
+    # Kans: torqued 학습값 보관. 실시간 튜닝 중에는 LateralTorqueLiveFriction일 때 가속계수/마찰만 반영
+    self.live_lat_accel_factor = latAccelFactor
+    self.live_friction = friction
     if self.lateralTorqueCustom:
+      if self.lateralTorqueLiveFriction:
+        self.torque_params.latAccelFactor = latAccelFactor
+        self.torque_params.friction = friction
+        self.update_limits()
       return
 
     self.torque_params.latAccelFactor = latAccelFactor
@@ -83,11 +93,14 @@ class LatControlTorque(LatControl):
     self.frame += 1
     if self.frame % 10 == 0:
       lateralTorqueCustom = self.params.get_bool("LateralTorqueCustom")
+      self.lateralTorqueLiveFriction = self.params.get_bool("LateralTorqueLiveFriction")
 
       if lateralTorqueCustom:
-        self.torque_params.latAccelFactor = self.params.get_float("LateralTorqueAccelFactor") * 0.001
+        # 학습값을 쓰는 설정이고 학습값이 있으면 그 값, 아니면 설정값
+        use_live = self.lateralTorqueLiveFriction and self.live_lat_accel_factor is not None
+        self.torque_params.latAccelFactor = self.live_lat_accel_factor if use_live else self.params.get_float("LateralTorqueAccelFactor") * 0.001
         self.torque_params.latAccelOffset = self.latAccelOffset_default
-        self.torque_params.friction = self.params.get_float("LateralTorqueFriction") * 0.001
+        self.torque_params.friction = self.live_friction if use_live else self.params.get_float("LateralTorqueFriction") * 0.001
 
         self.pid._k_p = ([0.0], [self.params.get_float("LateralTorqueKpV") * 0.01])
         self.pid._k_i = ([0.0], [self.params.get_float("LateralTorqueKiV") * 0.01])
