@@ -127,6 +127,9 @@ class SelfdriveD:
     self.cruise_mismatch_counter = 0
     self.last_steering_pressed_frame = 0
     self.distance_traveled = 0
+    # Kans: 누적 주행거리 (selfdriveState.distanceTraveled) - carrot_serv가 네비 갱신 사이 회전/카메라 거리를 줄이는 데 사용
+    # distance_traveled는 GPS 정상이면 매 프레임 0으로 초기화되는 noGps 경고용이라 따로 둔다
+    self.distance_traveled_total = 0.
     self.last_functional_fan_frame = 0
     self.events_prev = []
     self.logged_comm_issue = None
@@ -470,6 +473,7 @@ class SelfdriveD:
     if gps_ok:
       self.distance_traveled = 0
     self.distance_traveled += abs(CS.vEgo) * DT_CTRL
+    self.distance_traveled_total += abs(CS.vEgo) * DT_CTRL
 
     # TODO: fix simulator
     if not SIMULATION or REPLAY:
@@ -554,6 +558,7 @@ class SelfdriveD:
     ss.engageable = not self.events.contains(ET.NO_ENTRY)
     ss.experimentalMode = self.experimental_mode
     ss.personality = self.personality
+    ss.distanceTraveled = float(self.distance_traveled_total)
 
     ss.alertText1 = self.AM.current_alert.alert_text_1
     ss.alertText2 = self.AM.current_alert.alert_text_2

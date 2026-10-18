@@ -1221,7 +1221,8 @@ class CarrotServ:
       v_ego = CS.vEgo
       v_ego_kph = v_ego * 3.6
       distanceTraveled = sm['selfdriveState'].distanceTraveled
-      delta_dist = distanceTraveled - self.totalDistance
+      # Kans: selfdrived 재시작(onroad 전환)으로 누적거리가 0부터 다시 시작하면 음수가 되므로 무시
+      delta_dist = max(0., distanceTraveled - self.totalDistance)
       self.totalDistance = distanceTraveled
       if CS.speedLimit > 0 and self.active_carrot <= 1:
         self.nRoadLimitSpeed = CS.speedLimit
@@ -1341,7 +1342,9 @@ class CarrotServ:
       (sdi_speed, "hda" if hda_active else "bump" if self.xSpdType == 22 else "section" if self.xSpdType == 4 else "police" if self.xSpdType == 100 else "waze" if self.xSpdType == 101 else "cam"),
       (limit_speed, "road"),
     ]
-    if self.turnSpeedControlMode in [1,2]:
+    # Kans: 모드 3도 비전(vturn) 포함 - 3: 비전 + 경로(항상)
+    # (경로만 쓰면 회전안내 없는 램프 등에서 지도 곡률이 진입 직전 실제 곡률보다 완만해 진입속도가 높아짐, rlog18)
+    if self.turnSpeedControlMode in [1,2,3]:
       speed_n_sources.append((max(abs(vturn_speed), self.autoCurveSpeedLowerLimit), "vturn"))
 
     route_speed = max(route_speed * self.mapTurnSpeedFactor, self.autoCurveSpeedLowerLimit)
@@ -1349,6 +1352,7 @@ class CarrotServ:
       if -500 < self.xDistToTurn < 500:
         speed_n_sources.append((route_speed, "route"))
     elif self.turnSpeedControlMode == 3:
+      # Kans: 회전안내(TBT)와 무관하게 경로 곡률 속도를 항상 반영 (vturn과 함께 낮은 쪽을 따름)
       speed_n_sources.append((route_speed, "route"))
       #speed_n_sources.append((self.calculate_current_speed(dist, speed * self.mapTurnSpeedFactor, 0, 1.2), "route"))
 
