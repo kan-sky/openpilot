@@ -180,8 +180,6 @@ class RealtimeBroker:
       "ShowLaneInfo",
       "ShowPathMode",
       "ShowPathColor",
-      "ShowPathModeLane",
-      "ShowPathColorLane",
       "ShowPathColorCruiseOff",
       "ShowPathWidth",
       "ShowPlotMode",

@@ -835,8 +835,6 @@ const SETTING_CONTROL_OVERRIDES = {
   ShowPathMode: { kind: "select" },
   ShowPathColor: { kind: "select" },
   ShowPathColorCruiseOff: { kind: "select" },
-  ShowPathModeLane: { kind: "select" },
-  ShowPathColorLane: { kind: "select" },
   ShowPlotMode: { kind: "select" },
   ClusterHudScreenMode: { kind: "select" },
   ClusterHudRadarInfo: { kind: "select" },

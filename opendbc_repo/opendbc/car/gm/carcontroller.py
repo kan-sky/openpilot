@@ -37,6 +37,11 @@ def apply_deadzone(error, deadzone):
   return error
 
 
+# Kans: panda gm.h GM_STEERING_LIMITS의 max_rate_up/max_rate_down
+PANDA_STEER_RATE_UP = 20
+PANDA_STEER_RATE_DOWN = 25
+
+
 class CarController(CarControllerBase):
   def __init__(self, dbc_names, CP):
     super().__init__(dbc_names, CP)
@@ -53,6 +58,11 @@ class CarController(CarControllerBase):
 
     self.params = CarControllerParams(self.CP)
     self.params_ = Params()
+
+    # Kans: 조향 한계 실시간 튜닝 (CustomSteerMax/DeltaUp/DeltaDown, 차선변경 중 LC값)
+    self.steerMaxOrg = self.params.STEER_MAX
+    self.steerDeltaUpOrg = self.steerDeltaUp = self.steerDeltaUpLC = self.params.STEER_DELTA_UP
+    self.steerDeltaDownOrg = self.steerDeltaDown = self.steerDeltaDownLC = self.params.STEER_DELTA_DOWN
 
     # Kans: 롱피치(경사보상) / EV 리젠·브레이크 경계표 - 파라미터 LongPitch, EVTable
     self.long_pitch = self.params_.get_bool("LongPitch")
@@ -71,8 +81,31 @@ class CarController(CarControllerBase):
     self.packer_ch = CANPacker(DBC[self.CP.carFingerprint][Bus.chassis])
 
   def update(self, CC, CS, now_nanos):
+    # Kans: 0.5초마다 조향 한계 파라미터 반영 (0 이하면 기본값). STEER_MAX는 panda 한계(300)를 넘지 않게 제한
+    if self.frame % 50 == 0:
+      steerMax = self.params_.get_int("CustomSteerMax")
+      steerDeltaUp = self.params_.get_int("CustomSteerDeltaUp")
+      steerDeltaDown = self.params_.get_int("CustomSteerDeltaDown")
+      steerDeltaUpLC = self.params_.get_int("CustomSteerDeltaUpLC")
+      steerDeltaDownLC = self.params_.get_int("CustomSteerDeltaDownLC")
+
+      # panda gm.h 한계(max_rate_up 20, max_rate_down 25) 안으로 제한 (이 포크 gm.h는 위반 시 차단하지 않으므로 여기서 지킴)
+      self.params.STEER_MAX = min(steerMax, self.steerMaxOrg) if steerMax > 0 else self.steerMaxOrg
+      self.steerDeltaUp = min(steerDeltaUp, PANDA_STEER_RATE_UP) if steerDeltaUp > 0 else self.steerDeltaUpOrg
+      self.steerDeltaDown = min(steerDeltaDown, PANDA_STEER_RATE_DOWN) if steerDeltaDown > 0 else self.steerDeltaDownOrg
+      self.steerDeltaUpLC = min(steerDeltaUpLC, PANDA_STEER_RATE_UP) if steerDeltaUpLC > 0 else self.steerDeltaUp
+      self.steerDeltaDownLC = min(steerDeltaDownLC, PANDA_STEER_RATE_DOWN) if steerDeltaDownLC > 0 else self.steerDeltaDown
+
     actuators = CC.actuators
     hud_control = CC.hudControl
+
+    # Kans: 차선변경 중(desire laneChangeLeft/Right = 3/4)에는 LC 변화율 사용
+    if hud_control.modelDesire in (3, 4):
+      self.params.STEER_DELTA_UP = self.steerDeltaUpLC
+      self.params.STEER_DELTA_DOWN = self.steerDeltaDownLC
+    else:
+      self.params.STEER_DELTA_UP = self.steerDeltaUp
+      self.params.STEER_DELTA_DOWN = self.steerDeltaDown
     hud_alert = hud_control.visualAlert
     hud_v_cruise = hud_control.setSpeed
     if hud_v_cruise > 70:

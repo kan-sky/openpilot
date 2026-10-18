@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
+import json
+import os
 from math import fabs, exp
 import numpy as np
 
 from opendbc.car import get_safety_config, structs
+from opendbc.car.common.basedir import BASEDIR
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.gm.carcontroller import CarController
 from opendbc.car.gm.carstate import CarState
@@ -20,6 +23,38 @@ NON_LINEAR_TORQUE_PARAMS = {
   CAR.GMC_ACADIA: [4.78003305, 1.0, 0.3122, 0.05591772],
   CAR.CHEVROLET_SILVERADO: [3.29974374, 1.0, 0.25571356, 0.0465122]
 }
+
+# Kans: NNFF (신경망 피드포워드) - 횡가속도 → 조향토크
+NEURAL_PARAMS_PATH = os.path.join(BASEDIR, 'torque_data/neural_ff_weights.json')
+NEURAL_FF_CARS = (CAR.CHEVROLET_VOLT,)
+
+
+class NanoFFModel:
+  def __init__(self, platform):
+    with open(NEURAL_PARAMS_PATH) as f:
+      self.weights = {
+        k: np.asarray(v)
+        for k, v in json.load(f)[platform].items()
+      }
+
+  def predict(self, inputs):
+    w = self.weights
+    x = np.asarray(inputs, dtype=float)
+
+    x = (x - w["input_norm_mat"][:, 0]) / (
+      w["input_norm_mat"][:, 1] - w["input_norm_mat"][:, 0]
+    )
+
+    x = np.maximum(0.0, x @ w["w_1"] + w["b_1"])
+    x = np.maximum(0.0, x @ w["w_2"] + w["b_2"])
+    x = np.maximum(0.0, x @ w["w_3"] + w["b_3"])
+    x = x @ w["w_4"] + w["b_4"]
+
+    return float(
+      x[0] *
+      (w["output_norm_mat"][1] - w["output_norm_mat"][0]) +
+      w["output_norm_mat"][0]
+    )
 
 
 class CarInterface(CarInterfaceBase):
@@ -66,8 +101,29 @@ class CarInterface(CarInterfaceBase):
     assert min(torque_values) < -1 and max(torque_values) > 1, "The torque values should cover the range [-1, 1]"
     return torque_values, lataccel_values
 
+  # Kans: NNFF 입력(롤 보정, 속도, 가속도)은 latcontrol_torque가 매 프레임 넘겨준다
+  def set_torque_from_lateral_accel_context(self, roll_compensation: float, v_ego: float, a_ego: float) -> None:
+    self._nano_roll_compensation = float(roll_compensation)
+    self._nano_v_ego = float(v_ego)
+    self._nano_a_ego = float(a_ego)
+
+  def torque_from_lateral_accel_neural(self, lateral_acceleration: float,
+                                       torque_params: structs.CarParams.LateralTorqueTuning) -> float:
+    # 마찰 보상은 latcontrol_torque가 횡가속도 공간에서 이미 적용하므로 여기서는 NNFF 입력만 구성
+    roll_compensation = getattr(self, "_nano_roll_compensation", 0.0)
+    inputs = [
+      float(lateral_acceleration) + roll_compensation,
+      roll_compensation,
+      getattr(self, "_nano_v_ego", 0.0),
+      getattr(self, "_nano_a_ego", 0.0),
+    ]
+    return float(self.neural_ff_model.predict(inputs))
+
   def torque_from_lateral_accel(self) -> TorqueFromLateralAccelCallbackType:
-    if self.CP.carFingerprint in NON_LINEAR_TORQUE_PARAMS:
+    if self.CP.carFingerprint in NEURAL_FF_CARS:
+      self.neural_ff_model = NanoFFModel(str(self.CP.carFingerprint))
+      return self.torque_from_lateral_accel_neural
+    elif self.CP.carFingerprint in NON_LINEAR_TORQUE_PARAMS:
       torque_values, lataccel_values = self.get_lataccel_torque_siglin()
 
       def torque_from_lateral_accel_siglin(lateral_acceleration: float, torque_params: structs.CarParams.LateralTorqueTuning):
@@ -76,8 +132,29 @@ class CarInterface(CarInterfaceBase):
     else:
       return self.torque_from_lateral_accel_linear
 
+  # Kans: NNFF 역함수 - 현재 컨텍스트(롤/속도/가속도)에서 목표 토크가 되는 횡가속도를 이분탐색
+  # (선형식 latAccelFactor x 토크로 PID 상한을 잡으면 NNFF로는 토크 0.95까지만 도달해 긴 커브에서 언더스티어)
+  def lateral_accel_from_torque_neural(self, torque: float,
+                                       torque_params: structs.CarParams.LateralTorqueTuning) -> float:
+    lo, hi = -6.0, 6.0
+    if self.torque_from_lateral_accel_neural(hi, torque_params) <= torque:
+      return hi
+    if self.torque_from_lateral_accel_neural(lo, torque_params) >= torque:
+      return lo
+    for _ in range(16):
+      mid = 0.5 * (lo + hi)
+      if self.torque_from_lateral_accel_neural(mid, torque_params) < torque:
+        lo = mid
+      else:
+        hi = mid
+    return 0.5 * (lo + hi)
+
   def lateral_accel_from_torque(self) -> LateralAccelFromTorqueCallbackType:
-    if self.CP.carFingerprint in NON_LINEAR_TORQUE_PARAMS:
+    if self.CP.carFingerprint in NEURAL_FF_CARS:
+      if not hasattr(self, "neural_ff_model"):
+        self.neural_ff_model = NanoFFModel(str(self.CP.carFingerprint))
+      return self.lateral_accel_from_torque_neural
+    elif self.CP.carFingerprint in NON_LINEAR_TORQUE_PARAMS:
       torque_values, lataccel_values = self.get_lataccel_torque_siglin()
 
       def lateral_accel_from_torque_siglin(torque: float, torque_params: structs.CarParams.LateralTorqueTuning):
@@ -154,11 +231,8 @@ class CarInterface(CarInterfaceBase):
     ret.longitudinalActuatorDelay = 0.3  # large delay to initially start braking
 
     if candidate == CAR.CHEVROLET_VOLT:
-      ret.lateralTuning.pid.kpBP = [0., 40.]
-      ret.lateralTuning.pid.kpV = [0., 0.17]
-      ret.lateralTuning.pid.kiBP = [0.]
-      ret.lateralTuning.pid.kiV = [0.]
-      ret.lateralTuning.pid.kf = 1.  # get_steer_feedforward_volt()
+      # Kans: 토크 횡제어 + NNFF (튜닝값은 LateralTorqueCustom 파라미터)
+      CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
       ret.steerActuatorDelay = 0.2
       # Kans: 오토리쥼 - starting 상태로 출발, RES/가스펄스는 auto_resume.py
       ret.autoResumeSng = True

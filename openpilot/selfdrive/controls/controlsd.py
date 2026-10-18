@@ -32,6 +32,7 @@ ACTUATOR_FIELDS = tuple(car.CarControl.Actuators.schema.fields.keys())
 class Controls:
   def __init__(self) -> None:
     self.params = Params()
+    self.lat_smooth_seconds = LAT_SMOOTH_SECONDS  # Kans: LatSmoothSec
     cloudlog.info("controlsd is waiting for CarParams")
     self.CP = messaging.log_from_bytes(self.params.get("CarParams", block=True), car.CarParams)
     cloudlog.info("controlsd got CarParams")
@@ -131,7 +132,10 @@ class Controls:
     else:
       new_desired_curvature = model_v2.action.desiredCurvature if CC.latActive else self.curvature
     self.desired_curvature, curvature_limited = clip_curvature(CS.vEgo, self.desired_curvature, new_desired_curvature, lp.roll)
-    lat_delay = self.sm["lateralDelay"].lateralDelay + LAT_SMOOTH_SECONDS
+    # Kans: modeld와 같은 조향 스무딩 시간(LatSmoothSec, 0.01초 단위)을 지연에 반영 (1초마다 읽음)
+    if self.sm.frame % 100 == 0:
+      self.lat_smooth_seconds = self.params.get_float("LatSmoothSec") * 0.01
+    lat_delay = self.sm["lateralDelay"].lateralDelay + self.lat_smooth_seconds
 
     actuators.curvature = self.desired_curvature
     steer, lateral_output, lac_log = self.LaC.update(CC.latActive, CS, self.VM, lp,
@@ -200,6 +204,8 @@ class Controls:
     hudControl.leadVisible = self.sm['longitudinalPlan'].hasLead
     hudControl.leadDistanceBars = self.sm['selfdriveState'].personality.raw + 1
     hudControl.visualAlert = self.sm['selfdriveState'].alertHudVisual
+    # Kans: 차선변경 desire를 carcontroller에 전달 (GM 차선변경용 조향 변화율)
+    hudControl.modelDesire = self.sm['modelV2'].meta.desire.raw
 
     hudControl.rightLaneVisible = True
     hudControl.leftLaneVisible = True
