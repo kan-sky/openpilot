@@ -423,11 +423,9 @@ def main(demo=False):
     desire = DH.desire
     # Kans: DH.desire는 laneChangeStarting에서야 laneChangeLeft/Right가 되므로,
     # 차선변경 FSM이 off를 벗어나는 즉시(preLaneChange 포함) 모델에 미리 desire를 준다.
-    # 단, 교차로 회전 접근(atc left/right)의 preLaneChange에서는 미리 주지 않는다 - 이미 회전 차로에 있어도
-    # 모델이 교차로 진입 전에 핸들을 틀어버림 (rlog20: 차선 끝 약 7m 전부터 43도). 실제 차선변경 시작 시에만 desire 전달
-    atc_turn_pre_lane_change = (DH.lane_change_state == log.LaneChangeState.preLaneChange and
-                                DH.atc_type in ("atc left", "atc right"))
-    if DH.lane_change_state != log.LaneChangeState.off and not atc_turn_pre_lane_change:
+    # 교차로 회전에서는 이 사전 desire가 회전 desire와 이어져야 모델이 회전을 유지한다 (rlog20 성공 / rlog23 실패).
+    # 사전 desire 시작 시점은 carrot_serv의 AutoTurnAtcDistLeft/Right(atc left/right 구간 길이)로 조정
+    if DH.lane_change_state != log.LaneChangeState.off:
       if DH.lane_change_direction == log.LaneChangeDirection.left:
         desire = log.Desire.laneChangeLeft
       elif DH.lane_change_direction == log.LaneChangeDirection.right:

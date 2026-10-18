@@ -235,6 +235,9 @@ class CarrotServ:
     self.autoTurnControl = self.params.get_int("AutoTurnControl")
     self.autoTurnControlTurnEnd = self.params.get_int("AutoTurnControlTurnEnd")
     self.autoTurnDistOffset = self.params.get_int("AutoTurnDistOffset")
+    # Kans: ATC 회전 준비구간(m) - atc left/right 구간 길이, 좌/우회전 별도
+    self.autoTurnAtcDistLeft = max(0, self.params.get_int("AutoTurnAtcDistLeft"))
+    self.autoTurnAtcDistRight = max(0, self.params.get_int("AutoTurnAtcDistRight"))
     # Kans: ATC 좌/우회전 통과속도(km/h), 0 이하면 15
     self.autoTurnPassSpeed = self.params.get_int("AutoTurnPassSpeed")
     if self.autoTurnPassSpeed <= 0:
@@ -1035,8 +1038,10 @@ class CarrotServ:
       road_dist = np.interp(self.nTBTNextRoadWidth, [5, 10], [30, 45])
       speed_dist = np.interp(v_ego_kph, [20, 30, 50], [15, 25, 40])
       start_turn_dist = min(road_dist, speed_dist)
-      # start_fork_dist(prepare->활성 전환)는 start_turn_dist보다 항상 15m 멀리서 시작한다.
-      start_fork_dist = start_turn_dist + 15.0
+      # Kans: atc left/right 구간 길이(= 회전 desire 전 사전 차선변경 desire 구간)를 좌/우회전 따로 설정
+      # 좌회전은 주로 사거리, 우회전은 진행차선 오른쪽 끝/골목 진입이라 맞는 값이 다름 (기존 고정 15m는 너무 일찍 꺾음)
+      atc_dist = self.autoTurnAtcDistLeft if x_turn_info == 1 else self.autoTurnAtcDistRight
+      start_fork_dist = start_turn_dist + atc_dist
       atc_debug = "Trn"
 
     elif is_rotary:

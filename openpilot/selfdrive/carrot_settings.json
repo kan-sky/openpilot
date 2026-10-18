@@ -122,6 +122,8 @@
                 "AutoTurnControlTurnEnd",
                 "AutoTurnDistOffset",
                 "AutoTurnPassSpeed",
+                "AutoTurnAtcDistLeft",
+                "AutoTurnAtcDistRight",
                 "AutoTurnMapChange"
               ]
             },
@@ -1262,6 +1264,38 @@
       "min": 10,
       "max": 40,
       "default": 23,
+      "unit": 1
+    },
+    {
+      "group": "조향일반",
+      "name": "AutoTurnAtcDistLeft",
+      "title": "ATC: 좌회전 준비구간(5)m",
+      "descr": "회전 desire 전에 차선변경 desire를 미리 주는 구간 길이. 크면 일찍 꺾고, 작으면 늦게 꺾음(너무 작으면 회전을 포기할 수 있음)",
+      "egroup": "LATSET",
+      "etitle": "ATC: Left Turn Prep Dist(5)m",
+      "edescr": "Length of the pre lane-change desire before the turn desire. Larger steers earlier, smaller later (too small may abort the turn)",
+      "cgroup": "转向设置",
+      "ctitle": "ATC: 左转准备距离(5)m",
+      "cdescr": "转弯前预先给出变道意图的距离。越大越早转向，越小越晚",
+      "min": 0,
+      "max": 30,
+      "default": 5,
+      "unit": 1
+    },
+    {
+      "group": "조향일반",
+      "name": "AutoTurnAtcDistRight",
+      "title": "ATC: 우회전 준비구간(5)m",
+      "descr": "우회전(차선 오른쪽 끝/골목 진입)의 사전 desire 구간 길이. 크면 일찍 꺾고, 작으면 늦게 꺾음",
+      "egroup": "LATSET",
+      "etitle": "ATC: Right Turn Prep Dist(5)m",
+      "edescr": "Pre desire length for right turns (lane end / alley entry). Larger steers earlier, smaller later",
+      "cgroup": "转向设置",
+      "ctitle": "ATC: 右转准备距离(5)m",
+      "cdescr": "右转(车道右端/小巷)预先意图距离。越大越早转向，越小越晚",
+      "min": 0,
+      "max": 30,
+      "default": 5,
       "unit": 1
     },
     {
