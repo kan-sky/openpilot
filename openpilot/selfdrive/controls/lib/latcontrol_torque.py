@@ -49,41 +49,48 @@ class LatControlTorque(LatControl):
     self.lookahead_frames = int(JERK_LOOKAHEAD_SECONDS / self.dt)
     self.jerk_filter = FirstOrderFilter(0.0, 1 / (2 * np.pi * LP_FILTER_CUTOFF_HZ), self.dt)
 
-    # Kans: 토크 실시간 튜닝 (LateralTorqueCustom)
-    # 피드포워드 배율 kf는 공용 PIDController를 바꾸지 않고 여기서만 곱한다 (kf 미설정이면 1.0 = 콤마 순정)
+    # Kans: 토크 실시간 튜닝
+    # - Kp/Ki/Kf는 항상 설정값 사용 (LateralTorqueKpV/KiV/Kf)
+    # - 가속계수/마찰/오프셋: LateralTorqueCustom=1이면 모두 설정값, 0이면 모두 torqued 학습값 (학습값 없으면 차량 기본값)
+    # 피드포워드 배율 kf는 공용 PIDController를 바꾸지 않고 여기서만 곱한다
     self.frame = 0
     self.params = Params()
     self.lateralTorqueCustom = self.params.get_bool("LateralTorqueCustom")
-    # Kans: 실시간 튜닝 중에도 가속계수/마찰은 torqued 학습값 사용 (LateralTorqueLiveFriction), Kp/Ki/Kf는 설정값 유지
-    self.lateralTorqueLiveFriction = self.params.get_bool("LateralTorqueLiveFriction")
-    self.live_lat_accel_factor = None
-    self.live_friction = None
+    self.live_torque_params = None  # (latAccelFactor, latAccelOffset, friction)
 
     self.latAccelFactor_default = self.torque_params.latAccelFactor
     self.latAccelOffset_default = self.torque_params.latAccelOffset
     self.friction_default = self.torque_params.friction
-    self.kp_default = ([*INTERP_SPEEDS], [*KP_INTERP])
-    self.ki_default = ([0.0], [KI])
-    self.kf_default = self.torque_params.kf if self.torque_params.kf > 0. else 1.0
-    self.kf = self.kf_default
+    self.kf = 1.0
+    self.update_tuning()
     # Kans: D항(Kd)은 사용하지 않음 - 콤마/캐럿과 동일하게 pid.update에 error_rate를 넘기지 않아 D=0
     # (예측 성분은 피드포워드/NNFF와 저크 기반 마찰보상이 담당)
 
   def update_torque_parameters(self, latAccelFactor, latAccelOffset, friction):
-    # Kans: torqued 학습값 보관. 실시간 튜닝 중에는 LateralTorqueLiveFriction일 때 가속계수/마찰만 반영
-    self.live_lat_accel_factor = latAccelFactor
-    self.live_friction = friction
-    if self.lateralTorqueCustom:
-      if self.lateralTorqueLiveFriction:
-        self.torque_params.latAccelFactor = latAccelFactor
-        self.torque_params.friction = friction
-        self.update_limits()
-      return
+    # Kans: torqued 학습값 보관, 커스텀이 아니면 바로 반영
+    self.live_torque_params = (latAccelFactor, latAccelOffset, friction)
+    if not self.lateralTorqueCustom:
+      self.apply_torque_params()
 
-    self.torque_params.latAccelFactor = latAccelFactor
-    self.torque_params.latAccelOffset = latAccelOffset
-    self.torque_params.friction = friction
+  def apply_torque_params(self):
+    if self.lateralTorqueCustom:
+      self.torque_params.latAccelFactor = self.params.get_float("LateralTorqueAccelFactor") * 0.001
+      self.torque_params.latAccelOffset = self.params.get_float("LateralTorqueOffset") * 0.001
+      self.torque_params.friction = self.params.get_float("LateralTorqueFriction") * 0.001
+    elif self.live_torque_params is not None:
+      self.torque_params.latAccelFactor, self.torque_params.latAccelOffset, self.torque_params.friction = self.live_torque_params
+    else:
+      self.torque_params.latAccelFactor = self.latAccelFactor_default
+      self.torque_params.latAccelOffset = self.latAccelOffset_default
+      self.torque_params.friction = self.friction_default
     self.update_limits()
+
+  def update_tuning(self):
+    self.lateralTorqueCustom = self.params.get_bool("LateralTorqueCustom")
+    self.pid._k_p = ([0.0], [self.params.get_float("LateralTorqueKpV") * 0.01])
+    self.pid._k_i = ([0.0], [self.params.get_float("LateralTorqueKiV") * 0.01])
+    self.kf = self.params.get_float("LateralTorqueKf") * 0.01
+    self.apply_torque_params()
 
   def update_limits(self):
     self.pid.set_limits(self.lateral_accel_from_torque(self.steer_max, self.torque_params),
@@ -92,36 +99,7 @@ class LatControlTorque(LatControl):
   def update(self, active, CS, VM, params, steer_limited_by_safety, desired_curvature, curvature_limited, lat_delay):
     self.frame += 1
     if self.frame % 10 == 0:
-      lateralTorqueCustom = self.params.get_bool("LateralTorqueCustom")
-      self.lateralTorqueLiveFriction = self.params.get_bool("LateralTorqueLiveFriction")
-
-      if lateralTorqueCustom:
-        # 학습값을 쓰는 설정이고 학습값이 있으면 그 값, 아니면 설정값
-        use_live = self.lateralTorqueLiveFriction and self.live_lat_accel_factor is not None
-        self.torque_params.latAccelFactor = self.live_lat_accel_factor if use_live else self.params.get_float("LateralTorqueAccelFactor") * 0.001
-        self.torque_params.latAccelOffset = self.latAccelOffset_default
-        self.torque_params.friction = self.live_friction if use_live else self.params.get_float("LateralTorqueFriction") * 0.001
-
-        self.pid._k_p = ([0.0], [self.params.get_float("LateralTorqueKpV") * 0.01])
-        self.pid._k_i = ([0.0], [self.params.get_float("LateralTorqueKiV") * 0.01])
-        self.kf = self.params.get_float("LateralTorqueKf") * 0.01
-
-        self.update_limits()
-
-      elif self.lateralTorqueCustom:
-        # 실시간 튜닝을 끄면 기본값으로 복귀
-        self.torque_params.latAccelFactor = self.latAccelFactor_default
-        self.torque_params.latAccelOffset = self.latAccelOffset_default
-        self.torque_params.friction = self.friction_default
-
-        self.pid._k_p = self.kp_default
-        self.pid._k_i = self.ki_default
-        self.kf = self.kf_default
-
-        self.update_limits()
-        self.pid.reset()
-
-      self.lateralTorqueCustom = lateralTorqueCustom
+      self.update_tuning()
 
     pid_log = log.ControlsState.LateralTorqueState.new_message()
     pid_log.version = VERSION
