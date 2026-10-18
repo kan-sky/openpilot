@@ -9,6 +9,9 @@ from opendbc.car.gm.auto_hold import is_auto_hold
 
 LongCtrlState = structs.CarControl.Actuators.LongControlState
 
+# 정지 직후에는 레이더 앞차 속도가 흔들려 앞차 출발로 오검출된다 - 이 시간 동안 정지를 유지해야 Creep Release 허용
+CREEP_RELEASE_MIN_STANDSTILL = 1.0  # s
+
 # Kans: GM 오토리쥼/오토크루즈 모듈
 # - carcontroller 25Hz 블록에서 가스/브레이크 계산 직후, 2CB/브레이크 송신 직전에 호출
 # - 앞차 정보는 이 모듈에서 radarState를 직접 구독
@@ -33,6 +36,7 @@ class GMAutoResume:
     self.resume_frame = 0
     self.resume_fault_guard = 0
     self.lead_start_count = 0  # 앞차 출발시도 횟수
+    self.standstill_frame = 0  # 정지 시작 프레임 (0 = 주행 중)
     self.activateCruise_after_brake = False
     self.last_button_frame = 0
 
@@ -129,6 +133,12 @@ class GMAutoResume:
     has_lead = self.lead_present and np.isfinite(self.lead_distance)
     near_stop_ego = (CS.out.vEgo < 0.3)
     resume_standstill = CS.out.standstill or CS.out.cruiseState.standstill
+    if resume_standstill:
+      if self.standstill_frame == 0:
+        self.standstill_frame = frame
+    else:
+      self.standstill_frame = 0
+    standstill_dt = (frame - self.standstill_frame) * DT_CTRL if self.standstill_frame != 0 else 0.0
     reopen_delay = max(self.resumeDelay_time * 1.5, 0.28)
 
     # follow 조건(정지/재출발 구간에서 vRel 흔들림 감안)
@@ -148,12 +158,13 @@ class GMAutoResume:
     # 완전 정지 후 앞차 출발이 확인되면 starting 진입 전 브레이크를 잠시 풀어준다.
     # resume_frame은 실제 AutoResume까지 이어지는 리쥼윈도우로 유지한다.
     if (auto_resume_enabled and lead_start and resume_standstill and self.resume_frame == 0 and
+        standstill_dt >= CREEP_RELEASE_MIN_STANDSTILL and
         not CS.out.brakePressed and not CS.out.gasPressed and not manual_auto_hold):
       self.resume_frame = frame
       self.resume_fault_guard = -1
       self.last_button_frame = frame - int(0.12 / DT_CTRL)
       cloudlog.warning(f"[gm autoresume] creep-release window opened: leadDRel={lead_drel:.2f} "
-                       f"leadVRel={lead_vrel:.2f} vEgo={CS.out.vEgo:.2f} cstill={int(pcm_standstill)}")
+                       f"leadVRel={lead_vrel:.2f} vEgo={CS.out.vEgo:.2f} cstill={int(pcm_standstill)} standstill={standstill_dt:.2f}s")
 
     # resume_frame 갱신 후 계산
     creep_dt = (frame - self.resume_frame) * DT_CTRL if self.resume_frame != 0 else 999.0
