@@ -33,6 +33,9 @@ class Controls:
   def __init__(self) -> None:
     self.params = Params()
     self.lat_smooth_seconds = LAT_SMOOTH_SECONDS  # Kans: LatSmoothSec
+    self.steer_actuator_delay = self.params.get_float("SteerActuatorDelay") * 0.01
+    self.steer_ratio_rate = self.params.get_float("SteerRatioRate") / 100.0
+    self.custom_sr = self.params.get_float("CustomSR") / 10.0
     cloudlog.info("controlsd is waiting for CarParams")
     self.CP = messaging.log_from_bytes(self.params.get("CarParams", block=True), car.CarParams)
     cloudlog.info("controlsd got CarParams")
@@ -77,7 +80,12 @@ class Controls:
     # Update VehicleModel
     lp = self.sm['vehicleParameters']
     x = max(lp.stiffnessFactor, 0.1)
-    sr = max(lp.steerRatio, 0.1)
+    # Kans: 조향비 - CustomSR(0.1 단위)이 1.0보다 크면 그 값, 아니면 학습 조향비 x SteerRatioRate(%)
+    if self.sm.frame % 100 == 0:
+      self.steer_ratio_rate = self.params.get_float("SteerRatioRate") / 100.0
+      self.custom_sr = self.params.get_float("CustomSR") / 10.0
+    sr = max(lp.steerRatio, 0.1) * self.steer_ratio_rate
+    sr = max(self.custom_sr if self.custom_sr > 1.0 else sr, 0.1)
     self.VM.update_params(x, sr)
 
     steer_angle_without_offset = math.radians(CS.steeringAngleDeg - lp.angleOffsetDeg)
@@ -135,7 +143,10 @@ class Controls:
     # Kans: modeld와 같은 조향 스무딩 시간(LatSmoothSec, 0.01초 단위)을 지연에 반영 (1초마다 읽음)
     if self.sm.frame % 100 == 0:
       self.lat_smooth_seconds = self.params.get_float("LatSmoothSec") * 0.01
-    lat_delay = self.sm["lateralDelay"].lateralDelay + self.lat_smooth_seconds
+      self.steer_actuator_delay = self.params.get_float("SteerActuatorDelay") * 0.01
+    # SteerActuatorDelay가 0보다 크면 그 값, 0이면 학습된 지연(lateralDelay)
+    steer_actuator_delay = self.steer_actuator_delay if self.steer_actuator_delay > 0.0 else self.sm["lateralDelay"].lateralDelay
+    lat_delay = steer_actuator_delay + self.lat_smooth_seconds
 
     actuators.curvature = self.desired_curvature
     steer, lateral_output, lac_log = self.LaC.update(CC.latActive, CS, self.VM, lp,

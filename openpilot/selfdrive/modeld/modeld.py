@@ -382,8 +382,9 @@ def main(demo=False):
 
   DH = DesireHelper()
 
-  # Kans: LatSmoothSec(0.01초 단위)은 1초마다 읽음
+  # Kans: LatSmoothSec / SteerActuatorDelay(0.01초 단위)는 1초마다 읽음
   lat_smooth_seconds = LAT_SMOOTH_SECONDS
+  custom_lat_delay = 0.0
   lat_smooth_param_frame = 0
 
   while True:
@@ -435,9 +436,11 @@ def main(demo=False):
     v_ego = max(sm["carState"].vEgo, 0.)
     if lat_smooth_param_frame % int(1. / DT_MDL) == 0:
       lat_smooth_seconds = params.get_float("LatSmoothSec") * 0.01
+      custom_lat_delay = params.get_float("SteerActuatorDelay") * 0.01
     lat_smooth_param_frame += 1
     # Kans: 모델 입력 action_t에는 스무딩을 넣지 않음 (스무딩 보상은 곡률 계산에서만)
-    lat_delay = sm["lateralDelay"].lateralDelay
+    # SteerActuatorDelay가 0보다 크면 그 값, 0이면 학습된 지연(lateralDelay)
+    lat_delay = custom_lat_delay if custom_lat_delay > 0.0 else sm["lateralDelay"].lateralDelay
     if sm.updated["extrinsicsCalibration"] and sm.seen['narrowRoadCameraState'] and sm.seen['deviceState']:
       device_from_calib_euler = np.array(sm["extrinsicsCalibration"].rpyCalib, dtype=np.float32)
       dc = DEVICE_CAMERAS[(str(sm['deviceState'].deviceType), str(sm['narrowRoadCameraState'].sensor))]
