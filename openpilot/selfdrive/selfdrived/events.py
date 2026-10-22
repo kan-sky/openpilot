@@ -1056,7 +1056,7 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
 
   # Kans: GM 오토홀드
   EventName.autoHold: {
-    ET.WARNING: Alert(
+    ET.PERMANENT: Alert(
       "AutoHold Activated.",
       "",
       AlertStatus.normal, AlertSize.small,

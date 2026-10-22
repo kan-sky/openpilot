@@ -117,6 +117,8 @@ class SelfdriveD:
       self.params.remove("ExperimentalMode")
 
     self.CS_prev = car.CarState.new_message()
+    self.auto_hold_frame = -1000  # Kans: 오토홀드 마지막 감지 프레임
+    self.auto_hold_on_prev = False
     self.AM = AlertManager()
     self.events = Events()
 
@@ -272,9 +274,14 @@ class SelfdriveD:
       if CS.latEnabled != self.CS_prev.latEnabled:
         self.events.add(EventName.audioPrompt)
 
-      # Kans: GM 오토홀드
+      # Kans: GM 오토홀드 - 운전자 브레이크로 크루즈가 꺼진 상태에서 진입하므로 PERMANENT 알림으로 홀드 진입 시 1회 표시
+      # (autoHoldActivated가 프레임마다 깜빡일 수 있어 최근 0.2초 내 감지되면 홀드 중으로 판단)
       if CS.autoHoldActivated:
+        self.auto_hold_frame = self.sm.frame
+      auto_hold_on = (self.sm.frame - self.auto_hold_frame) * DT_CTRL < 0.2
+      if auto_hold_on and not self.auto_hold_on_prev:
         self.events.add(EventName.autoHold)
+      self.auto_hold_on_prev = auto_hold_on
 
     # Create events for temperature, disk space, and memory
     if self.sm['deviceState'].thermalStatus >= ThermalStatus.overheated:
