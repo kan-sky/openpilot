@@ -277,12 +277,19 @@ def main() -> NoReturn:
 
     if sm.updated['cameraOdometry']:
       calibrator.handle_v_ego(sm['carState'].vEgo)
-      new_rpy = calibrator.handle_cam_odom(sm['cameraOdometry'].trans,
-                                           sm['cameraOdometry'].rot,
-                                           sm['cameraOdometry'].wideFromDeviceEuler,
-                                           sm['cameraOdometry'].transStd,
-                                           sm['cameraOdometry'].roadTransformTrans,
-                                           sm['cameraOdometry'].roadTransformTransStd)
+
+      # Kans: 카메라 YAW 보정(CameraYawTrimDeg) 사용 중에는 캘리브레이션 완료 후 학습을 멈춰 보정이 상쇄되지 않게 한다
+      yaw_trim_deg = params_reader.get_float("CameraYawTrimDeg") * 0.01
+      calib_done = calibrator.cal_status == log.ExtrinsicsCalibration.Status.calibrated
+      if abs(yaw_trim_deg) > 1e-6 and calib_done:
+        new_rpy = None
+      else:
+        new_rpy = calibrator.handle_cam_odom(sm['cameraOdometry'].trans,
+                                             sm['cameraOdometry'].rot,
+                                             sm['cameraOdometry'].wideFromDeviceEuler,
+                                             sm['cameraOdometry'].transStd,
+                                             sm['cameraOdometry'].roadTransformTrans,
+                                             sm['cameraOdometry'].roadTransformTransStd)
 
       if DEBUG and new_rpy is not None:
         print('got new rpy', new_rpy)

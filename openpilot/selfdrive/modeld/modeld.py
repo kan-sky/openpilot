@@ -385,6 +385,7 @@ def main(demo=False):
   # Kans: LatSmoothSec / SteerActuatorDelay(0.01초 단위)는 1초마다 읽음
   lat_smooth_seconds = LAT_SMOOTH_SECONDS
   custom_lat_delay = 0.0
+  camera_yaw_trim_deg = params.get_float("CameraYawTrimDeg") * 0.01  # Kans: 카메라 YAW 보정(0.01도 단위, +: 오른쪽)
   lat_smooth_param_frame = 0
 
   while True:
@@ -437,12 +438,18 @@ def main(demo=False):
     if lat_smooth_param_frame % int(1. / DT_MDL) == 0:
       lat_smooth_seconds = params.get_float("LatSmoothSec") * 0.01
       custom_lat_delay = params.get_float("SteerActuatorDelay") * 0.01
+      camera_yaw_trim_deg = params.get_float("CameraYawTrimDeg") * 0.01
     lat_smooth_param_frame += 1
     # Kans: 모델 입력 action_t에는 스무딩을 넣지 않음 (스무딩 보상은 곡률 계산에서만)
     # SteerActuatorDelay가 0보다 크면 그 값, 0이면 학습된 지연(lateralDelay)
     lat_delay = custom_lat_delay if custom_lat_delay > 0.0 else sm["lateralDelay"].lateralDelay
     if sm.updated["extrinsicsCalibration"] and sm.seen['narrowRoadCameraState'] and sm.seen['deviceState']:
       device_from_calib_euler = np.array(sm["extrinsicsCalibration"].rpyCalib, dtype=np.float32)
+      # Kans: 캘리브레이션 완료 후에만 YAW 보정 적용 (기기를 좌우로 돌린 것과 같은 효과)
+      calib_done = sm["extrinsicsCalibration"].calStatus == log.ExtrinsicsCalibration.Status.calibrated
+      applied_yaw_trim_deg = camera_yaw_trim_deg if calib_done else 0.0
+      if applied_yaw_trim_deg != 0.0:
+        device_from_calib_euler[2] -= np.radians(applied_yaw_trim_deg)
       dc = DEVICE_CAMERAS[(str(sm['deviceState'].deviceType), str(sm['narrowRoadCameraState'].sensor))]
       main_intrinsics = dc.wide_road.intrinsics if main_wide_camera else dc.narrow_road.intrinsics
       model_transform_main = get_warp_matrix(device_from_calib_euler, main_intrinsics, False).astype(np.float32)
