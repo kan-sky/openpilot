@@ -79,6 +79,10 @@ nav_type_mapping = {
 }
 
 import collections
+
+# Kans: 카운트다운 - 남은거리가 이 값(또는 2초 주행거리) 이상 늘면 새 대상으로 보고 다시 셈
+COUNTDOWN_NEW_TARGET_MIN_JUMP_M = 20.0
+
 class CarrotServ:
   def __init__(self):
     self.params = Params()
@@ -183,8 +187,13 @@ class CarrotServ:
     self.traffic_light_count = -1
     self.traffic_state = 0
 
-    self.left_spd_sec = 0
-    self.left_tbt_sec = 0
+    self.left_spd_sec = 100
+    self.left_tbt_sec = 100
+    self.speed_countdown_distance_last = 0.0
+    self.turn_countdown_distance_last = 0.0
+    self.speed_event_gas_pressed = False
+    self.external_navigation_active = False
+    self.rear_camera_events = []  # Kans: 후면단속 카메라 통과 후 유지 구간 [{target, speed}]
     self.left_sec = 100
     self.max_left_sec = 100
     self.carrot_left_sec = 100
@@ -227,6 +236,8 @@ class CarrotServ:
     self.autoNaviSpeedSafetyFactor = float(self.params.get_int("AutoNaviSpeedSafetyFactor")) * 0.01
     self.autoNaviSpeedDecelRate = float(self.params.get_int("AutoNaviSpeedDecelRate")) * 0.01
     self.autoNaviCountDownMode = self.params.get_int("AutoNaviCountDownMode")
+    self.autoNaviSpeedBumpEndDistance = float(min(5000, max(0, self.params.get_int("AutoNaviSpeedBumpEndDistance")))) * 0.01
+    self.autoNaviRearCameraHoldDistance = float(min(300, max(0, self.params.get_int("AutoNaviRearCameraHoldDistance"))))
     self.turnSpeedControlMode= self.params.get_int("TurnSpeedControlMode")
     self.mapTurnSpeedFactor= self.params.get_float("MapTurnSpeedFactor") * 0.01
 
@@ -651,6 +662,92 @@ class CarrotServ:
 
     return sdi_map.get(nSdiType, "")
 
+  # Kans: 내비(Carrot Navi/앱) 연결 상태 - 연결/해제 시 후면단속·카운트다운 상태 초기화
+  def _external_navigation_connected(self):
+    return self.carrot_navi_active or self.active_count > 0 or self.active_kisa_count > 0
+
+  def _update_navigation_source(self):
+    external_active = self._external_navigation_connected()
+    changed = external_active != self.external_navigation_active
+    self.external_navigation_active = external_active
+    if changed:
+      self.rear_camera_events = []
+      self.speed_countdown_distance_last = self.turn_countdown_distance_last = 0.0
+      self.left_spd_sec = self.left_tbt_sec = 100
+      self.gas_override_speed = 0
+    return changed
+
+  # Kans: 티맵 SDI 75/76(후면 과속 / 후면 신호·과속 카메라)은 카메라를 지난 뒤에도
+  # AutoNaviRearCameraHoldDistance(m) 동안 제한속도 유지. 마지막 50m 접근에서 위치를 기억하고
+  # 안내가 사라지거나 다음 항목으로 바뀌어도 주행거리로 추적한다.
+  def _rear_camera_speed(self, CS, delta_dist):
+    hold_distance = self.autoNaviRearCameraHoldDistance
+    if (CS is None or delta_dist < 0 or not self.external_navigation_active or
+        self.autoNaviSpeedCtrlMode <= 0 or hold_distance <= 0 or self.carrot_navi_off_route):
+      self.rear_camera_events = []
+      return 250.0, 0.0
+
+    self.rear_camera_events = [event for event in self.rear_camera_events
+                               if event["target"] + hold_distance > self.totalDistance]
+    if (self.active_carrot > 1 and self.xSpdType in (75, 76) and
+        0 < self.xSpdDist <= 50 and self.xSpdLimit > 0):
+      target = self.totalDistance + self.xSpdDist
+      matching = next((event for event in self.rear_camera_events if abs(event["target"] - target) <= 40), None)
+      if matching is None:
+        self.rear_camera_events.append({"target": target, "speed": self.xSpdLimit})
+      else:
+        # 같은 카메라의 반복 안내로 유지 종료 지점이 밀리지 않게 한다
+        matching["speed"] = min(matching["speed"], self.xSpdLimit)
+
+    if not self.rear_camera_events:
+      return 250.0, 0.0
+    event = min(self.rear_camera_events, key=lambda event: event["speed"])
+    return event["speed"], max(0.0, event["target"] + hold_distance - self.totalDistance)
+
+  # Kans: 방지턱 남은거리가 AutoNaviSpeedBumpEndDistance 이하가 되면 감속을 먼저 해제
+  # (지도상 방지턱 위치가 실제보다 뒤에 있어 통과 후 속도 복원이 늦는 것 보정)
+  def _speed_bump_control_active(self, distance):
+    return distance > self.autoNaviSpeedBumpEndDistance
+
+  def _speed_countdown_distance(self):
+    bump_suppressed = self.xSpdType == 22 and self.autoNaviCountDownMode == 1
+    if self.external_navigation_active and self.xSpdDist > 0 and not bump_suppressed:
+      return self.xSpdDist
+    return 0
+
+  # Kans: 카운트다운 - 남은거리가 크게 늘면(새 카메라/새 회전) 새 대상으로 다시 센다
+  @staticmethod
+  def _countdown_channel(distance, previous_distance, previous_left_sec, v_ego):
+    if distance <= 0:
+      return 100, 0.0, False
+
+    calculated = int(max(distance - v_ego, 1) / max(1, v_ego) + 0.5)
+    new_target = (previous_distance > 0 and
+                  distance - previous_distance > max(COUNTDOWN_NEW_TARGET_MIN_JUMP_M, v_ego * 2.0))
+    rearmed = new_target and previous_left_sec <= 11
+    left_sec = calculated if new_target else min(previous_left_sec, calculated)
+    return (100 if rearmed else left_sec), float(distance), rearmed
+
+  def _update_countdown_alert(self, left_sec, source, v_ego_kph):
+    if left_sec > 11:
+      self.left_sec = 100
+      self.max_left_sec = 100
+      self.carrot_left_sec = 100
+      self.sdi_inform = False
+      return
+
+    self.sdi_inform = source in ("cam", "hda")
+    self.max_left_sec = min(11, max(6, int(v_ego_kph / 10) + 1))
+    if left_sec != self.left_sec:
+      if left_sec == self.max_left_sec and self.sdi_inform:
+        self.carrot_left_sec = 11
+      elif 1 <= left_sec < self.max_left_sec:
+        self.carrot_left_sec = left_sec
+      elif left_sec == 0 and self.left_sec == 1:
+        self.carrot_left_sec = left_sec
+
+      self.left_sec = left_sec
+
   def _update_sdi(self):
     #sdiBlockType
     # 1: startOSEPS: 구간단속시작
@@ -676,6 +773,7 @@ class CarrotServ:
       self.xSpdDist = 0
 
   def _reset_carrot_navi_sequences(self, session_id):
+    self.rear_camera_events = []
     self.carrot_navi_session_id = session_id
     self.carrot_navi_speed_sequence = -1
     self.carrot_navi_current_sequence = -1
@@ -695,6 +793,7 @@ class CarrotServ:
     self.carrot_navi_traffic_active = False
 
   def _clear_carrot_navi_control(self):
+    self.rear_camera_events = []
     self.active_count = 0
     self.active_sdi_count = 0
     self.carrot_navi_has_control = False
@@ -1252,6 +1351,7 @@ class CarrotServ:
     self.active_count = max(self.active_count - 1, 0)
     self.active_sdi_count = max(self.active_sdi_count - 1, 0)
     self.active_kisa_count = max(self.active_kisa_count - 1, 0)
+    navigation_source_changed = self._update_navigation_source()
     if self.active_kisa_count > 0:
       self.active_carrot = 2
 
@@ -1277,6 +1377,7 @@ class CarrotServ:
     if self.active_carrot <= 1 or self.active_kisa_count > 0:
       self.update_nav_instruction(sm)
 
+    rear_camera_speed, _ = self._rear_camera_speed(CS, delta_dist)
     if self.xSpdType < 0 or (self.xSpdType not in [100,101] and self.xSpdDist <= 0) or (self.xSpdType in [100,101] and self.xSpdDist < -250):
       self.xSpdType = -1
       self.xSpdDist = self.xSpdLimit = 0
@@ -1290,7 +1391,8 @@ class CarrotServ:
     sdi_speed = 250
     hda_active = False
     ### 과속카메라, 사고방지턱
-    if self.xSpdLimit > 0 and (self.xSpdDist > 0 or self.xSpdType in [100, 101]) and self.active_carrot > 0:
+    if (self.xSpdLimit > 0 and (self.xSpdDist > 0 or self.xSpdType in [100, 101]) and self.active_carrot > 0 and
+        (self.xSpdType != 22 or self._speed_bump_control_active(self.xSpdDist))):
       safe_sec = self.autoNaviSpeedBumpTime if self.xSpdType == 22 else self.autoNaviSpeedCtrlEnd
       decel = self.autoNaviSpeedDecelRate
       sdi_speed = min(sdi_speed, self.calculate_current_speed(self.xSpdDist, self.xSpdLimit, safe_sec, decel))
@@ -1346,10 +1448,17 @@ class CarrotServ:
       self.atcType = "none"
 
 
+    rear_camera_holding = rear_camera_speed < 250 and rear_camera_speed <= sdi_speed
+    sdi_speed = min(sdi_speed, rear_camera_speed)
+    if rear_camera_holding:
+      self.active_carrot = 3
+    sdi_source = ("cam" if rear_camera_holding else "hda" if hda_active else "bump" if self.xSpdType == 22 else
+                  "section" if self.xSpdType == 4 else "police" if self.xSpdType == 100 else
+                  "waze" if self.xSpdType == 101 else "cam")
     speed_n_sources = [
       (atc_desired, "atc"),
       (atc_desired_next, "atc2"),
-      (sdi_speed, "hda" if hda_active else "bump" if self.xSpdType == 22 else "section" if self.xSpdType == 4 else "police" if self.xSpdType == 100 else "waze" if self.xSpdType == 101 else "cam"),
+      (sdi_speed, sdi_source),
       (limit_speed, "road"),
     ]
     # Kans: 모드 3도 비전(vturn) 포함 - 3: 비전 + 경로(항상)
@@ -1373,11 +1482,20 @@ class CarrotServ:
     desired_speed, source = min(speed_n_sources, key=lambda x: x[0])
 
     if CS is not None:
+      speed_event_gas_rising = CS.gasPressed and not self.speed_event_gas_pressed
+      self.speed_event_gas_pressed = CS.gasPressed
       if source != self.source_last:
         self.gas_override_speed = 0
         self.gas_pressed_state = CS.gasPressed
       if CS.vEgo < 0.1 or desired_speed > 150 or source in ["cam", "section", "police"] or CS.brakePressed or road_speed_limit_changed:
         self.gas_override_speed = 0
+      elif source == "bump":
+        # Kans: 방지턱 - 감속 중 새로 가스를 밟으면 그 속도부터, 밟는 동안 최고속도를 유지
+        if self.gas_override_speed <= 0:
+          if speed_event_gas_rising and desired_speed < v_ego_kph:
+            self.gas_override_speed = v_ego_kph
+        elif CS.gasPressed:
+          self.gas_override_speed = max(v_ego_kph, self.gas_override_speed)
       elif CS.gasPressed and not self.gas_pressed_state:
         self.gas_override_speed = max(v_ego_kph, self.gas_override_speed)
       else:
@@ -1391,37 +1509,25 @@ class CarrotServ:
 
     left_spd_sec = 100
     left_tbt_sec = 100
+    speed_countdown_rearmed = False
+    turn_countdown_rearmed = False
     if self.autoNaviCountDownMode > 0:
-      if self.xSpdType == 22 and self.autoNaviCountDownMode == 1: # speed bump
-        pass
-      else:
-        if self.xSpdDist > 0:
-          left_spd_sec = min(self.left_spd_sec, int(max(self.xSpdDist - v_ego, 1) / max(1, v_ego) + 0.5))
-
-      if self.xDistToTurn > 0:
-        left_tbt_sec = min(self.left_tbt_sec, int(max(self.xDistToTurn - v_ego, 1) / max(1, v_ego) + 0.5))
+      left_spd_sec, self.speed_countdown_distance_last, speed_countdown_rearmed = self._countdown_channel(
+        self._speed_countdown_distance(), self.speed_countdown_distance_last, self.left_spd_sec, v_ego,
+      )
+      left_tbt_sec, self.turn_countdown_distance_last, turn_countdown_rearmed = self._countdown_channel(
+        self.xDistToTurn, self.turn_countdown_distance_last, self.left_tbt_sec, v_ego,
+      )
+    else:
+      self.speed_countdown_distance_last = 0.0
+      self.turn_countdown_distance_last = 0.0
 
     self.left_spd_sec = left_spd_sec
     self.left_tbt_sec = left_tbt_sec
 
-    left_sec = min(left_spd_sec, left_tbt_sec)
-
-    if left_sec > 11:
-      self.left_sec = 100
-      self.max_left_sec = 100
-    else:
-      self.sdi_inform = True if source in ["cam", "hda"] else False
-      self.max_left_sec = min(11, max(6, int(v_ego_kph/10) + 1))
-
-    if left_sec != self.left_sec:
-      if left_sec == self.max_left_sec and self.sdi_inform:
-        self.carrot_left_sec = 11
-      elif 1 <= left_sec < self.max_left_sec:
-        self.carrot_left_sec = left_sec
-      elif left_sec == 0 and self.left_sec == 1:
-        self.carrot_left_sec = left_sec
-
-      self.left_sec = left_sec
+    rearmed = navigation_source_changed or speed_countdown_rearmed or turn_countdown_rearmed
+    left_sec = 100 if rearmed else min(left_spd_sec, left_tbt_sec)
+    self._update_countdown_alert(left_sec, source, v_ego_kph)
 
 
     self._update_cmd()

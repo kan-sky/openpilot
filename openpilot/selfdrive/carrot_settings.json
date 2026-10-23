@@ -181,7 +181,8 @@
                 "AutoNaviSpeedCtrlEnd",
                 "AutoNaviSpeedDecelRate",
                 "AutoNaviSpeedSafetyFactor",
-                "AutoNaviCountDownMode"
+                "AutoNaviCountDownMode",
+                "AutoNaviRearCameraHoldDistance"
               ]
             },
             {
@@ -202,7 +203,8 @@
               "zh": "减速带",
               "params": [
                 "AutoNaviSpeedBumpTime",
-                "AutoNaviSpeedBumpSpeed"
+                "AutoNaviSpeedBumpSpeed",
+                "AutoNaviSpeedBumpEndDistance"
               ]
             },
             {
@@ -2633,6 +2635,38 @@
       "max": 2,
       "default": 2,
       "unit": 1
+    },
+    {
+      "group": "감속제어",
+      "name": "AutoNaviRearCameraHoldDistance",
+      "title": "후면단속 통과 후 유지 거리(100m)",
+      "descr": "티맵이 후면 과속 또는 후면 신호·과속 카메라(75/76)를 안내하면 카메라 지점을 지난 뒤 이 거리만큼 제한속도를 유지\n마지막 50m 접근에서 위치를 기억하고 주행거리로 추적\n0: 추가 유지 안함\n내비 연결 종료·경로 이탈·세션 변경 시 해제",
+      "egroup": "SPEED",
+      "etitle": "Rear Camera Post-pass Hold Distance (100m)",
+      "edescr": "When navigation reports a rear speed or rear signal-and-speed camera (TMAP 75/76), keep the speed cap for this distance beyond the camera. Position is captured within the final 50 m and tracked by traveled distance. 0 disables. Cleared on disconnect, off-route or new navigation session.",
+      "cgroup": "速度控制",
+      "ctitle": "后向摄像头通过后保持距离(100m)",
+      "cdescr": "导航报告后向测速或后向闯红灯及测速摄像头（TMAP 75/76）时，通过摄像头后在此距离内保持限速。0关闭。断开连接、偏离路线或导航会话变化时清除。",
+      "min": 0,
+      "max": 300,
+      "default": 100,
+      "unit": 10
+    },
+    {
+      "group": "감속제어",
+      "name": "AutoNaviSpeedBumpEndDistance",
+      "title": "방지턱 감속 조기 종료 거리(200cm)",
+      "descr": "방지턱 남은 거리가 이 값 이하가 되면 방지턱 감속을 먼저 해제 (단위 cm)\n0: 안내 지점까지 유지\n지도상 방지턱 위치가 실제보다 뒤에 있어 통과 후 속도 복원이 늦는 현상 보정\n너무 크면 방지턱 전에 가속할 수 있음",
+      "egroup": "SPEED",
+      "etitle": "Speed Bump Early Release Distance (200 cm)",
+      "edescr": "Release speed-bump deceleration when the remaining distance is at or below this value (cm). 0 keeps control until the reported point. Too high can accelerate before the actual bump.",
+      "cgroup": "速度控制",
+      "ctitle": "减速带减速提前解除距离（200厘米）",
+      "cdescr": "减速带剩余距离小于或等于此值时提前解除减速（厘米）。0表示保持到提示位置。设置过大可能在实际减速带前加速。",
+      "min": 0,
+      "max": 5000,
+      "default": 200,
+      "unit": 10
     },
     {
       "group": "감속제어",
