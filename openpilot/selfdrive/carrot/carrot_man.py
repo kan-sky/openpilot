@@ -420,28 +420,53 @@ class CarrotMan:
       return [], [], out_speed
 
     line = LineString(relative_coords)
-    resampled_points = []
-    resampled_distances = []
-    current_distance = 0.0
+    resampled_points, resampled_distances = self._resample_route_line(line, 0.0, distance_interval)
 
+    # Kans: 샘플 격자를 차 위치가 아니라 경로 누적거리에 고정한다.
+    # 차 위치 기준 격자는 주행하면서 함께 밀려 꺾은선 꼭짓점에 걸렸다/비껴갔다를 반복해
+    # 같은 커브가 0.3초 주기로 감속/비감속을 오갔다 (rlog30/31 계기판 설정속도 깜박임).
+    # 고정 격자를 4개 위상으로 계산해 가장 낮은 속도를 써서 꼭짓점 곡률을 놓치지 않게 한다.
+    route_s0 = self._route_distance_at(self.navi_points_start_index, start_point)
+    v_ego_kph = self.sm["carState"].vEgo * 3.6
+    for phase in (0.0, 2.5, 5.0, 7.5):
+      offset = (phase - route_s0) % distance_interval
+      points, _ = self._resample_route_line(line, offset, distance_interval)
+      out_speed = min(out_speed, self._route_speed_from_points(points, distance_interval, v_ego_kph))
+
+    return resampled_points, resampled_distances, out_speed
+
+  @staticmethod
+  def _resample_route_line(line, offset, distance_interval):
+    points = []
+    distances = []
+    current_distance = offset
     while current_distance <= line.length:
       point = line.interpolate(current_distance)
-      resampled_points.append((point.x, point.y))
-      resampled_distances.append(current_distance)
+      points.append((point.x, point.y))
+      distances.append(current_distance)
       current_distance += distance_interval
+    return points, distances
 
+  def _route_distance_at(self, index, point):
+    # Kans: 경로 시작점부터 point(index 구간 위)까지의 누적거리, 경로가 바뀔 때만 누적표를 다시 만든다
+    if getattr(self, "_route_cum_src", None) is not self.navi_points:
+      cum = [0.0]
+      for (lon1, lat1), (lon2, lat2) in zip(self.navi_points[:-1], self.navi_points[1:], strict=False):
+        cum.append(cum[-1] + haversine(lon1, lat1, lon2, lat2))
+      self._route_cum = cum
+      self._route_cum_src = self.navi_points
+    if index < 0 or index >= len(self._route_cum) or point is None:
+      return 0.0
+    lon, lat = self.navi_points[index]
+    return self._route_cum[index] + haversine(lon, lat, point[0], point[1])
+
+  def _route_speed_from_points(self, resampled_points, distance_interval, v_ego_kph):
     sample = 4
-
     if len(resampled_points) < sample * 2 + 1:
-      return resampled_points, resampled_distances, out_speed
+      return 300.0
 
     speeds = []
-    distances = []
-    distance = 10.0
-
     for i in range(len(resampled_points) - sample * 2):
-      distance += distance_interval
-
       p1 = resampled_points[i]
       p2 = resampled_points[i + sample]
       p3 = resampled_points[i + sample * 2]
@@ -453,18 +478,12 @@ class CarrotMan:
         speed = max(speed, self.carrot_serv.nRoadLimitSpeed)
 
       speeds.append(speed)
-      distances.append(distance)
-
-    if not speeds:
-      return resampled_points, resampled_distances, out_speed
 
     accel_limit = max(0.1, self.carrot_serv.autoNaviSpeedDecelRate)
     accel_limit_kmh = accel_limit * 3.6
     out_speeds = [0.0 for _ in speeds]
     out_speeds[-1] = speeds[-1]
 
-    v_ego_kph = self.sm["carState"].vEgo * 3.6
-    time_delay = self.carrot_serv.autoNaviSpeedCtrlEnd
     time_wait = 0.0
 
     for i in range(len(speeds) - 2, -1, -1):
@@ -482,8 +501,7 @@ class CarrotMan:
       out_speeds[i] = min(target_speed, max_allowed_speed)
       time_wait += min(2.0, time_interval)
 
-    out_speed = out_speeds[0]
-    return resampled_points, resampled_distances, out_speed
+    return out_speeds[0]
 
   def make_send_message(self):
     is_onroad = not self.params.get_bool("IsOffroad")
