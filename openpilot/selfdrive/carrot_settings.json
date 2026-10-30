@@ -20,8 +20,7 @@
               "zh": "起步动作",
               "params": [
                 "AlwaysLateral",
-                "AutoEngage",
-                "DisableMinSteerSpeed"
+                "AutoEngage"
               ]
             },
             {
@@ -52,8 +51,7 @@
               "params": [
                 "CruiseButtonMode",
                 "CancelButtonMode",
-                "LfaButtonMode",
-                "PaddleMode"
+                "LfaButtonMode"
               ]
             },
             {
@@ -65,17 +63,6 @@
                 "CruiseSpeedUnit",
                 "CruiseSpeedUnitBasic",
                 "CruiseButtonLongDelay"
-              ]
-            },
-            {
-              "id": "BUTTON_TEST",
-              "ko": "버튼 테스트",
-              "en": "Button Test",
-              "zh": "按钮测试",
-              "params": [
-                "CruiseButtonTest1",
-                "CruiseButtonTest2",
-                "CruiseButtonTest3"
               ]
             }
           ]
@@ -327,9 +314,7 @@
               "en": "Carrot Cruise",
               "zh": "Carrot巡航",
               "params": [
-                "CruiseEcoControl",
-                "CarrotCruiseDecel",
-                "CarrotCruiseAtcDecel"
+                "CruiseEcoControl"
               ]
             }
           ]
@@ -342,28 +327,6 @@
       "en": "Vehicle & Hardware",
       "zh": "车辆与硬件",
       "groups": [
-        {
-          "id": "VEH_HYUNDAI",
-          "ko": "현대·기아",
-          "en": "Hyundai·Kia",
-          "zh": "现代·起亚",
-          "params": [
-            "HyundaiCameraSCC",
-            "IsLdwsCar",
-            "HapticFeedbackWhenSpeedCamera"
-          ]
-        },
-        {
-          "id": "VEH_CANFD",
-          "ko": "CANFD·HDA",
-          "en": "CANFD·HDA",
-          "zh": "CANFD·HDA",
-          "params": [
-            "CanfdHDA2",
-            "CanfdDebug",
-            "HDPuse"
-          ]
-        },
         {
           "id": "VEH_RADAR",
           "ko": "레이더",
@@ -392,7 +355,6 @@
           "en": "Vehicle Aux",
           "zh": "车辆辅助",
           "params": [
-            "MaxAngleFrames",
             "SpeedFromPCM"
           ]
         }
@@ -410,14 +372,10 @@
           "en": "On-screen Info",
           "zh": "信息显示",
           "params": [
-            "ShowDebugUI",
-            "ShowTpms",
             "ShowDateTime",
             "ShowPathEnd",
-            "ShowDeviceState",
             "ShowLaneInfo",
             "ShowRadarInfo",
-            "ShowRouteInfo",
             "ShowPlotMode"
           ]
         },
@@ -427,140 +385,9 @@
           "en": "Path Display",
           "zh": "路径显示",
           "params": [
-            "CarrotTireTrajectory",
             "ShowPathMode",
             "ShowPathColor",
             "ShowPathColorCruiseOff"
-          ]
-        },
-        {
-          "id": "DISP_BRIGHT",
-          "ko": "밝기·주행화면",
-          "en": "Brightness & View",
-          "zh": "亮度与视图",
-          "params": [
-            "ShowCustomBrightness",
-            "ShowModelView"
-          ]
-        },
-        {
-          "id": "DISP_HUD",
-          "ko": "외부 HUD",
-          "en": "External HUD",
-          "zh": "外部HUD",
-          "groups": [
-            {
-              "id": "HUD_BASIC",
-              "ko": "기본",
-              "en": "Basic",
-              "zh": "基本",
-              "params": [
-                "ClusterHud",
-                "ClusterHudBrightness",
-                "ClusterHudTheme"
-              ]
-            },
-            {
-              "id": "HUD_SCREEN",
-              "ko": "화면·카메라",
-              "en": "Screen & Camera",
-              "zh": "画面·摄像头",
-              "params": [
-                "ClusterHudEncoder",
-                "ClusterHudLiveFps",
-                "ClusterHudScreenMode",
-                "ClusterHudCameraViewMode"
-              ]
-            },
-            {
-              "id": "HUD_RADAR",
-              "ko": "레이더 표시",
-              "en": "Radar Display",
-              "zh": "雷达显示",
-              "params": [
-                "ClusterHudRadarInfo",
-                "ClusterHudRadarDisplay",
-                "ClusterHudRadarSourceColor"
-              ]
-            },
-            {
-              "id": "HUD_PERF",
-              "ko": "성능·디버그",
-              "en": "Performance & Debug",
-              "zh": "性能·调试",
-              "params": [
-                "ClusterHudCoreMode",
-                "ClusterHudPriority",
-                "ClusterHudDebug"
-              ]
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "id": "SYSTEM",
-      "ko": "시스템",
-      "en": "System",
-      "zh": "系统",
-      "groups": [
-        {
-          "id": "SYS_RECORD",
-          "ko": "녹화·전원",
-          "en": "Record & Power",
-          "zh": "录制与电源",
-          "groups": [
-            {
-              "id": "SYS_RECORD_BASIC",
-              "ko": "녹화·전원",
-              "en": "Record & Power",
-              "zh": "录制与电源",
-              "params": [
-                "RecordRoadCam",
-                "MaxTimeOffroadMin"
-              ]
-            },
-            {
-              "id": "SYS_YOUTUBE",
-              "ko": "YouTube 라이브",
-              "en": "YouTube Live",
-              "zh": "YouTube Live",
-              "params": [
-                "CarrotYouTubeLive",
-                "CarrotYouTubeQuality",
-                "CarrotYouTubeTimestamp"
-              ]
-            }
-          ]
-        },
-        {
-          "id": "SYS_NET",
-          "ko": "네트워크·지도",
-          "en": "Network & Map",
-          "zh": "网络与地图",
-          "params": [
-            "HotspotOnBoot",
-            "MapboxStyle"
-          ]
-        },
-        {
-          "id": "SYS_SOUND",
-          "ko": "사운드",
-          "en": "Sound",
-          "zh": "声音",
-          "params": [
-            "SoundLanguageSetting",
-            "SoundVolumeAdjust",
-            "SoundVolumeAdjustEngage"
-          ]
-        },
-        {
-          "id": "SYS_SW",
-          "ko": "소프트웨어",
-          "en": "Software",
-          "zh": "软件",
-          "params": [
-            "SoftwareMenu"
           ]
         }
       ]
@@ -840,38 +667,6 @@
       "unit": 1
     },
     {
-      "group": "크루즈",
-      "name": "CarrotCruiseDecel",
-      "title": "당근크루즈감속도x0.01(-1)",
-      "descr": "당근크루즈 감속도 지정\n -1:크루즈OFF",
-      "egroup": "CRUISE",
-      "etitle": "CarrotCruiseDecel(-1)",
-      "edescr": "Carrot Cruise Deceleration Setting, -1: Cruise OFF",
-      "cgroup": "巡航设置",
-      "ctitle": "胡萝卜巡航减速度(-1)",
-      "cdescr": "胡萝卜巡航减速度设置，-1: 巡航关闭",
-      "min": -1,
-      "max": 200,
-      "default": -1,
-      "unit": 10
-    },
-    {
-      "group": "크루즈",
-      "name": "CarrotCruiseAtcDecel",
-      "title": "당근크루즈감속도ATCx0.01(-1)",
-      "descr": "당근크루즈 ATC 감속도 지정\n -1:변경안함",
-      "egroup": "CRUISE",
-      "etitle": "CarrotCruiseDecelATCx0.01(-1)",
-      "edescr": "Carrot Cruise ATC Deceleration Setting, -1: Not Change",
-      "cgroup": "巡航设置",
-      "ctitle": "胡萝卜巡航 ATC 减速度(-1)",
-      "cdescr": "胡萝卜巡航 ATC 减速度设置，-1: 不改变",
-      "min": -1,
-      "max": 200,
-      "default": -1,
-      "unit": 10
-    },
-    {
       "group": "조향튜닝",
       "name": "CustomSR",
       "title": "CustomSteerRatiox0.1(0)",
@@ -1095,14 +890,30 @@
     {
       "group": "주행튜닝",
       "name": "LongTuningKpV",
-      "title": "Long KpV(100)x0.01",
-      "descr": "롱컨 비례게인(오차 즉각 반응) \n\n HKG: 100 권장",
+      "title": "Long KpV(0)x0.01",
+      "descr": "롱컨 비례게인 (가속도 오차 즉각 반응)\n0: 차량 기본값(0)",
       "egroup": "LONG",
-      "etitle": "Long KpV(100)x0.01",
-      "edescr": "Longitudinal Control Proportional Gain (Immediate Error Response) — HKG: 100 Recommended",
+      "etitle": "Long KpV(0)x0.01",
+      "edescr": "Long proportional gain on accel error. 0: car default (0)",
       "cgroup": "纵向控制",
       "ctitle": "纵向 KpV(100)x0.01",
       "cdescr": "纵向控制比例增益 (瞬时误差响应) — HKG: 推荐 100",
+      "min": 0,
+      "max": 300,
+      "default": 0,
+      "unit": 5
+    },
+    {
+      "group": "주행튜닝",
+      "name": "LongTuningKf",
+      "title": "Long Kf(100)x0.01",
+      "descr": "롱컨 피드포워드 배율 (목표 가속도를 그대로 내보내는 비율)\n0 또는 100: 1.0 (기본)",
+      "egroup": "LONG",
+      "etitle": "Long Kf(100)x0.01",
+      "edescr": "Long feedforward (target accel) multiplier. 0 or 100: 1.0 (default)",
+      "cgroup": "纵向控制",
+      "ctitle": "纵向 Kf(100)x0.01",
+      "cdescr": "纵向前馈修正 — HKG: 推荐 100",
       "min": 0,
       "max": 200,
       "default": 100,
@@ -1110,35 +921,19 @@
     },
     {
       "group": "주행튜닝",
-      "name": "LongTuningKf",
-      "title": "Long Kf(100)x0.01",
-      "descr": "롱컨 예측기반 보정 \n\n HKG: 100으로 설정 권장",
-      "egroup": "LONG",
-      "etitle": "Long Kf(100)x0.01",
-      "edescr": "Longitudinal Feedforward Correction — HKG: 100 Recommended",
-      "cgroup": "纵向控制",
-      "ctitle": "纵向 Kf(100)x0.01",
-      "cdescr": "纵向前馈修正 — HKG: 推荐 100",
-      "min": 0,
-      "max": 200,
-      "default": 0,
-      "unit": 5
-    },
-    {
-      "group": "주행튜닝",
       "name": "LongTuningKiV",
       "title": "Long KiV(0)x0.01",
-      "descr": "롱컨 적분게인(누적오차 보정) \n\n HKG: 0으로 설정 권장",
+      "descr": "롱컨 적분게인 (누적 가속도 오차 보정)\n0: 차량 기본 속도별 값 (Volt: 18km/h 이하 2.4, 126km/h 이상 1.5)",
       "egroup": "LONG",
       "etitle": "Long KiV(0)x0.01",
-      "edescr": "Longitudinal Integral Gain (Cumulative Error Correction) — HKG: 0 Recommended",
+      "edescr": "Long integral gain on accel error. 0: car default speed schedule (Volt: 2.4 below 18 km/h, 1.5 above 126 km/h)",
       "cgroup": "纵向控制",
       "ctitle": "纵向 KiV(0)x0.01",
       "cdescr": "纵向积分增益 (累积误差修正) — HKG: 推荐 0",
       "min": 0,
-      "max": 2000,
+      "max": 500,
       "default": 0,
-      "unit": 1
+      "unit": 5
     },
     {
       "group": "주행튜닝",
@@ -1383,54 +1178,6 @@
     },
     {
       "group": "버튼설정",
-      "name": "CruiseButtonTest1",
-      "title": "크루즈버튼스팸쏘기(8)",
-      "descr": "(비롱컨 전용) 속도버튼신호 발송제한시간",
-      "egroup": "BUTN",
-      "etitle": "Cruise Button spam1(8)",
-      "edescr": "For Non-Long Vehicle Only, Speed Button Signal Send Restriction Time",
-      "cgroup": "按键设置",
-      "ctitle": "巡航按钮连发1(8)",
-      "cdescr": "仅限非纵向控制车辆，速度按钮信号发送限制时间",
-      "min": 1,
-      "max": 20,
-      "default": 0,
-      "unit": 1
-    },
-    {
-      "group": "버튼설정",
-      "name": "CruiseButtonTest2",
-      "title": "크루즈버튼스팸쉬기(30)",
-      "descr": "(비롱컨 전용) 속도버튼신호 발송 휴지시간",
-      "egroup": "BUTN",
-      "etitle": "Cruise Button spam2(30)",
-      "edescr": "For Non-Long Vehicle Only — Speed Button Signal Send Pause Time",
-      "cgroup": "按键设置",
-      "ctitle": "巡航按钮连发2(30)",
-      "cdescr": "仅限非纵向控制车辆 — 速度按钮信号发送暂停时间",
-      "min": 1,
-      "max": 200,
-      "default": 0,
-      "unit": 1
-    },
-    {
-      "group": "버튼설정",
-      "name": "CruiseButtonTest3",
-      "title": "크루즈버튼스팸연속쏘기(1)",
-      "descr": "(비롱컨 전용) 속도버튼신호 연속회수",
-      "egroup": "BUTN",
-      "etitle": "Cruise Button spam3(1)",
-      "edescr": "For Non-Long Vehicle Only — Consecutive Speed Button Signal Count",
-      "cgroup": "按键设置",
-      "ctitle": "巡航按钮连发3(1)",
-      "cdescr": "仅限非纵向控制车辆 — 连续速度按钮信号计数",
-      "min": 1,
-      "max": 20,
-      "default": 0,
-      "unit": 1
-    },
-    {
-      "group": "버튼설정",
       "name": "CruiseSpeedUnit",
       "title": "크루즈버튼속도단위 확장(10)",
       "descr": "크루즈버튼 속도조절 단위(모드1,2,3, 엑셀톡등)",
@@ -1475,22 +1222,6 @@
       "min": 1,
       "max": 100,
       "default": 10,
-      "unit": 1
-    },
-    {
-      "group": "버튼설정",
-      "name": "PaddleMode",
-      "title": "패들시프트모드(0)",
-      "descr": "0:크루즈ON, 1:크루즈대기, 2:자동감속, 3:CarrotCruise ",
-      "egroup": "BUTN",
-      "etitle": "PaddleShift Mode(0)",
-      "edescr": "After Regen paddle, 0:Cruise ON, 1:Cruise Ready, 2: decel & cruise ready, 3: CarrotCruise",
-      "cgroup": "按键设置",
-      "ctitle": "换挡拨片模式(0)",
-      "cdescr": "动能回收拨片后, 0: 巡航开启, 1: 巡航就绪, 2: 减速并巡航就绪, 3: 胡萝卜巡航",
-      "min": 0,
-      "max": 3,
-      "default": 1,
       "unit": 1
     },
     {
@@ -1559,118 +1290,6 @@
     },
     {
       "group": "시작",
-      "name": "RecordRoadCam",
-      "title": "RoadCam녹화",
-      "descr": "저장소에 비디오 녹화\n0:녹화안함,1:일반카메라\n2:일반카메라+광각카메라",
-      "egroup": "START",
-      "etitle": "Record RoadCam",
-      "edescr": "1: Standard Camera, 2: Standard Camera + Wide Camera",
-      "cgroup": "启动设置",
-      "ctitle": "记录路面摄像头",
-      "cdescr": "1: 标准摄像头, 2: 标准摄像头 + 广角摄像头",
-      "min": 0,
-      "max": 2,
-      "default": 0,
-      "unit": 1
-    },
-    {
-      "group": "SYS_YOUTUBE",
-      "name": "CarrotYouTubeLive",
-      "title": "YouTube 송출",
-      "descr": "주행 중 선택한 카메라 영상을 YouTube Live로 송출합니다.\n0: 끄기, 1: 켜기",
-      "egroup": "System",
-      "etitle": "YouTube Live",
-      "edescr": "Stream the selected driving camera to YouTube Live.\n0: OFF, 1: ON",
-      "cgroup": "System",
-      "ctitle": "YouTube Live",
-      "cdescr": "Stream the selected driving camera to YouTube Live.\n0: OFF, 1: ON",
-      "min": 0,
-      "max": 1,
-      "default": 0,
-      "unit": 1
-    },
-    {
-      "group": "SYS_YOUTUBE",
-      "name": "CarrotYouTubeQuality",
-      "title": "YouTube 화질",
-      "descr": "송출 영상\n0: 저화질 (데이터 절약)\n1: 중화질 (기본 전방)\n2: 고화질 (선명한 전방)\n3: 광각 (넓은 시야)",
-      "egroup": "System",
-      "etitle": "YouTube Quality",
-      "edescr": "Stream video\n0: Low (data saving)\n1: Medium (front)\n2: High (clear front)\n3: Wide (wide view)",
-      "cgroup": "System",
-      "ctitle": "YouTube Quality",
-      "cdescr": "Stream video\n0: Low (data saving)\n1: Medium (front)\n2: High (clear front)\n3: Wide (wide view)",
-      "min": 0,
-      "max": 3,
-      "default": 0,
-      "unit": 1
-    },
-    {
-      "group": "SYS_YOUTUBE",
-      "name": "CarrotYouTubeTimestamp",
-      "title": "YouTube 시간 자막",
-      "descr": "영상 재인코딩 없이 현재 시간을 CEA-608/708 자막으로 송출합니다. 송출 시작 전에 Live Control Room의 스트림 설정 > 자막에서 '내장 608/708'을 선택해야 합니다. 종료된 영상의 수정 화면에서는 설정할 수 없습니다.\n0: 끄기, 1: 켜기",
-      "egroup": "System",
-      "etitle": "YouTube Time Caption",
-      "edescr": "Send the current time as embedded CEA-608/708 captions without re-encoding video. Before streaming, select Embedded 608/708 under Live Control Room > Stream settings > Captions. It cannot be enabled from the completed video's edit page.\n0: OFF, 1: ON",
-      "cgroup": "System",
-      "ctitle": "YouTube Time Caption",
-      "cdescr": "Send the current time as embedded CEA-608/708 captions without re-encoding video. Before streaming, select Embedded 608/708 under Live Control Room > Stream settings > Captions. It cannot be enabled from the completed video's edit page.\n0: OFF, 1: ON",
-      "min": 0,
-      "max": 1,
-      "default": 0,
-      "unit": 1
-    },
-    {
-      "group": "시작",
-      "name": "HDPuse",
-      "title": "HDP 사용(CCNC)",
-      "descr": "1:APN사용시\n2:항상",
-      "egroup": "START",
-      "etitle": "Use HDP(CCNC)",
-      "edescr": "1:While using APN, 2:Always",
-      "cgroup": "启动设置",
-      "ctitle": "使用 HDP (CCNC)",
-      "cdescr": "1: 使用 APN 时, 2: 始终",
-      "min": 0,
-      "max": 2,
-      "default": 0,
-      "unit": 1
-    },
-    {
-      "group": "시작",
-      "name": "MapboxStyle",
-      "title": "맵박스 스타일",
-      "descr": "0: 기본 배경\n 1: 어두운 배경\n 2: 위성 지도",
-      "egroup": "START",
-      "etitle": "MapboxStyle",
-      "edescr": "0: Default Background, 1: Dark Background, 2: Satellite Map",
-      "cgroup": "启动设置",
-      "ctitle": "Mapbox 样式",
-      "cdescr": "0: 默认背景, 1: 深色背景, 2: 卫星地图",
-      "min": 0,
-      "max": 2,
-      "default": 0,
-      "unit": 1
-    },
-    {
-      "group": "시작",
-      "name": "DisableMinSteerSpeed",
-      "title": "저속조향제한해제",
-      "descr": "저속조향이 안되는 차량 제한해제(SMDPS장착차량): 1",
-      "egroup": "START",
-      "etitle": "DisableMinSteerSpeed",
-      "edescr": "smdps equiped: 1",
-      "cgroup": "启动设置",
-      "ctitle": "解除最小转向速度限制",
-      "cdescr": "配备 smdps: 1",
-      "min": 0,
-      "max": 1,
-      "default": 0,
-      "unit": 1
-    },
-    {
-      "group": "시작",
       "name": "SpeedFromPCM",
       "title": "PCM차량속도제어",
       "descr": "PCM(비롱컨)속도제어방법\n0:커브/카메라 감속+롱컨\n1:버튼스패밍안함(순정SCC)\n2:커브/카메라 감속\n3: Honda/Toyota",
@@ -1684,22 +1303,6 @@
       "max": 3,
       "default": 0,
       "unit": 1
-    },
-    {
-      "group": "시작",
-      "name": "MaxTimeOffroadMin",
-      "title": "자동전원OFF(분)",
-      "descr": "시동이 꺼지고 해당 시간이 경과하면 콤마가 꺼집니다.",
-      "egroup": "START",
-      "etitle": "PowerOffTime(min)",
-      "edescr": "When the engine is turned off and the specified time elapses, the comma device will shut down.",
-      "cgroup": "启动设置",
-      "ctitle": "关机时间 (分钟)",
-      "cdescr": "发动机熄火且经过指定时间后，comma 设备将关机。",
-      "min": 0,
-      "max": 3000,
-      "default": 60,
-      "unit": 10
     },
     {
       "group": "시작",
@@ -1815,38 +1418,6 @@
     },
     {
       "group": "화면",
-      "name": "ShowDebugUI",
-      "title": "디버그정보 표시",
-      "descr": "",
-      "egroup": "DISP",
-      "etitle": "Show Debug Info",
-      "edescr": "",
-      "cgroup": "显示设置",
-      "ctitle": "显示调试信息",
-      "cdescr": "",
-      "min": 0,
-      "max": 2,
-      "default": 1,
-      "unit": 1
-    },
-    {
-      "group": "화면",
-      "name": "ShowTpms",
-      "title": "TPMS정보 표시",
-      "descr": "0:표시안함\n 1: 위\n 2: 아래\n 3: 둘다",
-      "egroup": "DISP",
-      "etitle": "Show TPMS Info",
-      "edescr": "0:None, 1: Upper, 2:Lower, 3: Both",
-      "cgroup": "显示设置",
-      "ctitle": "显示胎压 (TPMS) 信息",
-      "cdescr": "0: 无, 1: 上方, 2: 下方, 3: 两侧",
-      "min": 0,
-      "max": 3,
-      "default": 1,
-      "unit": 1
-    },
-    {
-      "group": "화면",
       "name": "ShowDateTime",
       "title": "시간정보표시",
       "descr": "0:표시안함\n 1:시간+날짜\n 2:시간\n 3:날짜",
@@ -1871,22 +1442,6 @@
       "edescr": "",
       "cgroup": "显示设置",
       "ctitle": "显示路径终点",
-      "cdescr": "",
-      "min": 0,
-      "max": 1,
-      "default": 1,
-      "unit": 1
-    },
-    {
-      "group": "화면",
-      "name": "ShowDeviceState",
-      "title": "디바이스정보 표시",
-      "descr": "",
-      "egroup": "DISP",
-      "etitle": "Show Device Info",
-      "edescr": "",
-      "cgroup": "显示设置",
-      "ctitle": "显示设备信息",
       "cdescr": "",
       "min": 0,
       "max": 1,
@@ -1922,38 +1477,6 @@
       "cdescr": "0: 无, 1: 显示, 2: + 相对位置, 3: 停止的障碍物",
       "min": 0,
       "max": 3,
-      "default": 0,
-      "unit": 1
-    },
-    {
-      "group": "화면",
-      "name": "ShowRouteInfo",
-      "title": "경로AR표시(0)",
-      "descr": "APN 연결시에만 작동합니다.\n 0: 안함\n 1: 표시함",
-      "egroup": "DISP",
-      "etitle": "Show Route Info",
-      "edescr": "Operates only when connected to APN. 0: Off, 1: On",
-      "cgroup": "显示设置",
-      "ctitle": "显示路线信息",
-      "cdescr": "仅在连接 APN 时运行。0: 关闭, 1: 开启",
-      "min": 0,
-      "max": 1,
-      "default": 0,
-      "unit": 1
-    },
-    {
-      "group": "화면패스",
-      "name": "CarrotTireTrajectory",
-      "title": "타이어 궤적 표시(0)",
-      "descr": "타이어 궤적 그라데이션 표시 여부를 설정합니다.\n 0: 끄기\n 1: 켜기",
-      "egroup": "DISP",
-      "etitle": "Tire Trajectory",
-      "edescr": "Shows the tire trajectory gradient on the screen.\n 0: Off, 1: On",
-      "cgroup": "显示设置",
-      "ctitle": "显示轮胎轨迹",
-      "cdescr": "显示轮胎轨迹。0: 关闭, 1: 开启",
-      "min": 0,
-      "max": 1,
       "default": 0,
       "unit": 1
     },
@@ -2086,88 +1609,6 @@
       "unit": 1
     },
     {
-      "group": "시작",
-      "name": "HapticFeedbackWhenSpeedCamera",
-      "title": "핸들햅틱기능사용(0)",
-      "descr": "0: 사용안함\n1: 진동\n 2: 계기판\n 3: HUD표시",
-      "egroup": "START",
-      "etitle": "HapticFeedbackSpeedCamera(0)",
-      "edescr": "0: Disabled, 1: Vibration, 2: Instrument Cluster, 3: HUD Display",
-      "cgroup": "启动设置",
-      "ctitle": "超速照相触感反馈 (0)",
-      "cdescr": "0: 禁用, 1: 振动, 2: 仪表盘, 3: HUD 显示",
-      "min": 0,
-      "max": 3,
-      "default": 0,
-      "unit": 1
-    },
-    {
-      "group": "시작",
-      "name": "MaxAngleFrames",
-      "title": "MaxAngleFrames(89)",
-      "descr": "89 권장",
-      "egroup": "START",
-      "etitle": "MaxAngleFrames(89)",
-      "edescr": "89 Recommeded",
-      "cgroup": "启动设置",
-      "ctitle": "最大角度帧数 (89)",
-      "cdescr": "推荐 89",
-      "min": 80,
-      "max": 100,
-      "default": 89,
-      "unit": 1
-    },
-    {
-      "group": "시작",
-      "name": "HyundaiCameraSCC",
-      "title": "HYUNDAI: CAMERA SCC",
-      "descr": "1:롱컨차량\n 2:크루즈 상태 동기화\n 3:순정크루즈(CANFD롱컨배선)",
-      "egroup": "START",
-      "etitle": "HYUNDAI: CAMERA SCC(0)",
-      "edescr": "1: Long-con Vehicle, 2: Cruise State Sync (CAN-FD Vehicle), 3: Stock Cruise (CANFD Long harness)",
-      "cgroup": "启动设置",
-      "ctitle": "现代: 摄像头 SCC (0)",
-      "cdescr": "1: 纵向控制车辆, 2: 巡航状态同步 (CAN-FD 车辆), 3: 原厂巡航 (CANFD 纵向线束)",
-      "min": 0,
-      "max": 3,
-      "default": 0,
-      "unit": 1
-    },
-    {
-      "group": "시작",
-      "name": "IsLdwsCar",
-      "title": "HYUNDAI: LDWS ONLY CAR(0)",
-      "descr": "LDWS ONLY CAR는 ON",
-      "egroup": "START",
-      "etitle": "HYUNDAI: LDWS ONLY CAR(0)",
-      "edescr": "LDWS ONLY CAR",
-      "cgroup": "启动设置",
-      "ctitle": "现代: 仅配备 LDWS 的车辆 (0)",
-      "cdescr": "仅配备 LDWS 的车辆",
-      "min": 0,
-      "max": 1,
-      "default": 0,
-      "unit": 1
-    },
-    {
-      "group": "시작",
-      "name": "HardwareC3xLite",
-      "title": "C3X Lite 하드웨어",
-      "descr": "C3X Lite에서만 켜세요. 스피커·앰프 대신 GPIO 부저를 사용하며 오디오·로그 기록 프로세스를 끕니다. 변경 후 기기를 재부팅하세요.",
-      "egroup": "START",
-      "etitle": "C3X Lite Hardware",
-      "edescr": "Enable only on C3X Lite. Uses the GPIO buzzer instead of the speaker/amplifier and disables audio and logging processes. Reboot the device after changing.",
-      "cgroup": "启动设置",
-      "ctitle": "C3X Lite 硬件",
-      "cdescr": "仅在 C3X Lite 上启用。使用 GPIO 蜂鸣器代替扬声器/功放，并停用音频和日志记录进程。更改后请重启设备。",
-      "min": 0,
-      "max": 1,
-      "default": 0,
-      "unit": 1,
-      "control": "toggle",
-      "risk": "high"
-    },
-    {
       "group": "레이더설정",
       "name": "CarrotRadarCutInSensitivity",
       "title": "당근레이더 컷인 민감도(3)",
@@ -2212,38 +1653,6 @@
       }
     },
     {
-      "group": "시작",
-      "name": "CanfdHDA2",
-      "title": "CANFD HDA2지원(0)",
-      "descr": "1: HDA2 차량",
-      "egroup": "START",
-      "etitle": "CANFD HDA2(0)",
-      "edescr": "0:HDA1, 1: HDA2",
-      "cgroup": "启动设置",
-      "ctitle": "CANFD HDA2 (0)",
-      "cdescr": "0: HDA1, 1: HDA2",
-      "min": 0,
-      "max": 1,
-      "default": 0,
-      "unit": 1
-    },
-    {
-      "group": "시작",
-      "name": "CanfdDebug",
-      "title": "CANFD Debug(0)",
-      "descr": "",
-      "egroup": "START",
-      "etitle": "CANFD Debug(0)",
-      "edescr": "",
-      "cgroup": "启动设置",
-      "ctitle": "CANFD 调试 (0)",
-      "cdescr": "",
-      "min": -1,
-      "max": 128,
-      "default": 0,
-      "unit": 1
-    },
-    {
       "group": "레이더설정",
       "name": "EnableRadarTracks",
       "title": "레이더트랙 사용(0)",
@@ -2276,83 +1685,6 @@
       "unit": 1,
       "control": "toggle",
       "risk": "high"
-    },
-    {
-      "group": "시작",
-      "name": "HotspotOnBoot",
-      "title": "부팅시 핫스팟켜기",
-      "descr": "COMMA에 USIM을 장착한경우 핫스팟을 자동으로 켜주는 기능",
-      "egroup": "START",
-      "etitle": "Enable HotSpot(0)",
-      "edescr": "Feature to automatically enable hotspot when a USIM is inserted in COMMA",
-      "cgroup": "启动设置",
-      "ctitle": "开启热点 (0)",
-      "cdescr": "在 COMMA 中插入 USIM 卡时自动开启热点的功能",
-      "min": 0,
-      "max": 1,
-      "default": 0,
-      "unit": 1
-    },
-    {
-      "group": "시작",
-      "name": "SoftwareMenu",
-      "title": "소프트웨어메뉴활성화",
-      "descr": "메모리오류가 있을때 끄기",
-      "egroup": "START",
-      "etitle": "Enable Software menu",
-      "edescr": "Turn off on memory error",
-      "cgroup": "启动设置",
-      "ctitle": "开启软件菜单",
-      "cdescr": "内存错误时关闭",
-      "min": 0,
-      "max": 1,
-      "default": 0,
-      "unit": 1
-    },
-    {
-      "group": "시작",
-      "name": "SoundLanguageSetting",
-      "title": "사운드 언어",
-      "descr": "안내음성에 사용할 언어를 선택합니다. 자동은 기기 언어 설정을 따릅니다.",
-      "egroup": "START",
-      "etitle": "Sound Language",
-      "edescr": "Select the language used for voice prompts. Auto follows the device language.",
-      "cgroup": "启动设置",
-      "ctitle": "声音语言",
-      "cdescr": "选择提示音使用的语言。自动会跟随设备语言设置。",
-      "default": "auto"
-    },
-    {
-      "group": "시작",
-      "name": "SoundVolumeAdjust",
-      "title": "사운드볼륨조절(100%)",
-      "descr": "",
-      "egroup": "START",
-      "etitle": "Sound Volume adjust(100%)",
-      "edescr": "",
-      "cgroup": "启动设置",
-      "ctitle": "音量调节 (100%)",
-      "cdescr": "",
-      "min": 5,
-      "max": 200,
-      "default": 0,
-      "unit": 5
-    },
-    {
-      "group": "시작",
-      "name": "SoundVolumeAdjustEngage",
-      "title": "사운드볼륨조절, 인게이지 볼륨(10%)",
-      "descr": "",
-      "egroup": "START",
-      "etitle": "Sound Volume adjust,Engage(10%)",
-      "edescr": "",
-      "cgroup": "启动设置",
-      "ctitle": "音量调节，激活音量 (10%)",
-      "cdescr": "",
-      "min": 5,
-      "max": 200,
-      "default": 0,
-      "unit": 5
     },
     {
       "group": "차량간격",
@@ -2731,247 +2063,6 @@
       "max": 120,
       "default": 105,
       "unit": 1
-    },
-    {
-      "group": "화면",
-      "name": "ShowCustomBrightness",
-      "title": "주행중 화면밝기(100%)",
-      "descr": "주행 시작 약 10초 후 화면밝기 비율\n0: 주변밝기 자동조절\n100: 항상 최대 밝기",
-      "egroup": "DISPLAY",
-      "etitle": "Onroad Screen Brightness(100%)",
-      "edescr": "Screen brightness ratio ~10s after driving starts\n0: Auto adjust by ambient light\n100: Always max brightness",
-      "cgroup": "显示",
-      "ctitle": "行车中屏幕亮度(100%)",
-      "cdescr": "行车开始约10秒后的屏幕亮度比例\n0: 根据环境亮度自动调节\n100: 始终最大亮度",
-      "min": 0,
-      "max": 100,
-      "default": 100,
-      "unit": 5
-    },
-    {
-      "group": "화면",
-      "name": "ShowModelView",
-      "title": "주행화면 표시 모드(C4)",
-      "descr": "주행 중 화면 밝기가 설정값 근처까지 낮아졌을 때 표시 방식\n0: 카메라와 모델 표시\n1: 카메라만 표시\n2: 모델만 표시\n3: 카메라와 모델 숨김",
-      "egroup": "DISPLAY",
-      "etitle": "Onroad Display Mode(C4)",
-      "edescr": "Display mode when onroad screen brightness reaches the configured level\n0: Show camera and model\n1: Show camera only\n2: Show model only\n3: Hide camera and model",
-      "cgroup": "显示",
-      "ctitle": "行车画面显示模式(C4)",
-      "cdescr": "行车中屏幕亮度接近设定值时的显示方式\n0: 显示摄像头和模型\n1: 仅显示摄像头\n2: 仅显示模型\n3: 隐藏摄像头和模型",
-      "min": 0,
-      "max": 3,
-      "default": 0,
-      "unit": 1
-    },
-    {
-      "group": "외부 HUD",
-      "name": "ClusterHud",
-      "title": "외부 HUD 활성화(0)",
-      "descr": "0: 끄기\n1: TURZX 9.2인치\n2: TURZX 12.3인치",
-      "egroup": "CLUSTER HUD",
-      "etitle": "External HUD Display(0)",
-      "edescr": "0: Off\n1: TURZX 9.2 inch\n2: TURZX 12.3 inch",
-      "cgroup": "外部 HUD",
-      "ctitle": "外部 HUD 显示(0)",
-      "cdescr": "0: 关闭\n1: TURZX 9.2 英寸\n2: TURZX 12.3 英寸",
-      "min": 0,
-      "max": 2,
-      "default": 0,
-      "unit": 1
-    },
-    {
-      "group": "외부 HUD",
-      "name": "ClusterHudDebug",
-      "title": "외부 HUD 디버깅(0)",
-      "descr": "0: 온로드에서만\n1: 항상\n2: 항상+UI\n3: 항상+Navi",
-      "egroup": "CLUSTER HUD",
-      "etitle": "External HUD Debug(0)",
-      "edescr": "0: Onroad only\n1: Always\n2: Always + UI\n3: Always + Navi",
-      "cgroup": "外部 HUD",
-      "ctitle": "External HUD Debug(0)",
-      "cdescr": "0: Onroad only\n1: Always\n2: Always + UI\n3: Always + Navi",
-      "min": 0,
-      "max": 3,
-      "default": 0,
-      "unit": 1
-    },
-    {
-      "group": "외부 HUD",
-      "name": "ClusterHudBrightness",
-      "title": "외부 HUD 밝기(0)",
-      "descr": "0: 자동\n1~100: 밝기",
-      "egroup": "CLUSTER HUD",
-      "etitle": "External HUD Brightness(0)",
-      "edescr": "0: Auto\n1-100: Brightness",
-      "cgroup": "外部 HUD",
-      "ctitle": "外部 HUD 亮度(0)",
-      "cdescr": "0: 自动\n1-100: 亮度",
-      "min": 0,
-      "max": 100,
-      "default": 0,
-      "unit": 1
-    },
-    {
-      "group": "외부 HUD",
-      "name": "ClusterHudEncoder",
-      "title": "외부 HUD 인코더(0)",
-      "descr": "0: 자동(하드웨어 H264 -> 소프트웨어 H264 -> JPEG)\n1: JPEG\n2: 하드웨어 H264\n3: 소프트웨어 H264(ffmpeg/libx264)",
-      "egroup": "CLUSTER HUD",
-      "etitle": "External HUD Encoder(0)",
-      "edescr": "0: Auto (Hardware H264 -> Software H264 -> JPEG)\n1: JPEG\n2: Hardware H264\n3: Software H264 (ffmpeg/libx264)",
-      "cgroup": "外部 HUD",
-      "ctitle": "外部 HUD 编码器(0)",
-      "cdescr": "0: Auto (Hardware H264 -> Software H264 -> JPEG)\n1: JPEG\n2: Hardware H264\n3: Software H264 (ffmpeg/libx264)",
-      "min": 0,
-      "max": 3,
-      "default": 0,
-      "unit": 1
-    },
-    {
-      "group": "외부 HUD",
-      "name": "ClusterHudTheme",
-      "title": "외부 HUD 테마(0)",
-      "descr": "0: 자동\n1: 다크\n2: 라이트",
-      "egroup": "CLUSTER HUD",
-      "etitle": "External HUD Theme(0)",
-      "edescr": "0: Auto\n1: Dark\n2: Light",
-      "cgroup": "外部 HUD",
-      "ctitle": "外部 HUD 主题(0)",
-      "cdescr": "0: 自动\n1: 深色\n2: 浅色",
-      "min": 0,
-      "max": 2,
-      "default": 0,
-      "unit": 1
-    },
-    {
-      "group": "외부 HUD",
-      "name": "ClusterHudLiveFps",
-      "title": "외부 HUD 라이브 FPS 제한(1)",
-      "descr": "0: 무제한(진단용)\n1: 10 FPS(기본)\n2: 20 FPS\n3: 30 FPS\n4: 40 FPS\n5: 50 FPS\n6: 60 FPS",
-      "egroup": "CLUSTER HUD",
-      "etitle": "External HUD Live FPS Limit(1)",
-      "edescr": "0: Uncapped (diagnostic)\n1: 10 FPS (default)\n2: 20 FPS\n3: 30 FPS\n4: 40 FPS\n5: 50 FPS\n6: 60 FPS",
-      "cgroup": "外部 HUD",
-      "ctitle": "外部 HUD 实时 FPS 限制(1)",
-      "cdescr": "0: Uncapped (diagnostic)\n1: 10 FPS (default)\n2: 20 FPS\n3: 30 FPS\n4: 40 FPS\n5: 50 FPS\n6: 60 FPS",
-      "min": 0,
-      "max": 6,
-      "default": 1,
-      "unit": 1
-    },
-    {
-      "group": "외부 HUD",
-      "name": "ClusterHudScreenMode",
-      "title": "외부 HUD 화면 모드(0)",
-      "descr": "0: 기본\n1: 디버그\n2: 디버그(시스템)\n3: 디버그(그래프1)\n4: 디버그(그래프2)",
-      "egroup": "CLUSTER HUD",
-      "etitle": "External HUD Screen Mode(0)",
-      "edescr": "0: Default\n1: Debug\n2: Debug (system)\n3: Debug (graph1)\n4: Debug (graph2)\n5: Navi Debug",
-      "cgroup": "外部 HUD",
-      "ctitle": "外部 HUD 画面模式(0)",
-      "cdescr": "0: 默认\n1: 调试\n2: 调试(系统)\n3: 调试(图表1)\n4: 调试(图表2)",
-      "min": 0,
-      "max": 5,
-      "default": 0,
-      "unit": 1
-    },
-    {
-      "group": "외부 HUD",
-      "name": "ClusterHudRadarInfo",
-      "title": "외부 HUD 레이더 정보 표시(4)",
-      "descr": "0: 표시 안함\n1: 속도(차량만)\n2: 속도,거리(차량만)\n3: 속도(모두)\n4: 속도,거리(모두)",
-      "egroup": "CLUSTER HUD",
-      "etitle": "External HUD Radar Info(4)",
-      "edescr": "0: Off\n1: Speed (vehicles only)\n2: Speed, distance (vehicles only)\n3: Speed (all)\n4: Speed, distance (all)",
-      "cgroup": "外部 HUD",
-      "ctitle": "外部 HUD 雷达信息(4)",
-      "cdescr": "0: 关闭\n1: 速度(仅车辆)\n2: 速度,距离(仅车辆)\n3: 速度(全部)\n4: 速度,距离(全部)",
-      "min": 0,
-      "max": 4,
-      "default": 4,
-      "unit": 1
-    },
-    {
-      "group": "외부 HUD",
-      "name": "ClusterHudRadarDisplay",
-      "title": "외부 HUD 레이더 표시 옵션(0)",
-      "descr": "0: 기본(가까운 레이더 포인트 병합)\n1: 상세(레이더 포인트 병합 안함)",
-      "egroup": "CLUSTER HUD",
-      "etitle": "External HUD Radar Display(0)",
-      "edescr": "0: Default (merge nearby radar points)\n1: Detail (raw radar points)",
-      "cgroup": "外部 HUD",
-      "ctitle": "外部 HUD 雷达显示选项(0)",
-      "cdescr": "0: 默认(合并相近雷达点)\n1: 详细(不合并雷达点)",
-      "min": 0,
-      "max": 1,
-      "default": 0,
-      "unit": 1
-    },
-    {
-      "group": "외부 HUD",
-      "name": "ClusterHudRadarSourceColor",
-      "title": "외부 HUD 레이더 소스 색구분(0)",
-      "descr": "0: 기본(모든 차량 회색)\n1: 켜짐(SCC=R, HDA=B, RADAR=O)",
-      "egroup": "CLUSTER HUD",
-      "etitle": "External HUD Radar Source Colors(0)",
-      "edescr": "0: Default (all vehicles gray)\n1: On (SCC=R, HDA=B, RADAR=O)",
-      "cgroup": "外部 HUD",
-      "ctitle": "外部 HUD 雷达来源颜色(0)",
-      "cdescr": "0: 默认(所有车辆灰色)\n1: 开启(SCC=R, HDA=B, RADAR=O)",
-      "min": 0,
-      "max": 1,
-      "default": 0,
-      "unit": 1
-    },
-    {
-      "group": "외부 HUD",
-      "name": "ClusterHudCoreMode",
-      "title": "외부 HUD CPU 코어 지정(0)",
-      "descr": "CLUSTER_REALTIME=1일 때만 적용\n0: 1,2,3,4\n1: 모든 코어\n변경 시 클러스터 HUD를 재시작합니다.",
-      "egroup": "CLUSTER HUD",
-      "etitle": "External HUD CPU Core Mode(0)",
-      "edescr": "Applies only when CLUSTER_REALTIME=1\n0: cores 1,2,3,4\n1: all cores\nChanging this restarts the cluster HUD process.",
-      "cgroup": "外部 HUD",
-      "ctitle": "External HUD CPU Core Mode(0)",
-      "cdescr": "Applies only when CLUSTER_REALTIME=1\n0: cores 1,2,3,4\n1: all cores\nChanging this restarts the cluster HUD process.",
-      "min": 0,
-      "max": 1,
-      "default": 0,
-      "unit": 1
-    },
-    {
-      "group": "외부 HUD",
-      "name": "ClusterHudPriority",
-      "title": "외부 HUD 실시간 우선순위(10)",
-      "descr": "CLUSTER_REALTIME=1일 때만 적용\n1-99\n기본 10\n변경 시 클러스터 HUD를 재시작합니다.",
-      "egroup": "CLUSTER HUD",
-      "etitle": "External HUD Realtime Priority(10)",
-      "edescr": "Applies only when CLUSTER_REALTIME=1\n1-99\nDefault 10\nChanging this restarts the cluster HUD process.",
-      "cgroup": "外部 HUD",
-      "ctitle": "External HUD Realtime Priority(10)",
-      "cdescr": "Applies only when CLUSTER_REALTIME=1\n1-99\nDefault 10\nChanging this restarts the cluster HUD process.",
-      "min": 1,
-      "max": 99,
-      "default": 10,
-      "unit": 1
-    },
-    {
-      "group": "외부 HUD",
-      "name": "ClusterHudCameraViewMode",
-      "title": "외부 HUD 카메라 뷰 모드(0)",
-      "descr": "0: 기본\n1: 모드1(하단뷰)",
-      "egroup": "CLUSTER HUD",
-      "etitle": "External HUD Camera View Mode(0)",
-      "edescr": "0: Default\n1: Mode 1 (bottom view)",
-      "cgroup": "外部 HUD",
-      "ctitle": "External HUD Camera View Mode(0)",
-      "cdescr": "0: Default\n1: Mode 1 (bottom view)",
-      "min": 0,
-      "max": 1,
-      "default": 0,
-      "unit": 1
     }
-
   ]
 }

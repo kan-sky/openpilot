@@ -58,8 +58,24 @@ class LongControl:
     self.readParamCount = 0
     self.stopping_accel = 0.0
 
+    # Kans: 롱컨 실시간 튜닝 (가속도 오차 PID: error = aTarget - aEgo)
+    # LongTuningKpV(x0.01): 비례게인, 0이면 차량 기본값(0)
+    # LongTuningKiV(x0.01): 적분게인, 0이면 차량 기본 속도별 값(CP.longitudinalTuning.kiBP/kiV)
+    # LongTuningKf(x0.01): 피드포워드(aTarget) 배율, 0이면 1.0
+    self.kp_default = self.pid._k_p
+    self.ki_default = self.pid._k_i
+    self.kf = 1.0
+
   def reset(self):
     self.pid.reset()
+
+  def _update_tuning(self):
+    kp = self.params.get_float("LongTuningKpV") * 0.01
+    ki = self.params.get_float("LongTuningKiV") * 0.01
+    kf = self.params.get_float("LongTuningKf") * 0.01
+    self.pid._k_p = ([0.0], [kp]) if kp > 0.0 else self.kp_default
+    self.pid._k_i = ([0.0], [ki]) if ki > 0.0 else self.ki_default
+    self.kf = kf if kf > 0.0 else 1.0
 
   def update(self, active, CS, a_target, should_stop, accel_limits):
     """Update longitudinal control. This updates the state machine and runs a PID loop"""
@@ -67,6 +83,7 @@ class LongControl:
     if self.readParamCount >= 100:
       self.readParamCount = 0
       self.stopping_accel = self.params.get_float("StoppingAccel") * 0.01
+      self._update_tuning()
 
     self.pid.neg_limit = accel_limits[0]
     self.pid.pos_limit = accel_limits[1]
@@ -96,7 +113,7 @@ class LongControl:
     else:  # LongCtrlState.pid
       error = a_target - CS.aEgo
       output_accel = self.pid.update(error, speed=CS.vEgo,
-                                     feedforward=a_target)
+                                     feedforward=a_target * self.kf)
 
     self.last_output_accel = np.clip(output_accel, accel_limits[0], accel_limits[1])
     return self.last_output_accel
