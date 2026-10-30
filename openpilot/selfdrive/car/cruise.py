@@ -74,6 +74,8 @@ class VCruiseHelper:
     self._cruise_speed_unit_basic = 5
     self._cruise_button_mode = 3
     self._lfa_button_mode = 0  # Kans: LfaButtonMode
+    self._cancel_button_mode = 0  # Kans: CancelButtonMode (1: 취소 버튼 짧게 눌러도 횡제어까지 해제)
+    self._cruise_button_long_delay = 40  # Kans: CruiseButtonLongDelay (길게누름 판정 프레임)
     self.disengage_on_accelerator = self.params.get_bool("DisengageOnAccelerator")
     self.speed_from_pcm = self.params.get_int("SpeedFromPCM")
 
@@ -159,6 +161,8 @@ class VCruiseHelper:
 
       self._cruise_button_mode = self.params.get_int("CruiseButtonMode")
       self._lfa_button_mode = self.params.get_int("LfaButtonMode")
+      self._cancel_button_mode = self.params.get_int("CancelButtonMode")
+      self._cruise_button_long_delay = self.params.get_int("CruiseButtonLongDelay")
       self.disengage_on_accelerator = self.params.get_bool("DisengageOnAccelerator")
       self.cruiseOnDist = self.params.get_float("CruiseOnDist") * 0.01
       # Kans: pcmCruise 차량의 설정속도 출처 (1: PCM 표시속도 사용)
@@ -350,7 +354,7 @@ class VCruiseHelper:
       ]:
         self.button_cnt = 1
         self.button_prev = bt
-        self.button_long_time = 40 if bt in [ButtonType.accelCruise, ButtonType.decelCruise] else 70
+        self.button_long_time = self._cruise_button_long_delay if bt in [ButtonType.accelCruise, ButtonType.decelCruise] else self._cruise_button_long_delay + 30
 
       elif not b.pressed and self.button_cnt > 0 and bt == self.button_prev:
         if bt == ButtonType.cancel:
@@ -463,6 +467,9 @@ class VCruiseHelper:
           self._add_log("Lateral " + ("enabled" if self._lat_enabled else "disabled"))
 
       elif button_type == ButtonType.cancel:
+        if self._cancel_button_mode in [1]:
+          self._lat_enabled = False
+          self._add_log("Lateral disabled")
         self._cruise_cancel_state = True
 
     else:

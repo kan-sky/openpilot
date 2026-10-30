@@ -160,6 +160,8 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"CarrotRadarCutInSensitivity", {PERSISTENT, INT, "3"}},
     {"RadarReactionFactor", {PERSISTENT, INT, "20"}},
     {"EnableRadarTracks", {PERSISTENT, INT, "0"}},
+    {"CancelButtonMode", {PERSISTENT, INT, "0"}},
+    {"CruiseButtonLongDelay", {PERSISTENT, INT, "40"}},
     {"LongTuningKpV", {PERSISTENT, INT, "0"}},
     {"LongTuningKiV", {PERSISTENT, INT, "0"}},
     {"LongTuningKf", {PERSISTENT, INT, "100"}},

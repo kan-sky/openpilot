@@ -178,9 +178,7 @@
               "en": "Speed Limit",
               "zh": "限速",
               "params": [
-                "AutoRoadSpeedLimitOffset",
-                "AutoRoadSpeedAdjust",
-                "AutoSpeedUptoRoadSpeedLimit"
+                "AutoRoadSpeedLimitOffset"
               ]
             },
             {
@@ -204,8 +202,7 @@
                 "AutoCurveSpeedLowerLimit",
                 "TurnSpeedControlMode",
                 "MapTurnSpeedFactor",
-                "ModelTurnSpeedFactor",
-                "ApplyModelSpeed"
+                "ModelTurnSpeedFactor"
               ]
             },
             {
@@ -1148,10 +1145,10 @@
       "group": "버튼설정",
       "name": "CancelButtonMode",
       "title": "캔슬버튼작동모드(0)",
-      "descr": "0:Long control, 1: Long + Lateral",
+      "descr": "0: 취소 버튼 짧게 - 크루즈(종방향)만 해제, 길게 - 횡제어까지 해제\n1: 짧게 눌러도 횡제어까지 해제",
       "egroup": "BUTN",
       "etitle": "Cancel Button Mode(0)",
-      "edescr": "0:Long control, 1: Long + Lateral",
+      "edescr": "0: short press cancels long control only (long press also disables lateral)\n1: short press also disables lateral",
       "cgroup": "按键设置",
       "ctitle": "取消按钮模式(0)",
       "cdescr": "0: 纵向控制, 1: 纵向 + 横向",
@@ -1196,10 +1193,10 @@
       "group": "버튼설정",
       "name": "CruiseButtonLongDelay",
       "title": "크루즈버튼롱딜레이(40)",
-      "descr": "버튼을 길게 눌렀을 때 기능이 작동하기 전까지의 지연 시간입니다.",
+      "descr": "크루즈 +/- 버튼 길게누름 판정 시간 (프레임, 100 = 1초)\n취소/거리/LKA 버튼은 이 값 + 30",
       "egroup": "Button Settings",
       "etitle": "Cruise Button Long Delay (40)",
-      "edescr": "Delay before the long-press action is triggered.",
+      "edescr": "Long-press time for cruise +/- buttons (frames, 100 = 1 s). Cancel/gap/LKA buttons use this + 30",
       "cgroup": "按键设置",
       "ctitle": "巡航按键长按延迟(40)",
       "cdescr": "长按按钮后，功能触发前的延迟时间。",
@@ -1354,38 +1351,6 @@
     },
     {
       "group": "크루즈",
-      "name": "AutoSpeedUptoRoadSpeedLimit",
-      "title": "자동속도증가 (100)%",
-      "descr": "전방차량에 따라 자동속도증가\n 로드스피드*비율 까지 자동속도올림.",
-      "egroup": "CRUISE",
-      "etitle": "AutoSpeedUpx:(100)%",
-      "edescr": "Automatically increases speed on lead car, up to (road speed x ratio)",
-      "cgroup": "巡航设置",
-      "ctitle": "自动加速至: (100)%",
-      "cdescr": "当前方有车时自动加速，最高至 (道路限速 x 比例)",
-      "min": 0,
-      "max": 200,
-      "default": 0,
-      "unit": 10
-    },
-    {
-      "group": "감속제어",
-      "name": "AutoRoadSpeedAdjust",
-      "title": "자동도로제한속도감속 (50)%",
-      "descr": "-1: 도로제한속도로 항상\n 0: 기존속도유지\n50: 중간값\n100: 새로운속도",
-      "egroup": "CRUISE",
-      "etitle": "AutoRoadLimitSpeedAdjust (50)%",
-      "edescr": "-1: set roadlimitspeed, 100: new road speed, 50: median, 0: not change",
-      "cgroup": "巡航设置",
-      "ctitle": "自动道路限速调整 (50)%",
-      "cdescr": "-1: 设置道路限速, 100: 新道路速度, 50: 中值, 0: 不改变",
-      "min": -1,
-      "max": 100,
-      "default": 0,
-      "unit": 10
-    },
-    {
-      "group": "크루즈",
       "name": "AutoGasSyncSpeed",
       "title": "자동크루즈속도 업데이트",
       "descr": "액셀을 밟아 속도가 설정속도보다 빨라지면 설정속도 변경",
@@ -1397,22 +1362,6 @@
       "cdescr": "如果踩下油门且速度超过设定速度，则更新设定速度",
       "min": 0,
       "max": 1,
-      "default": 0,
-      "unit": 1
-    },
-    {
-      "group": "크루즈",
-      "name": "ApplyModelSpeed",
-      "title": "모델 주행속도 적용 비율",
-      "descr": "모델이 계산한 주행속도를 설정한 비율만큼 적용합니다.",
-      "egroup": "CRUISE",
-      "etitle": "Model Speed Apply Ratio",
-      "edescr": "Applies the model-calculated driving speed by the set ratio.",
-      "cgroup": "巡航设置",
-      "ctitle": "模型车速应用比例",
-      "cdescr": "按设定比例应用模型计算的行驶速度。",
-      "min": -120,
-      "max": 120,
       "default": 0,
       "unit": 1
     },
