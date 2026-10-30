@@ -191,6 +191,12 @@ class VCruiseCarrot:
     self._pause_auto_speed_up = False
     self._activate_cruise = 0
     self._lat_enabled = self.params.get_int("AutoEngage") > 0
+
+    # activateCruise ON latch
+    self._activate_cruise_raw = 0
+    self._activate_cruise_on_latch = 0
+    self._activate_cruise_on_timer = 0
+    self.activate_cruise_on_hold_time = 0.5
     self._v_cruise_kph_at_brake = 0
     self.cruise_state_available_last = False
 
@@ -722,6 +728,15 @@ class VCruiseCarrot:
         self._soft_hold_active = 0
         return
       self._activate_cruise = enable
+      self._activate_cruise_raw = enable
+
+      if enable > 0:
+        self._activate_cruise_on_timer = int(self.activate_cruise_on_hold_time / 0.01)
+        self._activate_cruise_on_latch = 1
+      elif enable < 0:
+        self._activate_cruise_on_timer = 0
+        self._activate_cruise_on_latch = 0
+
       self._cancel_timer = int(cancel_timer / 0.01)   # DT_CTRL: 0.01
       self._add_log(reason)
 
@@ -739,16 +754,19 @@ class VCruiseCarrot:
       return False, d_final
 
   def _update_cruise_state(self, CS, CC, v_cruise_kph):
+    # activateCruise ON latch timer
+    if self._activate_cruise_on_timer > 0:
+      self._activate_cruise_on_timer -= 1
+      self._activate_cruise_on_latch = 1
+    else:
+      self._activate_cruise_on_latch = 0
+
     if not CC.enabled:
       #self._pause_auto_speed_up = False
       if self._brake_pressed_count == -1 and self._soft_hold_active > 0:
         self._soft_hold_active = 2
         #self.autoCruiseControl_cancel_timer = 0
         self._cruise_control(1, -1, "Cruise on (soft hold)")
-      # GM: autoResume
-      elif self.params.get_bool("ActivateCruiseAfterBrake"):
-        self.params.put_bool_nonblocking("ActivateCruiseAfterBrake", False)
-        self._cruise_control(1, -1, "Cruise on (brake)")
       elif self.v_cruise_kph < self.v_ego_kph_set:
         self.v_cruise_kph = self.v_ego_kph_set
 
@@ -842,6 +860,15 @@ class VCruiseCarrot:
       self._pause_auto_speed_up = True
 
     return self._auto_speed_up(v_cruise_kph)
+
+  # Kans: 오토크루즈 요청 (-1: OFF 1회, 1: ON 래치 유지 중, 0: 없음)
+  def get_activate_cruise(self):
+    if self._activate_cruise_raw < 0:  # 1) OFF(-1) 최우선. 한번 보내고 초기화(0)
+      self._activate_cruise_raw = 0
+      return -1
+    if self._activate_cruise_on_latch > 0:  # ON 래치가 살아 있으면 1
+      return 1
+    return 0  # 그외 0
 
   def _prepare_brake_gas(self, CS, CC):
     if CS.gasPressed:

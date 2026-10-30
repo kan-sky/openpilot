@@ -218,6 +218,9 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"AutoGasSyncSpeed", {PERSISTENT, INT, "1"} },
     {"ApplyModelSpeed", {PERSISTENT, INT, "0"} },
     {"AutoEngage", {PERSISTENT, INT, "0"}},
+    {"CruiseDelay", {PERSISTENT, INT, "12"}},
+    {"ResumeDelay", {PERSISTENT, INT, "6"}},
+    {"AccelForce", {PERSISTENT, INT, "200"}},
     {"AlwaysLateral", {PERSISTENT, INT, "1"} },
     {"DisableMinSteerSpeed", {PERSISTENT, INT, "0"}},
     {"AutoCurveSpeedLowerLimit", {PERSISTENT, INT, "30"}},
@@ -374,7 +377,6 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"EVTable", {PERSISTENT, BOOL, "0"}},
     {"LongPitch", {PERSISTENT, BOOL, "0"}},
 
-    {"ActivateCruiseAfterBrake", {CLEAR_ON_MANAGER_START, INT, "0"}},
 
     {"CustomSR", {PERSISTENT, INT, "0"}},
     {"SteerRatioRate", {PERSISTENT, INT, "100"}},
