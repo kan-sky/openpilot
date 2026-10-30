@@ -106,10 +106,12 @@ class GMAutoResume:
       at_full_stop = False
 
     if CS.out.activateCruise > 0 and not self._pending_activateCruise:
-      cloudlog.warning(f"[gm autocruise] activateCruise request: "
+      cloudlog.warning(f"[gm autocruise] activateCruise request: vEgo={CS.out.vEgo:.2f} "
                        f"brakePressed={CS.out.brakePressed} cruiseState.enabled={CS.out.cruiseState.enabled}")
 
-    if CS.out.activateCruise > 0 and not CS.out.brakePressed:
+    # 카메라 ACC ECM은 minEnableSpeed 미만에서 브레이크 없이 체결하면 폴트 - 그 속도 이상에서만 오토크루즈
+    # (정지 중 브레이크 밟고 체결은 허용되지만, 오토크루즈는 브레이크 해제 상태에서만 버튼을 보내므로 해당 없음)
+    if CS.out.activateCruise > 0 and not CS.out.brakePressed and CS.out.vEgo >= self.CP.minEnableSpeed:
       self._pending_activateCruise = True
 
     # Kans: 리쥼 + 가속펄스
