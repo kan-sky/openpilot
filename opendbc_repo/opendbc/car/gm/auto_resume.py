@@ -114,6 +114,19 @@ class GMAutoResume:
     if CS.out.activateCruise > 0 and not CS.out.brakePressed and CS.out.vEgo >= self.CP.minEnableSpeed:
       self._pending_activateCruise = True
 
+    # 끄기 요청(-1)이 오거나 시도 구간 밖에서 크루즈가 이미 켜져 있으면 대기 요청 폐기
+    # (남겨두면 나중에 운전자가 크루즈를 끈 직후 SET이 나가 재체결됨)
+    cruise_off_request = CS.out.activateCruise < 0
+    if cruise_off_request or (CS.out.cruiseState.enabled and not self.autoCruise_activate):
+      if self._pending_activateCruise or (cruise_off_request and self.autoCruise_activate):
+        cloudlog.warning(f"[gm autocruise] pending request dropped: activateCruise={CS.out.activateCruise} "
+                         f"cruiseState.enabled={CS.out.cruiseState.enabled}")
+      self._pending_activateCruise = False
+      if cruise_off_request:
+        self.autoCruise_activate = False
+        self.autoCruise_frame = 0
+        self.autoCruise_try_count = 0
+
     # Kans: 리쥼 + 가속펄스
     lead_drel = self.lead_distance
     lead_vrel = self.lead_vrel
@@ -182,9 +195,10 @@ class GMAutoResume:
         within_window = (frame - self.autoCruise_frame) * DT_CTRL <= self.cruiseDelay_time  # 예: 0.25초
 
         if within_window and self.autoCruise_try_count < 2:
-          if (frame - self.last_button_frame) * DT_CTRL >= 0.12:
-            # Kans: GM의 RESUME은 완전 정지 후 크루즈를 복구하지 못하고 SET만 된다 (실차 확인) - 자동체결은 DECEL_SET
-            btn = CruiseButtons.DECEL_SET if CS.out.activateCruise == 1 else CruiseButtons.RES_ACCEL
+          # Kans: GM의 RESUME은 완전 정지 후 크루즈를 복구하지 못하고 SET만 된다 (실차 확인) - 자동체결은 DECEL_SET
+          # ON 요청(1)이 유지될 때만 송신
+          if (frame - self.last_button_frame) * DT_CTRL >= 0.12 and CS.out.activateCruise == 1:
+            btn = CruiseButtons.DECEL_SET
             cloudlog.warning(f"[gm autocruise] send btn={btn} try={self.autoCruise_try_count} activateCruise={CS.out.activateCruise}")
             send_btn(btn)
             self.last_button_frame = frame
