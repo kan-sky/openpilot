@@ -94,16 +94,6 @@ def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.
 
   applied_lat_smooth_seconds = 0.0
   if lat_smooth_seconds > 0.0:
-    # Kans: 깊은 커브에서 모델 곡률이 갑자기 줄어들 때 핸들 급풀림 방지
-    # 같은 방향 곡률 0.0025 이상(램프 등)에서 70% 아래로 떨어지면 80%는 직전값 유지
-    raw_desired_curvature = float(desired_curvature)
-    prev_curvature = float(prev_action.desiredCurvature)
-    same_curve = raw_desired_curvature * prev_curvature > 0.0
-    deep_curve = abs(prev_curvature) > 0.0025
-    curv_drop = abs(raw_desired_curvature) < abs(prev_curvature) * 0.70
-    if same_curve and deep_curve and curv_drop:
-      desired_curvature = prev_curvature * 0.8 + raw_desired_curvature * 0.2
-
     # Kans: 곡률별/속도별 스무딩 상한 (큰 곡률·저속일수록 짧게)
     curve_smooth_max = float(np.interp(abs(desired_curvature), [0.0005, 0.0015, 0.0040], [0.13, 0.11, 0.10]))
     speed_smooth_max = float(np.interp(v_ego, [5.0, 15.0, 30.0], [0.08, 0.10, 0.18]))
