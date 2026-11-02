@@ -47,6 +47,7 @@ class DesireHelper:
     self.carrot_cmd_index_last = 0
     self.atc_type = ""
     self.atc_active = 0  # 0: 없음, 1: ATC 동작, 2: 충돌
+    self.atc_done_type = ""  # 차선변경을 마친 ATC 지시 (같은 지시가 끝날 때까지 재시도 안 함)
 
     # auto lane change
     self.auto_lane_change_enable = False
@@ -120,6 +121,10 @@ class DesireHelper:
     atc_type = carrotMan.atcType
     atc_blinker_state = BLINKER_NONE
 
+    # 완료된 ATC 지시는 다른 지시로 바뀌면 해제 ("fork right" ↔ "fork right prepare"는 같은 지시)
+    if self.atc_done_type and atc_type.replace(" prepare", "") != self.atc_done_type:
+      self.atc_done_type = ""
+
     # 유지 카운트는 DesireHelper에서 관리
     if self.carrot_lane_change_count > 0:
       atc_blinker_state = self.carrot_blinker_state
@@ -134,7 +139,9 @@ class DesireHelper:
         self.atc_active = 1
         self.blinker_ignore = False
     elif atc_type in ("fork left", "fork right", "atc left", "atc right"):
-      if self.atc_active != 2:
+      if atc_type == self.atc_done_type:
+        self.atc_active = 0
+      elif self.atc_active != 2:
         atc_blinker_state = BLINKER_LEFT if atc_type in ("fork left", "atc left") else BLINKER_RIGHT
         self.atc_active = 1
     else:
@@ -215,6 +222,15 @@ class DesireHelper:
     # externally readable
     self.lane_change_available_left = self.left.lane_change_available
     self.lane_change_available_right = self.right.lane_change_available
+
+  def _finish_atc_lane_change(self):
+    # ATC 차선변경 후 그쪽에 더 갈 차선이 없으면 같은 지시로 재시도하지 않고 종료
+    # (내비는 분기점을 지날 때까지 같은 지시를 계속 보냄)
+    self.atc_done_type = self.atc_type.replace(" prepare", "")
+    self.lane_change_state = LaneChangeState.off
+    self.lane_change_direction = LaneChangeDirection.none
+    self.next_lane_change = False
+    cloudlog.warning(f"[desire atc] lane change done, hold retry until atcType changes: {self.atc_done_type}")
 
   def _get_selected_side(self, blinker_state: int) -> SideState:
     return self.left if blinker_state == BLINKER_LEFT else self.right
@@ -376,6 +392,9 @@ class DesireHelper:
           if side is None:
             self.lane_change_state = LaneChangeState.off
             self.lane_change_direction = LaneChangeDirection.none
+          elif self.next_lane_change and atc_lane_change_only and self._is_last_lane(side):
+            # 운전자 깜빡이로 변경을 마친 뒤 깜빡이를 끄면 ATC 단독 대기로 남는 경우
+            self._finish_atc_lane_change()
           else:
             self.lane_change_direction = LaneChangeDirection.left if blinker_state == BLINKER_LEFT else LaneChangeDirection.right
 
@@ -450,7 +469,9 @@ class DesireHelper:
           self.lane_change_ll_prob = min(self.lane_change_ll_prob + DT_MDL, 1.0)
           if self.lane_change_ll_prob > 0.99:
             self.lane_change_direction = LaneChangeDirection.none
-            if desire_enabled:
+            if desire_enabled and atc_lane_change_only and self._is_last_lane(side):
+              self._finish_atc_lane_change()
+            elif desire_enabled:
               self.lane_change_state = LaneChangeState.preLaneChange
               self.next_lane_change = True
             else:
