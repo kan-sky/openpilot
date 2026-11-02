@@ -116,6 +116,10 @@ class LatControlTorque(LatControl):
     expected_lateral_accel = self.lat_accel_request_buffer[-delay_frames]
     setpoint = expected_lateral_accel
     error = setpoint - measurement
+    # Kans: 목표 곡률이 횡가속도 한계로 잘린 동안(루프 램프 등) 차가 같은 방향으로 목표보다 더 돌고 있으면
+    # 잘린 목표 쪽(바깥)으로 미는 보정은 하지 않는다 - 도로를 따라 돌던 차가 밀려 언더스티어가 남
+    if curvature_limited and setpoint * measurement > 0 and abs(measurement) > abs(setpoint):
+      error = 0.0
 
     lookahead_idx = int(np.clip(-delay_frames + self.lookahead_frames, -self.lat_accel_request_buffer_len+1, -2))
     raw_lateral_jerk = (self.lat_accel_request_buffer[lookahead_idx+1] - self.lat_accel_request_buffer[lookahead_idx-1]) / (2 * self.dt)
@@ -133,7 +137,8 @@ class LatControlTorque(LatControl):
       # do error correction in lateral acceleration space, convert at end to handle non-linear torque responses correctly
       pid_log.error = float(error)
 
-      freeze_integrator = steer_limited_by_safety or CS.steeringPressed or CS.vEgo < 5
+      # Kans: 목표 곡률이 잘린 동안의 오차는 추종 오차가 아니므로 적분하지 않음 (다음 커브로 I가 넘어가 오버스티어)
+      freeze_integrator = steer_limited_by_safety or CS.steeringPressed or CS.vEgo < 5 or curvature_limited
       if self.set_torque_from_lateral_accel_context is not None:
         self.set_torque_from_lateral_accel_context(roll_compensation, CS.vEgo, CS.aEgo)
         # Kans: NNFF 차종은 속도/롤에 따라 토크↔횡가속 관계가 바뀌므로 PID 상한을 20Hz로 갱신 (토크 ±steer_max까지 사용)
