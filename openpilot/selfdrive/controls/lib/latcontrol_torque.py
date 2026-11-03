@@ -128,7 +128,12 @@ class LatControlTorque(LatControl):
     ff = gravity_adjusted_future_lateral_accel
     # latAccelOffset corrects roll compensation bias from device roll misalignment relative to car roll
     ff -= self.torque_params.latAccelOffset
-    ff += get_friction(error + JERK_GAIN * desired_lateral_jerk, lateral_accel_deadzone, FRICTION_THRESHOLD, self.torque_params)
+    friction_lataccel = get_friction(error + JERK_GAIN * desired_lateral_jerk, lateral_accel_deadzone, FRICTION_THRESHOLD, self.torque_params)
+    # Kans: NNFF 차종은 마찰을 NNFF 출력 뒤 토크 공간에서 더한다
+    # (횡가속도 공간에서 더하면 NNFF 곡선이 평평한 커브 영역에서 마찰 토크가 1/4로 줄어 탈출 때 핸들이 멈춰 있음)
+    nnff_torque_friction = self.set_torque_from_lateral_accel_context is not None
+    if not nnff_torque_friction:
+      ff += friction_lataccel
 
     if not active:
       output_torque = 0.0
@@ -146,6 +151,10 @@ class LatControlTorque(LatControl):
           self.update_limits()
       output_lataccel = self.pid.update(pid_log.error, speed=CS.vEgo, feedforward=ff * self.kf, freeze_integrator=freeze_integrator)
       output_torque = self.torque_from_lateral_accel(output_lataccel, self.torque_params)
+      if nnff_torque_friction and self.torque_params.latAccelFactor > 0:
+        # get_friction은 friction × latAccelFactor(횡가속도 단위)를 돌려주므로 토크 단위로 환산
+        output_torque += friction_lataccel / self.torque_params.latAccelFactor
+        output_torque = float(np.clip(output_torque, -self.steer_max, self.steer_max))
 
       pid_log.active = True
       pid_log.p = float(self.pid.p)
