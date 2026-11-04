@@ -24,6 +24,7 @@ from openpilot.common.realtime import Ratekeeper, set_core_affinity
 from openpilot.common.params import Params
 from openpilot.common.filter_simple import MyMovingAverage
 from openpilot.common.hardware import PC
+from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.navd.helpers import Coordinate
 
 from openpilot.selfdrive.carrot.carrot_serv import CarrotServ
@@ -433,7 +434,27 @@ class CarrotMan:
       points, _ = self._resample_route_line(line, offset, distance_interval)
       out_speed = min(out_speed, self._route_speed_from_points(points, distance_interval, v_ego_kph))
 
+    self._log_route_speed(out_speed, v_ego_kph, resampled_points, distance_interval, current_position, start_point, route_s0, heading_deg)
     return resampled_points, resampled_distances, out_speed
+
+  def _log_route_speed(self, out_speed, v_ego_kph, points, distance_interval, current_position, start_point, route_s0, heading_deg):
+    # Kans: 차가 곧게 가는데 경로 속도가 낮을 때 원인 확인용 (1초에 1번)
+    now = time.monotonic()
+    actual_curvature = abs(self.sm["controlsState"].curvature)
+    if out_speed >= v_ego_kph + 20 or actual_curvature >= 0.008 or now - getattr(self, "route_log_time", 0.0) < 1.0:
+      return
+    self.route_log_time = now
+
+    sample = 4
+    curvatures = [abs(calculate_curvature(points[i], points[i + sample], points[i + sample * 2])) for i in range(len(points) - sample * 2)]
+    if not curvatures:
+      return
+    max_index = int(np.argmax(curvatures))
+    route_offset = haversine(current_position[0], current_position[1], start_point[0], start_point[1])
+    cloudlog.warning(f"[route speed] out={out_speed:.1f} vEgo={v_ego_kph:.1f} actualK={actual_curvature:.4f} window0K={curvatures[0]:.4f} "
+                     f"maxK={curvatures[max_index]:.4f} maxAt={max_index * distance_interval:.0f}m maxPoint={points[max_index + sample]} "
+                     f"routeS={route_s0:.0f} offset={route_offset:.1f}m heading={heading_deg:.1f} pos={current_position} "
+                     f"startIndex={self.navi_points_start_index} pointCount={len(self.navi_points)}")
 
   @staticmethod
   def _resample_route_line(line, offset, distance_interval):
