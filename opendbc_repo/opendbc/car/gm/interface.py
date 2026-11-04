@@ -216,7 +216,7 @@ class CarInterface(CarInterfaceBase):
       ret.pcmCruise = False  # stock non-adaptive cruise control is kept off
       # supports stop and go, but initial engage must (conservatively) be above 18mph
       ret.minEnableSpeed = -1 * CV.MPH_TO_MS
-      ret.minSteerSpeed = 7 * CV.MPH_TO_MS
+      ret.minSteerSpeed = 3.125 * CV.MPH_TO_MS
 
       # Tuning
       ret.longitudinalTuning.kiV = [2.4, 1.5]
