@@ -15,6 +15,10 @@ MIN_STABLE_DELAY = 0.3
 # EU guidelines
 MAX_LATERAL_JERK = 5.0  # m/s^3
 MAX_LATERAL_ACCEL_NO_ROLL = 3.0  # m/s^2
+# Kans: 루프/로터리에서 모델 곡률이 3.0에 잘려 실제 도로와 어긋나므로 저속에서만 상한을 올린다
+# (고속은 모델 곡률이 튈 때를 대비해 3.0 유지)
+MAX_LATERAL_ACCEL_LOW_SPEED = 4.0  # m/s^2
+MAX_LATERAL_ACCEL_SPEED_BP = [9.7, 13.9]  # m/s (35, 50 km/h)
 
 # Kans:
 def apply_deadzone(error, deadzone):
@@ -46,8 +50,9 @@ def clip_curvature(v_ego, prev_curvature, new_curvature, roll) -> tuple[float, b
                           prev_curvature + max_curvature_rate * DT_CTRL)
 
   roll_compensation = roll * ACCELERATION_DUE_TO_GRAVITY
-  max_lat_accel = MAX_LATERAL_ACCEL_NO_ROLL + roll_compensation
-  min_lat_accel = -MAX_LATERAL_ACCEL_NO_ROLL + roll_compensation
+  max_lat_accel_no_roll = float(np.interp(v_ego, MAX_LATERAL_ACCEL_SPEED_BP, [MAX_LATERAL_ACCEL_LOW_SPEED, MAX_LATERAL_ACCEL_NO_ROLL]))
+  max_lat_accel = max_lat_accel_no_roll + roll_compensation
+  min_lat_accel = -max_lat_accel_no_roll + roll_compensation
   new_curvature, limited_accel = clamp(new_curvature, min_lat_accel / v_ego ** 2, max_lat_accel / v_ego ** 2)
 
   new_curvature, limited_max_curv = clamp(new_curvature, -MAX_CURVATURE, MAX_CURVATURE)
