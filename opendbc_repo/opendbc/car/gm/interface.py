@@ -27,6 +27,10 @@ NON_LINEAR_TORQUE_PARAMS = {
 # Kans: NNFF (신경망 피드포워드) - 횡가속도 → 조향토크
 NEURAL_PARAMS_PATH = os.path.join(BASEDIR, 'torque_data/neural_ff_weights.json')
 NEURAL_FF_CARS = (CAR.CHEVROLET_VOLT,)
+# Kans: 실측상 NNFF는 조향 히스테리시스의 감김 쪽 토크를 예측하므로 중심값으로 내린다
+# 직진 부근은 유지하고, 차이가 작아지는 큰 횡가속(로터리/루프)에서는 토크가 모자라지 않게 줄인다
+NEURAL_FF_CENTER_OFFSET_BP = [0.0, 1.0, 1.75, 2.25, 3.0]  # |횡가속| m/s^2
+NEURAL_FF_CENTER_OFFSET_V = [0.0, 0.15, 0.15, 0.065, 0.0]  # 토크
 
 
 class NanoFFModel:
@@ -109,15 +113,17 @@ class CarInterface(CarInterfaceBase):
 
   def torque_from_lateral_accel_neural(self, lateral_acceleration: float,
                                        torque_params: structs.CarParams.LateralTorqueTuning) -> float:
-    # 마찰 보상은 latcontrol_torque가 횡가속도 공간에서 이미 적용하므로 여기서는 NNFF 입력만 구성
+    # 마찰 보상은 latcontrol_torque가 NNFF 출력 뒤 토크 공간에서 더한다
     roll_compensation = getattr(self, "_nano_roll_compensation", 0.0)
+    total_lateral_accel = float(lateral_acceleration) + roll_compensation
     inputs = [
-      float(lateral_acceleration) + roll_compensation,
+      total_lateral_accel,
       roll_compensation,
       getattr(self, "_nano_v_ego", 0.0),
       getattr(self, "_nano_a_ego", 0.0),
     ]
-    return float(self.neural_ff_model.predict(inputs))
+    center_offset = np.sign(total_lateral_accel) * np.interp(abs(total_lateral_accel), NEURAL_FF_CENTER_OFFSET_BP, NEURAL_FF_CENTER_OFFSET_V)
+    return float(self.neural_ff_model.predict(inputs) - center_offset)
 
   def torque_from_lateral_accel(self) -> TorqueFromLateralAccelCallbackType:
     if self.CP.carFingerprint in NEURAL_FF_CARS:
