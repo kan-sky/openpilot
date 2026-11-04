@@ -202,6 +202,10 @@ class CarrotServ:
 
     self.atc_paused = False
     self.atc_activate_count = 0
+    self.rotary_curve_seen = False
+    self.rotary_passed = False
+    self.rotary_clear_time = 0.0
+    self.rotary_dist_last = 0.0
     self.gas_override_speed = 0
     self.gas_pressed_state = False
     self.source_last = "none"
@@ -1083,6 +1087,32 @@ class CarrotServ:
 
     return new_lat, new_lon
 
+  def _update_rotary_passed(self, sm, x_turn_info, x_dist_to_turn):
+    # Kans: 로터리/루프 안내 지점은 실제 출구보다 뒤에 있고 ATC 속도는 현재속도 비율이라,
+    # 급커브를 지난 뒤 직선에서도 가속이 막힌다. 곡률이 풀렸으면 같은 안내가 끝날 때까지 ATC 속도를 해제
+    if x_turn_info != 5 or x_dist_to_turn > self.rotary_dist_last + 50:
+      self.rotary_curve_seen = False
+      self.rotary_passed = False
+      self.rotary_clear_time = 0.0
+    self.rotary_dist_last = x_dist_to_turn
+    if x_turn_info != 5 or self.rotary_passed:
+      return self.rotary_passed
+
+    curvature = abs(sm["controlsState"].curvature)
+    if curvature >= 0.020:
+      self.rotary_curve_seen = True
+      self.rotary_clear_time = 0.0
+    elif self.rotary_curve_seen and curvature < 0.003:
+      now = time.monotonic()
+      if self.rotary_clear_time <= 0.0:
+        self.rotary_clear_time = now
+      elif now - self.rotary_clear_time >= 1.0:
+        self.rotary_passed = True
+        cloudlog.warning(f"[atc] rotary passed, release atc speed: dist={x_dist_to_turn}")
+    else:
+      self.rotary_clear_time = 0.0
+    return self.rotary_passed
+
   def update_auto_turn(self, v_ego_kph, sm, x_turn_info, x_dist_to_turn, check_steer=False):
     turn_speed = v_ego_kph  # self.autoTurnControlSpeedTurn
     fork_speed = self.nRoadLimitSpeed
@@ -1259,6 +1289,8 @@ class CarrotServ:
       safe_sec = 2.0
       atc_desired = min(atc_desired, self.calculate_current_speed(x_dist_to_turn - atc_dist, atc_speed, safe_sec, decel))
 
+    if check_steer and self._update_rotary_passed(sm, x_turn_info, x_dist_raw):
+      atc_desired = 250
 
     return atc_desired, atc_type, atc_speed, atc_dist
 
@@ -1476,7 +1508,8 @@ class CarrotServ:
       #speed_n_sources.append((self.calculate_current_speed(dist, speed * self.mapTurnSpeedFactor, 0, 1.2), "route"))
 
     model_turn_speed = max(sm['modelV2'].meta.modelTurnSpeed, self.autoCurveSpeedLowerLimit)
-    if model_turn_speed < 200 and abs(vturn_speed) < 120:
+    # Kans: 모델 속도는 현재속도를 크게 넘지 않으므로 커브가 없으면 적용하지 않음 (직선에서 가속이 약 0.65m/s^2로 묶임)
+    if model_turn_speed < 200 and abs(vturn_speed) < min(120, v_ego_kph + 20):
       speed_n_sources.append((model_turn_speed, "model"))
 
     desired_speed, source = min(speed_n_sources, key=lambda x: x[0])
