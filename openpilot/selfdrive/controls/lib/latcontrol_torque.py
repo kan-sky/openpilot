@@ -31,6 +31,7 @@ LP_FILTER_CUTOFF_HZ = 1.2
 JERK_LOOKAHEAD_SECONDS = 0.19
 JERK_GAIN = 0.3
 LAT_ACCEL_REQUEST_BUFFER_SECONDS = 1.0
+NO_OUTWARD_CORRECTION_LAT_ACCEL = 3.0  # m/s^2
 VERSION = 1
 
 class LatControlTorque(LatControl):
@@ -116,9 +117,9 @@ class LatControlTorque(LatControl):
     expected_lateral_accel = self.lat_accel_request_buffer[-delay_frames]
     setpoint = expected_lateral_accel
     error = setpoint - measurement
-    # Kans: 목표 곡률이 횡가속도 한계로 잘린 동안(루프 램프 등) 차가 같은 방향으로 목표보다 더 돌고 있으면
-    # 잘린 목표 쪽(바깥)으로 미는 보정은 하지 않는다 - 도로를 따라 돌던 차가 밀려 언더스티어가 남
-    if curvature_limited and setpoint * measurement > 0 and abs(measurement) > abs(setpoint):
+    # Kans: 목표 곡률이 횡가속도 한계로 잘린 동안이나 큰 횡가속 중(루프/로터리)에 차가 같은 방향으로 목표보다 더 돌고 있으면
+    # 바깥으로 미는 보정은 하지 않는다 - 도로를 따라 돌던 차가 밀려 언더스티어가 남 (감소는 피드포워드가 따라감)
+    if (curvature_limited or abs(measurement) > NO_OUTWARD_CORRECTION_LAT_ACCEL) and setpoint * measurement > 0 and abs(measurement) > abs(setpoint):
       error = 0.0
 
     lookahead_idx = int(np.clip(-delay_frames + self.lookahead_frames, -self.lat_accel_request_buffer_len+1, -2))
