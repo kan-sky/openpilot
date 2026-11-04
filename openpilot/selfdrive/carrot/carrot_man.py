@@ -141,6 +141,16 @@ def haversine(lon1, lat1, lon2, lat2):
   return 2 * R * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
+# Kans: 경로 선분 방향과 차 진행 방향의 차이(도, 0~180)
+def segment_heading_diff(p1, p2, heading_deg):
+  east = (p2[0] - p1[0]) * math.cos(math.radians(p1[1]))
+  north = p2[1] - p1[1]
+  if east == 0 and north == 0:
+    return 0.0
+  diff = (math.degrees(math.atan2(east, north)) - heading_deg + 180.0) % 360.0 - 180.0
+  return abs(diff)
+
+
 # Get the closest point on a segment between two coordinates
 def closest_point_on_segment(p1, p2, current_position):
   x1, y1 = p1
@@ -156,7 +166,7 @@ def closest_point_on_segment(p1, p2, current_position):
 
 
 # Get path after a certain distance from the current position
-def get_path_after_distance(start_index, coordinates, current_position, distance_m):
+def get_path_after_distance(start_index, coordinates, current_position, distance_m, heading_deg=None):
   total_distance = 0
   path_after_distance = []
   closest_index = -1
@@ -167,6 +177,9 @@ def get_path_after_distance(start_index, coordinates, current_position, distance
   for i in range(start_index, len(coordinates) - 1):
     p1 = coordinates[i]
     p2 = coordinates[i + 1]
+    # Kans: 진행 방향과 반대인 구간은 제외 (로터리 출구처럼 지나온 도로와 겹치면 지나온 커브를 앞에 있는 것으로 잘못 봄)
+    if heading_deg is not None and segment_heading_diff(p1, p2, heading_deg) > 90.0:
+      continue
     candidate_point = closest_point_on_segment(p1, p2, current_position)
     distance = haversine(current_position[0], current_position[1], candidate_point[0], candidate_point[1])
     if distance < min_distance:
@@ -410,7 +423,7 @@ class CarrotMan:
     out_speed = 300.0
 
     path, self.navi_points_start_index, start_point = get_path_after_distance(
-      self.navi_points_start_index, self.navi_points, current_position, 300.0
+      self.navi_points_start_index, self.navi_points, current_position, 300.0, heading_deg
     )
 
     if not path or start_point is None:
