@@ -38,6 +38,7 @@ static bool gm_cc_long = false;
 static bool gm_skip_relay_check = false;
 static bool gm_force_ascm = false;
 static bool gm_sdgm = false;
+static bool gm_apply_prev = false;
 static bool gm_manual_hold = false;
 static struct {
   bool armed;
@@ -275,9 +276,21 @@ static bool gm_tx_hook(const CANPacket_t *to_send) {
   // GAS/REGEN: safety check
   if (addr == 0x2CB) {
     bool apply = GET_BIT(to_send, 0U);
-    // SDGM transmit requests must never restore permission after disengagement.
-    if (apply && !controls_allowed && !gm_sdgm) {
-      controls_allowed = true;        
+    if (gm_sdgm) {
+      // 오토크루즈: 합성 SET은 RX 버튼 경로를 타지 않으므로 2CB apply 상승 에지로 권한 부여.
+      // 메인 ON, 브레이크 미입력, 정상 버스/길이에서만 허용. apply가 유지된 채 늦게 도착한 명령은 권한을 되살리지 못함.
+      // apply 하강(오픈파일럿 해제)에서는 권한도 회수.
+      if ((GET_BUS(to_send) == 0U) && (GET_LEN(to_send) == 8U) && !relay_malfunction) {
+        if (apply && !gm_apply_prev && acc_main_on && !brake_pressed) {
+          controls_allowed = true;
+        }
+        if (!apply && gm_apply_prev) {
+          controls_allowed = false;
+        }
+        gm_apply_prev = apply;
+      }
+    } else if (apply && !controls_allowed) {
+      controls_allowed = true;
     }
     // convert float CAN signal to an int for gas checks: 22534 / 0.125 = 180272
     int gas_regen = (((GET_BYTE(to_send, 1) & 0x7U) << 16) | (GET_BYTE(to_send, 2) << 8) | GET_BYTE(to_send, 3)) - 180272U;
@@ -429,6 +442,7 @@ static safety_config gm_init(uint16_t param) {
 
   gm_cc_long = GET_FLAG(param, GM_PARAM_CC_LONG);
   gm_sdgm = GET_FLAG(param, GM_PARAM_HW_SDGM);
+  gm_apply_prev = false;
   gm_cam_long = false;
 #ifdef ALLOW_DEBUG
   const uint16_t GM_PARAM_HW_CAM_LONG = 2;

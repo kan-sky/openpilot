@@ -85,6 +85,36 @@ def test_gas_bounds_and_no_tx_permission_grant(safety, amount, active, enabled):
   assert bool(frame(safety, 1, brake(100))) == enabled
 
 
+MAIN_ON = (0xC9, bytes([0, 0, 0, 0x20, 0, 0, 0, 0]), 0)
+MAIN_OFF = (0xC9, bytes(8), 0)
+MAIN_ON_BRAKE = (0xC9, bytes([0, 0, 0, 0x20, 0, 1, 0, 0]), 0)
+
+
+def test_auto_cruise_grants_on_apply_rising_edge_only(safety):
+  frame(safety, 0, MAIN_ON)
+  assert frame(safety, 1, gas(0))
+  assert safety.get_controls_allowed()
+  # 유지 중인 apply는 해제 후 권한을 되살리지 못함
+  safety.set_controls_allowed(False)
+  assert not frame(safety, 1, gas(0))
+  assert not safety.get_controls_allowed()
+
+
+@pytest.mark.parametrize('state', [MAIN_OFF, MAIN_ON_BRAKE])
+def test_auto_cruise_needs_main_on_without_brake(safety, state):
+  frame(safety, 0, state)
+  assert not frame(safety, 1, gas(0))
+  assert not safety.get_controls_allowed()
+
+
+def test_apply_falling_edge_revokes_permission(safety):
+  frame(safety, 0, MAIN_ON)
+  assert frame(safety, 1, gas(0))
+  assert frame(safety, 1, gas(-500, False))
+  assert not safety.get_controls_allowed()
+  assert not frame(safety, 1, brake(100))
+
+
 @pytest.mark.parametrize('cause', ['brake', 'gas', 'cancel', 'relay'])
 def test_disengagement_survives_late_commands(safety, cause):
   # Engage through the actual RX button path, never a TX enable request.

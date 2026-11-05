@@ -103,7 +103,7 @@ def create_friction_brake_command(packer, bus, apply_brake, idx, enabled, near_s
     #elif near_stop:
     #  mode = 0xb
 
-  apply_brake = max(0, min(0xFFF, apply_brake))
+  apply_brake = max(0, min(0xFFF, int(apply_brake)))
   brake = (0x1000 - apply_brake) & 0xfff
   checksum = (0x10000 - (mode << 12) - brake - idx) & 0xffff
 

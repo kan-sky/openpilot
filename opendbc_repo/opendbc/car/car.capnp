@@ -245,6 +245,7 @@ struct CarState {
   logCarrot @59 :Text;
   softHoldActive @60 :Int16;    #0: not active, 1: active ready, 2: activated
   activateCruise @61 :Int16;
+  autoHoldActivated @107 :Bool;
   latEnabled @62 :Bool;
   pcmCruiseGap @63 :Int16;      #0: can't read, 1,2,3,4: gap setting
   speedLimit @64 :Float32;

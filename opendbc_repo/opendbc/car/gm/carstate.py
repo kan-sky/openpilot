@@ -36,6 +36,10 @@ class CarState(CarStateBase):
     self.manual_auto_hold = ManualAutoHold() if manual_hold_supported(CP) else None
     self.manual_hold_controls_active = True  # Wait for an actual CarControl before arming.
     self.brake_pedal_position = 0.
+    # 오토홀드: 트래버스 오픈파일럿 롱컨 전용
+    self.autoHold = CP.carFingerprint == CAR.CHEVROLET_TRAVERSE and CP.openpilotLongitudinalControl
+    self.autoHoldActive = False
+    self.autoHoldActivated = False
 
     self.buttons_counter = 0
     self.single_pedal_mode = False
@@ -183,6 +187,7 @@ class CarState(CarStateBase):
     self.lkas_enabled = pt_cp.vl["ASCMSteeringButton"]["LKAButton"]
 
     self.pcm_acc_status = pt_cp.vl["AcceleratorPedal2"]["CruiseState"]
+    ret.autoHoldActivated = self.autoHoldActivated
     if self.CP.carFingerprint in (CAR.CHEVROLET_TRAX, CAR.CHEVROLET_TRAILBLAZER, CAR.CHEVROLET_TRAILBLAZER_CC): 
       ret.vCluRatio = 0.96
     elif self.CP.flags & GMFlags.SPEED_RELATED_MSG.value:

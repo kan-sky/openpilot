@@ -8,6 +8,7 @@ from openpilot.common.params import Params
 from opendbc.car import Bus, get_safety_config, get_friction, structs
 from opendbc.car.common.basedir import BASEDIR
 from opendbc.car.common.conversions import Conversions as CV
+from opendbc.car.gm.auto_hold import update_auto_hold
 from opendbc.car.gm.carcontroller import CarController
 from opendbc.car.gm.carstate import CarState
 from opendbc.car.gm.radar_interface import RadarInterface, RADAR_HEADER_MSG, LAST_RADAR_MSG
@@ -66,6 +67,7 @@ class CarInterface(CarInterfaceBase):
 
   def apply(self, c, now_nanos=None, model_v2=None, radar_state=None):
     self._update_manual_hold(c, now_nanos)
+    update_auto_hold(self.CS, self.CP)
     return super().apply(c, now_nanos, model_v2, radar_state)
 
   @staticmethod
@@ -179,8 +181,6 @@ class CarInterface(CarInterfaceBase):
         ret.safetyConfigs[0].safetyParam |= GMSafetyFlags.HW_CAM_LONG.value
         if candidate == CAR.CHEVROLET_TRAVERSE:
           ret.safetyConfigs[0].safetyParam |= GMSafetyFlags.HW_SDGM.value
-          if not ret.enableGasInterceptorDEPRECATED:
-            ret.safetyConfigs[0].safetyParam |= GMSafetyFlags.MANUAL_AUTO_HOLD.value
 
       if candidate in ALT_ACCS:
         ret.alphaLongitudinalAvailable = False
