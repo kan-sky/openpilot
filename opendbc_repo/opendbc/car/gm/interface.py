@@ -176,6 +176,7 @@ class CarInterface(CarInterfaceBase):
     ret.autoResumeSng = False
     if 0x142 in fingerprint[CanBus.POWERTRAIN]:
       ret.flags |= GMFlags.HAS_BSM.value
+    ret.radarTimeStep = 0.067
 
     if candidate in EV_CAR:
       ret.transmissionType = TransmissionType.direct
@@ -216,7 +217,7 @@ class CarInterface(CarInterfaceBase):
       ret.pcmCruise = False  # stock non-adaptive cruise control is kept off
       # supports stop and go, but initial engage must (conservatively) be above 18mph
       ret.minEnableSpeed = -1 * CV.MPH_TO_MS
-      ret.minSteerSpeed = 3.125 * CV.MPH_TO_MS
+      ret.minSteerSpeed = 7.0 * CV.MPH_TO_MS
 
       # Tuning
       ret.longitudinalTuning.kiV = [2.4, 1.5]
@@ -240,10 +241,11 @@ class CarInterface(CarInterfaceBase):
       # Kans: 토크 횡제어 + NNFF (튜닝값은 LateralTorqueCustom 파라미터)
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
       ret.steerActuatorDelay = 0.2
+      ret.minSteerSpeed = 6.7 * CV.MPH_TO_MS
       # Kans: 오토리쥼 - starting 상태로 출발, RES/가스펄스는 auto_resume.py
       ret.autoResumeSng = True
       ret.startingState = True
-      ret.vEgoStarting = 0.3  # 출발상태로 판단하는 속도(값이 클수록 더 높은 속도까지 내주어서 출발가속이 강해질 수 있음)
+      ret.vEgoStarting = 0.35  # 출발상태로 판단하는 속도(값이 클수록 더 높은 속도까지 내주어서 출발가속이 강해질 수 있음)
       ret.startAccel = 1.9
       # Kans: 정지 직후 정지유지 감속(StoppingAccel)까지 끌어내리는 속도 (m/s^2/s)
       ret.stoppingDecelRate = 1.2
