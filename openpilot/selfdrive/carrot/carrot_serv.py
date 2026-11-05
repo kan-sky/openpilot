@@ -22,6 +22,12 @@ from openpilot.common.swaglog import cloudlog
 from openpilot.common.gps import get_gps_location_service
 from openpilot.selfdrive.carrot.carrot_navi_control import CarrotNaviControl, parse_carrot_navi_control
 
+ROTARY_HOLD_SPEED_KPH = 22.0
+ROTARY_HOLD_START_DIST = 200.0  # m, 안내 지점(출구 뒤쪽)까지 이 거리 안에서만 시작
+ROTARY_HOLD_CURVATURE = 0.020  # 1/m
+ROTARY_HOLD_CLEAR_SEC = 0.5
+ROTARY_HOLD_TIMEOUT_SEC = 25.0  # 22km/h로 시작거리 전체를 지나는 시간 이상
+
 nav_type_mapping = {
   12: ("turn", "left", 1),
   16: ("turn", "sharp left", 1),
@@ -206,6 +212,13 @@ class CarrotServ:
     self.rotary_passed = False
     self.rotary_clear_time = 0.0
     self.rotary_dist_last = 0.0
+    self.rotary_hold_active = False
+    self.rotary_hold_done = False
+    self.rotary_hold_curve_seen = False
+    self.rotary_hold_start_time = 0.0
+    self.rotary_hold_clear_time = 0.0
+    self.rotary_hold_dist_last = 0.0
+    self.route_speed_kph = 300.0
     self.gas_override_speed = 0
     self.gas_pressed_state = False
     self.source_last = "none"
@@ -1113,6 +1126,46 @@ class CarrotServ:
       self.rotary_clear_time = 0.0
     return self.rotary_passed
 
+  def _update_rotary_hold(self, sm, x_turn_info, x_dist_to_turn):
+    # Kans: 로터리 진입 순간에는 경로 곡률이 먼저 끝나고 모델도 커브를 놓쳐 vturn/route 제한이 함께 풀린다.
+    # 경로가 하한 속도까지 내려갔거나 좌회전 곡률이 잡히면 곡선을 빠져나갈 때까지 저속을 유지한다.
+    if x_turn_info != 5 or x_dist_to_turn > self.rotary_hold_dist_last + 50:
+      self.rotary_hold_active = False
+      self.rotary_hold_done = False
+      self.rotary_hold_curve_seen = False
+      self.rotary_hold_clear_time = 0.0
+    self.rotary_hold_dist_last = x_dist_to_turn
+    if x_turn_info != 5 or self.rotary_hold_done:
+      return False
+
+    # 로그의 곡률은 좌회전이 음수. 진입부 우측 곡선이나 출구 우측 곡선은 로터리 곡선으로 보지 않는다.
+    left_curvature = -sm["controlsState"].curvature
+    now = time.monotonic()
+    if not self.rotary_hold_active:
+      route_at_floor = self.route_speed_kph <= self.autoCurveSpeedLowerLimit
+      if 0 < x_dist_to_turn <= ROTARY_HOLD_START_DIST and (route_at_floor or left_curvature >= ROTARY_HOLD_CURVATURE):
+        self.rotary_hold_active = True
+        self.rotary_hold_start_time = now
+      else:
+        return False
+
+    if left_curvature >= ROTARY_HOLD_CURVATURE:
+      self.rotary_hold_curve_seen = True
+      self.rotary_hold_clear_time = 0.0
+    elif self.rotary_hold_curve_seen:
+      if self.rotary_hold_clear_time <= 0.0:
+        self.rotary_hold_clear_time = now
+      elif now - self.rotary_hold_clear_time >= ROTARY_HOLD_CLEAR_SEC:
+        self.rotary_hold_done = True
+    elif now - self.rotary_hold_start_time >= ROTARY_HOLD_TIMEOUT_SEC:
+      # 곡선이 끝내 안 나오면 일반 커브였던 것으로 보고 해제
+      self.rotary_hold_done = True
+
+    if self.rotary_hold_done:
+      self.rotary_hold_active = False
+      cloudlog.warning(f"[atc] rotary hold end: dist={x_dist_to_turn} curveSeen={self.rotary_hold_curve_seen}")
+    return self.rotary_hold_active
+
   def update_auto_turn(self, v_ego_kph, sm, x_turn_info, x_dist_to_turn, check_steer=False):
     turn_speed = v_ego_kph  # self.autoTurnControlSpeedTurn
     fork_speed = self.nRoadLimitSpeed
@@ -1292,6 +1345,9 @@ class CarrotServ:
     if check_steer and self._update_rotary_passed(sm, x_turn_info, x_dist_raw):
       atc_desired = 250
 
+    if check_steer and self._update_rotary_hold(sm, x_turn_info, x_dist_raw):
+      atc_desired = min(atc_desired, ROTARY_HOLD_SPEED_KPH)
+
     return atc_desired, atc_type, atc_speed, atc_dist
 
   def update_nav_instruction(self, sm):
@@ -1443,6 +1499,7 @@ class CarrotServ:
 
     #print(f"sdi_speed: {sdi_speed}, hda_active: {hda_active}, xSpdType: {self.xSpdType}, xSpdDist: {self.xSpdDist}, active_carrot: {self.active_carrot}, v_ego_kph: {v_ego_kph}, nRoadLimitSpeed: {self.nRoadLimitSpeed}")
     ### TBT 속도제어
+    self.route_speed_kph = route_speed * self.mapTurnSpeedFactor
     atc_desired, atc_type, self.atcSpeed, self.atcDist = self.update_auto_turn(v_ego * 3.6, sm, self.xTurnInfo, self.xDistToTurn, True)
     # Kans: 분기후 이어지는 차선변경안내(atc_type_next) 추가
     atc_desired_next, atc_type_next, _, _ = self.update_auto_turn(v_ego * 3.6, sm, self.xTurnInfoNext, self.xDistToTurnNext, False)
