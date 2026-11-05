@@ -176,7 +176,6 @@ class CarInterface(CarInterfaceBase):
     ret.autoResumeSng = False
     if 0x142 in fingerprint[CanBus.POWERTRAIN]:
       ret.flags |= GMFlags.HAS_BSM.value
-    ret.radarTimeStep = 0.067
 
     if candidate in EV_CAR:
       ret.transmissionType = TransmissionType.direct
