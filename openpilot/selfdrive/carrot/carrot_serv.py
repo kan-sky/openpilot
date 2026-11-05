@@ -1158,14 +1158,14 @@ class CarrotServ:
     # start_turn_dist: 일반 좌/우회전에서 atc left/right 유지 경계
     # 핸들이 늦게 꺾이면 start_fork_dist를 키우고, “턴” 시점이 늦으면 start_turn_dist를 키운다.
     start_fork_dist = 50.0
-    start_turn_dist = 35.0
+    start_turn_dist = 37.0
     atc_debug = "Df"
 
     if is_turn:
       # Kans: 일반 좌/우회전/교차로
       # 조향변경이 늦으니 멀리서부터 미리 준비하게 한다.
       road_dist = np.interp(self.nTBTNextRoadWidth, [5, 10], [30, 45])
-      speed_dist = np.interp(v_ego_kph, [20, 30, 50], [15, 25, 40])
+      speed_dist = np.interp(v_ego_kph, [20, 30, 50], [10, 20, 30])
       start_turn_dist = min(road_dist, speed_dist)
       # Kans: atc left/right 구간 길이(= 회전 desire 전 사전 차선변경 desire 구간)를 좌/우회전 따로 설정
       # 좌회전은 주로 사거리, 우회전은 진행차선 오른쪽 끝/골목 진입이라 맞는 값이 다름 (기존 고정 15m는 너무 일찍 꺾음)
@@ -1188,7 +1188,7 @@ class CarrotServ:
       elif is_highway_like:
         # Kans: 100m 고정은 고속 접근 시 후방차엔 늦게 변경하는 것처럼 보일 수 있어
         # 속도가 빠를수록 더 멀리서 시작하도록 보간(하한 110m).
-        start_fork_dist = float(np.interp(v_ego_kph, [70, 90, 110], [115, 130, 150]))
+        start_fork_dist = float(np.interp(v_ego_kph, [70, 90, 110], [110, 130, 150]))
         atc_debug = "Hwy"
 
       else:
