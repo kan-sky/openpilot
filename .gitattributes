@@ -1,0 +1,21 @@
+* text=auto -filter
+
+# Offline bootstrap payloads must match Linux image bytes on every workstation.
+tools/jetlink/*.py text eol=lf
+
+# Store bundled artifacts as ordinary Git blobs, without LFS bandwidth usage.
+# Keep their exact bytes on every platform. Larger external models stay on NAS.
+*.onnx -diff -merge -text
+openpilot/system/hardware/tici/updater -diff -merge -text
+
+# Image / font / sound types are shipped as REAL blobs in this fork. Declaring
+# them as LFS while the committed blob is real content made git-lfs report
+# phantom "modified" files ("Encountered files that should have been pointers,
+# but weren't") and blocked git pull on agnos. So they are NOT LFS by type.
+# -text also keeps them out of EOL renormalization.
+*.svg -filter -diff -merge -text
+*.png -filter -diff -merge -text
+*.gif -filter -diff -merge -text
+*.ttf -filter -diff -merge -text
+*.otf -filter -diff -merge -text
+*.wav -filter -diff -merge -text

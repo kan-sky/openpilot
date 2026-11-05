@@ -1,0 +1,221 @@
+import sys
+import ast
+from types import SimpleNamespace
+from pathlib import Path
+
+import usb.util
+import pytest
+
+CLUSTER_DIR = Path(__file__).resolve().parents[1] / "cluster"
+sys.path.insert(0, str(CLUSTER_DIR))
+
+from cluster_usb_display import (
+  TURZX_BRIGHTNESS_COMMAND_MAX,
+  USBGPU_H264_CHUNK_GAP_S,
+  USBGPU_H264_MAX_CHUNK_SIZE,
+  TuringUsbDisplay,
+  _transparent_h264_overlay_png,
+)
+
+
+@pytest.mark.parametrize('failure', [RuntimeError, KeyboardInterrupt])
+def test_connection_clears_before_encoder_teardown_can_fail(failure):
+  tree = ast.parse((CLUSTER_DIR / 'main.py').read_text(encoding='utf8'))
+  cleanup = next(n.finalbody for n in ast.walk(tree) if isinstance(n, ast.Try) and
+                 any('scheduler.update(False' in ast.unparse(s) for s in n.finalbody))
+  calls = []
+  def encoder_close():
+    calls.append('encoder.close')
+    raise failure('encoder failure')
+  noop = SimpleNamespace(close=lambda: None)
+  scope = dict(previous_gc_thresholds=None,
+               restore_gc_after_run=lambda _: calls.append('gc.restore'),
+               usb_display=SimpleNamespace(close=lambda: calls.append('display.close')),
+               _set_cluster_hud_connected=lambda value: calls.append(value),
+               scheduler=SimpleNamespace(update=lambda *a, **kw: None),
+               h264_pipeline=SimpleNamespace(encoder_pid=None, close=encoder_close),
+               signal_installed=False, gc_hook=None, network_address_provider=noop,
+               cluster_core_usage_sampler=None,
+               renderer=SimpleNamespace(release_nv12_dmabuf_output=lambda: calls.append('dmabuf.release'),
+                                        close=lambda: calls.append('renderer.close')),
+               usb_pipeline=None, controller=None, route_tools_window=None,
+               route_source=None, live_source=None, navi_source=None)
+  with pytest.raises(failure, match='encoder failure'):
+    exec(compile(ast.Module(body=cleanup, type_ignores=[]), '<HUD cleanup>', 'exec'), scope)
+  assert calls == ['gc.restore', False, 'dmabuf.release', 'encoder.close', 'renderer.close', 'display.close']
+
+
+def successful_response(command_id: int) -> bytes:
+  return bytes((command_id, 0xC8)) + bytes(510)
+
+
+def recording_display(*, brightness: int = 80, orientation: int = 0):
+  display = TuringUsbDisplay(brightness=brightness)
+  display.orientation = orientation
+  display.dev = object()
+  calls = []
+
+  def send(command_id, name, fields=None, **kwargs):
+    calls.append((command_id, name, fields, kwargs))
+    return successful_response(command_id)
+
+  display._send_command = send
+  return display, calls
+
+
+def test_runtime_brightness_uses_captured_sync_then_command_14(monkeypatch):
+  display, calls = recording_display(brightness=65)
+  monkeypatch.setattr("cluster_usb_display.time.sleep", lambda _seconds: None)
+
+  assert display.set_brightness(64)
+  assert [call[0] for call in calls] == [10, 14]
+  assert all(call[3]["expect_response"] is False for call in calls)
+  assert calls[1][2] == {8: int(64 / 100 * TURZX_BRIGHTNESS_COMMAND_MAX)}
+  assert display.brightness == 64
+
+
+def test_runtime_orientation_uses_captured_sync_then_command_13(monkeypatch):
+  display, calls = recording_display(orientation=0)
+  monkeypatch.setattr("cluster_usb_display.time.sleep", lambda _seconds: None)
+
+  assert display.set_orientation(2)
+  assert [call[0] for call in calls] == [10, 13]
+  assert all(call[3]["expect_response"] is False for call in calls)
+  assert calls[1][2] == {8: 2}
+  assert display.orientation == 2
+
+
+def test_runtime_orientation_ignores_unsupported_values():
+  display, calls = recording_display(orientation=2)
+
+  assert not display.set_orientation(1)
+  assert not display.set_orientation(3, force=True)
+  assert calls == []
+  assert display.orientation == 2
+
+
+def test_preopen_orientation_is_carried_by_h264_setup_without_setting_transaction(monkeypatch):
+  display = TuringUsbDisplay()
+  assert not display.set_orientation(2)
+  assert display.orientation == 2
+
+  display.dev = object()
+  calls = []
+  display._send_optional_command = (
+    lambda command_id, name, fields=None, **kwargs:
+      calls.append((command_id, name, fields, kwargs))
+  )
+  display._send_frame_no_ack = (
+    lambda command_id, frame, **kwargs:
+      calls.append((command_id, "clear-overlay", {8: len(frame)}, kwargs))
+  )
+  display._h264_chunk_size = lambda _requested: 202752
+  monkeypatch.setattr("cluster_usb_display._usbgpu_transfer_active", lambda: False)
+  monkeypatch.setattr("cluster_usb_display.time.sleep", lambda _seconds: None)
+
+  assert display.start_h264_stream() == 202752
+  assert [call[0] for call in calls] == [10, 111, 112, 13, 14, 52, 102, 15]
+  orientation = next(call for call in calls if call[0] == 13)
+  assert orientation[2] == {8: 2}
+  assert calls[4][2] == {8: int(80 / 100 * TURZX_BRIGHTNESS_COMMAND_MAX)}
+  assert all(call[3].get("no_ack_gap_s") == 0.0 for call in calls[:6])
+  assert calls[6][3] == {"drain_input": True}
+  assert calls[7][3]["no_ack_gap_s"] == 0.0
+
+
+def test_h264_egpu_coexistence_caps_chunks_and_yields_after_send(monkeypatch):
+  assert USBGPU_H264_MAX_CHUNK_SIZE == 32 * 1024
+  assert USBGPU_H264_CHUNK_GAP_S == 0.002
+
+  display = TuringUsbDisplay(fast_write=True)
+  display.dev = object()
+  display._send_optional_command = lambda *_args, **_kwargs: None
+  display._send_frame_no_ack = lambda *_args, **_kwargs: None
+  display._h264_chunk_size = lambda _requested: 202752
+  sent = []
+  sleeps = []
+  display._send_h264_chunk_no_ack = (
+    lambda chunk, *, is_last, drain_input: sent.append((chunk, is_last, drain_input))
+  )
+  monkeypatch.setattr("cluster_usb_display._usbgpu_transfer_active", lambda: True)
+  monkeypatch.setattr("cluster_usb_display.time.sleep", sleeps.append)
+
+  assert display.start_h264_stream() == USBGPU_H264_MAX_CHUNK_SIZE
+  assert display._h264_chunk_gap_s == USBGPU_H264_CHUNK_GAP_S
+
+  sleeps.clear()
+  display.send_h264_chunk(b"frame", wait_for_ack=False)
+
+  assert sent == [(b"frame", False, False)]
+  assert sleeps == [USBGPU_H264_CHUNK_GAP_S]
+
+
+def test_h264_egpu_coexistence_skips_blocking_chunk_negotiation(monkeypatch):
+  display = TuringUsbDisplay()
+  display._send_command = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+    AssertionError("eGPU mode must not wait for a TURZX response"),
+  )
+  monkeypatch.setattr("cluster_usb_display._usbgpu_transfer_active", lambda: True)
+
+  assert display._h264_chunk_size(0) > USBGPU_H264_MAX_CHUNK_SIZE
+
+
+def test_h264_clear_overlay_matches_captured_shape_and_size():
+  png = _transparent_h264_overlay_png()
+
+  assert len(png) == 3585
+  assert png[:8] == b"\x89PNG\r\n\x1a\n"
+  assert int.from_bytes(png[16:20], "big") == 464
+  assert int.from_bytes(png[20:24], "big") == 1920
+
+
+def test_h264_stop_uses_bounded_nonblocking_status_drain():
+  display, calls = recording_display()
+  display._send_optional_command = (
+    lambda command_id, name, fields=None, **kwargs:
+      calls.append((command_id, name, fields, kwargs))
+  )
+
+  display.stop_h264_stream()
+
+  assert [call[0] for call in calls] == [123, 122, 122]
+  assert all(call[3]["no_ack_gap_s"] == 0.080 for call in calls)
+  assert all(call[3]["no_ack_drain_attempts"] == 1 for call in calls)
+
+
+def test_reconnect_does_not_reset_shared_usb_path_while_egpu_is_active(monkeypatch):
+  display = TuringUsbDisplay()
+  calls = []
+
+  class FakeDevice:
+    def reset(self):
+      calls.append("reset")
+
+  display.dev = FakeDevice()
+  monkeypatch.setattr("cluster_usb_display._usbgpu_reset_protected", lambda: True)
+  monkeypatch.setattr(usb.util, "dispose_resources", lambda _dev: calls.append("dispose"))
+  monkeypatch.setattr(display, "_connect_device", lambda: calls.append("connect"))
+  monkeypatch.setattr("cluster_usb_display.time.sleep", lambda _seconds: None)
+
+  display._reset_and_reconnect()
+
+  assert calls == ["dispose", "connect"]
+
+
+def test_reconnect_keeps_device_reset_when_egpu_is_not_in_use(monkeypatch):
+  display = TuringUsbDisplay()
+  calls = []
+
+  class FakeDevice:
+    def reset(self):
+      calls.append("reset")
+
+  display.dev = FakeDevice()
+  monkeypatch.setattr("cluster_usb_display._usbgpu_reset_protected", lambda: False)
+  monkeypatch.setattr(usb.util, "dispose_resources", lambda _dev: calls.append("dispose"))
+  monkeypatch.setattr(display, "_connect_device", lambda: calls.append("connect"))
+  monkeypatch.setattr("cluster_usb_display.time.sleep", lambda _seconds: None)
+
+  display._reset_and_reconnect()
+
+  assert calls == ["reset", "dispose", "connect"]

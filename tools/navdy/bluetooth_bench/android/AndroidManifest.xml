@@ -1,0 +1,10 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.hl.navdy.btbench" android:versionCode="1" android:versionName="1.0">
+  <uses-sdk android:minSdkVersion="19" android:targetSdkVersion="22" />
+  <uses-permission android:name="android.permission.BLUETOOTH" />
+  <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
+  <uses-permission android:name="android.permission.WAKE_LOCK" />
+  <application android:label="HL Bluetooth Bench" android:allowBackup="false" android:debuggable="true">
+    <activity android:name=".PairActivity" android:exported="true" android:permission="android.permission.DUMP" android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+    <service android:name=".BenchService" android:exported="true" android:permission="android.permission.DUMP" />
+  </application>
+</manifest>

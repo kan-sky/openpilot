@@ -1,0 +1,157 @@
+{
+  "repository": "https://github.com/leehyuk1108/Wayon",
+  "ref": "codex/my-traverse-source",
+  "commit": "da8cda353ec2a16bcc6d3d870f54137b809af3ff",
+  "retrieved": "2026-10-26",
+  "source_license": "LICENSE",
+  "directories": [
+    "sounds",
+    "sounds_eng",
+    "sounds_chs"
+  ],
+  "mapping": {
+    "audio_1.wav": "prompt_single_low.wav",
+    "audio_10.wav": "prompt_single_low.wav",
+    "audio_2.wav": "prompt_single_low.wav",
+    "audio_3.wav": "prompt_single_low.wav",
+    "audio_4.wav": "prompt_single_low.wav",
+    "audio_5.wav": "prompt_single_low.wav",
+    "audio_6.wav": "prompt_single_low.wav",
+    "audio_7.wav": "prompt_single_low.wav",
+    "audio_8.wav": "prompt_single_low.wav",
+    "audio_9.wav": "prompt_single_low.wav",
+    "audio_auto_hold.wav": "prompt_single_low.wav",
+    "audio_car_watchout.wav": "prompt.wav",
+    "audio_disengage.wav": "disengage.wav",
+    "audio_engage.wav": "engage.wav",
+    "audio_lane_change.wav": "prompt_single_low.wav",
+    "audio_lanechange.wav": "prompt_single_low.wav",
+    "audio_speed_down.wav": "prompt.wav",
+    "audio_stopping.wav": "prompt_single_low.wav",
+    "audio_stopstop.wav": "warning_immediate.wav",
+    "audio_traffic_error.wav": "refuse.wav",
+    "audio_turn.wav": "prompt_single_low.wav",
+    "audio_turn2.wav": "prompt_single_low.wav",
+    "disengage_tizi.wav": "disengage_tizi.wav",
+    "disengage.wav": "disengage.wav",
+    "engage_tizi.wav": "engage_tizi.wav",
+    "engage.wav": "engage.wav",
+    "nnff.wav": "prompt_single_high.wav",
+    "prompt_distracted.wav": "prompt_distracted.wav",
+    "prompt_single_high.wav": "prompt_single_high.wav",
+    "prompt_single_low.wav": "prompt_single_low.wav",
+    "prompt.wav": "prompt.wav",
+    "radar_cutin.wav": "prompt.wav",
+    "refuse.wav": "refuse.wav",
+    "reverse_gear.wav": "prompt_single_low.wav",
+    "tici_disengaged.wav": "disengage.wav",
+    "tici_engaged.wav": "engage.wav",
+    "traffic_sign_changed.wav": "prompt_single_low.wav",
+    "traffic_sign_green.wav": "prompt_single_high.wav",
+    "warning_immediate.wav": "warning_immediate.wav",
+    "warning_soft.wav": "warning_soft.wav",
+    "Wazealert.wav": "prompt.wav",
+    "Wazealert2.wav": "prompt.wav"
+  },
+  "sources": {
+    "disengage.wav": {
+      "path": "selfdrive/assets/sounds/disengage.wav",
+      "sha256": "42bd04a57b527c787a0555503e02a203f7d672c12d448769a3f41f17befbf013",
+      "bytes": 48044,
+      "frames": 24000,
+      "sample_rate": 48000,
+      "channels": 1,
+      "sample_width": 2
+    },
+    "disengage_tizi.wav": {
+      "path": "selfdrive/assets/sounds/disengage_tizi.wav",
+      "sha256": "1f061777d66d8d856a5fcb17378416f959088885ed770181355195ad15de881b",
+      "bytes": 68628,
+      "frames": 34292,
+      "sample_rate": 48000,
+      "channels": 1,
+      "sample_width": 2
+    },
+    "engage.wav": {
+      "path": "selfdrive/assets/sounds/engage.wav",
+      "sha256": "b1e177499d9439367179cc57a6301b6162393972e3a136cc35c5fdac026bf10a",
+      "bytes": 48044,
+      "frames": 24000,
+      "sample_rate": 48000,
+      "channels": 1,
+      "sample_width": 2
+    },
+    "engage_tizi.wav": {
+      "path": "selfdrive/assets/sounds/engage_tizi.wav",
+      "sha256": "6b54a85cc09b8ee79fce23d48209205d2e70510eed4c5a86fa400fe3f7caebfd",
+      "bytes": 63120,
+      "frames": 31538,
+      "sample_rate": 48000,
+      "channels": 1,
+      "sample_width": 2
+    },
+    "prompt.wav": {
+      "path": "selfdrive/assets/sounds/prompt.wav",
+      "sha256": "a34fb339ba14e81277c1ff640f685ba68a0df610e69538ea0da459a8aecabd22",
+      "bytes": 34220,
+      "frames": 17088,
+      "sample_rate": 48000,
+      "channels": 1,
+      "sample_width": 2
+    },
+    "prompt_distracted.wav": {
+      "path": "selfdrive/assets/sounds/prompt_distracted.wav",
+      "sha256": "211403420daf53868eca92847e4be71b6d4ae50ee3a9db5920ad4efa2aa93cb7",
+      "bytes": 33260,
+      "frames": 16608,
+      "sample_rate": 48000,
+      "channels": 1,
+      "sample_width": 2
+    },
+    "prompt_single_high.wav": {
+      "path": "selfdrive/assets/sounds/prompt_single_high.wav",
+      "sha256": "dbfa5858c0a672411ffdc691efdecb06d01ae458cc1df409bcf3fdeaa4756f72",
+      "bytes": 34638,
+      "frames": 17280,
+      "sample_rate": 48000,
+      "channels": 1,
+      "sample_width": 2
+    },
+    "prompt_single_low.wav": {
+      "path": "selfdrive/assets/sounds/prompt_single_low.wav",
+      "sha256": "db9671bb03e01f119bba1eb6cc0507e0f039ac4e5b7f9f839a87071c52e86e56",
+      "bytes": 44416,
+      "frames": 22169,
+      "sample_rate": 48000,
+      "channels": 1,
+      "sample_width": 2
+    },
+    "refuse.wav": {
+      "path": "selfdrive/assets/sounds/refuse.wav",
+      "sha256": "7bbb732bb95cabe56f61507735db8abd6b528c46219658ecd7316b7b8a4c8536",
+      "bytes": 34508,
+      "frames": 17232,
+      "sample_rate": 48000,
+      "channels": 1,
+      "sample_width": 2
+    },
+    "warning_immediate.wav": {
+      "path": "selfdrive/assets/sounds/warning_immediate.wav",
+      "sha256": "c17e0066edae01e9b3ca5af3b29bc2b456494a44785238a1074b0a1d23b1f18c",
+      "bytes": 34892,
+      "frames": 17424,
+      "sample_rate": 48000,
+      "channels": 1,
+      "sample_width": 2
+    },
+    "warning_soft.wav": {
+      "path": "selfdrive/assets/sounds/warning_soft.wav",
+      "sha256": "eff365433a1bab9af9cc780277ab2cc9dda2fa271cb4a104cfb8791c90cd738c",
+      "bytes": 35372,
+      "frames": 17664,
+      "sample_rate": 48000,
+      "channels": 1,
+      "sample_width": 2
+    }
+  }
+}

@@ -1,0 +1,341 @@
+#!/usr/bin/env python3
+import os
+import selectors
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+# NOTE: Do NOT import anything here that needs be built (e.g. params)
+from openpilot.common.basedir import BASEDIR
+from openpilot.common.scons_cache_lock import acquire_cache_lock
+from openpilot.common.file_chunker import get_manifest_path
+from openpilot.common.spinner import Spinner
+from openpilot.common.text_window import TextWindow
+from openpilot.common.swaglog import cloudlog, add_file_handler
+from openpilot.system.hardware import HARDWARE, AGNOS
+from openpilot.system.version import get_build_metadata
+
+MAX_CACHE_SIZE = 4e9 if "CI" in os.environ else 2e9
+CACHE_DIR = Path(os.environ.get("SCONS_CACHE_DIR") or ("/data/scons_cache" if AGNOS else "/tmp/scons_cache"))
+
+TOTAL_SCONS_NODES = 2705
+MAX_BUILD_PROGRESS = 100
+USBGPU_BUILD_ATTEMPTS = 6
+USBGPU_BUILD_RETRY_INTERVAL = 2.0
+USBGPU_READINESS_ATTEMPTS = 6
+USBGPU_READINESS_RETRY_INTERVAL = 3.0
+USBGPU_READINESS_TIMEOUT = 30.0
+USBGPU_TRANSIENT_READINESS_ERRORS = {"12V / PCIe not ready", "USB link errors", "GPU check timed out", "GPU incompatible"}
+USBGPU_ENUMERATION_WAIT_SECONDS = 20.0
+USBGPU_ENUMERATION_POLL_INTERVAL = 1.0
+
+
+def build_usbgpu_model(spinner: Spinner) -> bool:
+  """Build the optional big model without making the normal build depend on it."""
+  from openpilot.selfdrive.modeld.big_model import selected_manifest, model_path as cached_model_path, model_cache_dir
+  from openpilot.selfdrive.modeld.big_model_status import write_big_model_status
+  from openpilot.selfdrive.modeld.helpers import modeld_pkl_path, usbgpu_pcie_not_ready, usbgpu_present
+  from openpilot.system.hardware.usbgpu import check_usbgpu
+
+  manifest = selected_manifest()
+  if manifest is None:
+    return False
+  model_path = cached_model_path(manifest)
+
+  status_values = {
+    "model_id": manifest.model_id,
+    "sha256": manifest.sha256,
+    "downloaded_bytes": manifest.size,
+    "total_bytes": manifest.size,
+  }
+  # Only ONNX models can fall back to local SCons compilation.
+  fallback = 'internal model' if manifest.precompiled_only else 'local compiler'
+  from openpilot.selfdrive.modeld.precompiled_model import ensure_precompiled, record_failure
+  from openpilot.selfdrive.modeld.precompiled_validation import camera_sizes, device_context, validation_key, validation_cached, save_validation
+  precompiled = None
+  try:
+    spinner.update("USB eGPU big model\nChecking precompiled model")
+    def download_progress(done, total):
+      spinner.update(f"USB eGPU big model\nDownloading precompiled model {done * 100 // total}%")
+      write_big_model_status(model_cache_dir(), "downloading", model_id=manifest.model_id, sha256=manifest.sha256,
+                             downloaded_bytes=done, total_bytes=total, detail="precompiled model")
+    precompiled = ensure_precompiled(manifest, progress=download_progress)
+  except Exception as exc:
+    print(f"Precompiled eGPU model unavailable; using {fallback}: {exc}")
+  if precompiled is not None:
+    try:
+      if usbgpu_present():
+        sizes, key = camera_sizes(''), None
+        try:
+          device = device_context()
+          sizes = camera_sizes(device['device'])
+          key = validation_key(precompiled, device, sizes)
+        except (OSError, ValueError, KeyError, TypeError, ImportError):
+          print('Precompiled validation identity unavailable; running smoke test without cache')
+        if validation_cached(precompiled, key):
+          print('Reusing successful precompiled eGPU validation for this device/runtime')
+        else:
+          spinner.update("USB eGPU big model\nValidating precompiled model")
+          command = [sys.executable, '-m', 'openpilot.selfdrive.modeld.precompiled_runner', str(precompiled)]
+          for width, height in sizes:
+            command += ['--camera', f'{width}x{height}']
+          validation = subprocess.run(command, cwd=BASEDIR, check=True, timeout=300, text=True,
+                                      stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+          print(validation.stdout, end='')
+          try:
+            save_validation(precompiled, key)
+          except OSError as exc:
+            print(f'Could not cache successful precompiled validation: {exc}')
+      write_big_model_status(model_cache_dir(), "compiled", detail="downloaded precompiled model", **status_values)
+      print(f"Using precompiled eGPU model without SCons compilation: {precompiled}")
+      return True
+    except Exception as exc:
+      output = getattr(exc, 'output', '') or ''
+      if isinstance(output, bytes):
+        output = output.decode('utf-8', 'replace')
+      if output:
+        print(output, end='')
+      failure = TimeoutError(output or str(exc)) if isinstance(exc, subprocess.TimeoutExpired) else output or exc
+      if not record_failure(precompiled, failure, 'boot_validation'):
+        # USB enumeration can succeed with ignition off while the GPU's 12V
+        # supply is absent. Keep the verified artifact for the next model start.
+        detail = 'precompiled model verified; waiting for eGPU readiness or validation retry'
+        write_big_model_status(model_cache_dir(), 'waiting_for_ignition', detail=detail, **status_values)
+        print(f'Precompiled eGPU validation deferred: {detail}')
+        return True
+      print(f"Precompiled eGPU validation failed; using {fallback}: {exc}")
+  if manifest.precompiled_only:
+    write_big_model_status(model_cache_dir(), "error", detail="precompiled model unavailable; using internal model", **status_values)
+    return False
+  present = usbgpu_present()
+  if not present:
+    wait_started = time.monotonic()
+    write_big_model_status(model_cache_dir(), "waiting_for_ignition",
+                           detail="waiting for eGPU USB re-enumeration", **status_values)
+    while time.monotonic() - wait_started < USBGPU_ENUMERATION_WAIT_SECONDS:
+      elapsed = int(time.monotonic() - wait_started)
+      spinner.update(f"USB eGPU big model\nWaiting for USB · {elapsed:02d}s")
+      time.sleep(USBGPU_ENUMERATION_POLL_INTERVAL)
+      present = usbgpu_present()
+      if present:
+        print(f"USB eGPU returned after {time.monotonic() - wait_started:.1f}s; continuing optional model compilation")
+        break
+
+  if not present:
+    write_big_model_status(model_cache_dir(), "waiting_for_ignition",
+                           detail="turn ignition on, then restart to compile", **status_values)
+    return False
+
+  pkl_path = Path(modeld_pkl_path(usbgpu=True))
+  manifest_path = Path(get_manifest_path(pkl_path))
+  env = os.environ.copy()
+  env['BUILD_USB_GPU_MODEL'] = '1'
+  env['PYTHONUNBUFFERED'] = '1'
+  target = os.path.relpath(manifest_path, BASEDIR)
+  # A model hash alone does not cover compiler/serialization/tinygrad changes.
+  # Query SCons before reusing the existing artifact, without compiling it.
+  if manifest_path.is_file() and subprocess.run(
+    ["scons", "-q", target], cwd=BASEDIR, env=env, check=False,
+  ).returncode == 0:
+    write_big_model_status(model_cache_dir(), "compiled", **status_values)
+    return True
+
+  readiness_error = None
+  for readiness_attempt in range(1, USBGPU_READINESS_ATTEMPTS + 1):
+    check_message = (f"USB eGPU big model\nChecking GPU · " +
+                     f"{readiness_attempt}/{USBGPU_READINESS_ATTEMPTS} · up to {USBGPU_READINESS_TIMEOUT:.0f}s")
+    spinner.update(check_message)
+    write_big_model_status(model_cache_dir(), "checking", detail=check_message.replace("\n", " "), **status_values)
+    # A successful GPU workload proves the compile path is usable. The xHCI
+    # LEC can still record recoverable packet retries, which the interactive
+    # diagnostic reports strictly but must not block an optional compilation.
+    readiness_error = check_usbgpu(timeout=USBGPU_READINESS_TIMEOUT, require_clean_link=False)
+    if readiness_error is None:
+      break
+    if readiness_error not in USBGPU_TRANSIENT_READINESS_ERRORS or readiness_attempt >= USBGPU_READINESS_ATTEMPTS:
+      break
+    message = (f"USB eGPU transient readiness error: {readiness_error}; retrying in "
+               f"{USBGPU_READINESS_RETRY_INTERVAL:.0f}s ({readiness_attempt}/{USBGPU_READINESS_ATTEMPTS})")
+    print(message)
+    spinner.update(message)
+    write_big_model_status(model_cache_dir(), "waiting_for_ignition", detail=message, **status_values)
+    time.sleep(USBGPU_READINESS_RETRY_INTERVAL)
+  if readiness_error is not None:
+    message = f"USB eGPU not ready for optional model compilation: {readiness_error}"
+    print(message)
+    spinner.update(message)
+    write_big_model_status(model_cache_dir(), "waiting_for_ignition", detail=readiness_error, **status_values)
+    return False
+
+  all_output: list[bytes] = []
+  compile_started_at = time.time()
+  for attempt in range(1, USBGPU_BUILD_ATTEMPTS + 1):
+    # Never delete generated PKL artifacts here. A compiled model must survive
+    # transient eGPU/hub failures and subsequent boot attempts. Model versions
+    # use SHA-derived names, and compile_modeld overwrites its raw working PKL
+    # when an incomplete build is retried.
+    spinner.update("USB eGPU big model\nCompiling · 00:00 · keep ignition on")
+    write_big_model_status(model_cache_dir(), "compiling", started_at=compile_started_at,
+                           detail=f"compile attempt {attempt}/{USBGPU_BUILD_ATTEMPTS}", **status_values)
+    process = subprocess.Popen(["scons", "-j1", "--cache-populate", target], cwd=BASEDIR, env=env,
+                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    assert process.stdout is not None
+    output: list[bytes] = []
+    selector = selectors.DefaultSelector()
+    selector.register(process.stdout, selectors.EVENT_READ)
+    last_heartbeat = 0.0
+    last_status_heartbeat = 0.0
+    while process.poll() is None:
+      for _key, _events in selector.select(timeout=1.0):
+        line = process.stdout.readline().rstrip()
+        if line:
+          output.append(line)
+          print(line.decode('utf8', 'replace'))
+      now = time.time()
+      if now - last_heartbeat >= 1.0:
+        elapsed = max(0, int(now - compile_started_at))
+        elapsed_text = f"{elapsed // 60:02d}:{elapsed % 60:02d}"
+        spinner.update(f"USB eGPU big model\nCompiling · {elapsed_text} · keep ignition on")
+        last_heartbeat = now
+      if now - last_status_heartbeat >= 10.0:
+        write_big_model_status(model_cache_dir(), "compiling", started_at=compile_started_at,
+                               detail=f"compile attempt {attempt}/{USBGPU_BUILD_ATTEMPTS}", **status_values)
+        last_status_heartbeat = now
+    process.wait()
+    selector.close()
+    output.extend(line.rstrip() for line in process.stdout.readlines() if line.rstrip())
+    all_output.extend(output)
+
+    if process.returncode == 0 and manifest_path.is_file():
+      write_big_model_status(model_cache_dir(), "compiled", **status_values)
+      return True
+
+    error_text = b"\n".join(output).decode('utf8', 'replace')
+    if attempt < USBGPU_BUILD_ATTEMPTS and usbgpu_pcie_not_ready(error_text):
+      message = (f"USB eGPU PCIe link not ready; retrying in {USBGPU_BUILD_RETRY_INTERVAL:.0f}s "
+                 f"({attempt}/{USBGPU_BUILD_ATTEMPTS})")
+      print(message)
+      spinner.update(message)
+      time.sleep(USBGPU_BUILD_RETRY_INTERVAL)
+      continue
+    break
+
+  add_file_handler(cloudlog)
+  cloudlog.error("optional USB eGPU model build failed\n" + b"\n".join(all_output).decode('utf8', 'replace'))
+  spinner.update("USB eGPU model unavailable; using the internal model")
+  write_big_model_status(model_cache_dir(), "error", detail="compile failed; using internal model", **status_values)
+  return False
+
+def build(spinner: Spinner, dirty: bool = False, minimal: bool = False) -> None:
+  env = os.environ.copy()
+  env['SCONS_PROGRESS'] = "1"
+  env['PYTHONUNBUFFERED'] = "1"
+  nproc = os.cpu_count()
+  if nproc is None:
+    nproc = 2
+
+  extra_args = ["--minimal"] if minimal else []
+
+  if AGNOS:
+    HARDWARE.set_power_save(False)
+    os.sched_setaffinity(0, range(8))  # ensure we can use the isolcpus cores
+
+  # building with all cores can result in using too
+  # much memory, so retry with less parallelism
+  compile_output: list[bytes] = []
+  for n in (nproc, nproc/2, 1):
+    compile_output.clear()
+    scons: subprocess.Popen = subprocess.Popen(["scons", f"-j{int(n)}", "--cache-populate", *extra_args], cwd=BASEDIR, env=env,
+                                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    assert scons.stdout is not None
+
+    # Read progress and build output from scons and update spinner.
+    while scons.poll() is None:
+      try:
+        line = scons.stdout.readline()
+        if line is None:
+          continue
+        line = line.rstrip()
+
+        prefix = b'progress: '
+        if line.startswith(prefix):
+          i = int(line[len(prefix):])
+          spinner.update_progress(MAX_BUILD_PROGRESS * min(1., i / TOTAL_SCONS_NODES), 100.)
+        elif len(line):
+          compile_output.append(line)
+          line_text = line.decode('utf8', 'replace')
+          print(line_text)
+          spinner.update(line_text)
+      except Exception:
+        pass
+
+    if scons.returncode == 0:
+      break
+    compile_output += scons.stdout.read().split(b'\n')
+    if is_cache_lock_failure(compile_output) or any(b'SCons cache is in use:' in line for line in compile_output):
+      message = ("SCons cache lock failed; cache preserved. Reboot to let the launcher repair "
+                 "/data/scons_cache, or check for another running build.")
+      print(message)
+      spinner.update(message)
+      compile_output.append(message.encode('utf8'))
+      break
+
+  if scons.returncode != 0:
+    # Read remaining output
+    if scons.stdout is not None:
+      compile_output += scons.stdout.read().split(b'\n')
+
+    # Build failed log errors
+    error_s = b"\n".join(compile_output).decode('utf8', 'replace')
+    add_file_handler(cloudlog)
+    cloudlog.error("scons build failed\n" + error_s)
+
+    # Show TextWindow
+    spinner.close()
+    if not os.getenv("CI") and os.getenv("CARROT_STARTUP_RECOVERY") != "1":
+      with TextWindow("openpilot failed to build\n \n" + error_s) as t:
+        t.wait_for_exit()
+    exit(1)
+
+  # enforce max cache size only while no other patched SCons process uses it
+  prune_cache(CACHE_DIR)
+
+
+def prunable_cache_files(cache_dir: Path) -> list[Path]:
+  # Only cached build results, which SCons keeps in two-character bucket
+  # directories. The top level holds the SCons config (and its lock) and
+  # carrot's Params stamp; pruning those by age breaks or slows the next boot.
+  if not cache_dir.is_dir():
+    return []
+  return [f for d in cache_dir.iterdir() if d.is_dir() and len(d.name) == 2 for f in d.iterdir() if f.is_file()]
+
+
+def is_cache_lock_failure(output: list[bytes]) -> bool:
+  return any(b'SConsLockFailure' in line for line in output)
+
+
+def prune_cache(cache_dir: Path) -> None:
+  # The build just finished, but another process may already have started.
+  try:
+    guard = acquire_cache_lock(cache_dir)
+  except (OSError, RuntimeError) as exc:
+    print(f"Skipping cache pruning: {exc}")
+    return
+  with guard:
+    cache_files = prunable_cache_files(cache_dir)
+    cache_files.sort(key=lambda f: f.stat().st_mtime)
+    cache_size = sum(f.stat().st_size for f in cache_files)
+    for f in cache_files:
+      if cache_size < MAX_CACHE_SIZE:
+        break
+      cache_size -= f.stat().st_size
+      f.unlink()
+
+
+if __name__ == "__main__":
+  with Spinner() as spinner:
+    spinner.update_progress(0, 100)
+    build_metadata = get_build_metadata()
+    build(spinner, build_metadata.openpilot.is_dirty, minimal = AGNOS)
+    build_usbgpu_model(spinner)

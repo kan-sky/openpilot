@@ -1,0 +1,869 @@
+{
+  "schema": 1,
+  "updatedAt": "2026-05-21T08:45:55.577Z",
+  "events": {
+    "EVENTS.preEnableStandstill.PRE_ENABLE": {
+      "eventName": "preEnableStandstill",
+      "eventType": "PRE_ENABLE",
+      "source": "EVENTS",
+      "title": "오토홀드",
+      "subtitle": "오토홀드가 활성화되었습니다",
+      "subtitleFontPx": 35
+    },
+    "EVENTS.belowSteerSpeed.WARNING": {
+      "eventName": "belowSteerSpeed",
+      "eventType": "WARNING",
+      "source": "EVENTS",
+      "title": "조향 보조 꺼짐",
+      "subtitle": "최소 속도 {minSteerSpeed}",
+      "titleFontPx": 69
+    },
+    "EVENTS.accFaulted.IMMEDIATE_DISABLE": {
+      "eventName": "accFaulted",
+      "eventType": "IMMEDIATE_DISABLE",
+      "source": "EVENTS",
+      "title": "크루즈 오류",
+      "subtitle": "차량 재시동 요구됨"
+    },
+    "EVENTS.accFaulted.NO_ENTRY": {
+      "eventName": "accFaulted",
+      "eventType": "NO_ENTRY",
+      "source": "EVENTS",
+      "title": "크루즈 오류",
+      "subtitle": "차량 재시동 요구됨"
+    },
+    "EVENTS.accFaulted.PERMANENT": {
+      "eventName": "accFaulted",
+      "eventType": "PERMANENT",
+      "source": "EVENTS",
+      "title": "크루즈 오류",
+      "subtitle": "차량 재시동 요구됨"
+    },
+    "EVENTS.aeb.NO_ENTRY": {
+      "eventName": "aeb",
+      "eventType": "NO_ENTRY",
+      "source": "EVENTS",
+      "title": "AEB 작동됨",
+      "subtitle": "오픈파일럿 사용 불가"
+    },
+    "EVENTS.audioFeedback.PERMANENT": {
+      "eventName": "audioFeedback",
+      "eventType": "PERMANENT",
+      "source": "EVENTS",
+      "title": "음성 피드백 녹음 중",
+      "subtitle": "{seconds}초 남음. 다시 누르면 바로 저장됩니다.",
+      "titleFontPx": 54
+    },
+    "EVENTS.belowEngageSpeed.NO_ENTRY": {
+      "eventName": "belowEngageSpeed",
+      "eventType": "NO_ENTRY",
+      "source": "EVENTS",
+      "title": "속도가 낮습니다",
+      "subtitle": "{minEnableSpeed} 이상 사용 가능",
+      "titleFontPx": 63
+    },
+    "EVENTS.calibrationIncomplete.NO_ENTRY": {
+      "eventName": "calibrationIncomplete",
+      "eventType": "NO_ENTRY",
+      "source": "EVENTS",
+      "title": "캘리브레이션",
+      "subtitle": "오픈파일럿 사용 불가",
+      "titleFontPx": 74
+    },
+    "EVENTS.calibrationIncomplete.PERMANENT": {
+      "eventName": "calibrationIncomplete",
+      "eventType": "PERMANENT",
+      "source": "EVENTS",
+      "title": "캘리브레이션 진행 중 {calPerc}%",
+      "subtitle": "{MIN_SPEED_FILTER} 이상으로 주행하세요",
+      "titleFontPx": 49
+    },
+    "EVENTS.calibrationIncomplete.SOFT_DISABLE": {
+      "eventName": "calibrationIncomplete",
+      "eventType": "SOFT_DISABLE",
+      "source": "EVENTS",
+      "title": "운전자 개입 요구됨",
+      "subtitle": "캘리브레이션 미완료",
+      "titleFontPx": 60
+    },
+    "EVENTS.calibrationInvalid.NO_ENTRY": {
+      "eventName": "calibrationInvalid",
+      "eventType": "NO_ENTRY",
+      "source": "EVENTS",
+      "title": "캘리브레이션 오류",
+      "subtitle": "기기를 다시 장착하고 재보정하세요",
+      "titleFontPx": 59,
+      "subtitleFontPx": 29
+    },
+    "EVENTS.calibrationInvalid.PERMANENT": {
+      "eventName": "calibrationInvalid",
+      "eventType": "PERMANENT",
+      "source": "EVENTS",
+      "title": "캘리브레이션 필요",
+      "subtitle": "기기의 각도를 조정해주세요\n({pitch}°, {yaw}°)",
+      "titleFontPx": 61
+    },
+    "EVENTS.calibrationInvalid.SOFT_DISABLE": {
+      "eventName": "calibrationInvalid",
+      "eventType": "SOFT_DISABLE",
+      "source": "EVENTS",
+      "title": "운전자 개입 요구됨",
+      "subtitle": "재보정 필요",
+      "titleFontPx": 59
+    },
+    "EVENTS.calibrationRecalibrating.NO_ENTRY": {
+      "eventName": "calibrationRecalibrating",
+      "eventType": "NO_ENTRY",
+      "source": "EVENTS",
+      "title": "기기 재장착 감지됨",
+      "subtitle": "재보정이 필요합니다",
+      "titleFontPx": 55
+    },
+    "EVENTS.calibrationRecalibrating.PERMANENT": {
+      "eventName": "calibrationRecalibrating",
+      "eventType": "PERMANENT",
+      "source": "EVENTS",
+      "title": "캘리브레이션 진행 중 {calPerc}%",
+      "subtitle": "{MIN_SPEED_FILTER} 이상으로 주행하세요"
+    },
+    "EVENTS.calibrationRecalibrating.SOFT_DISABLE": {
+      "eventName": "calibrationRecalibrating",
+      "eventType": "SOFT_DISABLE",
+      "source": "EVENTS",
+      "title": "운전자 개입 요구됨",
+      "subtitle": "기기 재장착 감지됨: 재보정 중",
+      "titleFontPx": 60,
+      "subtitleFontPx": 36
+    },
+    "EVENTS.cameraFrameRate.NO_ENTRY": {
+      "eventName": "cameraFrameRate",
+      "eventType": "NO_ENTRY",
+      "source": "EVENTS",
+      "title": "카메라 프레임 낮음",
+      "subtitle": "기기 재부팅 요구됨",
+      "titleFontPx": 57
+    },
+    "EVENTS.cameraFrameRate.PERMANENT": {
+      "eventName": "cameraFrameRate",
+      "eventType": "PERMANENT",
+      "source": "EVENTS",
+      "title": "카메라 프레임 낮음",
+      "subtitle": "기기 재부팅 요구됨",
+      "titleFontPx": 58
+    },
+    "EVENTS.cameraFrameRate.SOFT_DISABLE": {
+      "eventName": "cameraFrameRate",
+      "eventType": "SOFT_DISABLE",
+      "source": "EVENTS",
+      "title": "운전자 개입 요구됨",
+      "subtitle": "카메라 프레임 낮음",
+      "titleFontPx": 60
+    },
+    "EVENTS.cameraMalfunction.NO_ENTRY": {
+      "eventName": "cameraMalfunction",
+      "eventType": "NO_ENTRY",
+      "source": "EVENTS",
+      "title": "기기 재부팅 필요",
+      "subtitle": "카메라 오류",
+      "titleFontPx": 65
+    },
+    "EVENTS.cameraMalfunction.PERMANENT": {
+      "eventName": "cameraMalfunction",
+      "eventType": "PERMANENT",
+      "source": "EVENTS",
+      "title": "카메라 오류",
+      "subtitle": "{bad camera list}"
+    },
+    "EVENTS.cameraMalfunction.SOFT_DISABLE": {
+      "eventName": "cameraMalfunction",
+      "eventType": "SOFT_DISABLE",
+      "source": "EVENTS",
+      "title": "운전자 개입 요구됨",
+      "subtitle": "카메라 비정상 감지됨"
+    },
+    "EVENTS.canBusMissing.IMMEDIATE_DISABLE": {
+      "eventName": "canBusMissing",
+      "eventType": "IMMEDIATE_DISABLE",
+      "source": "EVENTS",
+      "title": "즉시 제어 요망",
+      "subtitle": "CAN 버스 연결 해제됨",
+      "titleFontPx": 76
+    },
+    "EVENTS.canBusMissing.NO_ENTRY": {
+      "eventName": "canBusMissing",
+      "eventType": "NO_ENTRY",
+      "source": "EVENTS",
+      "title": "CAN 버스 연결 해제됨",
+      "subtitle": "연결 상태를 확인하세요",
+      "titleFontPx": 53
+    },
+    "EVENTS.canBusMissing.PERMANENT": {
+      "eventName": "canBusMissing",
+      "eventType": "PERMANENT",
+      "source": "EVENTS",
+      "title": "CAN 버스 연결 끊김",
+      "subtitle": "케이블 상태를 점검하세요",
+      "titleFontPx": 58
+    },
+    "EVENTS.canError.IMMEDIATE_DISABLE": {
+      "eventName": "canError",
+      "eventType": "IMMEDIATE_DISABLE",
+      "source": "EVENTS",
+      "title": "즉시 제어 요망",
+      "subtitle": "차량 식별 불가",
+      "titleFontPx": 74
+    },
+    "EVENTS.canError.NO_ENTRY": {
+      "eventName": "canError",
+      "eventType": "NO_ENTRY",
+      "source": "EVENTS",
+      "title": "차량 식별 불가",
+      "subtitle": "오픈파일럿 사용 불가",
+      "titleFontPx": 80
+    },
+    "EVENTS.canError.PERMANENT": {
+      "eventName": "canError",
+      "eventType": "PERMANENT",
+      "source": "EVENTS",
+      "title": "차량 식별 불가",
+      "subtitle": "",
+      "titleFontPx": 77
+    },
+    "EVENTS.carUnrecognized.PERMANENT": {
+      "eventName": "carUnrecognized",
+      "eventType": "PERMANENT",
+      "source": "EVENTS",
+      "title": "사용 불가능",
+      "subtitle": "미지원 차량"
+    },
+    "EVENTS.commIssue.NO_ENTRY": {
+      "eventName": "commIssue",
+      "eventType": "NO_ENTRY",
+      "source": "EVENTS",
+      "title": "{service names}",
+      "subtitle": "내부 서비스 통신 오류",
+      "titleFontPx": 40
+    },
+    "EVENTS.commIssue.SOFT_DISABLE": {
+      "eventName": "commIssue",
+      "eventType": "SOFT_DISABLE",
+      "source": "EVENTS",
+      "title": "운전자 개입 요구됨",
+      "subtitle": "프로세스 간 통신 오류",
+      "titleFontPx": 60
+    },
+    "EVENTS.commIssueAvgFreq.NO_ENTRY": {
+      "eventName": "commIssueAvgFreq",
+      "eventType": "NO_ENTRY",
+      "source": "EVENTS",
+      "title": "프로세스 오류",
+      "subtitle": "프로세스 간의 통신 속도 느림",
+      "titleFontPx": 82,
+      "subtitleFontPx": 38
+    },
+    "EVENTS.commIssueAvgFreq.SOFT_DISABLE": {
+      "eventName": "commIssueAvgFreq",
+      "eventType": "SOFT_DISABLE",
+      "source": "EVENTS",
+      "title": "운전자 개입 요구됨",
+      "subtitle": "프로세스 간 통신 속도 낮음",
+      "titleFontPx": 60
+    },
+    "EVENTS.controlsMismatch.IMMEDIATE_DISABLE": {
+      "eventName": "controlsMismatch",
+      "eventType": "IMMEDIATE_DISABLE",
+      "source": "EVENTS",
+      "title": "즉시 제어 요망",
+      "subtitle": "제어 상태 불일치",
+      "titleFontPx": 78
+    },
+    "EVENTS.controlsMismatch.NO_ENTRY": {
+      "eventName": "controlsMismatch",
+      "eventType": "NO_ENTRY",
+      "source": "EVENTS",
+      "title": "제어 상태 불일치",
+      "subtitle": "오픈파일럿 사용 불가",
+      "titleFontPx": 69
+    },
+    "EVENTS.cruiseDisabled.IMMEDIATE_DISABLE": {
+      "eventName": "cruiseDisabled",
+      "eventType": "IMMEDIATE_DISABLE",
+      "source": "EVENTS",
+      "title": "즉시 제어 요망",
+      "subtitle": "ACC가 꺼져 있습니다",
+      "titleFontPx": 74
+    },
+    "EVENTS.dashcamMode.PERMANENT": {
+      "eventName": "dashcamMode",
+      "eventType": "PERMANENT",
+      "source": "EVENTS",
+      "title": "미지원 차량",
+      "subtitle": ""
+    },
+    "EVENTS.deviceFalling.NO_ENTRY": {
+      "eventName": "deviceFalling",
+      "eventType": "NO_ENTRY",
+      "source": "EVENTS",
+      "title": "기기 탈착됨",
+      "subtitle": "기기 탈착 감지, 재보정 필요"
+    },
+    "EVENTS.deviceFalling.SOFT_DISABLE": {
+      "eventName": "deviceFalling",
+      "eventType": "SOFT_DISABLE",
+      "source": "EVENTS",
+      "title": "운전자 개입 요구됨",
+      "subtitle": "기기 탈착 감지됨",
+      "titleFontPx": 59
+    },
+    "EVENTS.doorOpen.NO_ENTRY": {
+      "eventName": "doorOpen",
+      "eventType": "NO_ENTRY",
+      "source": "EVENTS",
+      "title": "도어 열림",
+      "subtitle": "오픈파일럿 사용 불가"
+    },
+    "EVENTS.doorOpen.SOFT_DISABLE": {
+      "eventName": "doorOpen",
+      "eventType": "SOFT_DISABLE",
+      "source": "EVENTS",
+      "title": "운전자 개입 요구됨",
+      "subtitle": "도어 열림 감지됨"
+    },
+    "EVENTS.driverDistracted3.PERMANENT": {
+      "eventName": "driverDistracted3",
+      "eventType": "PERMANENT",
+      "source": "EVENTS",
+      "title": "운전 보조 비활성화",
+      "subtitle": "운전자 부주의 감지됨",
+      "titleFontPx": 59
+    },
+    "EVENTS.driverUnresponsive3.PERMANENT": {
+      "eventName": "driverUnresponsive3",
+      "eventType": "PERMANENT",
+      "source": "EVENTS",
+      "title": "운전 보조 비활성화",
+      "subtitle": "운전자 응답 없음",
+      "titleFontPx": 60
+    },
+    "EVENTS.espActive.NO_ENTRY": {
+      "eventName": "espActive",
+      "eventType": "NO_ENTRY",
+      "source": "EVENTS",
+      "title": "ESP 작동 중",
+      "subtitle": "오픈파일럿 사용 불가"
+    },
+    "EVENTS.espActive.SOFT_DISABLE": {
+      "eventName": "espActive",
+      "eventType": "SOFT_DISABLE",
+      "source": "EVENTS",
+      "title": "ESP 작동 중",
+      "subtitle": "운전자 개입 요구됨"
+    },
+    "EVENTS.espDisabled.NO_ENTRY": {
+      "eventName": "espDisabled",
+      "eventType": "NO_ENTRY",
+      "source": "EVENTS",
+      "title": "ESP 꺼짐",
+      "subtitle": "활성화 불가능"
+    },
+    "EVENTS.espDisabled.SOFT_DISABLE": {
+      "eventName": "espDisabled",
+      "eventType": "SOFT_DISABLE",
+      "source": "EVENTS",
+      "title": "운전자 개입 요구됨",
+      "subtitle": "ESP 꺼짐",
+      "titleFontPx": 60
+    },
+    "EVENTS.fanMalfunction.PERMANENT": {
+      "eventName": "fanMalfunction",
+      "eventType": "PERMANENT",
+      "source": "EVENTS",
+      "title": "쿨링팬 비정상",
+      "subtitle": "하드웨어를 점검해주세요"
+    },
+    "EVENTS.fcw.PERMANENT": {
+      "eventName": "fcw",
+      "eventType": "PERMANENT",
+      "source": "EVENTS",
+      "title": "전방 추돌 주의",
+      "subtitle": "전방 차량과 추돌 위험이 있습니다",
+      "titleFontPx": 79,
+      "subtitleFontPx": 31
+    },
+    "EVENTS.invalidLkasSetting.NO_ENTRY": {
+      "eventName": "invalidLkasSetting",
+      "eventType": "NO_ENTRY",
+      "source": "EVENTS",
+      "title": "LKAS 설정 오류",
+      "subtitle": "오픈파일럿 사용 불가",
+      "titleFontPx": 75
+    },
+    "EVENTS.invalidLkasSetting.PERMANENT": {
+      "eventName": "invalidLkasSetting",
+      "eventType": "PERMANENT",
+      "source": "EVENTS",
+      "title": "LKAS 설정 오류",
+      "subtitle": "순정 LKAS 설정 점검 필요",
+      "titleFontPx": 75,
+      "subtitleFontPx": 34
+    },
+    "EVENTS.joystickDebug.PERMANENT": {
+      "eventName": "joystickDebug",
+      "eventType": "PERMANENT",
+      "source": "EVENTS",
+      "title": "원격 제어 작동 중",
+      "subtitle": "",
+      "titleFontPx": 81
+    },
+    "EVENTS.joystickDebug.WARNING": {
+      "eventName": "joystickDebug",
+      "eventType": "WARNING",
+      "source": "EVENTS",
+      "title": "원격 제어 모드",
+      "subtitle": "가속: {accel}%, 조향: {steer}%",
+      "titleFontPx": 80
+    },
+    "EVENTS.laneChange.WARNING": {
+      "eventName": "laneChange",
+      "eventType": "WARNING",
+      "source": "EVENTS",
+      "title": "차선 변경 중",
+      "subtitle": "주변 상황에 유의하세요"
+    },
+    "EVENTS.laneChangeBlocked.WARNING": {
+      "eventName": "laneChangeBlocked",
+      "eventType": "WARNING",
+      "source": "EVENTS",
+      "title": "차선 변경 대기",
+      "subtitle": "사각지대 차량 감지됨",
+      "titleFontPx": 77
+    },
+    "EVENTS.laneChangeUnavailable.WARNING": {
+      "eventName": "laneChangeUnavailable",
+      "eventType": "WARNING",
+      "source": "EVENTS",
+      "title": "차선 변경 일시정지",
+      "subtitle": "차선 변경 불가 구역 감지됨",
+      "titleFontPx": 72
+    },
+    "EVENTS.excessiveActuation.NO_ENTRY": {
+      "eventName": "excessiveActuation",
+      "eventType": "NO_ENTRY",
+      "source": "EVENTS",
+      "title": "제어 입력 과다",
+      "subtitle": "비정상적인 제어 입력 감지됨",
+      "titleFontPx": 68
+    },
+    "EVENTS.excessiveActuation.SOFT_DISABLE": {
+      "eventName": "excessiveActuation",
+      "eventType": "SOFT_DISABLE",
+      "source": "EVENTS",
+      "title": "운전자 개입 요구됨",
+      "subtitle": "비정상적인 제어 입력 감지됨",
+      "titleFontPx": 60
+    },
+    "EVENTS.lateralManeuver.PERMANENT": {
+      "eventName": "lateralManeuver",
+      "eventType": "PERMANENT",
+      "source": "EVENTS",
+      "title": "조향 테스트",
+      "subtitle": "주변 상황에 유의하세요"
+    },
+    "EVENTS.ldw.PERMANENT": {
+      "eventName": "ldw",
+      "eventType": "PERMANENT",
+      "source": "EVENTS",
+      "title": "차선 이탈",
+      "subtitle": "운전에 주의하세요"
+    },
+    "EVENTS.locationdPermanentError.IMMEDIATE_DISABLE": {
+      "eventName": "locationdPermanentError",
+      "eventType": "IMMEDIATE_DISABLE",
+      "source": "EVENTS",
+      "title": "즉시 제어 요망",
+      "subtitle": "locationd 치명적 오류",
+      "titleFontPx": 73
+    },
+    "EVENTS.locationdPermanentError.NO_ENTRY": {
+      "eventName": "locationdPermanentError",
+      "eventType": "NO_ENTRY",
+      "source": "EVENTS",
+      "title": "locationd 치명적 오류",
+      "subtitle": "오픈파일럿 사용 불가",
+      "titleFontPx": 66
+    },
+    "EVENTS.locationdPermanentError.PERMANENT": {
+      "eventName": "locationdPermanentError",
+      "eventType": "PERMANENT",
+      "source": "EVENTS",
+      "title": "locationd 치명적 오류",
+      "subtitle": ""
+    },
+    "EVENTS.locationdTemporaryError.NO_ENTRY": {
+      "eventName": "locationdTemporaryError",
+      "eventType": "NO_ENTRY",
+      "source": "EVENTS",
+      "title": "locationd 오류",
+      "subtitle": "locationd 일시적 오류",
+      "titleFontPx": 71
+    },
+    "EVENTS.locationdTemporaryError.SOFT_DISABLE": {
+      "eventName": "locationdTemporaryError",
+      "eventType": "SOFT_DISABLE",
+      "source": "EVENTS",
+      "title": "운전자 개입 요구됨",
+      "subtitle": "locationd 일시적 오류"
+    },
+    "EVENTS.longitudinalManeuver.PERMANENT": {
+      "eventName": "longitudinalManeuver",
+      "eventType": "PERMANENT",
+      "source": "EVENTS",
+      "title": "테스트 모드",
+      "subtitle": "주변 환경에 유의하세요"
+    },
+    "EVENTS.lowBattery.NO_ENTRY": {
+      "eventName": "lowBattery",
+      "eventType": "NO_ENTRY",
+      "source": "EVENTS",
+      "title": "배터리 전압 낮음",
+      "subtitle": "오픈파일럿 사용 불가",
+      "titleFontPx": 69
+    },
+    "EVENTS.lowBattery.SOFT_DISABLE": {
+      "eventName": "lowBattery",
+      "eventType": "SOFT_DISABLE",
+      "source": "EVENTS",
+      "title": "운전자 개입 요구됨",
+      "subtitle": "배터리 전압이 낮습니다"
+    },
+    "EVENTS.lowMemory.NO_ENTRY": {
+      "eventName": "lowMemory",
+      "eventType": "NO_ENTRY",
+      "source": "EVENTS",
+      "title": "메모리 부족",
+      "subtitle": "기기 재부팅 요구됨"
+    },
+    "EVENTS.lowMemory.PERMANENT": {
+      "eventName": "lowMemory",
+      "eventType": "PERMANENT",
+      "source": "EVENTS",
+      "title": "메모리 부족",
+      "subtitle": "{memoryUsagePercent}% 사용됨"
+    },
+    "EVENTS.lowMemory.SOFT_DISABLE": {
+      "eventName": "lowMemory",
+      "eventType": "SOFT_DISABLE",
+      "source": "EVENTS",
+      "title": "운전자 개입 요구됨",
+      "subtitle": "메모리 부족, 기기 재부팅"
+    },
+    "EVENTS.manualRestart.WARNING": {
+      "eventName": "manualRestart",
+      "eventType": "WARNING",
+      "source": "EVENTS",
+      "title": "운전자 개입 요구됨",
+      "subtitle": "직접 운전을 진행하세요",
+      "titleFontPx": 60
+    },
+    "EVENTS.modeldLagging.NO_ENTRY": {
+      "eventName": "modeldLagging",
+      "eventType": "NO_ENTRY",
+      "source": "EVENTS",
+      "title": "주행 모델 비정상",
+      "subtitle": "주행 모델 응답성 떨어짐",
+      "titleFontPx": 61
+    },
+    "EVENTS.modeldLagging.PERMANENT": {
+      "eventName": "modeldLagging",
+      "eventType": "PERMANENT",
+      "source": "EVENTS",
+      "title": "시스템 불안정",
+      "subtitle": "{frameDropPerc}% 프레임 하락됨",
+      "titleFontPx": 79
+    },
+    "EVENTS.modeldLagging.SOFT_DISABLE": {
+      "eventName": "modeldLagging",
+      "eventType": "SOFT_DISABLE",
+      "source": "EVENTS",
+      "title": "운전자 개입 요구됨",
+      "subtitle": "주행 모델 응답성 떨어짐",
+      "titleFontPx": 60
+    },
+    "EVENTS.outOfSpace.NO_ENTRY": {
+      "eventName": "outOfSpace",
+      "eventType": "NO_ENTRY",
+      "source": "EVENTS",
+      "title": "용량 부족",
+      "subtitle": "오픈파일럿 사용 불가",
+      "titleFontPx": 82
+    },
+    "EVENTS.overheat.NO_ENTRY": {
+      "eventName": "overheat",
+      "eventType": "NO_ENTRY",
+      "source": "EVENTS",
+      "title": "기기 냉각중",
+      "subtitle": "기기의 온도가 내려가면 활성화 가능",
+      "subtitleFontPx": 29
+    },
+    "EVENTS.overheat.PERMANENT": {
+      "eventName": "overheat",
+      "eventType": "PERMANENT",
+      "source": "EVENTS",
+      "title": "기기 냉각중",
+      "subtitle": "{temperature} °C"
+    },
+    "EVENTS.overheat.SOFT_DISABLE": {
+      "eventName": "overheat",
+      "eventType": "SOFT_DISABLE",
+      "source": "EVENTS",
+      "title": "운전자 개입 요구됨",
+      "subtitle": "기기의 온도가 높습니다"
+    },
+    "EVENTS.paramsdPermanentError.IMMEDIATE_DISABLE": {
+      "eventName": "paramsdPermanentError",
+      "eventType": "IMMEDIATE_DISABLE",
+      "source": "EVENTS",
+      "title": "즉시 제어 요망",
+      "subtitle": "차량 파라미터 오류",
+      "titleFontPx": 75
+    },
+    "EVENTS.paramsdPermanentError.NO_ENTRY": {
+      "eventName": "paramsdPermanentError",
+      "eventType": "NO_ENTRY",
+      "source": "EVENTS",
+      "title": "차량 파라미터 오류",
+      "subtitle": "오픈파일럿 사용 불가",
+      "titleFontPx": 60
+    },
+    "EVENTS.paramsdPermanentError.PERMANENT": {
+      "eventName": "paramsdPermanentError",
+      "eventType": "PERMANENT",
+      "source": "EVENTS",
+      "title": "차량 파라미터 오류",
+      "subtitle": "",
+      "titleFontPx": 60
+    },
+    "EVENTS.paramsdTemporaryError.NO_ENTRY": {
+      "eventName": "paramsdTemporaryError",
+      "eventType": "NO_ENTRY",
+      "source": "EVENTS",
+      "title": "조향 정렬 비정상",
+      "subtitle": "조향 정렬 (Offset: {offset}°)",
+      "titleFontPx": 66
+    },
+    "EVENTS.paramsdTemporaryError.SOFT_DISABLE": {
+      "eventName": "paramsdTemporaryError",
+      "eventType": "SOFT_DISABLE",
+      "source": "EVENTS",
+      "title": "운전자 개입 요구됨",
+      "subtitle": "일시적 차량 파라미터 오류"
+    },
+    "EVENTS.driverUnresponsive1.PERMANENT": {
+      "eventName": "driverUnresponsive1",
+      "eventType": "PERMANENT",
+      "source": "EVENTS",
+      "title": "운전자 감지 안됨",
+      "subtitle": "스티어링 휠을 잡아주세요",
+      "titleFontPx": 68
+    },
+    "EVENTS.preLaneChangeLeft.WARNING": {
+      "eventName": "preLaneChangeLeft",
+      "eventType": "WARNING",
+      "source": "EVENTS",
+      "title": "차선 변경 대기",
+      "subtitle": "좌측 조향 시 시작",
+      "titleFontPx": 62
+    },
+    "EVENTS.preLaneChangeRight.WARNING": {
+      "eventName": "preLaneChangeRight",
+      "eventType": "WARNING",
+      "source": "EVENTS",
+      "title": "차선 변경 대기",
+      "subtitle": "우측 조향 시 시작",
+      "titleFontPx": 62
+    },
+    "EVENTS.seatbeltNotLatched.NO_ENTRY": {
+      "eventName": "seatbeltNotLatched",
+      "eventType": "NO_ENTRY",
+      "source": "EVENTS",
+      "title": "안전벨트 미체결",
+      "subtitle": "오픈파일럿 사용 불가",
+      "titleFontPx": 70
+    },
+    "EVENTS.speedTooHigh.NO_ENTRY": {
+      "eventName": "speedTooHigh",
+      "eventType": "NO_ENTRY",
+      "source": "EVENTS",
+      "title": "작동 가능 속도 초과",
+      "subtitle": "감속해야 활성화 가능",
+      "titleFontPx": 58
+    },
+    "EVENTS.speedTooHigh.WARNING": {
+      "eventName": "speedTooHigh",
+      "eventType": "WARNING",
+      "source": "EVENTS",
+      "title": "속도가 너무 높음",
+      "subtitle": "주행 모델 불안정 가능성 있음",
+      "titleFontPx": 64,
+      "subtitleFontPx": 36
+    },
+    "EVENTS.steerSaturated.WARNING": {
+      "eventName": "steerSaturated",
+      "eventType": "WARNING",
+      "source": "EVENTS",
+      "title": "운전자 개입 필요",
+      "subtitle": "조향각 한도 도달함",
+      "titleFontPx": 66,
+      "subtitleFontPx": 47
+    },
+    "EVENTS.steerTempUnavailable.NO_ENTRY": {
+      "eventName": "steerTempUnavailable",
+      "eventType": "NO_ENTRY",
+      "source": "EVENTS",
+      "title": "조향 일시적 비활성화",
+      "subtitle": "오픈파일럿 사용 불가",
+      "titleFontPx": 53
+    },
+    "EVENTS.steerTempUnavailable.SOFT_DISABLE": {
+      "eventName": "steerTempUnavailable",
+      "eventType": "SOFT_DISABLE",
+      "source": "EVENTS",
+      "title": "운전자 개입 필요",
+      "subtitle": "조향 제어를 일시적 비활성화",
+      "titleFontPx": 69,
+      "subtitleFontPx": 37
+    },
+    "EVENTS.steerTempUnavailableSilent.WARNING": {
+      "eventName": "steerTempUnavailableSilent",
+      "eventType": "WARNING",
+      "source": "EVENTS",
+      "title": "조향 제어 불안정",
+      "subtitle": "",
+      "titleFontPx": 68
+    },
+    "EVENTS.steerUnavailable.IMMEDIATE_DISABLE": {
+      "eventName": "steerUnavailable",
+      "eventType": "IMMEDIATE_DISABLE",
+      "source": "EVENTS",
+      "title": "직접 제어 요망",
+      "subtitle": "LKAS 오류: 차량 재시동",
+      "titleFontPx": 76
+    },
+    "EVENTS.steerUnavailable.NO_ENTRY": {
+      "eventName": "steerUnavailable",
+      "eventType": "NO_ENTRY",
+      "source": "EVENTS",
+      "title": "LKAS 오류",
+      "subtitle": "차량 재시동 요구됨"
+    },
+    "EVENTS.steerUnavailable.PERMANENT": {
+      "eventName": "steerUnavailable",
+      "eventType": "PERMANENT",
+      "source": "EVENTS",
+      "title": "LKAS 오류",
+      "subtitle": "차량 재시동 요구됨"
+    },
+    "EVENTS.stockAeb.NO_ENTRY": {
+      "eventName": "stockAeb",
+      "eventType": "NO_ENTRY",
+      "source": "EVENTS",
+      "title": "AEB 작동함",
+      "subtitle": "차량 AEB 작동됨"
+    },
+    "EVENTS.stockAeb.PERMANENT": {
+      "eventName": "stockAeb",
+      "eventType": "PERMANENT",
+      "source": "EVENTS",
+      "title": "AEB 작동",
+      "subtitle": "차량 AEB 작동됨"
+    },
+    "EVENTS.tooDistracted.NO_ENTRY": {
+      "eventName": "tooDistracted",
+      "eventType": "NO_ENTRY",
+      "source": "EVENTS",
+      "title": "운전자 부주의",
+      "subtitle": "이번 세션에서 활성화 불가능",
+      "subtitleFontPx": 37
+    },
+    "STARPILOT_EVENTS.greenLight.PERMANENT": {
+      "eventName": "greenLight",
+      "eventType": "PERMANENT",
+      "source": "STARPILOT_EVENTS",
+      "title": "신호 변경됨",
+      "subtitle": "전방 신호 변경 감지됨",
+      "titleFontPx": 73
+    },
+    "STARPILOT_EVENTS.leadDeparting.PERMANENT": {
+      "eventName": "leadDeparting",
+      "eventType": "PERMANENT",
+      "source": "STARPILOT_EVENTS",
+      "title": "전방 차량 출발",
+      "subtitle": "전방 차량이 출발했습니다",
+      "titleFontPx": 79
+    },
+    "STARPILOT_EVENTS.nnffLoaded.PERMANENT": {
+      "eventName": "nnffLoaded",
+      "eventType": "PERMANENT",
+      "source": "STARPILOT_EVENTS",
+      "title": "NNFF 활성화",
+      "subtitle": "인공 신경망 모델 활성화",
+      "titleFontPx": 61
+    },
+    "STARPILOT_EVENTS.openpilotCrashed.IMMEDIATE_DISABLE": {
+      "eventName": "openpilotCrashed",
+      "eventType": "IMMEDIATE_DISABLE",
+      "source": "STARPILOT_EVENTS",
+      "title": "오류 발생",
+      "subtitle": "오류가 발생했습니다"
+    },
+    "STARPILOT_EVENTS.openpilotCrashed.NO_ENTRY": {
+      "eventName": "openpilotCrashed",
+      "eventType": "NO_ENTRY",
+      "source": "STARPILOT_EVENTS",
+      "title": "오류 발생",
+      "subtitle": "오류가 발생했습니다"
+    },
+    "STARPILOT_EVENTS.noLaneAvailable.WARNING": {
+      "eventName": "noLaneAvailable",
+      "eventType": "WARNING",
+      "source": "STARPILOT_EVENTS",
+      "title": "차선 변경 대기",
+      "subtitle": "변경 가능한 차선이 없습니다",
+      "titleFontPx": 79,
+      "subtitleFontPx": 36
+    },
+    "EVENTS.driverDistracted1.PERMANENT": {
+      "eventName": "driverDistracted1",
+      "eventType": "PERMANENT",
+      "source": "EVENTS",
+      "title": "운전에 집중하세요",
+      "subtitle": ""
+    },
+    "EVENTS.trafficStopping.WARNING": {
+      "eventName": "trafficStopping",
+      "eventType": "WARNING",
+      "source": "EVENTS",
+      "title": "정지합니다",
+      "subtitle": "전방 신호 감지됨.",
+      "titleFontPx": 60,
+      "subtitleFontPx": 30
+    },
+    "EVENTS.radarCutin.WARNING": {
+      "eventName": "radarCutin",
+      "eventType": "WARNING",
+      "source": "EVENTS",
+      "title": "끼어드는 차량 감지",
+      "subtitle": "전방 차량을 확인하세요",
+      "titleFontPx": 48,
+      "subtitleFontPx": 30
+    },
+    "EVENTS.driverDistracted2.PERMANENT": {
+      "eventName": "driverDistracted2",
+      "eventType": "PERMANENT",
+      "source": "EVENTS",
+      "title": "운전에 집중하세요",
+      "subtitle": "운전자 부주의 감지됨",
+      "titleFontPx": 60
+    }
+  }
+}

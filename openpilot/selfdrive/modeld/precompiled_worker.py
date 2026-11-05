@@ -1,0 +1,202 @@
+"""Run a pinned compiled model in its own tinygrad interpreter and shared input buffer."""
+import hashlib
+import faulthandler
+import json
+import mmap
+import os
+from pathlib import Path
+import sys
+import threading
+import time
+import traceback
+
+_gpu_owner = None
+
+
+def claim_gpu_owner():
+  # Keep the lock for the process lifetime, including teardown/native USB waits.
+  # A modeld restart must not open the device while its old worker is exiting.
+  global _gpu_owner
+  if sys.platform == 'linux':
+    import fcntl
+    _gpu_owner = open('/tmp/carrot-precompiled-gpu.lock', 'a')
+    try:
+      fcntl.flock(_gpu_owner, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError as exc:
+      raise RuntimeError('previous eGPU worker is still exiting') from exc
+
+
+def watch_parent(parent, progress):
+  # PR_SET_PDEATHSIG follows the creating *thread*. modeld's loading thread exits
+  # after startup, so monitor the parent process instead of killing a healthy worker.
+  reported = set()
+  while os.getppid() == parent:
+    stage, frame, started = progress.current
+    age = time.monotonic() - started
+    if (frame > 0 and stage in ('input_upload', 'warp', 'model_call', 'output_read') and age > .075
+        and frame not in reported and len(reported) < 3):
+      reported.add(frame)
+      print(json.dumps({'precompiledWorkerStall': {'stage': stage, 'frame': frame, 'age_ms': round(age * 1000)}}),
+            file=sys.stderr, flush=True)
+      faulthandler.dump_traceback(file=sys.stderr, all_threads=True)
+    time.sleep(.05)
+  os._exit(1)
+
+
+def main():
+  # Release the exclusive USB GPU when modeld exits, including a crash/SIGKILL.
+  parent = os.getppid()
+  if parent == 1:
+    return
+  control = sys.stdout.buffer
+  sys.stdout = sys.stderr  # tinygrad diagnostics must not enter the control protocol
+  pkl, shared_path, width, height = Path(sys.argv[1]), Path(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4])
+  background_recovery = sys.argv[5:] == ['--recovery']
+  # This entry point is executed by filename; keep early diagnostics stdlib-only.
+  from egpu_worker_progress import WorkerProgress
+  progress = WorkerProgress(Path(str(shared_path) + '.progress'))
+  threading.Thread(target=watch_parent, args=(parent, progress), daemon=True).start()
+  manifest = json.loads((pkl.parent / 'installed.json').read_text())
+  progress.mark('verify_model')
+  with pkl.open('rb') as f:
+    if hashlib.file_digest(f, 'sha256').hexdigest() != manifest['pickle']['sha256']:
+      raise ValueError('precompiled PKL checksum mismatch')
+  claim_gpu_owner()
+  runtime = pkl.parent / ('runtime-' + manifest['runtime']['sha256'][:16])
+  sys.path.insert(0, str(runtime))
+  os.environ.update(DEV='USB+AMD:LLVM', GMMU='0', JIT_BATCH_SIZE='0')
+  import numpy as np
+  generic = manifest['format'] == 'comma-generic-onnx'
+  if background_recovery and not generic:
+    raise ValueError('background recovery requires generic AMD model')
+  if generic:
+    os.environ.update(FLOAT16='1', TC_OPT='2', TC_MIN_GLOBALS='32')
+    if manifest.get('serialization') == 'persistent-buffer-v1':
+      os.environ['OPENPILOT_HACKS'] = '1'
+  if not generic:
+    import model_runtime
+  from tinygrad import Device, Tensor
+  from openpilot.selfdrive.modeld.egpu_usb_wait import configure_usb_wait
+  configure_usb_wait(manifest)
+  from openpilot.selfdrive.modeld.precompiled_artifact import load_artifact
+  from openpilot.common.runtime_diagnostics import RuntimeDiagnostics
+  from openpilot.common.swaglog import cloudlog
+  from openpilot.system.camerad.cameras.nv12_info import get_nv12_info
+
+  progress.mark('load_model')
+  jits = load_artifact(pkl, manifest.get('serialization', 'oob-v1'))
+  if not generic and ('run_policy' in jits or 'run_model' not in jits):
+    raise ValueError('wrong precompiled runtime format')
+  if generic:
+    progress.mark('prepare_runtime')
+    from openpilot.selfdrive.modeld.generic_model_runtime import model_metadata
+    from openpilot.selfdrive.modeld.local_gpu_warp import LocalWarpRuntime, bind_runtime, create_runtime, vehicle_device_type
+    checkpoint, _, _, _ = model_metadata(jits)
+    if checkpoint != manifest['model_checkpoint']:
+      raise ValueError('precompiled checkpoint mismatch')
+    adapter_args = (jits, width, height, runtime, get_nv12_info(width, height))
+    # Concurrent recovery must not compile or execute on the internal QCOM GPU.
+    adapter = create_runtime(adapter_args, '' if background_recovery else vehicle_device_type(), cloudlog.exception)
+    metadata = {'model_checkpoint': adapter.checkpoint, 'input_shapes': adapter.input_shapes, 'output_slices': adapter.output_slices}
+    device = adapter.device
+  else:
+    metadata = jits['metadata']
+    if metadata['model_checkpoint'] != manifest['model_checkpoint']:
+      raise ValueError('precompiled checkpoint mismatch')
+    run_model = jits['run_model'][(width, height)]
+    device = jits['input_devices']['model']
+  if Device[device].arch != manifest['gpu_arch']:
+    raise ValueError('precompiled GPU architecture mismatch')
+  if generic:
+    frame_size, packed, views = adapter.frame_size, adapter.packed, adapter.views
+    queues = {}
+  else:
+    frame_size = model_runtime.nv12_copy_size(*get_nv12_info(width, height)[:3])
+    queues, npy, frames = model_runtime.make_input_queues(metadata['input_shapes'], 4, device, frame_size)
+    packed = frames['img'].base
+    views = npy | frames
+  assert packed.dtype == np.uint8 and packed.ndim == 1 and packed.flags.c_contiguous
+  layout = {name: {'offset': view.ctypes.data - packed.ctypes.data, 'shape': list(view.shape), 'dtype': str(view.dtype)}
+            for name, view in views.items()}
+  count = max(section.stop for section in metadata['output_slices'].values())
+  input_bytes = packed.nbytes
+  total = input_bytes + count * 4
+  with shared_path.open('r+b') as f:
+    progress.mark('bind_buffers')
+    f.truncate(total)
+    with mmap.mmap(f.fileno(), total) as shared:
+      packed_shared = np.ndarray((input_bytes,), np.uint8, buffer=shared)
+      packed_shared[:] = 0
+      output = np.ndarray((count,), np.float32, buffer=shared, offset=input_bytes)
+      if generic:
+        adapter = bind_runtime(adapter, adapter_args, packed_shared, cloudlog.exception)
+        adapter.progress = progress.mark
+        cloudlog.event('precompiledWarp', backend='qcom' if isinstance(adapter, LocalWarpRuntime) else 'amd',
+                       input_bytes=input_bytes, usb_input_bytes=getattr(adapter, 'upload_bytes', input_bytes))
+      else:
+        queues['packed_npy_inputs'] = Tensor(packed_shared, device='NPY').realize()
+      info = {'size': total, 'input_bytes': input_bytes, 'output_count': count, 'layout': layout,
+              'input_shapes': metadata['input_shapes'],
+              'output_slices': {k: [v.start, v.stop, v.step] for k, v in metadata['output_slices'].items()},
+              'checkpoint': metadata['model_checkpoint'], 'frame_size': frame_size}
+      control.write(json.dumps(info).encode() + b'\n')
+      control.flush()
+      progress.mark('idle')
+      diagnostics = RuntimeDiagnostics('precompiled_worker', cloudlog.event)
+      while command := sys.stdin.buffer.read(1):
+        if command == b'q':
+          break
+        if command == b'z' and background_recovery:
+          adapter.reset_state()
+          control.write(b'Z\n')
+          control.flush()
+          continue
+        if command != b'r':
+          raise ValueError('invalid model worker command')
+        progress.frame += 1
+        started, cpu_started = time.monotonic(), time.thread_time()
+        if generic:
+          result = adapter.run()
+          dispatched = time.monotonic()
+        else:
+          progress.mark('model_call')
+          outs, = run_model(**{k: queues[k] for k in model_runtime.MODELD_INPUTS})
+          dispatched = time.monotonic()
+          progress.mark('output_read')
+          result = outs.numpy().reshape(-1)
+        if result.size != count or not np.isfinite(result).all():
+          raise ValueError('invalid precompiled model output')
+        progress.mark('publish')
+        output[:] = result
+        finished, cpu_finished = time.monotonic(), time.thread_time()
+        control.write(b'1\n')
+        control.flush()
+        progress.mark('idle')
+        # Timings include transfers/synchronization; these are not pure GPU
+        # kernel durations. Keep the pipe protocol and the compiled graph intact.
+        diagnostics.record(context={'gpu_arch': manifest['gpu_arch'], 'format': manifest['format'],
+                                    'camera_width': width, 'camera_height': height, 'input_bytes': input_bytes,
+                                    'warp_backend': 'qcom' if generic and isinstance(adapter, LocalWarpRuntime) else 'amd',
+                                    'usb_input_bytes': getattr(adapter, 'upload_bytes', input_bytes) if generic else input_bytes,
+                                    'model_sha256': manifest['pickle']['sha256']},
+                           run_model_ms=(dispatched - started) * 1000,
+                           result_sync_ms=(finished - dispatched) * 1000,
+                           work_ms=(finished - started) * 1000,
+                           thread_cpu_ms=(cpu_finished - cpu_started) * 1000,
+                           **(adapter.last_timings if generic else {}))
+      if generic:
+        del adapter
+      del output, packed_shared, queues
+
+
+if __name__ == '__main__':
+  control = sys.stdout.buffer
+  try:
+    main()
+  except Exception:
+    # stderr alone loses the underlying error at the parent pipe's EOF. Send
+    # the traceback over the control pipe so PCIe readiness remains retryable.
+    error = traceback.format_exc()
+    control.write(b'ERROR ' + json.dumps(error[-16384:]).encode() + b'\n')
+    control.flush()
+    raise

@@ -1,0 +1,1507 @@
+from types import SimpleNamespace
+
+import pytest
+
+from openpilot.selfdrive.carrot.radar_motion.primary import RadarPointSnapshot
+from openpilot.selfdrive.carrot.radar_motion.predictor import (
+  project_to_model_path,
+)
+from openpilot.selfdrive.carrot.radar_motion.trajectory_cutin import (
+  FRONT_LATERAL_CONFIDENCE_MIN,
+  TrajectoryCutInDetector,
+  front_lateral_motion_confidence,
+  front_lateral_noise_floor_m,
+  prediction_horizon_s,
+)
+
+
+PATH = ((0.0, 0.0), (100.0, 0.0))
+MODEL = SimpleNamespace(leadsV3=())
+
+
+def point(
+  track_id: int,
+  source: str,
+  d_rel: float,
+  y_rel: float,
+  *,
+  v_ego: float = 10.0,
+  v_rel: float = -2.0,
+  yv_rel: float = 0.0,
+) -> RadarPointSnapshot:
+  return RadarPointSnapshot(
+    track_id=track_id,
+    source=source,
+    d_rel=d_rel,
+    y_rel=y_rel,
+    v_rel=v_rel,
+    a_rel=0.0,
+    yv_rel=yv_rel,
+    v_lead=v_ego + v_rel,
+    a_lead=0.0,
+    j_lead=0.0,
+    measured=True,
+  )
+
+
+def corner_series(
+  detector: TrajectoryCutInDetector,
+  lateral_values: tuple[float, ...],
+  *,
+  d_rel: float = 12.0,
+  v_ego: float = 10.0,
+  v_rel: float = -2.0,
+) -> object:
+  estimate = None
+  for index, y_rel in enumerate(lateral_values):
+    corner = point(
+      1200,
+      "corner235",
+      d_rel + v_rel * index * 0.1,
+      y_rel,
+      v_ego=v_ego,
+      v_rel=v_rel,
+      yv_rel=-0.8,
+    )
+    front = point(
+      48,
+      "frontRadar",
+      corner.d_rel,
+      y_rel,
+      v_ego=v_ego,
+      v_rel=v_rel,
+    )
+    estimate = detector.update(
+      index * 0.1,
+      v_ego,
+      (corner,),
+      PATH,
+      MODEL,
+      cross_sensor_matches={(corner.source, corner.track_id): front},
+    )[0]
+  assert estimate is not None
+  return estimate
+
+
+def test_low_speed_prediction_looks_farther_ahead() -> None:
+  assert prediction_horizon_s(2.0) > prediction_horizon_s(25.0)
+
+
+@pytest.mark.parametrize("side", (-1, 1))
+@pytest.mark.parametrize("sensitivity", range(1, 6))
+def test_stationary_outside_pair_does_not_corroborate_corner_position_jump(side, sensitivity) -> None:
+  detector = TrajectoryCutInDetector(sensitivity)
+  estimates = []
+  for index in range(13):
+    time_s = index * 0.05
+    corner = point(2302, "corner235", 13.0 - 4.8 * time_s, side * (5.0 - 2.0 * time_s),
+                   v_ego=6.0, v_rel=-4.8, yv_rel=-side * 0.05)
+    front = point(52, "frontRadar", corner.d_rel, side * 3.9, v_ego=6.0, v_rel=-5.7)
+    estimates.extend(detector.update(time_s, 6.0, (corner,), PATH, MODEL,
+                                    cross_sensor_matches={(corner.source, corner.track_id): front}))
+  assert any(e.stationary_pair_alias for e in estimates)
+  assert not any(e.confirmed_cutin or e.control_eligible or e.predecel_risk for e in estimates)
+
+
+@pytest.mark.parametrize("side", (-1, 1))
+@pytest.mark.parametrize("evidence", ("corner_velocity", "front_velocity", "front_positions", "overlap", "moving_front", "vision"))
+def test_stationary_pair_veto_preserves_independent_entry_evidence(side, evidence) -> None:
+  detector = TrajectoryCutInDetector()
+  estimates = []
+  for index in range(21):
+    time_s = index * 0.05
+    corner_y = 3.0 - 2.0 * time_s if evidence == "overlap" else 5.0 - 2.0 * time_s
+    front_y = 4.5 - time_s if evidence == "front_positions" else 3.9
+    corner = point(2302, "corner235", 16.0 - 4.8 * time_s, side * corner_y,
+                   v_ego=6.0, v_rel=-4.8, yv_rel=-side * (1.0 if evidence == "corner_velocity" else 0.05))
+    front = point(52, "frontRadar", corner.d_rel, side * front_y, v_ego=6.0,
+                  v_rel=-4.8 if evidence == "moving_front" else -5.7,
+                  yv_rel=-side * (1.0 if evidence == "front_velocity" else 0.0))
+    model = SimpleNamespace(leadsV3=(SimpleNamespace(
+      prob=0.95, x=(corner.d_rel + 1.52,), y=(-corner.y_rel,), v=(corner.v_lead,),
+    ),)) if evidence == "vision" else MODEL
+    estimates.extend(detector.update(time_s, 6.0, (corner,), PATH, model,
+                                    cross_sensor_matches={(corner.source, corner.track_id): front}))
+  assert not estimates[-1].stationary_pair_alias
+  assert any(e.confirmed_cutin for e in estimates[-5:])
+
+
+def test_front_lateral_noise_floor_increases_at_close_range() -> None:
+  assert front_lateral_noise_floor_m(5.0) > front_lateral_noise_floor_m(20.0)
+  assert front_lateral_noise_floor_m(20.0) > front_lateral_noise_floor_m(45.0)
+
+
+def test_front_lateral_confidence_separates_close_jitter_from_entry() -> None:
+  close_jitter = front_lateral_motion_confidence(
+    6.15, 0.35, 0.77, 1.00, 0.55,
+  )
+  sustained_entry = front_lateral_motion_confidence(
+    5.25, 0.49, 1.00, 1.00, 0.84,
+  )
+
+  assert close_jitter < FRONT_LATERAL_CONFIDENCE_MIN
+  assert sustained_entry >= FRONT_LATERAL_CONFIDENCE_MIN
+
+
+def test_close_front_lateral_wander_does_not_confirm_cutin() -> None:
+  detector = TrajectoryCutInDetector()
+  samples = (
+    (0.00, 5.95, -2.55, -1.24),
+    (0.30, 7.39, -2.55, -2.01),
+    (0.60, 6.30, -2.50, -1.01),
+    (0.90, 6.71, -2.45, -1.14),
+    (1.15, 6.86, -2.45, -1.36),
+    (1.45, 6.60, -2.50, -2.00),
+    (1.70, 6.53, -2.45, -1.85),
+    (2.00, 6.21, -2.11, -1.25),
+    (2.05, 6.15, -2.10, -1.25),
+    (2.30, 4.76, -2.10, -1.82),
+    (2.60, 5.11, -2.05, -2.15),
+    (2.90, 4.93, -2.00, -1.75),
+  )
+  estimate = None
+  for time_s, d_rel, y_rel, v_rel in samples:
+    estimate = detector.update(
+      time_s,
+      15.5,
+      (point(
+        35,
+        "frontRadar",
+        d_rel,
+        y_rel,
+        v_ego=15.5,
+        v_rel=v_rel,
+      ),),
+      PATH,
+      MODEL,
+    )[0]
+
+  assert estimate is not None
+  assert not estimate.confirmed_cutin
+  assert not estimate.control_eligible
+  assert not estimate.predecel_risk
+
+
+def test_close_uncorroborated_front_stays_clear_outside_path_overlap() -> None:
+  detector = TrajectoryCutInDetector()
+  estimate = None
+  for index in range(31):
+    ratio = index / 30.0
+    y_rel = (
+      -2.60 + 0.10 * ratio
+      if ratio < 0.5
+      else -2.55 + 0.48 * (ratio - 0.5) / 0.5
+    )
+    estimate = detector.update(
+      index * 0.05,
+      6.8,
+      (point(
+        59,
+        "frontRadar",
+        5.70 - 2.90 * ratio,
+        y_rel,
+        v_ego=6.8,
+        v_rel=-1.82,
+      ),),
+      PATH,
+      MODEL,
+    )[0]
+
+  assert estimate is not None
+  assert abs(estimate.d_path) > 1.90
+  assert not estimate.confirmed_cutin
+  assert not estimate.control_eligible
+
+
+def test_close_uncorroborated_front_detects_after_actual_path_overlap() -> None:
+  detector = TrajectoryCutInDetector()
+  estimate = None
+  for index in range(31):
+    ratio = index / 30.0
+    estimate = detector.update(
+      index * 0.05,
+      6.8,
+      (point(
+        59,
+        "frontRadar",
+        5.70 - 2.70 * ratio,
+        -2.60 + 0.75 * ratio,
+        v_ego=6.8,
+        v_rel=-1.80,
+      ),),
+      PATH,
+      MODEL,
+    )[0]
+
+  assert estimate is not None
+  assert abs(estimate.d_path) <= 1.90
+  assert estimate.confirmed_cutin
+  assert estimate.control_eligible
+
+
+def test_higher_sensitivity_confirms_the_same_trajectory_earlier() -> None:
+  def first_detection_index(sensitivity: int) -> int | None:
+    detector = TrajectoryCutInDetector(sensitivity)
+    for index in range(12):
+      y_rel = 3.0 - 0.1 * index
+      corner = point(
+        1200, "corner235", 12.0 - 0.2 * index, y_rel, yv_rel=-0.8,
+      )
+      front = point(
+        48, "frontRadar", corner.d_rel, y_rel,
+      )
+      estimate = detector.update(
+        index * 0.1,
+        10.0,
+        (corner,),
+        PATH,
+        MODEL,
+        cross_sensor_matches={(corner.source, corner.track_id): front},
+      )[0]
+      if estimate.confirmed_cutin:
+        return index
+    return None
+
+  assert first_detection_index(5) < first_detection_index(1)
+
+
+def test_corner_trajectory_detects_early_and_controls_when_relevant() -> None:
+  estimate = corner_series(
+    TrajectoryCutInDetector(),
+    (3.0, 2.8, 2.55, 2.30, 2.10),
+  )
+
+  assert estimate.confirmed_cutin
+  assert estimate.control_eligible
+  assert estimate.future_d_path < estimate.d_path
+
+
+def test_far_corner_trajectory_is_detected_and_promoted_to_l2() -> None:
+  estimate = corner_series(
+    TrajectoryCutInDetector(),
+    (3.00, 2.91, 2.82, 2.73, 2.64, 2.55, 2.46, 2.37, 2.28, 2.19, 2.10),
+    d_rel=32.0,
+    v_rel=-2.0,
+  )
+
+  assert estimate.confirmed_cutin
+  assert estimate.control_eligible
+
+
+def test_confirmed_away_cutin_is_l2_without_predecel() -> None:
+  estimate = corner_series(
+    TrajectoryCutInDetector(),
+    (3.0, 2.8, 2.55, 2.30, 2.10),
+    d_rel=18.0,
+    v_ego=10.0,
+    v_rel=4.0,
+  )
+
+  assert estimate.confirmed_cutin
+  assert estimate.control_eligible
+  assert not estimate.predecel_risk
+
+
+def test_cross_sensor_corner_slot_handoff_preserves_motion_history() -> None:
+  detector = TrajectoryCutInDetector()
+  continuity_ids = []
+  estimate = None
+  for index, y_rel in enumerate((3.0, 2.85, 2.70, 2.55, 2.40, 2.25)):
+    corner = point(
+      202 if index < 3 else 201,
+      "corner235",
+      7.0 - 0.1 * index,
+      y_rel,
+      v_rel=-1.0,
+      yv_rel=-0.6,
+    )
+    front = point(
+      59,
+      "frontRadar",
+      corner.d_rel + 0.1,
+      y_rel + 0.1,
+      v_rel=-1.0,
+    )
+    estimate = detector.update(
+      index * 0.1,
+      10.0,
+      (corner,),
+      PATH,
+      MODEL,
+      cross_sensor_matches={(corner.source, corner.track_id): front},
+    )[0]
+    continuity_ids.append(estimate.continuity_id)
+
+  assert estimate is not None
+  assert len(set(continuity_ids)) == 1
+  assert estimate.history_s == 0.5
+  assert estimate.inward_progress > 0.5
+  assert estimate.confirmed_cutin
+
+
+def test_first_cross_sensor_match_preserves_existing_raw_motion_history() -> None:
+  detector = TrajectoryCutInDetector()
+  continuity_ids = []
+  estimate = None
+  for index, y_rel in enumerate((2.50, 2.35, 2.20, 2.05)):
+    corner = point(
+      2920,
+      "corner235",
+      5.5 + 0.1 * index,
+      y_rel,
+      v_ego=6.0,
+      v_rel=2.0,
+      yv_rel=-0.8,
+    )
+    matches = {}
+    if index == 3:
+      front = point(
+        51,
+        "frontRadar",
+        corner.d_rel + 0.5,
+        1.80,
+        v_ego=6.0,
+        v_rel=1.5,
+      )
+      matches[(corner.source, corner.track_id)] = front
+    estimate = detector.update(
+      index * 0.1,
+      6.0,
+      (corner,),
+      PATH,
+      MODEL,
+      cross_sensor_matches=matches,
+    )[0]
+    continuity_ids.append(estimate.continuity_id)
+
+  assert estimate is not None
+  assert len(set(continuity_ids)) == 1
+  assert estimate.history_s >= 0.29
+  assert estimate.inward_progress >= 0.35
+  assert estimate.confirmed_cutin
+  assert estimate.control_eligible
+
+
+def test_first_cross_sensor_match_rejects_discontinuous_raw_history() -> None:
+  detector = TrajectoryCutInDetector()
+  continuity_ids = []
+  estimate = None
+  for index, (d_rel, y_rel) in enumerate((
+    (20.0, 2.50),
+    (20.2, 2.35),
+    (5.8, 2.05),
+  )):
+    corner = point(
+      2920,
+      "corner235",
+      d_rel,
+      y_rel,
+      v_ego=6.0,
+      v_rel=2.0,
+      yv_rel=-0.8,
+    )
+    matches = {}
+    if index == 2:
+      front = point(
+        51,
+        "frontRadar",
+        corner.d_rel + 0.5,
+        1.80,
+        v_ego=6.0,
+        v_rel=1.5,
+      )
+      matches[(corner.source, corner.track_id)] = front
+    estimate = detector.update(
+      index * 0.1,
+      6.0,
+      (corner,),
+      PATH,
+      MODEL,
+      cross_sensor_matches=matches,
+    )[0]
+    continuity_ids.append(estimate.continuity_id)
+
+  assert estimate is not None
+  assert continuity_ids[-1] != continuity_ids[-2]
+  assert estimate.history_s == 0.0
+  assert not estimate.confirmed_cutin
+  assert not estimate.control_eligible
+
+
+def test_intermittent_cross_sensor_match_keeps_close_entry_continuous() -> None:
+  detector = TrajectoryCutInDetector()
+  continuity_ids = []
+  estimate = None
+  for index, y_rel in enumerate((3.0, 2.90, 2.80, 2.70, 2.60, 2.50, 2.40)):
+    corner = point(
+      1339,
+      "corner235",
+      3.0 + 0.05 * index,
+      y_rel,
+      v_rel=0.7,
+      yv_rel=-0.45,
+    )
+    front = point(
+      52,
+      "frontRadar",
+      corner.d_rel + 2.0,
+      y_rel - 0.15,
+      v_rel=-1.3,
+    )
+    matches = (
+      {(corner.source, corner.track_id): front}
+      if index in (0, 4) else {}
+    )
+    estimate = detector.update(
+      index * 0.1,
+      10.0,
+      (corner,),
+      PATH,
+      MODEL,
+      cross_sensor_matches=matches,
+    )[0]
+    continuity_ids.append(estimate.continuity_id)
+
+  assert estimate is not None
+  assert len(set(continuity_ids)) == 1
+  assert estimate.history_s >= 0.59
+  assert estimate.confirmed_cutin
+  assert estimate.control_eligible
+
+
+def test_far_cross_sensor_slot_change_keeps_raw_histories_separate() -> None:
+  detector = TrajectoryCutInDetector()
+  continuity_ids = []
+  for index, track_id in enumerate((202, 201)):
+    corner = point(
+      track_id,
+      "corner235",
+      20.0,
+      3.0 - 0.1 * index,
+      v_rel=-1.0,
+      yv_rel=-0.6,
+    )
+    front = point(
+      40,
+      "frontRadar",
+      corner.d_rel,
+      corner.y_rel,
+      v_rel=-1.0,
+    )
+    estimate = detector.update(
+      index * 0.1,
+      10.0,
+      (corner,),
+      PATH,
+      MODEL,
+      cross_sensor_matches={(corner.source, corner.track_id): front},
+    )[0]
+    continuity_ids.append(estimate.continuity_id)
+
+  assert continuity_ids[0] != continuity_ids[1]
+
+
+def test_reversed_unsupported_trajectory_clears_confirmed_hold() -> None:
+  detector = TrajectoryCutInDetector()
+  estimate = None
+  for index, y_rel in enumerate((3.0, 2.85, 2.70, 2.55, 2.40)):
+    corner = point(
+      3545,
+      "corner235",
+      20.0,
+      y_rel,
+      v_rel=-2.0,
+      yv_rel=-0.8,
+    )
+    estimate = detector.update(
+      index * 0.1, 10.0, (corner,), PATH, MODEL,
+    )[0]
+
+  assert estimate is not None and estimate.confirmed_cutin
+  for offset, y_rel in enumerate((2.55, 2.70, 2.85, 3.0, 3.15), start=5):
+    corner = point(
+      3545,
+      "corner235",
+      20.0,
+      y_rel,
+      v_rel=1.0,
+      yv_rel=0.8,
+    )
+    estimate = detector.update(
+      offset * 0.1, 10.0, (corner,), PATH, MODEL,
+    )[0]
+
+  assert not estimate.raw_cutin
+  assert not estimate.confirmed_cutin
+  assert not estimate.predecel_risk
+
+
+@pytest.mark.parametrize("side", (-1.0, 1.0))
+@pytest.mark.parametrize("maneuver", ("settle", "return", "continue", "single_sample", "overlap"))
+def test_entry_withdrawal_requires_sustained_motion_loss_outside_path(side, maneuver) -> None:
+  detector = TrajectoryCutInDetector()
+  estimates = []
+  for index in range(45):
+    time_s = index * 0.05
+    stop_time = 1.7 if maneuver == "overlap" else 1.0
+    inward = 1.5
+    lateral = 4.2 - 1.5 * time_s
+    if maneuver in ("settle", "return", "overlap") and time_s >= stop_time:
+      inward = -0.5 if maneuver == "return" else 0.0
+      lateral = 4.2 - 1.5 * stop_time - inward * (time_s - stop_time)
+    reported_inward = 0.0 if maneuver == "single_sample" and index == 21 else inward
+    corner = point(1200, "corner235", 30.0 - 5.0 * time_s, side * lateral,
+                   v_ego=15.0, v_rel=-5.0, yv_rel=-side * reported_inward)
+    front = point(38, "frontRadar", corner.d_rel + 1.0, corner.y_rel,
+                  v_ego=15.0, v_rel=-5.0, yv_rel=-side * reported_inward)
+    estimates.append(detector.update(time_s, 15.0, (corner,), PATH, MODEL,
+      cross_sensor_matches={(corner.source, corner.track_id): front})[0])
+
+  assert any(e.confirmed_cutin and e.control_eligible and e.predecel_risk for e in estimates[:20])
+  if maneuver in ("settle", "return"):
+    assert any(e.entry_withdrawn for e in estimates[20:30])
+    assert all(not e.confirmed_cutin and not e.predecel_risk for e in estimates[30:])
+  else:
+    assert not any(e.entry_withdrawn for e in estimates)
+
+
+@pytest.mark.parametrize("side", (-1.0, 1.0))
+@pytest.mark.parametrize("aborts_entry", (False, True))
+def test_confirmed_slow_entry_does_not_flip_parallel_at_velocity_boundary(side, aborts_entry) -> None:
+  detector = TrajectoryCutInDetector()
+  estimates = []
+  for index in range(41):
+    time_s = index * 0.05
+    stopped = aborts_entry and time_s >= 1.0
+    lateral = 2.55 - 0.30 * (min(time_s, 1.0) if aborts_entry else time_s)
+    # The 0.9 s progress window remains around 0.25 m, and reported velocity
+    # jitters across 0.15 m/s although positions keep moving inward.
+    reported = 0.0 if stopped else 0.14 if index >= 20 and index % 2 else 0.16
+    corner = point(1200, "corner180", 3.0 + 0.1 * time_s, side * lateral,
+                   v_ego=3.0, v_rel=0.1, yv_rel=-side * reported)
+    front = point(40, "frontRadar", corner.d_rel + 1.0, corner.y_rel,
+                  v_ego=3.0, v_rel=0.1, yv_rel=-side * reported)
+    estimates.append(detector.update(time_s, 3.0, (corner,), PATH, MODEL,
+      cross_sensor_matches={(corner.source, corner.track_id): front})[0])
+
+  first = next(i for i, estimate in enumerate(estimates) if estimate.confirmed_cutin)
+  assert first < 20
+  if aborts_entry:
+    assert any(e.entry_withdrawn for e in estimates[20:])
+    assert all(not e.confirmed_cutin for e in estimates[30:])
+  else:
+    assert all(e.confirmed_cutin and not e.parallel_drift for e in estimates[first:])
+
+
+def test_far_inconsistent_corner_motion_stays_alert_only() -> None:
+  detector = TrajectoryCutInDetector()
+  estimate = None
+  for index, y_rel in enumerate((3.20, 3.00, 2.78, 2.55, 2.30, 2.10)):
+    corner = point(
+      1106, "corner235", 30.0 - 0.1 * index, y_rel,
+      v_ego=15.0, v_rel=-1.0, yv_rel=0.0,
+    )
+    front = point(
+      51, "frontRadar", corner.d_rel, y_rel,
+      v_ego=15.0, v_rel=-1.0,
+    )
+    estimate = detector.update(
+      index * 0.1,
+      15.0,
+      (corner,),
+      PATH,
+      MODEL,
+      cross_sensor_matches={(corner.source, corner.track_id): front},
+    )[0]
+
+  assert estimate is not None
+  assert estimate.confirmed_cutin
+  assert not estimate.control_eligible
+
+
+def test_fast_unstable_side_motion_uses_shorter_prediction_horizon() -> None:
+  detector = TrajectoryCutInDetector()
+  estimate = None
+  for index, y_rel in enumerate((3.2, 2.7, 3.1, 2.6, 3.0, 2.5)):
+    corner = point(
+      3001, "corner235", 18.0 + 0.8 * index, y_rel,
+      v_ego=10.0, v_rel=8.0, yv_rel=-0.2,
+    )
+    front = point(
+      45, "frontRadar", corner.d_rel, y_rel,
+      v_ego=10.0, v_rel=8.0,
+    )
+    estimate = detector.update(
+      index * 0.1,
+      10.0,
+      (corner,),
+      PATH,
+      MODEL,
+      cross_sensor_matches={(corner.source, corner.track_id): front},
+    )[0]
+
+  assert estimate is not None
+  assert estimate.jittering
+  assert estimate.horizon_s < prediction_horizon_s(10.0)
+  assert not estimate.confirmed_cutin
+
+
+def test_close_born_rear_side_pass_is_not_cutin() -> None:
+  detector = TrajectoryCutInDetector()
+  estimate = None
+  samples = zip(
+    (0.90, 1.00, 1.10, 1.20, 1.25, 1.35, 1.45,
+     1.60, 1.70, 1.85, 2.05, 2.50, 2.75, 3.03),
+    (2.85, 2.85, 2.85, 2.85, 2.85, 2.80, 2.80,
+     2.80, 2.75, 2.75, 2.75, 2.75, 2.70, 2.64),
+    (-1.35, -1.25, -0.95, -0.60, -0.50, -0.45, -0.35,
+     -0.20, -0.10, 0.00, 0.15, 1.15, 1.70, 1.85),
+    strict=True,
+  )
+  for index, (d_rel, y_rel, v_rel) in enumerate(samples):
+    corner = point(
+      3286, "corner235", d_rel, y_rel,
+      v_ego=12.9, v_rel=v_rel, yv_rel=-0.15,
+    )
+    front = point(
+      56, "frontRadar", d_rel + 2.0, 2.15,
+      v_ego=12.9, v_rel=v_rel,
+    )
+    estimate = detector.update(
+      index * 0.1,
+      12.9,
+      (corner,),
+      PATH,
+      MODEL,
+      cross_sensor_matches={(corner.source, corner.track_id): front},
+    )[0]
+
+  assert estimate is not None
+  assert estimate.rear_pass
+  assert not estimate.raw_cutin
+  assert not estimate.confirmed_cutin
+  assert not estimate.control_eligible
+  assert not estimate.predecel_risk
+
+
+def test_close_parallel_cross_sensor_drift_is_not_cutin() -> None:
+  detector = TrajectoryCutInDetector()
+  estimate = None
+  for index in range(22):
+    y_rel = -3.15 + 0.02 * index
+    corner = point(
+      3284, "corner235", 2.2, y_rel,
+      v_ego=12.9, v_rel=-0.05, yv_rel=0.10,
+    )
+    front = point(
+      57, "frontRadar", 3.5, -2.15,
+      v_ego=12.9, v_rel=-0.05,
+    )
+    estimate = detector.update(
+      index * 0.1,
+      12.9,
+      (corner,),
+      PATH,
+      MODEL,
+      cross_sensor_matches={(corner.source, corner.track_id): front},
+    )[0]
+
+  assert estimate is not None
+  assert estimate.parallel_drift
+  assert not estimate.raw_cutin
+  assert not estimate.confirmed_cutin
+  assert not estimate.control_eligible
+  assert not estimate.predecel_risk
+
+
+def test_corner_mode_unmatched_front_uses_strong_recent_history() -> None:
+  detector = TrajectoryCutInDetector()
+  estimate = None
+  for index, y_rel in enumerate((3.40, 3.35, 3.30, 3.20, 3.05, 2.90)):
+    estimate = detector.update(
+      index * 0.1,
+      10.0,
+      (point(
+        62, "frontRadar", 10.0 + 0.15 * index, y_rel,
+        v_ego=10.0, v_rel=1.5,
+      ),),
+      PATH,
+      MODEL,
+      vision_required_front=True,
+    )[0]
+
+  assert estimate is not None
+  assert estimate.front_history_supported
+  assert estimate.confirmed_cutin
+  assert not estimate.control_eligible
+
+
+def test_corner_mode_unmatched_front_rejects_velocity_identity_jump() -> None:
+  detector = TrajectoryCutInDetector()
+  estimate = None
+  v_rels = (2.0, 1.8, -2.8, 0.2, 0.8, 1.0)
+  for index, (y_rel, v_rel) in enumerate(zip(
+    (3.40, 3.35, 3.30, 3.20, 3.05, 2.90),
+    v_rels,
+    strict=True,
+  )):
+    estimate = detector.update(
+      index * 0.1,
+      10.0,
+      (point(
+        57, "frontRadar", 10.0, y_rel,
+        v_ego=10.0, v_rel=v_rel,
+      ),),
+      PATH,
+      MODEL,
+      vision_required_front=True,
+    )[0]
+
+  assert estimate is not None
+  assert estimate.recent_v_rel_spread > 1.0
+  assert not estimate.front_history_supported
+  assert not estimate.confirmed_cutin
+
+
+def test_corner_mode_unmatched_front_rejects_recent_curve_motion() -> None:
+  detector = TrajectoryCutInDetector()
+  estimate = None
+  for index, y_rel in enumerate((3.40, 3.35, 3.30, 3.20, 3.05, 2.90)):
+    estimate = detector.update(
+      index * 0.1,
+      10.0,
+      (point(
+        50, "frontRadar", 10.0 + 0.15 * index, y_rel,
+        v_ego=10.0, v_rel=1.5,
+      ),),
+      PATH,
+      MODEL,
+      yaw_rate_rad_s=0.03,
+      vision_required_front=True,
+    )[0]
+
+  assert estimate is not None
+  assert estimate.recent_abs_yaw_max >= 0.02
+  assert not estimate.front_history_supported
+  assert not estimate.confirmed_cutin
+
+
+def test_front_curve_projection_without_radar_lateral_motion_is_rejected() -> None:
+  detector = TrajectoryCutInDetector()
+  estimate = None
+  yaw_rate = 0.05
+  for index, y_rel in enumerate((-3.20, -3.00, -2.80, -2.60, -2.40, -2.20)):
+    d_rel = 15.0 + 0.2 * index
+    estimate = detector.update(
+      index * 0.1,
+      10.0,
+      (point(
+        51,
+        "frontRadar",
+        d_rel,
+        y_rel,
+        v_rel=2.0,
+        yv_rel=-yaw_rate * d_rel,
+      ),),
+      PATH,
+      MODEL,
+      yaw_rate_rad_s=yaw_rate,
+    )[0]
+
+  assert estimate is not None
+  assert estimate.recent_abs_yaw_max >= 0.05
+  assert estimate.reported_inward_rate < 0.01
+  assert not estimate.confirmed_cutin
+  assert not estimate.control_eligible
+
+
+def test_close_cross_sensor_reflection_without_motion_is_rejected() -> None:
+  detector = TrajectoryCutInDetector()
+  estimate = None
+  for index in range(5):
+    corner = point(
+      201, "corner235", 1.8 - 0.15 * index, 2.60,
+      v_ego=8.0, v_rel=-2.0,
+    )
+    front = point(
+      51, "frontRadar", corner.d_rel, 1.80,
+      v_ego=8.0, v_rel=-2.0,
+    )
+    estimate = detector.update(
+      index * 0.1,
+      8.0,
+      (corner,),
+      PATH,
+      MODEL,
+      cross_sensor_matches={(corner.source, corner.track_id): front},
+    )[0]
+
+  assert estimate is not None
+  assert not estimate.confirmed_cutin
+
+
+def test_close_paired_outer_body_reflection_detects_with_inward_motion() -> None:
+  detector = TrajectoryCutInDetector()
+  estimate = None
+  for index, y_rel in enumerate((-2.70, -2.62, -2.55, -2.48, -2.42)):
+    corner = point(
+      16687, "corner235", 8.0 - 0.25 * index, y_rel,
+      v_ego=5.0, v_rel=-2.5, yv_rel=0.20,
+    )
+    front = point(
+      49, "frontRadar", corner.d_rel + 0.8, y_rel,
+      v_ego=5.0, v_rel=-2.5,
+    )
+    estimate = detector.update(
+      index * 0.1,
+      5.0,
+      (corner,),
+      PATH,
+      MODEL,
+      cross_sensor_matches={(corner.source, corner.track_id): front},
+    )[0]
+
+  assert estimate is not None
+  assert estimate.confirmed_cutin
+  assert estimate.control_eligible
+
+
+def test_close_paired_target_passing_behind_before_overlap_is_rejected() -> None:
+  detector = TrajectoryCutInDetector()
+  estimate = None
+  samples = (
+    (0.86, 2.79, -1.95, -0.45),
+    (0.78, 2.80, -1.80, -0.40),
+    (0.84, 2.75, -1.30, -0.20),
+  )
+  for index, (d_rel, y_rel, v_rel, yv_rel) in enumerate(samples):
+    corner = point(
+      3160, "corner180", d_rel, y_rel,
+      v_ego=13.0, v_rel=v_rel, yv_rel=yv_rel,
+    )
+    front = point(
+      62, "frontRadar", d_rel + 0.2, 2.00,
+      v_ego=13.0, v_rel=v_rel,
+    )
+    estimate = detector.update(
+      index * 0.1,
+      13.0,
+      (corner,),
+      PATH,
+      MODEL,
+      cross_sensor_matches={(corner.source, corner.track_id): front},
+    )[0]
+
+  assert estimate is not None
+  assert estimate.time_to_overlap_s is not None
+  assert estimate.point.d_rel + estimate.point.v_rel * estimate.time_to_overlap_s < 0.5
+  assert not estimate.confirmed_cutin
+  assert not estimate.control_eligible
+
+
+def test_close_paired_outer_body_with_weak_motion_is_rejected() -> None:
+  detector = TrajectoryCutInDetector()
+  estimate = None
+  for index, y_rel in enumerate((2.70, 2.66, 2.62, 2.58, 2.54, 2.50)):
+    corner = point(
+      1479,
+      "corner235",
+      5.5 + 0.02 * index,
+      y_rel,
+      v_rel=0.1,
+      yv_rel=-0.09,
+    )
+    front = point(
+      55,
+      "frontRadar",
+      corner.d_rel + 2.0,
+      2.60,
+      v_rel=0.1,
+    )
+    estimate = detector.update(
+      index * 0.1,
+      10.0,
+      (corner,),
+      PATH,
+      MODEL,
+      cross_sensor_matches={(corner.source, corner.track_id): front},
+    )[0]
+
+  assert estimate is not None
+  assert estimate.reported_inward_rate < 0.15
+  assert not estimate.confirmed_cutin
+  assert not estimate.control_eligible
+
+
+def test_curve_outer_body_pair_needs_straight_trajectory_support() -> None:
+  detector = TrajectoryCutInDetector()
+  estimate = None
+  yaw_rate = 0.057
+  for index, y_rel in enumerate((2.80, 2.70, 2.60, 2.50, 2.40, 2.30)):
+    d_rel = 4.4 + 0.05 * index
+    corner = point(
+      202,
+      "corner235",
+      d_rel,
+      y_rel,
+      v_rel=0.8,
+      yv_rel=-0.40 - yaw_rate * d_rel,
+    )
+    front = point(
+      42,
+      "frontRadar",
+      d_rel + 1.0,
+      2.60,
+      v_rel=0.8,
+    )
+    estimate = detector.update(
+      index * 0.1,
+      10.0,
+      (corner,),
+      PATH,
+      MODEL,
+      yaw_rate_rad_s=yaw_rate,
+      cross_sensor_matches={(corner.source, corner.track_id): front},
+    )[0]
+
+  assert estimate is not None
+  assert estimate.inward_progress >= 0.20
+  assert estimate.reported_inward_rate >= 0.39
+  assert not estimate.confirmed_cutin
+  assert not estimate.control_eligible
+
+
+def test_close_fast_paired_side_pass_requires_more_history() -> None:
+  detector = TrajectoryCutInDetector()
+  estimate = None
+  for index, (d_rel, y_rel) in enumerate((
+    (7.0, 2.75),
+    (6.0, 2.70),
+    (5.0, 2.65),
+  )):
+    corner = point(
+      2606,
+      "corner235",
+      d_rel,
+      y_rel,
+      v_ego=23.0,
+      v_rel=-8.5,
+      yv_rel=-0.20,
+    )
+    front = point(
+      41,
+      "frontRadar",
+      d_rel - 2.0,
+      2.10,
+      v_ego=23.0,
+      v_rel=-10.0,
+    )
+    estimate = detector.update(
+      index * 0.1,
+      23.0,
+      (corner,),
+      PATH,
+      MODEL,
+      cross_sensor_matches={(corner.source, corner.track_id): front},
+    )[0]
+
+  assert estimate is not None
+  assert estimate.history_s < 0.35
+  assert not estimate.confirmed_cutin
+  assert not estimate.control_eligible
+
+
+def test_curve_projection_of_far_side_vehicle_is_not_physical_entry() -> None:
+  detector = TrajectoryCutInDetector()
+  estimate = None
+  yaw_rate = 0.065
+  for index, path_end_y in enumerate((8.0, 10.0, 12.0, 14.0, 16.0, 18.0)):
+    path = ((0.0, 0.0), (100.0, path_end_y))
+    d_rel = 27.0 - 0.45 * index
+    y_rel = -6.5
+    projection = project_to_model_path(path, d_rel, y_rel)
+    v_rel = -4.7
+    v_lead = 10.0 + v_rel
+    velocity_x = v_lead - yaw_rate * y_rel
+    yv_rel = (
+      projection.tangent_y / projection.tangent_x * velocity_x
+      - yaw_rate * d_rel
+    )
+    corner = point(
+      2740,
+      "corner235",
+      d_rel,
+      y_rel,
+      v_rel=v_rel,
+      yv_rel=yv_rel,
+    )
+    front = point(
+      39,
+      "frontRadar",
+      d_rel,
+      -1.8,
+      v_rel=v_rel,
+    )
+    estimate = detector.update(
+      index * 0.1,
+      10.0,
+      (corner,),
+      path,
+      MODEL,
+      yaw_rate_rad_s=yaw_rate,
+      cross_sensor_matches={(corner.source, corner.track_id): front},
+    )[0]
+
+  assert estimate is not None
+  assert abs(estimate.point.y_rel) - abs(estimate.d_path) >= 2.0
+  assert estimate.reported_inward_rate < 0.01
+  assert estimate.curve_alias
+  assert not estimate.confirmed_cutin
+  assert not estimate.predecel_risk
+
+
+def test_close_uncorroborated_projected_crossing_is_rejected() -> None:
+  detector = TrajectoryCutInDetector()
+  estimate = None
+  for index, y_rel in enumerate((4.9, 4.5, 4.1, 3.8, 3.5)):
+    estimate = detector.update(
+      index * 0.1,
+      10.0,
+      (point(
+        3442, "corner235", 4.5 - 0.5 * index, y_rel,
+        v_ego=10.0, v_rel=-1.0, yv_rel=-1.0,
+      ),),
+      PATH,
+      MODEL,
+    )[0]
+
+  assert estimate is not None
+  assert not estimate.confirmed_cutin
+
+
+def test_far_uncorroborated_away_corner_path_jump_is_rejected() -> None:
+  detector = TrajectoryCutInDetector()
+  estimate = None
+  for index, y_rel in enumerate((2.75, 2.45, 2.05, 1.65, 1.30, 1.05)):
+    estimate = detector.update(
+      index * 0.1,
+      14.0,
+      (point(
+        205, "corner235", 38.0 + 0.3 * index, y_rel,
+        v_ego=14.0, v_rel=3.0, yv_rel=-0.6,
+      ),),
+      PATH,
+      MODEL,
+    )[0]
+
+  assert estimate is not None
+  assert not estimate.confirmed_cutin
+  assert not estimate.predecel_risk
+
+
+def test_nonclosing_far_parallel_pair_needs_strong_entry_motion() -> None:
+  detector = TrajectoryCutInDetector()
+  estimate = None
+  samples = (
+    (3.60, 0.00),
+    (3.55, 0.10),
+    (3.45, 0.20),
+    (3.40, 0.30),
+    (3.30, 0.40),
+    (3.25, 0.50),
+  )
+  for index, (y_rel, v_rel) in enumerate(samples):
+    corner = point(
+      3020, "corner180", 42.0 + 0.05 * index, y_rel,
+      v_ego=13.0, v_rel=v_rel, yv_rel=-0.70,
+    )
+    front = point(
+      52, "frontRadar", corner.d_rel + 2.0, y_rel + 0.1,
+      v_ego=13.0, v_rel=v_rel + 1.0,
+    )
+    estimate = detector.update(
+      index * 0.1,
+      13.0,
+      (corner,),
+      PATH,
+      MODEL,
+      cross_sensor_matches={(corner.source, corner.track_id): front},
+    )[0]
+
+  assert estimate is not None
+  assert estimate.inward_progress >= 0.28
+  assert not estimate.current_path
+  assert not estimate.confirmed_cutin
+  assert not estimate.control_eligible
+
+
+@pytest.mark.parametrize("last_distance", (1.95, 2.05, 3.0, 4.0))
+@pytest.mark.parametrize("side", (-1.0, 1.0))
+@pytest.mark.parametrize("sensitivity", (1, 3, 5))
+def test_paired_side_pass_is_rejected_on_both_sides_of_two_meters(
+  last_distance: float, side: float, sensitivity: int,
+) -> None:
+  detector = TrajectoryCutInDetector(sensitivity)
+  estimates = []
+  for index in range(21):
+    time_s = index * 0.05
+    corner = point(
+      3103, "corner235", last_distance + 1.1 * (1.0 - time_s),
+      side * (2.90 - 0.20 * time_s),
+      v_ego=11.7, v_rel=-1.1, yv_rel=-side * 0.10,
+    )
+    front = point(
+      36, "frontRadar", corner.d_rel + 2.1, side * 2.10,
+      v_ego=11.7, v_rel=-1.1,
+    )
+    estimates.append(detector.update(
+      time_s, 11.7, (corner,), PATH, MODEL,
+      cross_sensor_matches={(corner.source, corner.track_id): front},
+    )[0])
+
+  assert estimates[-1].time_to_overlap_s is not None
+  assert estimates[-1].passing_before_overlap
+  assert not any(value.confirmed_cutin for value in estimates)
+  assert not any(value.control_eligible for value in estimates)
+  assert not any(value.predecel_risk for value in estimates)
+
+
+def test_paired_cutin_latch_clears_when_entry_will_be_behind_ego() -> None:
+  detector = TrajectoryCutInDetector()
+  estimates = []
+  for index in range(21):
+    time_s = index * 0.05
+    corner = point(
+      3103, "corner235", 3.5 - time_s, 2.9 - 0.5 * min(time_s, 0.5),
+      v_ego=11.7, v_rel=-1.0, yv_rel=-0.5 if index <= 10 else 0.0,
+    )
+    front = point(36, "frontRadar", corner.d_rel + 0.5, 2.1, v_ego=11.7, v_rel=-1.0)
+    estimates.append(detector.update(
+      time_s, 11.7, (corner,), PATH, MODEL,
+      cross_sensor_matches={(corner.source, corner.track_id): front},
+    )[0])
+
+  assert any(value.confirmed_cutin for value in estimates)
+  rejected = [value for value in estimates if value.passing_before_overlap]
+  assert rejected
+  assert all(not value.confirmed_cutin and not value.control_eligible for value in rejected)
+
+
+@pytest.mark.parametrize("front_inward, expected", ((0.05, False), (0.5, True)))
+def test_paired_front_entry_forecast_requires_measured_inward_motion(
+  front_inward: float, expected: bool,
+) -> None:
+  detector = TrajectoryCutInDetector()
+  for index in range(21):
+    time_s = index * 0.05
+    corner = point(
+      2102, "corner235", 7.7 - 3.0 * time_s, -2.85 + 0.2 * time_s,
+      v_ego=14.4, v_rel=-3.0, yv_rel=0.2,
+    )
+    front = point(56, "frontRadar", corner.d_rel + 1.8, -2.35,
+                  v_ego=14.4, v_rel=-3.0, yv_rel=front_inward)
+    estimate = detector.update(
+      time_s, 14.4, (corner,), PATH, MODEL,
+      cross_sensor_matches={(corner.source, corner.track_id): front},
+    )[0]
+
+  assert estimate.confirmed_cutin == expected
+  assert estimate.control_eligible == expected
+  assert estimate.passing_before_overlap != expected
+
+
+@pytest.mark.parametrize("side", (-1.0, 1.0))
+def test_close_paired_vehicle_already_entering_path_remains_eligible(side: float) -> None:
+  detector = TrajectoryCutInDetector()
+  for index in range(21):
+    time_s = index * 0.05
+    corner = point(
+      3103, "corner235", 2.2 - time_s, side * (2.9 - 1.2 * time_s),
+      v_ego=11.7, v_rel=-1.0, yv_rel=-side * 1.2,
+    )
+    front = point(36, "frontRadar", corner.d_rel + 0.5, corner.y_rel,
+                  v_ego=11.7, v_rel=-1.0)
+    estimate = detector.update(
+      time_s, 11.7, (corner,), PATH, MODEL,
+      cross_sensor_matches={(corner.source, corner.track_id): front},
+    )[0]
+
+  assert estimate.confirmed_cutin and estimate.control_eligible
+  assert not estimate.passing_before_overlap
+
+
+def test_near_outer_body_range_disagreement_cannot_trigger_or_hold_cutin() -> None:
+  detector = TrajectoryCutInDetector()
+  for index in range(18):
+    # Start with a genuine coherent pair, then the corner switches to a rear
+    # body reflection while the front return remains outside the lane.
+    y_rel = 2.85 - 0.06 * min(index, 9)
+    corner = point(7856, "corner235", 6.0, y_rel, v_rel=-1.0, yv_rel=-0.6)
+    front = point(34, "frontRadar", 6.8 if index < 10 else 8.0, y_rel, v_rel=-1.0)
+    estimate = detector.update(
+      index * 0.1, 10.0, (corner,), PATH, MODEL,
+      yaw_rate_rad_s=0.025,
+      cross_sensor_matches={} if index in (12, 13, 16) else {(corner.source, corner.track_id): front},
+    )[0]
+    if index == 9:
+      assert estimate.confirmed_cutin
+    if index >= 10:
+      assert not estimate.confirmed_cutin
+      assert not estimate.predecel_risk
+      assert not estimate.control_eligible
+      assert estimate.reason == "ambiguous outer-body pair"
+
+
+def test_front_parallel_drift_stays_clear_until_body_overlap() -> None:
+  detector = TrajectoryCutInDetector()
+  estimates = ()
+  for index, y_rel in enumerate((2.70, 2.55, 2.40, 2.25, 2.05)):
+    estimates = detector.update(
+      index * 0.1,
+      20.0,
+      (point(44, "frontRadar", 40.0, y_rel, v_ego=20.0),),
+      PATH,
+      MODEL,
+    )
+
+  assert estimates
+  assert not estimates[0].confirmed_cutin
+
+
+def test_close_fast_side_pass_does_not_become_front_cutin() -> None:
+  detector = TrajectoryCutInDetector()
+  estimate = None
+  for index, (d_rel, y_rel) in enumerate((
+    (7.0, 2.40),
+    (5.8, 2.30),
+    (4.6, 2.12),
+    (3.4, 2.00),
+  )):
+    estimate = detector.update(
+      index * 0.1,
+      12.0,
+      (point(
+        32,
+        "frontRadar",
+        d_rel,
+        y_rel,
+        v_ego=12.0,
+        v_rel=-6.0,
+      ),),
+      PATH,
+      MODEL,
+    )[0]
+
+  assert estimate is not None
+  assert not estimate.confirmed_cutin
+
+
+def test_close_born_uncorroborated_front_target_is_filtered() -> None:
+  detector = TrajectoryCutInDetector()
+  estimate = None
+  for index, (d_rel, y_rel) in enumerate((
+    (3.60, 2.30),
+    (4.05, 2.10),
+    (3.50, 1.90),
+    (3.70, 1.70),
+  )):
+    estimate = detector.update(
+      index * 0.1,
+      10.0,
+      (point(
+        50,
+        "frontRadar",
+        d_rel,
+        y_rel,
+        v_ego=10.0,
+        v_rel=-0.5,
+      ),),
+      PATH,
+      MODEL,
+      yaw_rate_rad_s=0.035,
+    )[0]
+
+  assert estimate is not None
+  assert not estimate.close_front_supported
+  assert not estimate.confirmed_cutin
+  assert not estimate.control_eligible
+
+
+def test_close_side_pass_uses_history_when_last_velocity_slows() -> None:
+  detector = TrajectoryCutInDetector()
+  estimate = None
+  samples = (
+    (4.55, 2.73, -2.20),
+    (3.89, 2.73, -2.19),
+    (2.79, 2.60, -2.57),
+    (2.21, 2.24, -2.44),
+    (1.78, 2.18, -3.52),
+    (1.75, 2.02, -1.31),
+  )
+  for index, (d_rel, y_rel, v_rel) in enumerate(samples):
+    estimate = detector.update(
+      index * 0.29,
+      8.0,
+      (point(
+        35,
+        "frontRadar",
+        d_rel,
+        y_rel,
+        v_ego=8.0,
+        v_rel=v_rel,
+      ),),
+      PATH,
+      MODEL,
+    )[0]
+
+  assert estimate is not None
+  assert not estimate.confirmed_cutin
+
+
+def test_alternating_corner_jitter_is_rejected() -> None:
+  estimate = corner_series(
+    TrajectoryCutInDetector(),
+    (3.0, 2.55, 3.10, 2.50, 3.05, 2.60, 3.10),
+  )
+
+  assert estimate.jittering
+  assert not estimate.confirmed_cutin
+
+
+@pytest.mark.parametrize("side", (-1.0, 1.0))
+@pytest.mark.parametrize("missing", (None, "vision", "weak_vision", "front", "front_motion", "corner_motion", "curve", "discontinuity"))
+def test_slow_body_entry_survives_path_jitter_only_with_independent_evidence(side, missing) -> None:
+  detector = TrajectoryCutInDetector()
+  for index in range(71):
+    t = index * 0.05
+    d_rel = 8.0 - t
+    y_rel = side * (2.4 - 0.3 * t)
+    yaw = side * 0.03 if missing == "curve" else 0.0
+    corner = point(1200, "corner180", d_rel, y_rel, v_ego=4.0, v_rel=-1.0,
+                   yv_rel=-yaw * d_rel if missing in ("corner_motion", "curve") else -side * 0.3)
+    front = point(52, "frontRadar", d_rel + 1.0, y_rel - side * 0.2, v_ego=4.0, v_rel=-1.0,
+                  yv_rel=-yaw * (d_rel + 1.0) if missing in ("front_motion", "curve") else -side * 0.3)
+    model = SimpleNamespace(leadsV3=(SimpleNamespace(
+      prob=0.5 if missing == "weak_vision" else 0.99,
+      x=(front.d_rel + 1.0 + 1.52,), y=(0.0,), v=(3.0,),
+    ),))
+    offset = 0.08 if index % 2 else -0.08
+    path = ((0.0, offset), (100.0, offset))
+    if missing == "discontinuity" and index == 70:
+      t += 0.3
+    estimate = detector.update(
+      t, 4.0, (corner,), path, MODEL if missing == "vision" else model,
+      yaw_rate_rad_s=yaw, primary_lead={"status": True, "dRel": 16.0},
+      cross_sensor_matches={} if missing == "front" else {(corner.source, corner.track_id): front},
+    )[0]
+  if missing is None:
+    # Both sensors have been inside the boundary for more than the ordinary
+    # 1.5 s window. Their smooth raw positions resolve the moving path noise.
+    assert estimate.jittering
+    assert estimate.confirmed_cutin
+    assert estimate.paired_body_entry
+    assert estimate.control_eligible
+  else:
+    assert not estimate.paired_body_entry
+    assert not estimate.confirmed_cutin
+
+
+@pytest.mark.parametrize("missing", ("outside", "stale_outside", "parallel", "front_jitter", "range", "speed", "new_front", "unmeasured_front", "scc"))
+def test_slow_body_entry_cannot_use_stale_history_or_unrelated_vision(missing) -> None:
+  detector = TrajectoryCutInDetector()
+  for index in range(131):
+    t = index * 0.05
+    # The stale case spends >3 s inside before a second small inward move.
+    if missing == "outside":
+      y = 1.85 - 0.08 * t
+    elif missing == "stale_outside":
+      y = max(1.7, 2.4 - 0.7 * t) - max(0.0, t - 5.0) * 0.3
+    else:
+      y = max(1.8, 2.4 - 0.3 * t) - max(0.0, t - 5.0) * (0.0 if missing == "parallel" else 0.3)
+    corner = point(1200, "corner180", 7.0, y, v_ego=4.0, v_rel=-0.2, yv_rel=-0.3)
+    front = point(52, "frontRadar", 8.0, y - 0.2 + (0.2 * (-1)**index if missing == "front_jitter" else 0.0),
+                  v_ego=4.0, v_rel=-0.2, yv_rel=-0.3)
+    if missing in ("new_front", "unmeasured_front", "scc"):
+      from dataclasses import replace
+      front = replace(front, track_id=52 + index if missing == "new_front" else 52,
+                      measured=missing != "unmeasured_front", source="scc" if missing == "scc" else "frontRadar")
+    model = SimpleNamespace(leadsV3=(SimpleNamespace(
+      prob=0.99, x=(25.0 if missing == "range" else 10.52,),
+      y=(0.0,), v=(15.0 if missing == "speed" else 3.8,),
+    ),))
+    offset = 0.08 if index % 2 else -0.08
+    estimate = detector.update(t, 4.0, (corner,), ((0.0, offset), (100.0, offset)), model,
+                               primary_lead={"status": True, "dRel": 16.0},
+                               cross_sensor_matches={(corner.source, corner.track_id): front})[0]
+  assert not estimate.paired_body_entry
+  assert not estimate.confirmed_cutin
+
+
+@pytest.mark.parametrize("side", (-1.0, 1.0))
+@pytest.mark.parametrize("missing_evidence", (
+  None, "vision", "probability", "range", "speed", "front", "primary",
+  "parallel", "curve", "passes_before_entry",
+))
+def test_slow_close_entry_uses_vision_transition_only_with_physical_support(side, missing_evidence) -> None:
+  detector = TrajectoryCutInDetector()
+  estimates = []
+  for index in range(35):
+    time_s = index * 0.05
+    v_rel = -4.0 if missing_evidence == "passes_before_entry" else -2.0
+    d_rel = 9.0 + v_rel * time_s
+    y_rel = side * (2.9 - (0.0 if missing_evidence == "parallel" else 0.3) * time_s)
+    # In the curve negative case, all reported lateral speed comes from ego
+    # rotation; the wandering body positions have no physical inward support.
+    yaw = 0.03 if missing_evidence == "curve" else 0.0
+    corner = point(1200, "corner180", d_rel, y_rel, v_ego=8.0, v_rel=v_rel, yv_rel=-yaw * d_rel)
+    front = point(42, "frontRadar", d_rel + 1.8, y_rel, v_ego=8.0, v_rel=v_rel - 1.0, yv_rel=-yaw * (d_rel + 1.8))
+    model = SimpleNamespace(leadsV3=(SimpleNamespace(
+      prob=0.5 if missing_evidence == "probability" else 0.99,
+      x=(18.0 if missing_evidence == "range" else 13.02,),
+      y=(0.0,),
+      v=(12.0 if missing_evidence == "speed" else 8.0 + v_rel,),
+    ),))
+    estimates.extend(detector.update(
+      time_s, 8.0, (corner,), PATH,
+      MODEL if missing_evidence == "vision" else model,
+      primary_lead=None if missing_evidence == "primary" else {"status": True, "dRel": 16.0},
+      cross_sensor_matches={} if missing_evidence == "front" else {(corner.source, corner.track_id): front},
+      yaw_rate_rad_s=yaw,
+    ))
+
+  if missing_evidence is None:
+    assert not any(estimate.vision_supported for estimate in estimates)
+    assert any(estimate.vision_bracket_supported for estimate in estimates)
+    assert any(estimate.predecel_risk for estimate in estimates)
+    assert any(estimate.confirmed_cutin and not estimate.control_eligible for estimate in estimates)
+    assert estimates[-1].confirmed_cutin
+    assert estimates[-1].control_eligible
+    assert not estimates[-1].current_path
+  else:
+    assert not any(estimate.vision_bracket_supported for estimate in estimates)
+    assert not any(estimate.confirmed_cutin or estimate.control_eligible or estimate.predecel_risk for estimate in estimates)
+
+
+@pytest.mark.parametrize("side", (-1.0, 1.0))
+@pytest.mark.parametrize("physical_motion", (True, False))
+def test_curve_pair_resolves_body_offset_only_with_physical_inward_motion(side, physical_motion) -> None:
+  detector = TrajectoryCutInDetector()
+  yaw = side * 0.025
+  model = SimpleNamespace(leadsV3=(SimpleNamespace(prob=0.99, x=(12.52,), y=(0.0,), v=(7.0,)),))
+  for index in range(21):
+    t = index * 0.05
+    d_rel = 8.0 - t
+    y_rel = side * (2.85 - 0.6 * t)
+    normal_speed = -side * 0.6 if physical_motion else 0.0
+    corner = point(1200, "corner235", d_rel, y_rel, v_ego=8.0, v_rel=-1.0,
+                   yv_rel=normal_speed - yaw * d_rel)
+    front = point(42, "frontRadar", d_rel + 1.8, y_rel, v_ego=8.0, v_rel=-1.0,
+                  yv_rel=normal_speed - yaw * (d_rel + 1.8))
+    estimate = detector.update(t, 8.0, (corner,), PATH, model, yaw_rate_rad_s=yaw,
+                              primary_lead={"status": True, "dRel": 16.0},
+                              cross_sensor_matches={(corner.source, corner.track_id): front})[0]
+  assert not estimate.current_path
+  assert estimate.paired_inward_motion_supported == physical_motion
+  assert estimate.confirmed_cutin == physical_motion
+  assert estimate.control_eligible == physical_motion
+  assert estimate.predecel_risk == physical_motion

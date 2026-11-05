@@ -1,0 +1,315 @@
+#!/usr/bin/env python3
+import unittest
+
+from opendbc.car.structs import CarParams
+from opendbc.car.tesla.values import TeslaSafetyFlags
+from opendbc.can import CANDefine
+from opendbc.safety.tests.libsafety import libsafety_py
+import opendbc.safety.tests.common as common
+from opendbc.safety.tests.common import CANPackerPanda
+
+MSG_DAS_steeringControl = 0x488
+MSG_APS_eacMonitor = 0x27d
+MSG_DAS_Control = 0x2b9
+MSG_VCLEFT_SWITCH_STATUS = 0x3C2
+OBSERVED_SPEED_WHEEL_IDLE = bytes.fromhex("010000c000000000")
+
+
+class TestTeslaSafetyBase(common.PandaCarSafetyTest, common.AngleSteeringSafetyTest, common.LongitudinalAccelSafetyTest):
+  RELAY_MALFUNCTION_ADDRS = {0: (MSG_DAS_steeringControl, MSG_APS_eacMonitor)}
+  FWD_BLACKLISTED_ADDRS = {2: [MSG_DAS_steeringControl, MSG_APS_eacMonitor]}
+  TX_MSGS = [[MSG_DAS_steeringControl, 0], [MSG_APS_eacMonitor, 0], [MSG_DAS_Control, 0]]
+
+  STANDSTILL_THRESHOLD = 0.1
+  GAS_PRESSED_THRESHOLD = 3
+
+  # Angle control limits
+  STEER_ANGLE_MAX = 360  # deg
+  DEG_TO_CAN = 10
+
+  ANGLE_RATE_BP = [0., 5., 25.]
+  ANGLE_RATE_UP = [2.5, 1.5, 0.2]  # windup limit
+  ANGLE_RATE_DOWN = [5., 2.0, 0.3]  # unwind limit
+
+  # Long control limits
+  MAX_ACCEL = 2.0
+  MIN_ACCEL = -3.48
+  INACTIVE_ACCEL = 0.0
+
+  packer: CANPackerPanda
+
+  @classmethod
+  def setUpClass(cls):
+    if cls.__name__ == "TestTeslaSafetyBase":
+      raise unittest.SkipTest
+
+  def setUp(self):
+    self.packer = CANPackerPanda("tesla_model3_party")
+    self.define = CANDefine("tesla_model3_party")
+    self.acc_states = {d: v for v, d in self.define.dv["DAS_control"]["DAS_accState"].items()}
+
+  def _angle_cmd_msg(self, angle: float, enabled: bool):
+    values = {"DAS_steeringAngleRequest": angle, "DAS_steeringControlType": 1 if enabled else 0}
+    return self.packer.make_can_msg_panda("DAS_steeringControl", 0, values)
+
+  def _angle_meas_msg(self, angle: float):
+    values = {"EPAS3S_internalSAS": angle}
+    return self.packer.make_can_msg_panda("EPAS3S_sysStatus", 0, values)
+
+  def _user_brake_msg(self, brake):
+    values = {"ESP_driverBrakeApply": 2 if brake else 1}
+    return self.packer.make_can_msg_panda("ESP_status", 0, values)
+
+  def _speed_msg(self, speed):
+    values = {"DI_vehicleSpeed": speed * 3.6}
+    return self.packer.make_can_msg_panda("DI_speed", 0, values)
+
+  def _vehicle_moving_msg(self, speed: float):
+    values = {"DI_cruiseState": 3 if speed <= self.STANDSTILL_THRESHOLD else 2}
+    return self.packer.make_can_msg_panda("DI_state", 0, values)
+
+  def _user_gas_msg(self, gas):
+    values = {"DI_accelPedalPos": gas}
+    return self.packer.make_can_msg_panda("DI_systemStatus", 0, values)
+
+  def _pcm_status_msg(self, enable):
+    values = {"DI_cruiseState": 2 if enable else 0}
+    return self.packer.make_can_msg_panda("DI_state", 0, values)
+
+  def _long_control_msg(self, set_speed, acc_state=0, jerk_limits=(0, 0), accel_limits=(0, 0), aeb_event=0, bus=0):
+    values = {
+      "DAS_setSpeed": set_speed,
+      "DAS_accState": acc_state,
+      "DAS_aebEvent": aeb_event,
+      "DAS_jerkMin": jerk_limits[0],
+      "DAS_jerkMax": jerk_limits[1],
+      "DAS_accelMin": accel_limits[0],
+      "DAS_accelMax": accel_limits[1],
+    }
+    return self.packer.make_can_msg_panda("DAS_control", bus, values)
+
+  @staticmethod
+  def _speed_wheel_msg(right_ticks=0, data=OBSERVED_SPEED_WHEEL_IDLE):
+    payload = bytearray(data)
+    payload[3] = (payload[3] & 0xC0) | (right_ticks & 0x3F)
+    return libsafety_py.make_CANPacket(MSG_VCLEFT_SWITCH_STATUS, 1, payload)
+
+  def _accel_msg(self, accel: float):
+    # For common.LongitudinalAccelSafetyTest
+    return self._long_control_msg(10, accel_limits=(accel, max(accel, 0)))
+
+  def test_vehicle_speed_measurements(self):
+    # OVERRIDDEN: 79.1667 is the max speed in m/s
+    self._common_measurement_test(self._speed_msg, 0, 285 / 3.6, 1,
+                                  self.safety.get_vehicle_speed_min, self.safety.get_vehicle_speed_max)
+
+  def test_inactive_angle_requires_clamped_measurement(self):
+    self.safety.set_controls_allowed(False)
+    for measured in (-420.0, -360.0, -12.3, 12.3, 360.0, 420.0):
+      with self.subTest(measured=measured):
+        self._reset_angle_measurement(measured)
+        inactive = max(-self.STEER_ANGLE_MAX, min(self.STEER_ANGLE_MAX, measured))
+        self.assertTrue(self._tx(self._angle_cmd_msg(inactive, False)))
+        self.assertFalse(self._tx(self._angle_cmd_msg(inactive + 1.0, False)))
+
+
+class TestTeslaStockSafety(TestTeslaSafetyBase):
+
+  LONGITUDINAL = False
+
+  def setUp(self):
+    super().setUp()
+    self.safety = libsafety_py.libsafety
+    self.safety.set_safety_hooks(CarParams.SafetyModel.tesla, 0)
+    self.safety.init_tests()
+
+  def test_cancel(self):
+    for acc_state in range(16):
+      self.safety.set_controls_allowed(True)
+      should_tx = acc_state == self.acc_states["ACC_CANCEL_GENERIC_SILENT"]
+      self.assertFalse(self._tx(self._long_control_msg(0, acc_state=acc_state, accel_limits=(self.MIN_ACCEL, self.MAX_ACCEL))))
+      self.assertEqual(should_tx, self._tx(self._long_control_msg(0, acc_state=acc_state)))
+
+  def test_no_aeb(self):
+    for aeb_event in range(4):
+      self.assertEqual(self._tx(self._long_control_msg(10, acc_state=self.acc_states["ACC_CANCEL_GENERIC_SILENT"], aeb_event=aeb_event)), aeb_event == 0)
+
+
+class TestTeslaLongitudinalSafety(TestTeslaSafetyBase):
+  RELAY_MALFUNCTION_ADDRS = {0: (MSG_DAS_steeringControl, MSG_APS_eacMonitor, MSG_DAS_Control)}
+  FWD_BLACKLISTED_ADDRS = {2: [MSG_DAS_steeringControl, MSG_APS_eacMonitor, MSG_DAS_Control]}
+
+  def setUp(self):
+    super().setUp()
+    self.safety = libsafety_py.libsafety
+    self.safety.set_safety_hooks(CarParams.SafetyModel.tesla, TeslaSafetyFlags.LONG_CONTROL)
+    self.safety.init_tests()
+
+  def test_no_aeb(self):
+    for aeb_event in range(4):
+      self.assertEqual(self._tx(self._long_control_msg(10, aeb_event=aeb_event)), aeb_event == 0)
+
+  def test_acceleration_tx_never_grants_controls(self):
+    for flags in (1, 3, 5, 7):
+      for accel in (0.0, 1.0, -1.0, 2.1, -3.6):
+        with self.subTest(flags=flags, accel=accel):
+          self.safety.set_safety_hooks(CarParams.SafetyModel.tesla, flags)
+          self.safety.init_tests()
+          self.safety.set_controls_allowed(False)
+          self.assertEqual(self._tx(self._accel_msg(accel)), accel == 0.0)
+          self.assertFalse(self.safety.get_controls_allowed())
+
+  def test_permission_loss_blocks_actuation_without_tx_reengagement(self):
+    for cause in ("cruise", "brake", "gas"):
+      with self.subTest(cause=cause):
+        self._reset_safety_hooks()
+        self.safety.init_tests()
+        self.assertTrue(self._rx(self._pcm_status_msg(True)))
+        self.assertTrue(self.safety.get_controls_allowed())
+        self.assertTrue(self._tx(self._accel_msg(1.0)))
+        if cause == "cruise":
+          self.assertTrue(self._rx(self._pcm_status_msg(False)))
+        elif cause == "brake":
+          self.assertTrue(self._rx(self._user_brake_msg(True)))
+        else:
+          self.assertTrue(self._rx(self._user_gas_msg(10)))
+        self.assertFalse(self._tx(self._accel_msg(1.0)))
+        self.assertTrue(self._tx(self._accel_msg(0.0)))
+        if cause != "gas":
+          self.assertFalse(self.safety.get_controls_allowed())
+
+  def test_each_acceleration_bound_requires_permission_and_valid_range(self):
+    for enabled in (False, True):
+      self.safety.set_controls_allowed(enabled)
+      for minimum, maximum in ((0, 0), (-1, 0), (0, 1), (-3.48, 2), (-3.6, 0), (0, 2.1), (2.1, 0), (0, -3.6)):
+        with self.subTest(enabled=enabled, minimum=minimum, maximum=maximum):
+          valid_range = self.MIN_ACCEL <= minimum <= self.MAX_ACCEL and self.MIN_ACCEL <= maximum <= self.MAX_ACCEL
+          inactive = minimum == maximum == 0
+          self.assertEqual(self._tx(self._long_control_msg(10, accel_limits=(minimum, maximum))),
+                           valid_range and (enabled or inactive))
+          self.assertEqual(self.safety.get_controls_allowed(), enabled)
+
+  def test_stock_aeb_still_blocks_host_commands(self):
+    self.safety.set_controls_allowed(True)
+    self.assertTrue(self._tx(self._accel_msg(1.0)))
+    self.assertTrue(self._rx(self._long_control_msg(10, aeb_event=1, bus=2)))
+    self.assertFalse(self._tx(self._accel_msg(1.0)))
+    self.assertFalse(self._tx(self._accel_msg(0.0)))
+    self.assertTrue(self._rx(self._long_control_msg(10, aeb_event=0, bus=2)))
+    self.assertTrue(self._tx(self._accel_msg(1.0)))
+
+  def test_stock_aeb_passthrough(self):
+    no_aeb_msg = self._long_control_msg(10, aeb_event=0)
+    no_aeb_msg_cam = self._long_control_msg(10, aeb_event=0, bus=2)
+    aeb_msg_cam = self._long_control_msg(10, aeb_event=1, bus=2)
+
+    # stock system sends no AEB -> no forwarding, and OP is allowed to TX
+    self.assertEqual(1, self._rx(no_aeb_msg_cam))
+    self.assertEqual(-1, self.safety.safety_fwd_hook(2, no_aeb_msg_cam.addr))
+    self.assertTrue(self._tx(no_aeb_msg))
+
+    # stock system sends AEB -> forwarding, and OP is not allowed to TX
+    self.assertEqual(1, self._rx(aeb_msg_cam))
+    self.assertEqual(0, self.safety.safety_fwd_hook(2, aeb_msg_cam.addr))
+    self.assertFalse(self._tx(no_aeb_msg))
+
+  def test_prevent_reverse(self):
+    # Note: Tesla can reverse while at a standstill if both accel_min and accel_max are negative.
+    self.safety.set_controls_allowed(True)
+
+    # accel_min and accel_max are positive
+    self.assertTrue(self._tx(self._long_control_msg(set_speed=10, accel_limits=(1.1, 0.8))))
+    self.assertTrue(self._tx(self._long_control_msg(set_speed=0, accel_limits=(1.1, 0.8))))
+
+    # accel_min and accel_max are both zero
+    self.assertTrue(self._tx(self._long_control_msg(set_speed=10, accel_limits=(0, 0))))
+    self.assertTrue(self._tx(self._long_control_msg(set_speed=0, accel_limits=(0, 0))))
+
+    # accel_min and accel_max have opposing signs
+    self.assertTrue(self._tx(self._long_control_msg(set_speed=10, accel_limits=(-0.8, 1.3))))
+    self.assertTrue(self._tx(self._long_control_msg(set_speed=0, accel_limits=(0.8, -1.3))))
+    self.assertTrue(self._tx(self._long_control_msg(set_speed=0, accel_limits=(0, -1.3))))
+
+    # accel_min and accel_max are negative
+    self.assertFalse(self._tx(self._long_control_msg(set_speed=10, accel_limits=(-1.1, -0.6))))
+    self.assertFalse(self._tx(self._long_control_msg(set_speed=0, accel_limits=(-0.6, -1.1))))
+    self.assertFalse(self._tx(self._long_control_msg(set_speed=0, accel_limits=(-0.1, -0.1))))
+
+
+class TestTeslaAutoSpeedLimitSafety(TestTeslaLongitudinalSafety):
+  TX_MSGS = [*TestTeslaLongitudinalSafety.TX_MSGS, [MSG_VCLEFT_SWITCH_STATUS, 1]]
+
+  def setUp(self):
+    super().setUp()
+    self.safety.set_safety_hooks(CarParams.SafetyModel.tesla, TeslaSafetyFlags.LONG_CONTROL | TeslaSafetyFlags.AUTO_SPEED_LIMIT)
+    self.safety.init_tests()
+
+  def test_speed_wheel_requires_template_and_controls(self):
+    self.safety.set_controls_allowed(True)
+    self.assertFalse(self._tx(self._speed_wheel_msg(1)))
+    self.assertTrue(self._rx(self._speed_wheel_msg()))
+    self.safety.set_controls_allowed(False)
+    self.assertFalse(self._tx(self._speed_wheel_msg(1)))
+    self.safety.set_controls_allowed(True)
+    self.assertTrue(self._tx(self._speed_wheel_msg(1)))
+    self.safety.set_timer(250_000)
+    self.assertTrue(self._tx(self._speed_wheel_msg(-1)))
+
+  def test_speed_wheel_rate_limit(self):
+    self.assertTrue(self._rx(self._speed_wheel_msg()))
+    self.safety.set_controls_allowed(True)
+    self.assertTrue(self._tx(self._speed_wheel_msg(1)))
+    self.safety.set_timer(249_999)
+    self.assertFalse(self._tx(self._speed_wheel_msg(-1)))
+    self.safety.set_timer(250_000)
+    self.assertTrue(self._tx(self._speed_wheel_msg(-1)))
+
+  def test_speed_wheel_template_expires(self):
+    self.assertTrue(self._rx(self._speed_wheel_msg()))
+    self.safety.set_controls_allowed(True)
+    self.safety.set_timer(1_500_001)
+    self.assertFalse(self._tx(self._speed_wheel_msg(-1)))
+    self.assertTrue(self._rx(self._speed_wheel_msg()))
+    self.assertTrue(self._tx(self._speed_wheel_msg(-1)))
+
+  def test_speed_wheel_only_changes_tick_by_one(self):
+    self.assertTrue(self._rx(self._speed_wheel_msg()))
+    self.safety.set_controls_allowed(True)
+    for tick in range(-32, 32):
+      if tick not in (-1, 1):
+        self.assertFalse(self._tx(self._speed_wheel_msg(tick)))
+    for byte in range(8):
+      data = bytearray(OBSERVED_SPEED_WHEEL_IDLE)
+      data[byte] ^= 0x40 if byte == 3 else 0x80
+      self.assertFalse(self._tx(self._speed_wheel_msg(1, data)))
+    self.assertTrue(self._tx(self._speed_wheel_msg(1)))
+
+  def test_speed_wheel_requires_longitudinal_and_feature_flags(self):
+    for flags in (0, TeslaSafetyFlags.LONG_CONTROL, TeslaSafetyFlags.AUTO_SPEED_LIMIT):
+      with self.subTest(flags=flags):
+        self.safety.set_safety_hooks(CarParams.SafetyModel.tesla, flags)
+        self.safety.init_tests()
+        self.assertTrue(self._rx(self._speed_wheel_msg()))
+        self.safety.set_controls_allowed(True)
+        self.assertFalse(self._tx(self._speed_wheel_msg(1)))
+
+  def test_speed_wheel_requires_genuine_complete_idle_template(self):
+    invalid_templates = [
+      (0, OBSERVED_SPEED_WHEEL_IDLE),
+      (2, OBSERVED_SPEED_WHEEL_IDLE),
+      (1, bytes.fromhex("000000c000000000")),  # wrong mux
+      (1, bytes.fromhex("010000c100000000")),  # driver input
+      (1, OBSERVED_SPEED_WHEEL_IDLE[:4]),
+      (1, OBSERVED_SPEED_WHEEL_IDLE + bytes(4)),
+    ]
+    for bus, data in invalid_templates:
+      with self.subTest(bus=bus, data=data):
+        self._reset_safety_hooks()
+        self.safety.init_tests()
+        self.safety.set_controls_allowed(True)
+        self.assertTrue(self._rx(libsafety_py.make_CANPacket(MSG_VCLEFT_SWITCH_STATUS, bus, data)))
+        self.assertFalse(self._tx(self._speed_wheel_msg(1)))
+
+
+if __name__ == "__main__":
+  unittest.main()

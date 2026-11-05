@@ -1,0 +1,277 @@
+# Xiaoge Vision: V-ASM and Lane Detection
+
+## 中文
+
+### 概述
+
+Xiaoge Vision 是 CarrotPilot 的本地视觉扩展。启用 `ShareData` 后，它使用 comma3 的 VisionIPC
+相机帧运行车道线 ONNX；视觉 BSD ONNX 还需要单独开启默认关闭的 `OnnxBsdEnabled`。两个模型的结果通过版本化的
+`xiaogeVision` JSON 消息写入 `customReservedRawData0`。`card.py` 接收该
+消息后，将车道线类型和视觉盲区结果安全地合并到 `carState`，供现有 UI 与变道逻辑使用。
+
+受管理入口是 `openpilot.selfdrive.carrot.xiaoge_data`。只有启用现有的 `ShareData` 参数时，管理器才会
+启动此进程，同时提供本地视觉识别和原有 TCP 7711 数据服务。相机推理需要 `camerad` 运行。
+请不要同时手动启动 `v_asm_server.py`，否则会
+与入口进程争用 8082 端口并产生重复的视觉推理进程。
+
+### 启用
+
+在 Carrot Web（端口 7000）的 **设置 → 驾驶控制 → 转向 → ONNX 车道与盲点 → ONNX 车道与盲点识别** 中启用车道识别服务。默认关闭并保留已有 `ShareData` 值。车道 ONNX 随服务运行；如需视觉 BSD，再在同一详情页单独开启 `OnnxBsdEnabled`（默认关闭）。关闭 `ShareData` 会停止视觉服务和 TCP 7711；关闭 `OnnxBsdEnabled` 会停止 BSD 推理并卸载 BSD ONNX 网络，但视觉服务、相机订阅、车道识别及车辆 OEM BSD 不受影响。
+
+### 功能和原理
+
+| 功能 | 相机与模型 | 工作方式 |
+|---|---|---|
+| 车道线识别 | 前向道路相机 `VISION_STREAM_ROAD`、`assets/lane.onnx` | `ShareData` 开启时运行。直接从 NV12 的 Y 平面进行居中正方形裁切，缩放至 416x416 灰度图，复制为三个归一化通道后输入 YOLOv8-Seg 模型。输出左/右车道线：`1` 实线、`0` 虚线、`-1` 未知。 |
+| V-ASM 盲区识别 | 广角道路相机 `VISION_STREAM_WIDE_ROAD`、`assets/v_asm_model.onnx` | 仅当 `ShareData` 和 `OnnxBsdEnabled` 都开启时运行；轮流检测模型估算车道宽度至少 2m 的已配置左右 ROI，保持比例缩放至 352x352，并只使用近距离危险车辆类别。 |
+| 车载合并 | `customReservedRawData0` -> `card.py` | 车道类型只覆盖模型已识别的一侧，同时保留车辆原有颜色编码。视觉盲区与 OEM `leftBlindspot/rightBlindspot` 做 OR 合并，视觉结果永远不会清除 OEM 盲区；拆分来源写入带有效标记的 `CarState` 字段，并通过包含单调时钟时间戳的 `customReservedRawData1` 消息单独送给 UI。 |
+
+V-ASM 每一侧仅在以下条件全部满足时推理：
+
+1. `ShareData` 与 `OnnxBsdEnabled` 均已启用，并且 V-ASM 模型和广角相机可用。
+2. `carState` 与 `modelV2` 均处于 alive、valid 状态。
+3. 该侧 ROI 已配置。
+4. 该侧 `laneWidthLeft` 或 `laneWidthRight` 不低于 2.0 m。
+
+车速和 `modelV2.meta.laneChangeDirection` 不再是启动条件。满足条件的左右侧每次只推理一侧并轮流执行。
+
+车道结果超过 4 秒、盲区结果超过 1.5 秒未更新时，`card.py` 自动忽略它们。这样相机、模型或进程异常
+时不会将过期视觉信息继续用于 UI 或变道判断。
+
+### mici 行车显示
+
+启用 `ShareData` 后，mici 右下角显示 VISION 状态、最近一次车道推理耗时和左右实线/虚线图标。
+`?` 表示无法识别；等待或过期结果不会保留已识别图标。BSD 区分待机、指定侧未检测到和检测到；
+`OnnxBsdEnabled` 关闭时 BSD ONNX 网络会卸载、视觉 BSD 保持待机；车道识别和供快照使用的相机订阅仍继续。开启后只有当前已评估的侧才会显示未检测到，另一侧不会被当作已检查。
+相机画面隐藏时仍保留状态卡和侧边 BSD 提示。显示道路模型时，车道使用与 c3 相同的虚线分段规则。
+BSD 路障在仅车辆/OEM 检测时为琥珀色、仅视觉检测时为蓝色、同侧两种来源同时检测时为淡红色；
+左右侧分别独立着色。车道位置来自驾驶模型，`lane.onnx` 只提供实线/虚线分类。
+OEM BSD 提示不依赖 `ShareData`；驾驶告警仍在最上层。
+
+### Web 设置与调试
+
+在 Carrot Web 的 **设置 → 驾驶控制 → 转向 → ONNX 车道与盲点** 中打开详细设置。该页面使用 Carrot Web 的通用组件和设计令牌，提供运行状态、车道/BSD 置信度、处理性能、相机快照、BSD 区域编辑及六项持久化设置。`OnnxBsdEnabled` 关闭时视觉 BSD 保持待机，车道识别仍运行。
+旧版页面暂时保留在 `http://<comma-ip>:7000/xiaoge/` 作为兼容入口；7000 端口仅将请求转发到本机回环地址的 8082 服务，因此 8082 不再直接暴露到局域网。
+
+- 默认适配手机浏览器；宽度达到 900px 时自动显示为左侧车道线、右侧 V-ASM 的电脑双栏布局。
+- 支持中文/English/한국어 切换，并沿用工具菜单的语言；显示模型状态、推理耗时、频率、检测置信度和原始状态 JSON。
+- 相机就绪后自动加载第一帧；首次加载失败会重试，并显示加载状态。之后点击对应“刷新画面”按钮获取新快照，不会连续播放视频。
+- V-ASM 页面显示门控条件、目标侧和当前车道宽度；可在广角图像上修改左右盲区多边形。
+- 未保存配置时使用内置的 1928x1208 广角默认多边形；“恢复默认标注”会删除本地覆盖配置。
+
+网页中的阈值、平滑时间和推理间隔用于调试和验证。车道线识别在服务运行时固定启用，避免因网页操作中断
+系统车道线结果。
+
+`Latency` 是一次图像预处理、模型推理和后处理的实际耗时，也包含线程等待；不是网页网络延迟。
+`Interval` 只限制推理启动间隔，缩短它不会让模型本身计算更快。车载相机和推理线程使用普通工作核心 CPU 0–3，
+OpenCV 最多使用两个 CPU 计算线程，避免与实时驾驶核心争用。
+相机以非阻塞方式接收，空闲时在 Python 中短暂休眠，避免 VisionIPC 等待持有 GIL 并阻塞其他线程。
+原始状态 JSON 的 `lane.inference.threadCpuMs` 和 `inference.threadCpuMs` 分别记录车道和 V-ASM
+推理线程的 CPU 时间。它们不包含等待或其他工作线程的 CPU 时间，因此与 `latencyMs` 的差值不能直接视为 GIL 等待时间。
+
+### 安装和手动启动
+
+正常启动会从 `third_party/wheels` 将已固定版本的 OpenCV 安装到可写的 `pydeps`，无需联网，也不会修改只读系统虚拟环境或替换 NumPy。下面的命令仅用于手动验证。
+
+在 comma3 的 openpilot 根目录运行：
+
+```bash
+python -m pip install --no-index --no-deps --find-links third_party/wheels \
+  --target pydeps opencv-python-headless==4.13.0.92
+PYTHONPATH="$PWD/pydeps:$PWD${PYTHONPATH:+:$PYTHONPATH}" python -m openpilot.selfdrive.carrot.xiaoge_data
+```
+
+`camerad` 必须运行。V-ASM 多边形配置保存在本目录的 `v_asm_config.json`，该文件已被 Git 忽略。
+
+---
+
+## English
+
+### Overview
+
+Xiaoge Vision is a local CarrotPilot vision extension. Enabling `ShareData` runs the lane ONNX on
+comma3 VisionIPC frames. Visual BSD additionally requires `OnnxBsdEnabled`, which defaults off.
+Both models' results are published as one versioned `xiaogeVision` JSON payload through `customReservedRawData0`.
+`card.py` safely merges the resulting lane-marking types and visual blindspot state into `carState`,
+where the existing UI and lane-change logic consume them.
+
+The managed entry point is `openpilot.selfdrive.carrot.xiaoge_data`. The manager starts it only when
+the existing `ShareData` parameter is enabled, providing both local vision and the existing TCP 7711
+data service. Camera inference requires `camerad` to be running. Do not also launch
+`v_asm_server.py` manually: it would conflict on port 8082 and create a second vision process.
+
+### Enabling the feature
+
+Enable the lane-recognition service in **Carrot Web (port 7000) → Settings → Driving → Steering → ONNX Lane & BSD → ONNX Lane and BSD Detection**. It defaults to off and preserves the saved `ShareData` value. Lane ONNX runs with this service. To use camera BSD, also turn on `OnnxBsdEnabled` in the same detail page; it defaults to off. Turning off `ShareData` stops vision and TCP 7711. Turning off `OnnxBsdEnabled` stops BSD inference and unloads its ONNX network, while the visual service, camera subscription, lane inference, and vehicle-provided BSD remain active.
+
+### Features and operation
+
+| Feature | Camera and model | Operation |
+|---|---|---|
+| Lane detection | `VISION_STREAM_ROAD`, `assets/lane.onnx` | Runs while `ShareData` is enabled. The NV12 Y plane is center-square cropped, resized to a 416x416 grayscale image, copied into three normalized channels, and passed to the YOLOv8-Seg model. Lane types are `1` solid, `0` dashed, and `-1` unknown. |
+| V-ASM blindspot detection | `VISION_STREAM_WIDE_ROAD`, `assets/v_asm_model.onnx` | Runs only when both `ShareData` and `OnnxBsdEnabled` are enabled. It alternates across configured left/right ROIs whose model-estimated lane width is at least 2 m, letterboxes each ROI to 352x352, and uses only the near-threat vehicle class. |
+| Vehicle-state merge | `customReservedRawData0` -> `card.py` | A recognized lane type replaces only its corresponding type digit while preserving the vehicle color code. Visual blindspot state is OR-merged with OEM `leftBlindspot/rightBlindspot`; vision can never clear an OEM blindspot. Split sources are written to `CarState` fields guarded by a validity marker and are also sent to the UI through a `customReservedRawData1` message with a monotonic timestamp. |
+
+Each V-ASM side runs only when all conditions hold:
+
+1. Both `ShareData` and `OnnxBsdEnabled` are enabled, and the V-ASM model and wide-road camera are available.
+2. `carState` and `modelV2` are both alive and valid.
+3. That side has a configured ROI.
+4. Its `laneWidthLeft` or `laneWidthRight` is at least 2.0 m.
+
+Speed and `modelV2.meta.laneChangeDirection` are not activation gates. Eligible left and right sides
+are evaluated alternately, one side per inference.
+
+`card.py` discards lane results older than four seconds and blindspot results older than 1.5 seconds.
+This prevents stale visual state from affecting the UI or lane-change decision after a camera, model,
+or process failure.
+
+### mici on-road display
+
+With `ShareData` enabled, a card at the lower right shows VISION status, the latest lane inference
+time, and left/right solid or dashed icons. `?` means unknown; waiting or stale results do not retain
+recognized icons. BSD distinguishes standby, no detection on the evaluated side, and detection.
+Only a freshly evaluated side can show no detection; the other side is not assumed to have been checked.
+The card and side warnings remain visible with the camera hidden. With the road model visible,
+lanes use the same dash geometry as c3. A BSD barrier is amber for vehicle/OEM-only detection, blue
+for vision-only detection, and light red when both sources detect the same side; left and right are
+colored independently. Lane positions still come from the driving model; `lane.onnx` supplies only
+solid/dashed classification. OEM BSD warnings also work with `ShareData` off. Driving alerts remain on top.
+
+### Web settings and diagnostics
+
+Open **Carrot Web → Settings → Driving → Steering → ONNX Lane & BSD**. The detail screen uses the shared Carrot Web components and tokens for runtime state, lane/BSD confidence, processing performance, camera snapshots, BSD polygon editing, and six persistent settings. With `OnnxBsdEnabled` off, the BSD ONNX network is unloaded and visual BSD is in standby; lane detection and the camera subscription for snapshots continue.
+The legacy page remains temporarily available at `http://<comma-ip>:7000/xiaoge/` as a compatibility entry. Port 7000 proxies requests to the loopback-only 8082 service, so 8082 is no longer exposed directly on the LAN.
+
+- The interface is mobile-first. At 900px or wider it automatically becomes a desktop two-column
+  view with lanes on the left and V-ASM on the right.
+- Korean, Chinese, and English are available, following the Tools menu language. The page shows model state, inference latency/rate,
+  confidence, and raw status JSON.
+- The first snapshot loads automatically when its camera is ready, with retries and visible loading
+  status. Use the matching refresh button for later snapshots; the images are not a continuous video feed.
+- The V-ASM panel shows its activation gate, selected side, and lane width. Its wide-camera view
+  supports editing the left and right blindspot polygons.
+- Built-in 1928x1208 wide-camera polygons are used until a local override is saved. Resetting the
+  annotations removes that override.
+
+The web threshold, smoothing, and interval controls are intended for validation. Lane detection
+remains enabled while the service runs so web actions cannot interrupt system lane results.
+
+`Latency` measures one preprocessing, model inference, and postprocessing pass, including thread
+waits; it is not web network latency. `Interval` only limits how often inference starts, so reducing
+it does not speed up the model. On the device, camera and inference threads use background CPU cores
+0–3, with OpenCV limited to two compute threads, avoiding the realtime driving cores. Camera receivers poll
+without blocking and briefly sleep in Python when idle, so VisionIPC waits cannot hold the GIL and
+stall other threads. Raw status JSON exposes `lane.inference.threadCpuMs` and `inference.threadCpuMs`
+for the lane and V-ASM inference threads. These exclude waiting and CPU time on other worker threads;
+their difference from `latencyMs` is not a direct measurement of GIL waiting.
+
+### Installation and manual launch
+
+Normal startup installs pinned OpenCV from `third_party/wheels` into writable `pydeps` without internet access. It leaves the read-only system venv and its NumPy intact. The commands below are for manual validation only.
+
+From the comma3 openpilot root:
+
+```bash
+python -m pip install --no-index --no-deps --find-links third_party/wheels \
+  --target pydeps opencv-python-headless==4.13.0.92
+PYTHONPATH="$PWD/pydeps:$PWD${PYTHONPATH:+:$PYTHONPATH}" python -m openpilot.selfdrive.carrot.xiaoge_data
+```
+
+`camerad` must be running. Local V-ASM polygon overrides are saved as `v_asm_config.json` in this
+directory and are ignored by Git.
+
+---
+
+## 한국어
+
+### 개요
+
+Xiaoge Vision은 CarrotPilot용 로컬 비전 확장 기능입니다. `ShareData`를 켜면 comma3 VisionIPC 카메라
+프레임에서 차선 ONNX를 실행합니다. 비전 BSD ONNX는 기본 꺼짐인 `OnnxBsdEnabled`도 켜야 실행됩니다.
+두 모델의 결과는 하나의 버전 관리된 `xiaogeVision` JSON 메시지로
+`customReservedRawData0`으로 발행합니다. `card.py`는 차선 종류와 비전 사각지대 상태를 `carState`에
+안전하게 병합하며, 기존 UI와 차선 변경 로직이 이를 사용합니다.
+
+관리형 시작점은 `openpilot.selfdrive.carrot.xiaoge_data`입니다. 기존 `ShareData` 파라미터가 켜져 있을
+때만 관리자가 실행하며, 로컬 비전 인식과 기존 TCP 7711 데이터 서비스를 함께 제공합니다.
+카메라 추론에는 `camerad` 실행이 필요합니다. `v_asm_server.py`를 별도로
+실행하지 마십시오. 8082 포트가 충돌하고 두 번째 비전 프로세스가 실행됩니다.
+
+### 기능 켜기
+
+**Carrot Web(7000번 포트) → 설정 → 주행 제어 → 차량 조향 → ONNX 차선·BSD → ONNX 차선·BSD 인식**에서 차선 인식 서비스를 켭니다. 기존 `ShareData` 저장값을 유지하며 기본값은 꺼짐입니다. 차선 ONNX는 서비스와 함께 실행됩니다. 비전 BSD를 사용하려면 같은 상세 화면에서 기본 꺼짐인 `OnnxBsdEnabled`도 켜십시오. `ShareData`를 끄면 비전 서비스와 TCP 7711이 중지되며, `OnnxBsdEnabled`를 끄면 BSD 추론이 중지되고 BSD ONNX 네트워크가 언로드됩니다. 비전 서비스, 카메라 구독, 차선 인식과 차량 자체 BSD는 유지됩니다.
+
+### 기능 및 동작 원리
+
+| 기능 | 카메라 및 모델 | 동작 |
+|---|---|---|
+| 차선 인식 | `VISION_STREAM_ROAD`, `assets/lane.onnx` | `ShareData`가 켜져 있을 때 실행됩니다. NV12 Y 평면을 중앙 정사각형으로 자르고 416x416 그레이스케일로 조정한 뒤, 정규화된 동일한 세 채널로 복사하여 YOLOv8-Seg 모델에 입력합니다. `1`은 실선, `0`은 점선, `-1`은 알 수 없음입니다. |
+| V-ASM 사각지대 인식 | `VISION_STREAM_WIDE_ROAD`, `assets/v_asm_model.onnx` | `ShareData`와 `OnnxBsdEnabled`를 모두 켰을 때만 실행됩니다. 모델 추정 차로 폭이 2m 이상인 설정된 좌우 ROI를 번갈아 종횡비를 유지한 352x352 입력으로 분류하고, 근접 위험 차량 클래스만 BSD로 사용합니다. |
+| 차량 상태 병합 | `customReservedRawData0` -> `card.py` | 인식된 차선 종류는 차량 색상 코드를 보존한 채 해당 종류 자리만 갱신합니다. 비전 사각지대 상태는 OEM `leftBlindspot/rightBlindspot`과 OR 병합되므로 비전 결과가 OEM 사각지대 상태를 해제할 수 없습니다. 분리된 출처는 유효성 표시 필드가 있는 `CarState`에 기록하고, 단조 시계 타임스탬프를 포함한 `customReservedRawData1` 메시지로 UI에도 전달합니다. |
+
+V-ASM의 각 측면은 다음 조건을 모두 만족할 때 실행됩니다.
+
+1. `ShareData`와 `OnnxBsdEnabled`가 모두 켜져 있고 V-ASM 모델과 광각 카메라를 사용할 수 있습니다.
+2. `carState`와 `modelV2`가 alive·valid 상태입니다.
+3. 해당 측 ROI가 설정되어 있습니다.
+4. 해당 측 `laneWidthLeft` 또는 `laneWidthRight`가 2.0m 이상입니다.
+
+속도와 `modelV2.meta.laneChangeDirection`은 실행 조건이 아닙니다. 조건을 만족하는 좌우 측면은 한 번에
+한 측면씩 번갈아 검사합니다.
+
+`card.py`는 4초가 지난 차선 결과와 1.5초가 지난 사각지대 결과를 무시합니다. 따라서 카메라, 모델 또는
+프로세스 장애 후 오래된 비전 상태가 UI나 차선 변경 판단에 사용되지 않습니다.
+
+### mici 주행 화면
+
+`ShareData`가 켜져 있으면 오른쪽 아래에 VISION 상태, 최근 차선 추론 시간, 좌우 실선·점선 아이콘이 나옵니다.
+`?`는 차선 종류를 알 수 없다는 뜻이며, 결과를 기다리거나 오래된 결과만 남으면 인식 아이콘을 유지하지 않습니다.
+BSD는 ‘대기’, 검사한 쪽의 ‘미감지’, ‘감지’를 구분합니다. 방금 검사한 쪽만 미감지로 표시하고,
+검사하지 않은 반대쪽을 검사한 것으로 간주하지 않습니다.
+카메라 화면을 숨겨도 상태 표시와 좌우 BSD 경고는 남습니다. 도로 모델이 보일 때는 c3와 같은
+점선 구간을 사용합니다. 차선 위치는 주행 모델에서 가져오며,
+`lane.onnx`는 실선·점선 종류만 제공합니다.
+차량 자체 BSD 경고는 `ShareData`가 꺼져 있어도 표시하며, 주행 경고는 가장 위에 나옵니다.
+V-ASM은 속도와 방향 요청에 관계없이 폭 2m 이상인 설정 측면을 검사합니다. BSD 벽은 차량·OEM만
+감지하면 호박색, 비전만 감지하면 파란색, 두 출처가 같은 쪽을 감지하면 연한 빨간색입니다.
+
+### 웹 설정과 진단
+
+Carrot Web의 **설정 → 주행 제어 → 차량 조향 → ONNX 차선·BSD** 상세 화면을 여십시오. 공통 Carrot Web 컴포넌트와 토큰으로 실행 상태, 차선/BSD 신뢰도, 처리 성능, 카메라 스냅샷, BSD 감지 영역 편집과 저장되는 세부값 6개를 제공합니다. `OnnxBsdEnabled`가 꺼져 있으면 BSD ONNX 네트워크를 언로드하고 비전 BSD는 대기 상태를 유지합니다. 차선 인식과 스냅샷용 카메라 구독은 계속됩니다.
+기존 페이지는 호환용으로 `http://<comma-ip>:7000/xiaoge/`에 잠시 유지합니다. 7000번 서버가 로컬 루프백의 8082 서비스로 요청을 전달하므로 8082는 더 이상 LAN에 직접 노출되지 않습니다.
+
+- 모바일 우선 UI이며, 너비가 900px 이상이면 왼쪽 차선/오른쪽 V-ASM의 데스크톱 2열 보기로 자동 전환됩니다.
+- 도구 메뉴의 언어를 이어받으며 한국어·영어·중국어 전환을 지원합니다. 모델 상태, 추론 시간/주기, 신뢰도, 원시 상태 JSON을 표시합니다.
+- 카메라가 준비되면 첫 스냅샷을 자동으로 가져오며, 처음 실패하면 재시도하고 로딩 상태를 표시합니다. 이후에는 각 새로고침 버튼으로 새 사진을 가져옵니다. 연속 재생 영상은 아닙니다.
+- V-ASM 패널은 실행 조건, 대상 측, 차선 폭을 표시하며 광각 영상에서 좌우 사각지대 다각형을 편집할 수 있습니다.
+- 로컬 설정을 저장하기 전에는 내장 1928x1208 광각 기본 다각형을 사용합니다. 주석을 초기화하면 로컬 설정이 제거됩니다.
+
+BSD 신뢰도 기본값은 94%이고 조정 범위는 0-100%입니다. 활성화된 BSD는 시작 기준보다 신뢰도가
+15%p 낮아질 때 해제되어 임계값 주변의 표시 변동을 줄입니다. 웹의 임계값, 평활 시간, 추론 간격은
+검증용입니다. 서비스가 실행되는 동안 차선 인식은 항상 활성화되어 웹
+동작 때문에 시스템 차선 결과가 중단되지 않습니다.
+
+`Latency`는 영상 전처리, 모델 계산, 후처리 한 번에 걸린 실제 시간이며 스레드 대기도 포함합니다. 웹 통신
+지연이 아닙니다. `Interval`은 추론 시작 간격만 제한하므로 줄여도 모델 계산 자체가 빨라지지는 않습니다.
+장치의 카메라·추론 스레드는 일반 작업용 CPU 0~3번을 사용하고, OpenCV 계산 스레드는 최대 두 개로 제한합니다.
+실시간 주행 작업이 사용하는 코어와의 경쟁을 피하기 위한 배치입니다. 카메라는 대기 없이 수신을 확인하고, 프레임이 없으면
+Python에서 잠시 쉬어 VisionIPC 대기가 GIL을 잡고 다른 스레드를 막지 않도록 합니다.
+원시 상태 JSON의 `lane.inference.threadCpuMs`와 `inference.threadCpuMs`는 각각 차선 및 V-ASM 추론
+스레드가 사용한 CPU 시간입니다. 대기와 다른 작업 스레드의 CPU 시간은 제외하므로 `latencyMs`와의 차이가
+그대로 GIL 대기 시간은 아닙니다.
+
+### 설치 및 수동 시작
+
+정상 시작 시 `third_party/wheels`에 포함된 고정 버전 OpenCV를 쓰기 가능한 `pydeps`에 자동 설치합니다. 인터넷 없이 준비하며 읽기 전용 시스템 가상환경과 기존 NumPy는 변경하지 않습니다. 아래 명령은 수동 검증용입니다.
+
+comma3 openpilot 루트에서 실행합니다.
+
+```bash
+python -m pip install --no-index --no-deps --find-links third_party/wheels \
+  --target pydeps opencv-python-headless==4.13.0.92
+PYTHONPATH="$PWD/pydeps:$PWD${PYTHONPATH:+:$PYTHONPATH}" python -m openpilot.selfdrive.carrot.xiaoge_data
+```
+
+`camerad`가 실행 중이어야 합니다. 로컬 V-ASM 다각형 설정은 이 디렉터리의 `v_asm_config.json`에
+저장되며 Git에서 무시됩니다.

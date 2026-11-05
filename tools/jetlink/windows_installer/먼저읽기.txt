@@ -1,0 +1,7 @@
+﻿CARROT JETSON
+
+설치안내.html을 두 번 클릭하세요.
+Double-click 설치안내.html for the installation guide.
+
+단계별 실행 방법, 예상 시간, 답변 방법과 안전 주의사항을 안내합니다.
+The guide explains each step, estimated times, answers and safety precautions.

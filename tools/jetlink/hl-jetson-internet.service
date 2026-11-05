@@ -1,0 +1,16 @@
+[Unit]
+Description=USB Internet sharing for the SSH-paired Jetson
+After=network.target
+ConditionPathExists=/data/hl-jetson/usb-internet.enabled
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /data/openpilot/tools/jetlink/usb_internet.py daemon
+Restart=on-failure
+RestartSec=10
+Nice=10
+TimeoutStopSec=20
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

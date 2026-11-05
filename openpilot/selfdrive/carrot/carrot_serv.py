@@ -1,0 +1,2093 @@
+import fcntl
+import json
+import math
+import os
+import socket
+import struct
+import subprocess
+import threading
+import time
+import numpy as np
+from datetime import datetime
+
+from openpilot.cereal import log
+import openpilot.cereal.messaging as messaging
+from openpilot.common.realtime import Ratekeeper
+from openpilot.common.params import Params
+from openpilot.common.filter_simple import MyMovingAverage
+from openpilot.system.hardware import PC, TICI
+from openpilot.selfdrive.navd.helpers import Coordinate
+from openpilot.common.constants import CV
+from openpilot.common.gps import get_gps_location_service
+from openpilot.selfdrive.carrot.gps_sources import GPSSources
+from openpilot.selfdrive.carrot.carrot_navi_control import CarrotNaviControl, parse_carrot_navi_control
+from openpilot.selfdrive.carrot.deceleration_source import deceleration_candidates
+from openpilot.selfdrive.navdy.navigation import NavigationReader
+from openpilot.selfdrive.navigation.provenance import RoutePublication
+
+NAVI_SOURCE_NETWORK = 0
+NAVI_SOURCE_NAVDY = 1
+
+nav_type_mapping = {
+  12: ("turn", "left", 1),
+  16: ("turn", "sharp left", 1),
+  1000: ("turn", "slight left", 1),
+  1001: ("turn", "slight right", 2),
+  1002: ("fork", "slight left", 3),
+  1003: ("fork", "slight right", 4),
+  1006: ("off ramp", "left", 3),
+  1007: ("off ramp", "right", 4),
+  13: ("turn", "right", 2),
+  19: ("turn", "sharp right", 2),
+  102: ("off ramp", "slight left", 3),
+  105: ("off ramp", "slight left", 3),
+  112: ("off ramp", "slight left", 3),
+  115: ("off ramp", "slight left", 3),
+  101: ("off ramp", "slight right", 4),
+  104: ("off ramp", "slight right", 4),
+  111: ("off ramp", "slight right", 4),
+  114: ("off ramp", "slight right", 4),
+  7: ("fork", "left", 3),
+  44: ("fork", "left", 3),
+  17: ("fork", "left", 3),
+  75: ("fork", "left", 3),
+  76: ("fork", "left", 3),
+  118: ("fork", "left", 3),
+  6: ("fork", "right", 4),
+  43: ("fork", "right", 4),
+  73: ("fork", "right", 4),
+  74: ("fork", "right", 4),
+  123: ("fork", "right", 4),
+  124: ("fork", "right", 4),
+  117: ("fork", "right", 4),
+  131: ("rotary", "slight right", 5),
+  132: ("rotary", "slight right", 5),
+  140: ("rotary", "slight left", 5),
+  141: ("rotary", "slight left", 5),
+  133: ("rotary", "right", 5),
+  134: ("rotary", "sharp right", 5),
+  135: ("rotary", "sharp right", 5),
+  136: ("rotary", "sharp left", 5),
+  137: ("rotary", "sharp left", 5),
+  138: ("rotary", "sharp left", 5),
+  139: ("rotary", "left", 5),
+  142: ("rotary", "straight", 5),
+  14: ("turn", "uturn", 5),
+  201: ("arrive", "straight", 5),
+  51: ("notification", "straight", None),
+  52: ("notification", "straight", None),
+  53: ("notification", "straight", None),
+  54: ("notification", "straight", None),
+  55: ("notification", "straight", None),
+  153: ("", "", 6),  #TG
+  154: ("", "", 6),  #TG
+  249: ("", "", 6)   #TG
+}
+
+import collections
+
+COUNTDOWN_NEW_TARGET_MIN_JUMP_M = 20.0
+SCHOOL_ZONE_GAS_OVERRIDE_TIMEOUT_S = 3.0
+
+
+class CarrotServ:
+  def __init__(self):
+    self.params = Params()
+    self.params_memory = Params("/dev/shm/params")
+    # Latch at process startup; changing guidance sources while driving can
+    # otherwise mix route, camera and traffic-light data from different inputs.
+    self.navi_source = self.params.get_int("CarrotNaviSource")
+    self.navdy_navigation = NavigationReader()
+    self.model_routes = RoutePublication()
+    self.model_guidance_current = self.model_guidance_next = None
+
+    self.nRoadLimitSpeed = 30
+    self.nRoadLimitSpeed_last = 30
+    self.nRoadLimitSpeed_counter = 0
+    self.legacy_road_limit_received_at = 0.0
+    self.legacy_road_limit_kph = 0.0
+
+    self.active_carrot = 0     ## 1: CarrotMan Active, 2: sdi active , 3: speed decel active, 4: section active, 5: bump active, 6: speed limit active
+    self.active_count = 0
+    self.active_sdi_count = 0
+    self.active_sdi_count_max = 200 # 20 sec
+
+    self.active_kisa_count = 0
+    self.external_navigation_active = False
+
+    self.nSdiType = -1
+    self.nSdiSpeedLimit = 0
+    self.nSdiSection = 0
+    self.nSdiDist = 0
+    self.nSdiBlockType = -1
+    self.nSdiBlockSpeed = 0
+    self.nSdiBlockDist = 0
+
+    self.nTBTDist = 0
+    self.nTBTTurnType = -1
+    self.szTBTMainText = ""
+    self.szNearDirName = ""
+    self.szFarDirName = ""
+    self.nTBTNextRoadWidth = 0
+
+    self.nTBTDistNext = 0
+    self.nTBTTurnTypeNext = -1
+    self.szTBTMainTextNext = ""
+
+    self.nGoPosDist = 0
+    self.nGoPosTime = 0
+    self.route_traffic_total = 0
+    self.route_traffic_segments = ()
+    self.szPosRoadName = ""
+    self.nSdiPlusType = -1
+    self.nSdiPlusSpeedLimit = 0
+    self.nSdiPlusDist = 0
+    self.nSdiPlusBlockType = -1
+    self.nSdiPlusBlockSpeed = 0
+    self.nSdiPlusBlockDist = 0
+
+    self.goalPosX = 0.0
+    self.goalPosY = 0.0
+    self.szGoalName = ""
+    self.vpPosPointLatNavi = 0.0
+    self.vpPosPointLonNavi = 0.0
+    self.vpPosPointLat = 0.0
+    self.vpPosPointLon = 0.0
+    self.roadcate = 8
+
+    self.nPosSpeed = 0.0
+    self.nPosAngle = 0.0
+    self.nPosAnglePhone = 0.0
+
+    self.diff_angle_count = 0
+    self.last_calculate_gps_time = 0
+    self.position_mono_time = 0
+    self.last_update_gps_time = 0
+    self.last_update_gps_time_phone = 0
+    self.last_update_gps_time_navi = 0
+    self.bearing_offset = 0.0
+    self.bearing_measured = 0.0
+    self.bearing = 0.0
+    self.gps_valid = False
+
+    self.phone_gps_accuracy = 0.0
+    self.gps_accuracy_device = 0.0
+    self.phone_latitude = 0.0
+    self.phone_longitude = 0.0
+    self.phone_gps_frame = 0
+
+    self.totalDistance = 0
+    self.xSpdLimit = 0
+    self.xSpdDist = 0
+    self.xSpdType = -1
+    self.rear_camera_events = []
+
+    self.xTurnInfo = -1
+    self.xDistToTurn = 0
+    self.xTurnInfoNext = -1
+    self.xDistToTurnNext = 0
+
+    self.navType, self.navModifier = "invalid", ""
+    self.navTypeNext, self.navModifierNext = "invalid", ""
+
+    self.carrotIndex = 0
+    self.carrotCmdIndex = 0
+    self.carrotCmd = ""
+    self.carrotArg = ""
+    self.carrotCmdIndex_last = 0
+
+    self.traffic_light_q = collections.deque(maxlen=int(2.0/0.1))  # 2 secnods
+    self.traffic_light_count = -1
+    self.traffic_state = 0
+
+    self.left_spd_sec = 100
+    self.left_tbt_sec = 100
+    self.speed_countdown_distance_last = 0.0
+    self.turn_countdown_distance_last = 0.0
+    self.left_sec = 100
+    self.max_left_sec = 100
+    self.carrot_left_sec = 100
+    self.sdi_inform = False
+
+
+    self.atc_paused = False
+    self.atc_activate_count = 0
+    self.gas_override_speed = 0
+    self.gas_pressed_state = False
+    self.speed_event_gas_pressed = False
+    self.source_last = "none"
+    self.school_zone_gas_override_started_at = None
+    self.school_zone_suppressed = False
+
+    self.carrot_navi_session_id = ""
+    self.carrot_navi_speed_sequence = -1
+    self.carrot_navi_current_sequence = -1
+    self.carrot_navi_next_sequence = -1
+    self.carrot_navi_vehicle_sequence = -1
+    self.carrot_navi_route_sequence = -1
+    self.carrot_navi_active = False
+    self.carrot_navi_has_control = False
+    self.carrot_navi_road_limit_valid = False
+    self.carrot_navi_off_route = False
+    self.carrot_navi_traffic_active = False
+    self.carrot_navi_control = None
+    self.navdy_section_limit = 0
+    self.navdy_section_distance = 0
+    self._navdy_section_hazard = None
+
+    self.debugText = ""
+
+    # 默认语言，稍后在 update_params 中从 Params 读取覆盖，
+    # 规则：main_ko -> 韩语；main_zh-CHS -> 中文；其他 -> 英文
+    self.lang = "en"
+
+    self.update_params()
+
+  def update_params(self):
+    self.autoNaviSpeedBumpSpeed = float(self.params.get_int("AutoNaviSpeedBumpSpeed"))
+    self.autoNaviSpeedBumpTime = float(self.params.get_int("AutoNaviSpeedBumpTime"))
+    self.autoNaviSpeedBumpEndDistance = float(min(5000, max(0, self.params.get_int("AutoNaviSpeedBumpEndDistance")))) * 0.01
+    self.autoNaviSpeedCtrlEnd = float(self.params.get_int("AutoNaviSpeedCtrlEnd"))
+    self.autoNaviRearCameraHoldDistance = float(min(300, max(0, self.params.get_int("AutoNaviRearCameraHoldDistance"))))
+    self.autoNaviSpeedCtrlMode = self.params.get_int("AutoNaviSpeedCtrlMode")
+    self.vehicleNaviCanControl = min(3, max(0, self.params.get_int("VehicleNaviCanControl")))
+    self.vehicleNaviSchoolZoneControl = self.params.get_bool("VehicleNaviSchoolZoneControl")
+    self.vehicleSpeedCameraControlMode = min(3, max(0, self.params.get_int("VehicleSpeedCameraControlMode")))
+    self.autoNaviSpeedSafetyFactor = float(self.params.get_int("AutoNaviSpeedSafetyFactor")) * 0.01
+    self.autoNaviSpeedDecelRate = float(self.params.get_int("AutoNaviSpeedDecelRate")) * 0.01
+    self.autoNaviCountDownMode = self.params.get_int("AutoNaviCountDownMode")
+    self.turnSpeedControlMode= self.params.get_int("TurnSpeedControlMode")
+    self.mapTurnSpeedFactor= self.params.get_float("MapTurnSpeedFactor") * 0.01
+
+    self.autoTurnControlSpeedTurn = self.params.get_int("AutoTurnControlSpeedTurn")
+    self.autoTurnMapChange = self.params.get_int("AutoTurnMapChange")
+    self.autoTurnControl = self.params.get_int("AutoTurnControl")
+    self.autoTurnControlTurnEnd = self.params.get_int("AutoTurnControlTurnEnd")
+    #self.autoNaviSpeedDecelRate = float(self.params.get_int("AutoNaviSpeedDecelRate")) * 0.01
+    self.autoCurveSpeedLowerLimit = int(self.params.get("AutoCurveSpeedLowerLimit"))
+    self.is_metric = self.params.get_bool("IsMetric")
+    self.autoRoadSpeedLimitOffset = self.params.get_int("AutoRoadSpeedLimitOffset")
+
+    # 读取语言设置：优先使用 LanguageSetting，与 UI 保持一致；回退读取可能存在的 "lang"
+    try:
+      lang_val = self.params.get('LanguageSetting') or self.params.get('lang')
+    except Exception:
+      lang_val = None
+    if isinstance(lang_val, bytes):
+      try:
+        lang_val = lang_val
+      except Exception:
+        lang_val = None
+    if lang_val == "main_ko":
+      self.lang = "ko"
+    elif lang_val == "main_zh-CHS":
+      self.lang = "zh"
+    else:
+      self.lang = "en"
+
+
+  def _update_cmd(self):
+    if self.carrotCmdIndex != self.carrotCmdIndex_last:
+      self.carrotCmdIndex_last = self.carrotCmdIndex
+      command_handlers = {
+        "DETECT": self._handle_detect_command,
+      }
+
+      handler = command_handlers.get(self.carrotCmd)
+      if handler:
+        handler(self.carrotArg)
+
+    self.traffic_light_q.append((-1, -1, "none", 0.0))
+    self.traffic_light_count -= 1
+    if self.traffic_light_count < 0:
+      self.traffic_light_count = -1
+      self.traffic_state = 0
+
+  def _handle_detect_command(self, xArg):
+    elements = [e.strip() for e in xArg.split(',')]
+    if len(elements) >= 4:
+      try:
+        state = elements[0]
+        value1 = float(elements[1])
+        value2 = float(elements[2])
+        value3 = float(elements[3])
+        self.traffic_light(value1, value2, state, value3)
+        self.traffic_light_count = int(0.5 / 0.1)
+      except ValueError:
+        pass
+
+  def traffic_light(self, x, y, color, cnf):
+    traffic_red = 0
+    traffic_green = 0
+    traffic_left = 0
+    traffic_red_trig = 0
+    traffic_green_trig = 0
+    traffic_left_trig = 0
+    for pdata in self.traffic_light_q:
+      px, py, pcolor,pcnf = pdata
+      if abs(x - px) < 0.2 and abs(y - py) < 0.2:
+        if pcolor in ["Green Light", "Left turn"]:
+          if color in ["Red Light", "Yellow Light"]:
+            traffic_red_trig += cnf
+            traffic_red += cnf
+          elif color in ["Green Light", "Left turn"]:
+            traffic_green += cnf
+        elif pcolor in ["Red Light", "Yellow Light"]:
+          if color in ["Green Light"]: #, "Left turn"]:
+            traffic_green_trig += cnf
+            traffic_green += cnf
+          elif color in ["Left turn"]:
+            traffic_left_trig += cnf
+            traffic_left += cnf
+          elif color in ["Red Light", "Yellow Light"]:
+            traffic_red += cnf
+
+    #print(self.traffic_light_q)
+    if traffic_red_trig > 0:
+      self.traffic_state = 1
+      #self._add_log("Red light triggered")
+      #print("Red light triggered")
+    elif traffic_green_trig > 0 and traffic_green > traffic_red:  #주변에 red light의 cnf보다 더 크면 출발... 감지오류로 출발하는경우가 생김.
+      self.traffic_state = 2
+      #self._add_log("Green light triggered")
+      #print("Green light triggered")
+    elif traffic_left_trig > 0:
+      self.traffic_state = 3
+    elif traffic_red > 0:
+      self.traffic_state = 1
+      #self._add_log("Red light continued")
+      #print("Red light continued")
+    elif traffic_green > 0:
+      self.traffic_state = 2
+      #self._add_log("Green light continued")
+      #print("Green light continued")
+    else:
+      self.traffic_state = 0
+      #print("TrafficLight none")
+
+    self.traffic_light_q.append((x,y,color,cnf))
+
+
+  def calculate_current_speed(self, left_dist, safe_speed_kph, safe_time, safe_decel_rate):
+    safe_speed = safe_speed_kph / 3.6
+    safe_dist = safe_speed * safe_time
+    decel_dist = left_dist - safe_dist
+
+    if decel_dist <= 0:
+      return safe_speed_kph
+
+    # v_i^2 = v_f^2 + 2ad
+    temp = safe_speed**2 + 2 * safe_decel_rate * decel_dist  # 공식에서 감속 적용
+
+    if temp < 0:
+      speed_mps = safe_speed
+    else:
+      speed_mps = math.sqrt(temp)
+    return max(safe_speed_kph, min(250, speed_mps * 3.6))
+
+  def _external_navigation_connected(self):
+    # Connection freshness, not the presence of a camera/bump or active guidance.
+    return self.carrot_navi_active or self.active_count > 0 or self.active_kisa_count > 0
+
+  def _road_limit_speed_valid(self):
+    if not self.external_navigation_active:
+      return False
+    if self.carrot_navi_active:
+      navi = getattr(self, 'carrot_navi_control', None)
+      if not (self.carrot_navi_road_limit_valid and navi is not None
+              and navi.speed.road_limit_kph == self.nRoadLimitSpeed):
+        return False
+      if self.accepts_navigation(NAVI_SOURCE_NAVDY):
+        return True  # The Navdy reader already expires the original road component.
+      received = navi.speed.received_mono_time_ns
+      # Match the v2 JSON stream's 10-second timeout, not its IPC publication age.
+      return received > 0 and 0 <= time.monotonic_ns() - received < 10_000_000_000
+    if self.accepts_navigation(NAVI_SOURCE_NAVDY):
+      return False
+    received = getattr(self, 'legacy_road_limit_received_at', 0.0)
+    limit = getattr(self, 'legacy_road_limit_kph', 0.0)
+    # Other navigation heartbeats must not renew a missing or old road limit.
+    return received > 0 and 0 <= time.monotonic() - received <= 4.0 and 0 < limit == self.nRoadLimitSpeed
+
+  def _update_navigation_source(self):
+    external_active = self._external_navigation_connected()
+    changed = external_active != self.external_navigation_active
+    self.external_navigation_active = external_active
+    if changed:
+      self.rear_camera_events = []
+      self.speed_countdown_distance_last = self.turn_countdown_distance_last = 0.0
+      self.left_spd_sec = self.left_tbt_sec = 100
+      self.gas_override_speed = 0
+      self.school_zone_gas_override_started_at = None
+      self.school_zone_suppressed = False
+    return changed
+
+  def _rear_camera_speed(self, CS, delta_dist):
+    # TMAP EDC SDI 75/76: rear speed / rear signal-and-speed camera.
+    # Arm only on the final approach. Keep the wheel-distance endpoint even
+    # when the app removes the SDI at the camera or announces the next item.
+    hold_distance = self.autoNaviRearCameraHoldDistance
+    if (CS is None or delta_dist < 0 or not self.external_navigation_active or
+        self.autoNaviSpeedCtrlMode <= 0 or hold_distance <= 0 or self.carrot_navi_off_route):
+      self.rear_camera_events = []
+      return 250.0, 0.0
+
+    self.rear_camera_events = [event for event in self.rear_camera_events
+                               if event["target"] + hold_distance > self.totalDistance]
+    if (self.active_carrot > 1 and self.xSpdType in (75, 76) and
+        0 < self.xSpdDist <= 50 and self.xSpdLimit > 0):
+      target = self.totalDistance + self.xSpdDist
+      matching = next((event for event in self.rear_camera_events if abs(event["target"] - target) <= 40), None)
+      if matching is None:
+        self.rear_camera_events.append({"target": target, "speed": self.xSpdLimit})
+      else:
+        # Repeated zero/near-zero reports must not move the hold endpoint.
+        matching["speed"] = min(matching["speed"], self.xSpdLimit)
+
+    if not self.rear_camera_events:
+      return 250.0, 0.0
+    event = min(self.rear_camera_events, key=lambda event: event["speed"])
+    return event["speed"], max(0.0, event["target"] + hold_distance - self.totalDistance)
+
+  def _vehicle_speed_camera_enabled(self, CS):
+    return (not self.external_navigation_active and
+            self.vehicleSpeedCameraControlMode > 0 and CS.speedLimit > 0 and CS.speedLimitDistance > 0 and
+            not (CS.schoolZoneActive and self.school_zone_suppressed) and
+            not (self.vehicleSpeedCameraControlMode == 3 and CS.gasPressed))
+
+  def _speed_bump_control_active(self, distance):
+    return distance > self.autoNaviSpeedBumpEndDistance
+
+  def _vehicle_speed_bump_enabled(self, CS):
+    return (not self.external_navigation_active and self.vehicleNaviCanControl and self.autoNaviSpeedCtrlMode >= 2 and
+            self._speed_bump_control_active(CS.speedBumpDistance))
+
+  def _vehicle_school_zone_enabled(self, CS):
+    if not CS.schoolZoneActive:
+      self.school_zone_gas_override_started_at = None
+      self.school_zone_suppressed = False
+      return False
+    return (not self.external_navigation_active and
+            self.vehicleNaviSchoolZoneControl and self.vehicleSpeedCameraControlMode > 0 and not self.school_zone_suppressed and
+            not (self.vehicleSpeedCameraControlMode == 3 and CS.gasPressed))
+
+  def _vehicle_school_zone_speed(self, CS):
+    return 30 if self._vehicle_school_zone_enabled(CS) else 250
+
+  def _vehicle_section_zone_enabled(self, CS):
+    return (not self.external_navigation_active and self.vehicleNaviCanControl and self.vehicleSpeedCameraControlMode > 0 and
+            getattr(CS, "vehicleNaviSectionActive", False) and getattr(CS, "vehicleNaviSpeed", 0) > 0 and
+            not (self.vehicleSpeedCameraControlMode == 3 and CS.gasPressed))
+
+  def _vehicle_navigation_display(self, CS):
+    if self.external_navigation_active or CS is None or not self.vehicleNaviCanControl or not getattr(CS, "vehicleNaviActive", False):
+      return False, 0, False
+    if CS.schoolZoneActive:
+      speed = 30
+    elif getattr(CS, "vehicleNaviSpeed", 0) > 0:
+      speed = int(CS.vehicleNaviSpeed * self.autoNaviSpeedSafetyFactor)
+    elif self._speed_bump_control_active(CS.speedBumpDistance):
+      speed = int(self.autoNaviSpeedBumpSpeed)
+    else:
+      speed = 0
+    return speed > 0, speed, bool(getattr(CS, "vehicleNaviSectionActive", False))
+
+  def _speed_countdown_distance(self, CS):
+    distances = []
+    legacy_bump_suppressed = self.xSpdType == 22 and self.autoNaviCountDownMode == 1
+    if self.external_navigation_active and self.xSpdDist > 0 and not legacy_bump_suppressed:
+      distances.append(self.xSpdDist)
+
+    vehicle_navi_active = (not self.external_navigation_active and CS is not None and self.vehicleNaviCanControl and
+                           getattr(CS, "vehicleNaviActive", False))
+    if vehicle_navi_active:
+      camera_distance = getattr(CS, "speedLimitDistance", 0)
+      if camera_distance > 0:
+        distances.append(camera_distance)
+      bump_distance = getattr(CS, "speedBumpDistance", 0)
+      if self.autoNaviCountDownMode >= 2 and bump_distance > 0:
+        distances.append(bump_distance)
+
+    return min(distances, default=0)
+
+  def _update_countdown_alert(self, left_sec, source, v_ego_kph):
+    if left_sec > 11:
+      self.left_sec = 100
+      self.max_left_sec = 100
+      self.carrot_left_sec = 100
+      self.sdi_inform = False
+      return
+
+    self.sdi_inform = source in ("cam", "hda")
+    self.max_left_sec = min(11, max(6, int(v_ego_kph / 10) + 1))
+    if left_sec != self.left_sec:
+      if left_sec == self.max_left_sec and self.sdi_inform:
+        self.carrot_left_sec = 11
+      elif 1 <= left_sec < self.max_left_sec:
+        self.carrot_left_sec = left_sec
+      elif left_sec == 0 and self.left_sec == 1:
+        self.carrot_left_sec = left_sec
+
+      self.left_sec = left_sec
+
+  @staticmethod
+  def _countdown_channel(distance, previous_distance, previous_left_sec, v_ego):
+    if distance <= 0:
+      return 100, 0.0, False
+
+    calculated = int(max(distance - v_ego, 1) / max(1, v_ego) + 0.5)
+    new_target = (previous_distance > 0 and
+                  distance - previous_distance > max(COUNTDOWN_NEW_TARGET_MIN_JUMP_M, v_ego * 2.0))
+    rearmed = new_target and previous_left_sec <= 11
+    left_sec = calculated if new_target else min(previous_left_sec, calculated)
+    return (100 if rearmed else left_sec), float(distance), rearmed
+
+  def _update_school_zone_gas_override(self, override_active):
+    if not override_active:
+      self.school_zone_gas_override_started_at = None
+      return
+
+    now = time.monotonic()
+    if self.school_zone_gas_override_started_at is None:
+      self.school_zone_gas_override_started_at = now
+    elif now - self.school_zone_gas_override_started_at >= SCHOOL_ZONE_GAS_OVERRIDE_TIMEOUT_S:
+      self.school_zone_suppressed = True
+
+  def _apply_speed_source_gas_floor(self, CS, desired_speed, source, v_ego_kph, road_speed_limit_changed):
+    speed_event_gas_rising = CS.gasPressed and not self.speed_event_gas_pressed
+    self.speed_event_gas_pressed = CS.gasPressed
+
+    if source in ("hda", "hda_section", "hda_bump", "school"):
+      # Vehicle speed bumps always allow an intentional accelerator override.
+      # Camera, section, and school sources follow mode 2 only after their
+      # target has fallen below the current speed and actual deceleration is
+      # requested.
+      gas_floor_active = source == "hda_bump" or self.vehicleSpeedCameraControlMode == 2
+      if not gas_floor_active:
+        self.gas_override_speed = 0
+      else:
+        reset_floor = (source != self.source_last or CS.vEgo < 0.1 or desired_speed > 150 or
+                       CS.brakePressed or road_speed_limit_changed)
+        if reset_floor:
+          self.gas_override_speed = 0
+        if self.gas_override_speed <= 0:
+          if (speed_event_gas_rising and not CS.brakePressed and CS.vEgo >= 0.1 and
+              desired_speed <= 150 and desired_speed < v_ego_kph):
+            # A new accelerator input during active event deceleration means
+            # the driver wants to ignore the remaining slowdown.
+            self.gas_override_speed = v_ego_kph
+        elif CS.gasPressed:
+          # Keep the highest speed reached while overriding this event.
+          self.gas_override_speed = max(v_ego_kph, self.gas_override_speed)
+
+      self.source_last = source
+      override_active = gas_floor_active and desired_speed < self.gas_override_speed
+      if source == "school":
+        self._update_school_zone_gas_override(override_active)
+      elif not self.school_zone_suppressed:
+        self.school_zone_gas_override_started_at = None
+      if override_active:
+        return self.gas_override_speed, "gas"
+      return desired_speed, source
+
+    # Vehicle speed-camera modes must not change the existing accelerator
+    # override behavior for road limits, curves, or other navigation sources.
+    if source != self.source_last:
+      self.gas_override_speed = 0
+      self.gas_pressed_state = CS.gasPressed
+
+    reset_floor = (CS.vEgo < 0.1 or desired_speed > 150 or source in ["cam", "section", "police"] or
+                   CS.brakePressed or road_speed_limit_changed)
+    if reset_floor:
+      self.gas_override_speed = 0
+    elif source == "bump":
+      if self.gas_override_speed <= 0:
+        if speed_event_gas_rising and desired_speed < v_ego_kph:
+          self.gas_override_speed = v_ego_kph
+      elif CS.gasPressed:
+        self.gas_override_speed = max(v_ego_kph, self.gas_override_speed)
+    elif CS.gasPressed and not self.gas_pressed_state:
+      self.gas_override_speed = max(v_ego_kph, self.gas_override_speed)
+    else:
+      self.gas_pressed_state = False
+
+    self.source_last = source
+    if desired_speed < self.gas_override_speed:
+      return self.gas_override_speed, "gas"
+    return desired_speed, source
+
+  def _update_tbt(self):
+    #xTurnInfo : 1: left turn, 2: right turn, 3: left lane change, 4: right lane change, 5: rotary, 6: tg, 7: arrive or uturn
+    turn_type_mapping = {
+      12: ("turn", "left", 1),
+      16: ("turn", "sharp left", 1),
+      13: ("turn", "right", 2),
+      19: ("turn", "sharp right", 2),
+      102: ("off ramp", "slight left", 3),
+      105: ("off ramp", "slight left", 3),
+      112: ("off ramp", "slight left", 3),
+      115: ("off ramp", "slight left", 3),
+      101: ("off ramp", "slight right", 4),
+      104: ("off ramp", "slight right", 4),
+      111: ("off ramp", "slight right", 4),
+      114: ("off ramp", "slight right", 4),
+      7: ("fork", "left", 3),
+      44: ("fork", "left", 3),
+      17: ("fork", "left", 3),
+      75: ("fork", "left", 3),
+      76: ("fork", "left", 3),
+      118: ("fork", "left", 3),
+      6: ("fork", "right", 4),
+      43: ("fork", "right", 4),
+      73: ("fork", "right", 4),
+      74: ("fork", "right", 4),
+      123: ("fork", "right", 4),
+      124: ("fork", "right", 4),
+      117: ("fork", "right", 4),
+      131: ("rotary", "slight right", 5),
+      132: ("rotary", "slight right", 5),
+      140: ("rotary", "slight left", 5),
+      141: ("rotary", "slight left", 5),
+      133: ("rotary", "right", 5),
+      134: ("rotary", "sharp right", 5),
+      135: ("rotary", "sharp right", 5),
+      136: ("rotary", "sharp left", 5),
+      137: ("rotary", "sharp left", 5),
+      138: ("rotary", "sharp left", 5),
+      139: ("rotary", "left", 5),
+      142: ("rotary", "straight", 5),
+      14: ("turn", "uturn", 7),
+      201: ("arrive", "straight", 8),
+      51: ("notification", "straight", 0),
+      52: ("notification", "straight", 0),
+      53: ("notification", "straight", 0),
+      54: ("notification", "straight", 0),
+      55: ("notification", "straight", 0),
+      153: ("", "", 6),  #TG
+      154: ("", "", 6),  #TG
+      249: ("", "", 6)   #TG
+    }
+
+    if self.nTBTTurnType in turn_type_mapping:
+      self.navType, self.navModifier, self.xTurnInfo = turn_type_mapping[self.nTBTTurnType]
+    else:
+      self.navType, self.navModifier, self.xTurnInfo = "invalid", "", -1
+
+    if self.nTBTTurnTypeNext in turn_type_mapping:
+      self.navTypeNext, self.navModifierNext, self.xTurnInfoNext = turn_type_mapping[self.nTBTTurnTypeNext]
+    else:
+      self.navTypeNext, self.navModifierNext, self.xTurnInfoNext = "invalid", "", -1
+
+    if self.nTBTDist > 0 and self.xTurnInfo > 0:
+      self.xDistToTurn = self.nTBTDist
+    if self.nTBTDistNext > 0 and self.xTurnInfoNext > 0:
+      self.xDistToTurnNext = self.nTBTDistNext + self.nTBTDist
+
+  def _get_sdi_descr(self, nSdiType):
+    # 多语言映射：ko（韩语，原始），zh（简体中文），en（英文）。
+    sdi_ko = {
+        75: "후면 과속 단속",
+        76: "후면 신호·과속 단속",
+        0: "신호과속",
+        1: "과속 (고정식)",
+        2: "구간단속 시작",
+        3: "구간단속 끝",
+        4: "구간단속중",
+        5: "꼬리물기단속카메라",
+        6: "신호 단속",
+        7: "과속 (이동식)",
+        8: "고정식 과속위험 구간(박스형)",
+        9: "버스전용차로구간",
+        10: "가변 차로 단속",
+        11: "갓길 감시 지점",
+        12: "끼어들기 금지",
+        13: "교통정보 수집지점",
+        14: "방범용cctv",
+        15: "과적차량 위험구간",
+        16: "적재 불량 단속",
+        17: "주차단속 지점",
+        18: "일방통행도로",
+        19: "철길 건널목",
+        20: "어린이 보호구역(스쿨존 시작 구간)",
+        21: "어린이 보호구역(스쿨존 끝 구간)",
+        22: "과속방지턱",
+        23: "lpg충전소",
+        24: "터널 구간",
+        25: "휴게소",
+        26: "톨게이트",
+        27: "안개주의 지역",
+        28: "유해물질 지역",
+        29: "사고다발",
+        30: "급커브지역",
+        31: "급커브구간1",
+        32: "급경사구간",
+        33: "야생동물 교통사고 잦은 구간",
+        34: "우측시야불량지점",
+        35: "시야불량지점",
+        36: "좌측시야불량지점",
+        37: "신호위반다발구간",
+        38: "과속운행다발구간",
+        39: "교통혼잡지역",
+        40: "방향별차로선택지점",
+        41: "무단횡단사고다발지점",
+        42: "갓길 사고 다발 지점",
+        43: "과속 사발 다발 지점",
+        44: "졸음 사고 다발 지점",
+        45: "사고다발지점",
+        46: "보행자 사고다발지점",
+        47: "차량도난사고 상습발생지점",
+        48: "낙석주의지역",
+        49: "결빙주의지역",
+        50: "병목지점",
+        51: "합류 도로",
+        52: "추락주의지역",
+        53: "지하차도 구간",
+        54: "주택밀집지역(교통진정지역)",
+        55: "인터체인지",
+        56: "분기점",
+        57: "휴게소(lpg충전가능)",
+        58: "교량",
+        59: "제동장치사고다발지점",
+        60: "중앙선침범사고다발지점",
+        61: "통행위반사고다발지점",
+        62: "목적지 건너편 안내",
+        63: "졸음 쉼터 안내",
+        64: "노후경유차단속",
+        65: "터널내 차로변경단속",
+        66: "",
+    }
+
+    sdi_en = {
+        75: "Rear speed camera",
+        76: "Rear signal and speed camera",
+        0: "Signal speed enforcement",
+        1: "Speed camera (fixed)",
+        2: "Section control start",
+        3: "Section control end",
+        4: "Under section control",
+        5: "Block-the-box camera",
+        6: "Signal violation enforcement",
+        7: "Speed camera (mobile)",
+        8: "Fixed speed camera zone (box)",
+        9: "Bus-only lane zone",
+        10: "Reversible/variable lane enforcement",
+        11: "Shoulder surveillance point",
+        12: "No cut-in",
+        13: "Traffic data collection point",
+        14: "Security CCTV",
+        15: "Overloaded vehicle risk zone",
+        16: "Improper loading enforcement",
+        17: "Parking enforcement point",
+        18: "One-way road",
+        19: "Railroad crossing",
+        20: "School zone start",
+        21: "School zone end",
+        22: "Speed bump",
+        23: "LPG station",
+        24: "Tunnel section",
+        25: "Rest area",
+        26: "Toll gate",
+        27: "Fog caution area",
+        28: "Hazardous materials area",
+        29: "Accident-prone section",
+        30: "Sharp curve area",
+        31: "Sharp curve section 1",
+        32: "Steep slope section",
+        33: "Wild animal crossing area",
+        34: "Poor visibility (right)",
+        35: "Poor visibility",
+        36: "Poor visibility (left)",
+        37: "Frequent signal violations",
+        38: "Frequent speeding",
+        39: "Traffic congestion area",
+        40: "Lane selection by direction",
+        41: "Frequent jaywalking accidents",
+        42: "Frequent shoulder accidents",
+        43: "Frequent speeding accidents",
+        44: "Frequent drowsy driving accidents",
+        45: "Accident-prone spot",
+        46: "Frequent pedestrian accidents",
+        47: "Frequent vehicle theft",
+        48: "Falling rock caution area",
+        49: "Icy road caution area",
+        50: "Bottleneck point",
+        51: "Merging road",
+        52: "Cliff/Drop caution area",
+        53: "Underpass section",
+        54: "Residential area (traffic calming)",
+        55: "Interchange",
+        56: "Junction",
+        57: "Rest area (LPG available)",
+        58: "Bridge",
+        59: "Frequent brake failure accidents",
+        60: "Center line invasion accidents",
+        61: "Violation-of-passage accidents",
+        62: "Destination on opposite side",
+        63: "Drowsy rest area",
+        64: "Old diesel control",
+        65: "Lane change enforcement in tunnel",
+        66: "",
+    }
+
+    sdi_zh = {
+        75: "后向测速摄像头",
+        76: "后向闯红灯及测速摄像头",
+        0: "信号测速/闯灯拍照",
+        1: "固定测速摄像头",
+        2: "区间测速开始",
+        3: "区间测速结束",
+        4: "区间测速中",
+        5: "路口压线摄像头",
+        6: "闯红灯拍照",
+        7: "流动测速摄像头",
+        8: "测速拍照",
+        9: "公交专用车道区间",
+        10: "可变/潮汐车道拍照",
+        11: "应急车道拍照",
+        12: "禁止加塞",
+        13: "交通信息采集点",
+        14: "治安监控",
+        15: "超载车辆风险区",
+        16: "装载不当拍照",
+        17: "违停拍照点",
+        18: "单行道",
+        19: "铁路道口",
+        20: "学校区域开始",
+        21: "学校区域结束",
+        22: "减速带",
+        23: "LPG加气站",
+        24: "隧道区间",
+        25: "服务区",
+        26: "ETC计费拍照",
+        27: "多雾路段",
+        28: "危险品区域",
+        29: "事故多发路段",
+        30: "急弯路段",
+        31: "急弯区段1",
+        32: "陡坡路段",
+        33: "野生动物出没路段",
+        34: "右侧视野不良点",
+        35: "视野不良点",
+        36: "左侧视野不良点",
+        37: "闯红灯多发",
+        38: "超速多发",
+        39: "交通拥堵区域",
+        40: "按方向选择车道点",
+        41: "行人乱穿马路多发处",
+        42: "应急车道事故多发",
+        43: "超速事故多发",
+        44: "疲劳驾驶事故多发",
+        45: "事故多发点",
+        46: "行人事故多发点",
+        47: "车辆盗窃多发点",
+        48: "落石危险路段",
+        49: "路面结冰危险",
+        50: "瓶颈路段",
+        51: "汇入道路",
+        52: "坠落危险路段",
+        53: "地下车道区间",
+        54: "居民区（交通缓和）",
+        55: "立交",
+        56: "分岔点",
+        57: "服务区（可加气）",
+        58: "桥梁",
+        59: "制动故障事故多发点",
+        60: "越线事故多发点",
+        61: "违法通行事故多发点",
+        62: "目的地在对面",
+        63: "瞌睡停车区",
+        64: "老旧柴油车管制",
+        65: "隧道内变道拍照",
+        66: "",
+    }
+
+    sdi_map = sdi_en
+    if self.lang == "ko":
+      sdi_map = sdi_ko
+    elif self.lang == "zh":
+      sdi_map = sdi_zh
+
+    return sdi_map.get(nSdiType, "")
+
+  def _update_sdi(self):
+    #sdiBlockType
+    # 1: startOSEPS: 구간단속시작
+    # 2: inOSEPS: 구간단속중
+    # 3: endOSEPS: 구간단속종료
+    # 0:감속안함,1:과속카메라,2:+사고방지턱,3:+이동식카메라
+    if self.nSdiType in [0,1,2,3,4,7,8, 75, 76] and self.nSdiSpeedLimit > 0 and self.autoNaviSpeedCtrlMode > 0:
+      self.xSpdLimit = self.nSdiSpeedLimit * self.autoNaviSpeedSafetyFactor
+      self.xSpdDist = self.nSdiDist
+      self.xSpdType = self.nSdiType
+      if self.nSdiBlockType in [2,3]:
+        self.xSpdDist = self.nSdiBlockDist
+        self.xSpdType = 4
+      elif self.nSdiType == 7 and self.autoNaviSpeedCtrlMode < 3: #이동식카메라
+        self.xSpdLimit = self.xSpdDist = 0
+    elif (self.nSdiPlusType == 22 or self.nSdiType == 22) and self.roadcate > 1 and self.autoNaviSpeedCtrlMode >= 2: # speed bump, roadcate:0,1: highway
+      self.xSpdLimit = self.autoNaviSpeedBumpSpeed
+      self.xSpdDist = self.nSdiPlusDist if self.nSdiPlusType == 22 else self.nSdiDist
+      self.xSpdType = 22
+    else:
+      self.xSpdLimit = 0
+      self.xSpdType = -1
+      self.xSpdDist = 0
+
+  def _reset_carrot_navi_sequences(self, session_id):
+    self.rear_camera_events = []
+    self.navdy_section_limit = self.navdy_section_distance = 0
+    self._navdy_section_hazard = None
+    self.model_guidance_current = self.model_guidance_next = None
+    self.carrot_navi_session_id = session_id
+    self.carrot_navi_speed_sequence = -1
+    self.carrot_navi_current_sequence = -1
+    self.carrot_navi_next_sequence = -1
+    self.carrot_navi_vehicle_sequence = -1
+    self.carrot_navi_route_sequence = -1
+
+  def _clear_carrot_navi_traffic(self):
+    if not getattr(self, "carrot_navi_traffic_active", False):
+      return
+    params_memory = getattr(self, "params_memory", None)
+    if params_memory is not None:
+      try:
+        params_memory.remove("TrafficLight")
+      except Exception:
+        pass
+    self.carrot_navi_traffic_active = False
+
+  def _clear_carrot_navi_control(self):
+    self.rear_camera_events = []
+    self.active_count = 0
+    self.active_sdi_count = 0
+    self.carrot_navi_has_control = False
+    self.carrot_navi_road_limit_valid = False
+    self.carrot_navi_off_route = False
+    self.carrot_navi_control = None
+    self._reset_carrot_navi_sequences("")
+
+    self.nSdiType = self.nSdiBlockType = self.nSdiPlusType = self.nSdiPlusBlockType = -1
+    self.nSdiSection = -1
+    self.nSdiSpeedLimit = self.nSdiDist = 0
+    self.nSdiBlockSpeed = self.nSdiBlockDist = 0
+    self.nSdiPlusSpeedLimit = self.nSdiPlusDist = 0
+    self.nSdiPlusBlockSpeed = self.nSdiPlusBlockDist = 0
+    self.xSpdType = -1
+    self.xSpdLimit = self.xSpdDist = 0
+
+    self.nTBTTurnType = self.nTBTTurnTypeNext = -1
+    self.nTBTDist = self.nTBTDistNext = 0
+    self.xTurnInfo = self.xTurnInfoNext = -1
+    self.xDistToTurn = self.xDistToTurnNext = 0
+    self.navType = self.navTypeNext = "invalid"
+    self.navModifier = self.navModifierNext = ""
+
+    self.nGoPosDist = self.nGoPosTime = 0
+    self.route_traffic_total = 0
+    self.route_traffic_segments = ()
+    self.last_update_gps_time_navi = 0
+    self._gps_sources().remove('external_navi')
+    self.szPosRoadName = ""
+    self._clear_carrot_navi_traffic()
+
+  def _apply_navdy_section(self, speed, preserve_distance):
+    hazard = ((speed.section_session_id, speed.section_speed_limit_kph, speed.section_remaining_distance_m)
+              if speed.section_active else None)
+    if hazard is None:
+      self.navdy_section_limit = self.navdy_section_distance = 0
+    else:
+      self.navdy_section_limit = speed.section_speed_limit_kph
+      if not preserve_distance or hazard != getattr(self, '_navdy_section_hazard', None):
+        self.navdy_section_distance = speed.section_remaining_distance_m
+    self._navdy_section_hazard = hazard
+
+  def _navdy_section_speed(self, delta_dist):
+    self.navdy_section_distance = max(0, getattr(self, 'navdy_section_distance', 0) - max(0, delta_dist))
+    if (self.accepts_navigation(NAVI_SOURCE_NAVDY) and self.external_navigation_active
+        and self.active_carrot > 0 and not self.carrot_navi_off_route
+        and self.autoNaviSpeedCtrlMode > 0 and self.navdy_section_distance > 0):
+      limit = getattr(self, 'navdy_section_limit', 0) * self.autoNaviSpeedSafetyFactor
+      if limit > 0:
+        return limit
+    return 250.0
+
+  def _apply_carrot_navi_speed(self, navi: CarrotNaviControl, *, preserve_navdy_distance=False):
+    speed = navi.speed
+    navdy_selected = self.accepts_navigation(NAVI_SOURCE_NAVDY)
+    if navdy_selected:
+      self._apply_navdy_section(speed, preserve_navdy_distance)
+    previous_distance = self.xSpdDist
+    self.carrot_navi_road_limit_valid = speed.road_limit_kph is not None
+    if speed.road_limit_kph is not None:
+      self.nRoadLimitSpeed = speed.road_limit_kph
+
+    if speed.section_active and not navdy_selected:
+      self.nSdiType = 4
+      self.nSdiSpeedLimit = speed.section_speed_limit_kph
+      self.nSdiDist = speed.section_remaining_distance_m
+      self.nSdiSection = 1
+      self.nSdiBlockType = 2
+      self.nSdiBlockSpeed = speed.section_speed_limit_kph
+      self.nSdiBlockDist = speed.section_remaining_distance_m
+    elif speed.sdi_present:
+      self.nSdiType = speed.sdi_type
+      self.nSdiSpeedLimit = speed.sdi_speed_limit_kph
+      self.nSdiDist = speed.sdi_distance_m
+      self.nSdiSection = speed.sdi_section_type
+      self.nSdiBlockType = speed.sdi_block_type
+      self.nSdiBlockSpeed = speed.sdi_block_speed_kph
+      self.nSdiBlockDist = speed.sdi_block_distance_m
+    else:
+      self.nSdiType = -1
+      self.nSdiSpeedLimit = 0
+      self.nSdiDist = 0
+      self.nSdiSection = -1
+      self.nSdiBlockType = -1
+      self.nSdiBlockSpeed = 0
+      self.nSdiBlockDist = 0
+
+    if speed.secondary_sdi_present:
+      self.nSdiPlusType = speed.secondary_sdi_type
+      self.nSdiPlusSpeedLimit = speed.secondary_sdi_speed_limit_kph
+      self.nSdiPlusDist = speed.secondary_sdi_distance_m
+      self.nSdiPlusBlockType = speed.secondary_sdi_block_type
+      self.nSdiPlusBlockSpeed = speed.secondary_sdi_block_speed_kph
+      self.nSdiPlusBlockDist = speed.secondary_sdi_block_distance_m
+    else:
+      self.nSdiPlusType = -1
+      self.nSdiPlusSpeedLimit = 0
+      self.nSdiPlusDist = 0
+      self.nSdiPlusBlockType = -1
+      self.nSdiPlusBlockSpeed = 0
+      self.nSdiPlusBlockDist = 0
+    self._update_sdi()
+
+    if self.accepts_navigation(NAVI_SOURCE_NAVDY):
+      # Compare only the hazard selected by the existing SDI policy. Road-limit
+      # and unselected-hazard updates must not replay its pre-motion distance.
+      hazard = None
+      if self.xSpdType >= 0 and self.xSpdLimit > 0:
+        if self.xSpdType == 22 and self.nSdiPlusType == 22:
+          hazard = ("secondary", self.nSdiPlusType, self.nSdiPlusSpeedLimit, self.nSdiPlusDist,
+                    self.nSdiPlusBlockType, self.nSdiPlusBlockSpeed, self.nSdiPlusBlockDist)
+        else:
+          hazard = ("primary", self.nSdiType, self.nSdiSpeedLimit, self.nSdiDist,
+                    self.nSdiSection, self.nSdiBlockType, self.nSdiBlockSpeed, self.nSdiBlockDist)
+        hazard = (hazard, self.xSpdType, self.xSpdLimit)
+      if preserve_navdy_distance and hazard is not None and hazard == getattr(self, "_navdy_speed_hazard", None):
+        self.xSpdDist = previous_distance
+      self._navdy_speed_hazard = hazard
+
+  def _apply_carrot_navi_vehicle(self, navi: CarrotNaviControl):
+    vehicle = navi.vehicle
+    if not vehicle.present:
+      self.last_update_gps_time_navi = 0
+      self._gps_sources().remove('external_navi')
+      self.szPosRoadName = ""
+      return
+
+    if vehicle.sequence == self.carrot_navi_vehicle_sequence:
+      return
+    now = time.monotonic()
+    # A cereal heartbeat is not a GPS fix. Retain the original local receipt
+    # time so dead reckoning and map freshness cannot restart on repeated data.
+    # Older senders without receipt metadata use their first observation only.
+    received = vehicle.received_mono_time_ns / 1e9 if vehicle.received_mono_time_ns else now
+    if received > now:
+      return
+    self.carrot_navi_vehicle_sequence = vehicle.sequence
+    self.vpPosPointLatNavi = vehicle.latitude
+    self.vpPosPointLonNavi = vehicle.longitude
+    self.nPosAngle = vehicle.heading_deg
+    self.nPosSpeed = vehicle.speed_kph
+    self.szPosRoadName = vehicle.road_name
+    self.last_update_gps_time_navi = self.last_calculate_gps_time = received
+    self._gps_sources().put('external_navi', vehicle.latitude, vehicle.longitude, vehicle.heading_deg,
+                            vehicle.speed_kph / 3.6, received)
+
+  def _apply_carrot_navi_route(self, navi: CarrotNaviControl):
+    route = navi.route
+    self.carrot_navi_route_sequence = route.sequence
+    self.nGoPosDist = route.remaining_distance_m if route.present else 0
+    self.nGoPosTime = route.remaining_time_sec if route.present else 0
+    self.route_traffic_total = route.traffic_total_m if route.present else 0
+    self.route_traffic_segments = route.traffic_segments if route.present else ()
+
+  def _apply_carrot_navi_traffic(self, navi: CarrotNaviControl):
+    traffic = navi.traffic
+    if not traffic.present or not traffic.visible or not traffic.lamp or traffic.remain_sec <= 0:
+      self._clear_carrot_navi_traffic()
+      return
+
+    params_memory = getattr(self, "params_memory", None)
+    if params_memory is None:
+      return
+    value = {
+      "distance": traffic.distance_m,
+      "lamp": traffic.lamp,
+      "remain": traffic.remain_sec,
+      "source": traffic.source,
+      "ts": time.monotonic(),
+    }
+    try:
+      params_memory.put_nonblocking("TrafficLight", json.dumps(value))
+      self.carrot_navi_traffic_active = True
+    except Exception:
+      pass
+
+  def _apply_carrot_navi_guidance(self, navi: CarrotNaviControl, force=False):
+    current = navi.current
+    current_changed = force or current.sequence != self.carrot_navi_current_sequence
+    next_guidance = navi.next
+    next_changed = force or next_guidance.sequence != self.carrot_navi_next_sequence
+    if not current_changed and not next_changed:
+      return
+
+    old_current_dist = self.xDistToTurn
+    old_next_dist = self.xDistToTurnNext
+    source = 'navdy' if self.accepts_navigation(NAVI_SOURCE_NAVDY) else 'network-v2'
+    if current_changed:
+      self.carrot_navi_current_sequence = current.sequence
+      self.model_guidance_current = (source, navi.session_id, current.received_mono_time_ns,
+                                     current.turn_type, current.distance_m) if current.present else None
+      self.nTBTDist = current.distance_m if current.present else 0
+      self.nTBTTurnType = current.turn_type if current.present else -1
+      self.szTBTMainText = current.main_text if current.present else ""
+      self.szNearDirName = current.near_direction if current.present else ""
+      self.szFarDirName = current.far_direction if current.present else ""
+
+    if next_changed:
+      self.carrot_navi_next_sequence = next_guidance.sequence
+      self.model_guidance_next = (source, navi.session_id, next_guidance.received_mono_time_ns,
+                                  next_guidance.turn_type, next_guidance.distance_m) if next_guidance.present else None
+      self.nTBTDistNext = next_guidance.distance_m if next_guidance.present else 0
+      self.nTBTTurnTypeNext = next_guidance.turn_type if next_guidance.present else -1
+      self.szTBTMainTextNext = next_guidance.main_text if next_guidance.present else ""
+
+    self._update_tbt()
+    if not current_changed:
+      self.xDistToTurn = old_current_dist
+    if not next_changed:
+      self.xDistToTurnNext = old_next_dist
+
+  def _update_carrot_navi(self, sm):
+    navdy_selected = self.accepts_navigation(NAVI_SOURCE_NAVDY)
+    service_active = not navdy_selected and sm.alive['carrotNavi'] and sm.valid['carrotNavi']
+    if service_active and not sm.updated['carrotNavi']:
+      if self.carrot_navi_active and self.carrot_navi_has_control:
+        self.active_count = 80
+        self.active_sdi_count = self.active_sdi_count_max
+      return self.carrot_navi_active and self.carrot_navi_has_control
+
+    navi = (self.navdy_navigation.read() if navdy_selected else
+            parse_carrot_navi_control(sm['carrotNavi']) if service_active else None)
+    was_active = self.carrot_navi_active
+    self.carrot_navi_active = navi is not None
+    if navi is None:
+      if was_active:
+        self._clear_carrot_navi_control()
+      return False
+
+    self.carrot_navi_control = navi
+    new_session = navi.session_id != self.carrot_navi_session_id
+    if navi.session_id != self.carrot_navi_session_id:
+      self._reset_carrot_navi_sequences(navi.session_id)
+    off_route_changed = navi.off_route != self.carrot_navi_off_route
+    self.carrot_navi_off_route = navi.off_route
+    self.carrot_navi_road_limit_valid = navi.speed.road_limit_kph is not None
+    self.carrot_navi_has_control = (
+      navi.speed.present or navi.current.present or navi.next.present
+      or navi.guidance_active or navi.route.present
+    )
+
+    if new_session or off_route_changed or navi.speed.sequence != self.carrot_navi_speed_sequence:
+      self.carrot_navi_speed_sequence = navi.speed.sequence
+      self._apply_carrot_navi_speed(navi, preserve_navdy_distance=navdy_selected and not new_session and not off_route_changed)
+
+    # Traffic Params use the service heartbeat; GPS only accepts new fixes.
+    self._apply_carrot_navi_vehicle(navi)
+    self._apply_carrot_navi_traffic(navi)
+    if new_session or navi.route.sequence != self.carrot_navi_route_sequence:
+      self._apply_carrot_navi_route(navi)
+
+    if navi.road_category is not None:
+      self.roadcate = navi.road_category
+    self._apply_carrot_navi_guidance(navi, force=new_session or off_route_changed)
+    if self.carrot_navi_has_control:
+      self.active_count = 80
+      self.active_sdi_count = self.active_sdi_count_max
+    return self.carrot_navi_has_control
+
+  def _gps_sources(self):
+    if not hasattr(self, 'gps_sources'):
+      self.gps_sources = GPSSources()
+    return self.gps_sources
+
+  def _update_gps(self, v_ego, sm, gps_service):
+    now = time.monotonic()
+    sources = self._gps_sources()
+    model_navigation = getattr(self, 'navdy_model_navigation', None)
+    if (self.accepts_navigation(NAVI_SOURCE_NAVDY) and model_navigation is not None
+        and 0 <= now - model_navigation.observed < 2. and model_navigation.position is not None):
+      sources.put('navdy_model', *model_navigation.position)
+    else:
+      sources.remove('navdy_model')
+    gps = sm[gps_service]
+    if sm.updated[gps_service]:
+      if sm.valid[gps_service] and gps.hasFix:
+        sources.put('device', gps.latitude, gps.longitude, gps.bearingDeg, gps.speed, sm.recv_time[gps_service])
+      else:
+        sources.remove('device')
+    if not sm.alive[gps_service] or not sm.valid[gps_service]:
+      sources.remove('device')
+    vehicle = sm['carState'].vehicleGps
+    ego_speed = v_ego if math.isfinite(v_ego) and 0 <= v_ego <= 90 else 0.
+    if sm.alive['carState'] and sm.valid['carState'] and vehicle.valid:
+      sources.put('vehicle', vehicle.latitude, vehicle.longitude,
+                  vehicle.headingDeg if vehicle.headingValid else None, ego_speed, vehicle.sampleMonoTime / 1e9)
+    else:
+      sources.remove('vehicle')
+    source, fix = sources.select(now)
+    if source != getattr(self, 'position_source', 'none'):
+      print(f'[GPS] source={source}', flush=True)
+    self.position_source = source
+    self.position_mono_time = now
+    self.position_heading_valid = fix is not None and fix.heading is not None
+    if fix is None:
+      self.vpPosPointLat = self.vpPosPointLon = 0.
+      self.last_calculate_gps_time = 0.
+      return float(self.nPosAngle)
+    self.last_calculate_gps_time = fix.stamp
+    if fix.heading is not None:
+      self.nPosAngle = fix.heading
+    self.nPosSpeed = fix.speed * 3.6
+    # Unknown direction permits a raw position, never guessed motion.
+    elapsed = now - fix.stamp if fix.heading is not None else 0.
+    self.vpPosPointLat, self.vpPosPointLon = self.estimate_position(
+      fix.latitude, fix.longitude, ego_speed, self.nPosAngle, elapsed)
+    return float(self.nPosAngle)
+
+
+  def estimate_position(self, lat, lon, speed, angle, dt):
+    R = 6371000
+    angle_rad = math.radians(angle)
+    delta_d = speed * dt
+    delta_lat = delta_d * math.cos(angle_rad) / R
+    new_lat = lat + math.degrees(delta_lat)
+    delta_lon = delta_d * math.sin(angle_rad) / (R * math.cos(math.radians(lat)))
+    new_lon = lon + math.degrees(delta_lon)
+
+    return new_lat, new_lon
+
+  def update_auto_turn(self, v_ego_kph, sm, x_turn_info, x_dist_to_turn, check_steer=False):
+    turn_speed = self.autoTurnControlSpeedTurn
+    fork_speed = self.nRoadLimitSpeed
+    stop_speed = 1
+    turn_dist_for_speed = self.autoTurnControlTurnEnd * turn_speed / 3.6 # 5
+    fork_dist_for_speed = self.autoTurnControlTurnEnd * fork_speed / 3.6 # 5
+    stop_dist_for_speed = 5
+    start_fork_dist = np.interp(self.nRoadLimitSpeed, [30, 50, 100], [160, 200, 350])
+    start_turn_dist = np.interp(self.nTBTNextRoadWidth, [5, 10], [43, 60])
+    turn_info_mapping = {
+        1: {"type": "turn left", "speed": turn_speed, "dist": turn_dist_for_speed, "start": start_fork_dist},
+        2: {"type": "turn right", "speed": turn_speed, "dist": turn_dist_for_speed, "start": start_fork_dist},
+        5: {"type": "straight", "speed": turn_speed, "dist": turn_dist_for_speed, "start": start_turn_dist},
+        3: {"type": "fork left", "speed": fork_speed, "dist": fork_dist_for_speed, "start": start_fork_dist},
+        4: {"type": "fork right", "speed": fork_speed, "dist": fork_dist_for_speed, "start": start_fork_dist},
+        6: {"type": "straight", "speed": fork_speed, "dist": fork_dist_for_speed, "start": start_fork_dist},
+        7: {"type": "straight", "speed": stop_speed, "dist": stop_dist_for_speed, "start": 1000},
+        8: {"type": "straight", "speed": stop_speed, "dist": stop_dist_for_speed, "start": 1000},
+    }
+
+    default_mapping = {"type": "none", "speed": 0, "dist": 0, "start": 1000}
+
+    mapping = turn_info_mapping.get(x_turn_info, default_mapping)
+
+    atc_type = mapping["type"]
+    atc_speed = mapping["speed"]
+    atc_dist = mapping["dist"]
+    atc_start_dist = mapping["start"]
+
+    if x_dist_to_turn > atc_start_dist:
+      atc_type += " prepare"
+      if check_steer:
+        self.atc_activate_count = min(0, self.atc_activate_count - 1)
+    else:
+      if check_steer:
+        self.atc_activate_count = max(0, self.atc_activate_count + 1)
+      if atc_type in ["turn left", "turn right"] and x_dist_to_turn > start_turn_dist:
+        atc_type = "atc left" if atc_type == "turn left" else "atc right"
+
+    if self.autoTurnMapChange > 0 and check_steer:
+      #print(f"x_dist_to_turn: {x_dist_to_turn}, atc_start_dist: {atc_start_dist}")
+      #print(f"atc_activate_count: {self.atc_activate_count}")
+      if self.atc_activate_count == 2:
+        self.carrotCmdIndex += 100
+        self.carrotCmd = "DISPLAY";
+        self.carrotArg = "MAP";
+      elif self.atc_activate_count == -50:
+        self.carrotCmdIndex += 100
+        self.carrotCmd = "DISPLAY";
+        self.carrotArg = "ROAD";
+
+    if check_steer:
+      if 0 <= x_dist_to_turn < atc_start_dist and atc_type in ["fork left", "fork right"]:
+        if not self.atc_paused:
+          steering_pressed = sm["carState"].steeringPressed
+          steering_torque = sm["carState"].steeringTorque
+          if steering_pressed and steering_torque < 0 and atc_type in ["fork left", "atc left"]:
+            self.atc_paused = True
+          elif steering_pressed and steering_torque > 0 and atc_type in ["fork right", "atc right"]:
+            self.atc_paused = True
+      else:
+        self.atc_paused = False
+
+      if self.atc_paused:
+        atc_type += " canceled"
+
+    atc_desired = 250
+    if atc_speed > 0 and x_dist_to_turn > 0:
+      decel = self.autoNaviSpeedDecelRate
+      safe_sec = 2.0
+      atc_desired = min(atc_desired, self.calculate_current_speed(x_dist_to_turn - atc_dist, atc_speed, safe_sec, decel))
+
+
+    return atc_desired, atc_type, atc_speed, atc_dist
+
+  def accepts_navigation(self, source):
+    return self.navi_source == source
+
+  def update_nav_instruction(self, sm):
+    if not self.accepts_navigation(NAVI_SOURCE_NETWORK) or self._external_navigation_connected():
+      return
+    if sm.alive['navInstruction'] and sm.valid['navInstruction']:
+      msg_nav = sm['navInstruction']
+
+      self.nGoPosDist = int(msg_nav.distanceRemaining)
+      self.nGoPosTime = int(msg_nav.timeRemaining)
+      if self.active_kisa_count <= 0 and msg_nav.speedLimit > 0:
+        self.nRoadLimitSpeed = max(30, round(msg_nav.speedLimit * CV.MS_TO_KPH))
+      self.xDistToTurn = int(msg_nav.maneuverDistance)
+      self.szTBTMainText = msg_nav.maneuverPrimaryText
+      self.xTurnInfo = -1
+      for key, value in nav_type_mapping.items():
+        if value[0] == msg_nav.maneuverType and value[1] == msg_nav.maneuverModifier:
+          self.xTurnInfo = value[2]
+          break
+
+      self.debugText = f"{self.nRoadLimitSpeed if self.is_metric else self.nRoadLimitSpeed * CV.KPH_TO_MPH:.0f},{msg_nav.maneuverType},{msg_nav.maneuverModifier} "
+      #print(msg_nav)
+      #print(f"navInstruction: {self.xTurnInfo}, {self.xDistToTurn}, {self.szTBTMainText}")
+
+  def update_kisa(self, data):
+    if not self.accepts_navigation(NAVI_SOURCE_NETWORK):
+      return
+    self.active_kisa_count = 100
+    if "kisawazecurrentspd" in data:
+      pass
+    if "kisawazeroadspdlimit" in data:
+      road_limit_speed = data["kisawazeroadspdlimit"]
+      self.legacy_road_limit_received_at = time.monotonic()
+      self.legacy_road_limit_kph = 0.0
+      if road_limit_speed > 0:
+        print(f"kisawazeroadspdlimit: {road_limit_speed} km/h")
+        if not self.is_metric:
+          road_limit_speed *= CV.MPH_TO_KPH
+        self.nRoadLimitSpeed = road_limit_speed
+        self.legacy_road_limit_kph = road_limit_speed
+    if "kisawazealert" in data:
+      pass
+    if "kisawazeendalert" in data:
+      pass
+    if "kisawazeroadname" in data:
+      print(f"kisawazeroadname: {data['kisawazeroadname']}")
+      self.szPosRoadName = data["kisawazeroadname"]
+    if "kisawazereportid" in data and "kisawazealertdist" in data:
+      id_str = data["kisawazereportid"]
+      dist_str = data["kisawazealertdist"].lower()
+      import re
+      match = re.search(r'(\d+)', dist_str)
+      distance = int(match.group(1)) if match else 0
+      if not self.is_metric:
+        distance = int(distance * 0.3048)
+      print(f"{id_str}: {distance} m")
+      xSpdType = -1
+      if 'camera' in id_str:
+        xSpdType = 101    # 101: waze speed cam, 100: police
+      elif 'police' in id_str:
+        xSpdType = 100
+
+      if xSpdType >= 0:
+        self.xSpdLimit = self.nRoadLimitSpeed * self.autoNaviSpeedSafetyFactor if self.nRoadLimitSpeed > 0 else 0
+        self.xSpdDist = distance
+        self.xSpdType = xSpdType
+
+  def update_navi(self, remote_ip, sm, pm, vturn_speed, coords, distances, route_speed, gps_service,
+                  *, vturn_target=0.0, route_target=0.0):
+
+    self.debugText = ""
+    self.update_params()
+    carrot_navi_active = self._update_carrot_navi(sm)
+    model_route = self._publish_model_route(sm, pm)
+    if sm.alive['carState'] and sm.alive['selfdriveState']:
+      CS = sm['carState']
+      v_ego = CS.vEgo
+      v_ego_kph = v_ego * 3.6
+      distanceTraveled = sm['selfdriveState'].distanceTraveled
+      delta_dist = distanceTraveled - self.totalDistance
+      self.totalDistance = distanceTraveled
+    else:
+      v_ego = v_ego_kph = 0
+      delta_dist = 0
+      CS = None
+
+    #self.bearing = self.nPosAngle #self._update_gps(v_ego, sm)
+    self.bearing = self._update_gps(v_ego, sm, gps_service)
+
+    self.xSpdDist = max(self.xSpdDist - delta_dist, -1000)
+    self.xDistToTurn = self.xDistToTurn - delta_dist
+    self.xDistToTurnNext = self.xDistToTurnNext - delta_dist
+    self.active_count = max(self.active_count - 1, 0)
+    self.active_sdi_count = max(self.active_sdi_count - 1, 0)
+    self.active_kisa_count = max(self.active_kisa_count - 1, 0)
+    navigation_source_changed = self._update_navigation_source()
+    if not self.external_navigation_active and CS is not None and CS.speedLimit > 0:
+      self.nRoadLimitSpeed = CS.speedLimit
+    road_speed_limit_changed = self.nRoadLimitSpeed != self.nRoadLimitSpeed_last
+    self.nRoadLimitSpeed_last = self.nRoadLimitSpeed
+    if self.active_kisa_count > 0:
+      self.active_carrot = 2
+
+    elif self.active_count > 0:
+      self.active_carrot = 2 if self.active_sdi_count > 0 else 1
+    else:
+      self.active_carrot = 0
+
+    limit_speed = 200
+    road_limit_valid = self.carrot_navi_road_limit_valid if self.accepts_navigation(NAVI_SOURCE_NAVDY) else (
+      not carrot_navi_active or self.carrot_navi_road_limit_valid)
+    if self.autoRoadSpeedLimitOffset >= 0 and self.active_carrot>=2 and road_limit_valid:
+      if self.nRoadLimitSpeed >= 30:
+        road_speed_limit_offset = self.autoRoadSpeedLimitOffset
+        if not self.is_metric:
+          road_speed_limit_offset *= CV.KPH_TO_MPH
+        limit_speed = self.nRoadLimitSpeed + road_speed_limit_offset
+
+    if self.active_carrot <= 1:
+      self.xSpdType = self.navType = self.xTurnInfo = self.xTurnInfoNext = -1
+      self.nSdiType = self.nSdiBlockType = self.nSdiPlusBlockType = -1
+      self.nTBTTurnType = self.nTBTTurnTypeNext = -1
+      self.roadcate = 8
+      self.nGoPosDist = 0
+    if self.active_carrot <= 1 or self.active_kisa_count > 0:
+      self.update_nav_instruction(sm)
+
+    rear_camera_speed, rear_camera_remaining = self._rear_camera_speed(CS, delta_dist)
+    if self.xSpdType < 0 or (self.xSpdType not in [100,101] and self.xSpdDist <= 0) or (self.xSpdType in [100,101] and self.xSpdDist < -250):
+      self.xSpdType = -1
+      self.xSpdDist = self.xSpdLimit = 0
+    if self.xTurnInfo < 0 or self.xDistToTurn < -50:
+      if self.xDistToTurn > 0:
+        self.xDistToTurn = 0
+      self.xTurnInfo = -1
+      self.xDistToTurnNext = 0
+      self.xTurnInfoNext = -1
+
+    sdi_speed = 250
+    vehicle_camera_speed = 250
+    vehicle_speed_camera_active = CS is not None and self._vehicle_speed_camera_enabled(CS)
+    vehicle_bump_active = CS is not None and self._vehicle_speed_bump_enabled(CS)
+    vehicle_bump_speed = 250
+    vehicle_school_zone_speed = 250
+    vehicle_section_zone_speed = 250
+    ### 과속카메라, 사고방지턱
+    legacy_sdi_active = (self.external_navigation_active and
+                         self.xSpdLimit > 0 and (self.xSpdDist > 0 or self.xSpdType in [100, 101]) and
+                         self.active_carrot > 0 and
+                         (self.xSpdType != 22 or self._speed_bump_control_active(self.xSpdDist)))
+    if legacy_sdi_active:
+      safe_sec = self.autoNaviSpeedBumpTime if self.xSpdType == 22 else self.autoNaviSpeedCtrlEnd
+      decel = self.autoNaviSpeedDecelRate
+      sdi_speed = min(sdi_speed, self.calculate_current_speed(self.xSpdDist, self.xSpdLimit, safe_sec, decel))
+      self.active_carrot = 5 if self.xSpdType == 22 else 3
+      if self.xSpdType == 4 or (self.xSpdType in [100, 101] and self.xSpdDist <= 0):
+        sdi_speed = self.xSpdLimit
+        self.active_carrot = 4
+    if vehicle_speed_camera_active:
+      vehicle_camera_speed = self.calculate_current_speed(CS.speedLimitDistance,
+                                                          CS.speedLimit * self.autoNaviSpeedSafetyFactor,
+                                                          self.autoNaviSpeedCtrlEnd,
+                                                          self.autoNaviSpeedDecelRate)
+      #self.active_carrot = 6
+
+    if vehicle_bump_active:
+      vehicle_bump_speed = self.calculate_current_speed(CS.speedBumpDistance,
+                                                        self.autoNaviSpeedBumpSpeed,
+                                                        self.autoNaviSpeedBumpTime,
+                                                        self.autoNaviSpeedDecelRate)
+      self.active_carrot = 5
+
+    if CS is not None:
+      vehicle_school_zone_speed = self._vehicle_school_zone_speed(CS)
+      if vehicle_school_zone_speed < 250:
+        self.active_carrot = 6
+      if self._vehicle_section_zone_enabled(CS):
+        vehicle_section_zone_speed = CS.vehicleNaviSpeed * self.autoNaviSpeedSafetyFactor
+        self.active_carrot = 4
+
+    #print(f"sdi_speed: {sdi_speed}, vehicle_speed_camera_active: {vehicle_speed_camera_active}, xSpdType: {self.xSpdType}, xSpdDist: {self.xSpdDist}, active_carrot: {self.active_carrot}, v_ego_kph: {v_ego_kph}, nRoadLimitSpeed: {self.nRoadLimitSpeed}")
+    ### TBT 속도제어
+    atc_desired, self.atcType, self.atcSpeed, self.atcDist = self.update_auto_turn(v_ego*3.6, sm, self.xTurnInfo, self.xDistToTurn, True)
+    atc_desired_next, _, atc_speed_next, _ = self.update_auto_turn(v_ego*3.6, sm, self.xTurnInfoNext, self.xDistToTurnNext, False)
+
+    if self.nSdiType  >= 0: # or self.active_carrot > 0:
+      pass
+      # self.debugText = (
+      #   f"Atc:{atc_desired:.1f}," +
+      #   f"{self.xTurnInfo}:{self.xDistToTurn:.1f}, " +
+      #   f"I({self.nTBTNextRoadWidth},{self.roadcate}) " +
+      #   f"Atc2:{atc_desired_next:.1f}," +
+      #   f"{self.xTurnInfoNext},{self.xDistToTurnNext:.1f}"
+      # )
+      #self.debugText = "" #f" {self.nSdiType}/{self.nSdiSpeedLimit}/{self.nSdiDist},BLOCK:{self.nSdiBlockType}/{self.nSdiBlockSpeed}/{self.nSdiBlockDist}, PLUS:{self.nSdiPlusType}/{self.nSdiPlusSpeedLimit}/{self.nSdiPlusDist}"
+    #elif self.nGoPosDist > 0 and self.active_carrot > 1:
+    #  self.debugText = " 목적지:{:.1f}km/{:.1f}분 남음".format(self.nGoPosDist/1000., self.nGoPosTime / 60)
+    else:
+      #self.debugText = ""
+      pass
+
+    if self.autoTurnControl not in [2, 3]:    # auto turn speed control
+      atc_desired = atc_desired_next = 250
+
+    if self.autoTurnControl not in [1,2]:    # auto turn control
+      self.atcType = "none"
+
+
+    rear_camera_holding = rear_camera_speed < 250 and rear_camera_speed <= sdi_speed
+    sdi_speed = min(sdi_speed, rear_camera_speed)
+    if rear_camera_holding:
+      self.active_carrot = 3
+    section_speed = self._navdy_section_speed(delta_dist)
+    section_selected = section_speed < 250 and section_speed <= sdi_speed
+    if section_selected:
+      self.active_carrot = 4
+    sdi_source = ("cam" if rear_camera_holding else "bump" if self.xSpdType == 22 else "section" if self.xSpdType == 4 else
+                  "police" if self.xSpdType == 100 else
+                  "waze" if self.xSpdType == 101 else "cam")
+    speed_n_sources = [
+      (atc_desired, "atc"),
+      (atc_desired_next, "atc2"),
+      (sdi_speed, sdi_source),
+      (vehicle_camera_speed, "hda"),
+      (vehicle_bump_speed, "hda_bump"),
+      (vehicle_school_zone_speed, "school"),
+      (vehicle_section_zone_speed, "hda_section"),
+      (limit_speed, "road"),
+    ]
+    if section_speed < 250:
+      speed_n_sources.insert(0, (section_speed, "section"))
+    if self.turnSpeedControlMode in [1,2]:
+      speed_n_sources.append((max(abs(vturn_speed), self.autoCurveSpeedLowerLimit), "vturn"))
+
+    route_speed = max(route_speed * self.mapTurnSpeedFactor, self.autoCurveSpeedLowerLimit)
+    if self.turnSpeedControlMode == 2:
+      if -500 < self.xDistToTurn < 500:
+        speed_n_sources.append((route_speed, "route"))
+    elif self.turnSpeedControlMode in [3, 4]:
+      speed_n_sources.append((route_speed, "route"))
+      #speed_n_sources.append((self.calculate_current_speed(dist, speed * self.mapTurnSpeedFactor, 0, 1.2), "route"))
+
+    # This extra payload describes existing calculations; control still selects
+    # the unchanged speed_n_sources below, including the existing gas override.
+    display_targets = {}
+    if self.autoTurnControl in [2, 3]:
+      if 0 < self.atcSpeed < 200 and self.xDistToTurn > 0:
+        display_targets['atc'] = self.atcSpeed
+      if 0 < atc_speed_next < 200 and self.xDistToTurnNext > 0:
+        display_targets['atc2'] = atc_speed_next
+    if legacy_sdi_active or rear_camera_holding:
+      display_targets[sdi_source] = rear_camera_speed if rear_camera_holding else self.xSpdLimit
+    if section_speed < 250:
+      display_targets['section'] = section_speed
+    if vehicle_speed_camera_active:
+      display_targets['hda'] = CS.speedLimit * self.autoNaviSpeedSafetyFactor
+    if vehicle_bump_active:
+      display_targets['hda_bump'] = self.autoNaviSpeedBumpSpeed
+    if vehicle_school_zone_speed < 250:
+      display_targets['school'] = vehicle_school_zone_speed
+    if vehicle_section_zone_speed < 250:
+      display_targets['hda_section'] = vehicle_section_zone_speed
+    if limit_speed < 200:
+      display_targets['road'] = limit_speed
+    display_targets['vturn'] = max(vturn_target, self.autoCurveSpeedLowerLimit) if vturn_target > 0 else 0.0
+    display_targets['route'] = max(route_target * self.mapTurnSpeedFactor, self.autoCurveSpeedLowerLimit) if route_target > 0 else 0.0
+    display_distances = {'atc': self.xDistToTurn, 'atc2': self.xDistToTurnNext,
+                         sdi_source: rear_camera_remaining if rear_camera_holding else max(0.0, self.xSpdDist)}
+    if section_speed < 250:
+      display_distances['section'] = self.navdy_section_distance
+    if CS is not None:
+      display_distances.update(hda=CS.speedLimitDistance, hda_bump=CS.speedBumpDistance)
+    display_candidates = deceleration_candidates(speed_n_sources, display_targets, display_distances)
+
+    desired_speed, source = min(speed_n_sources, key=lambda x: x[0])
+
+    if CS is not None:
+      desired_speed, source = self._apply_speed_source_gas_floor(
+        CS, desired_speed, source, v_ego_kph, road_speed_limit_changed,
+      )
+
+      self.debugText += f"route={route_speed:.1f}"#f"desired={desired_speed:.1f},{source},g={self.gas_override_speed:.0f}"
+
+    left_spd_sec = 100
+    left_tbt_sec = 100
+    speed_countdown_rearmed = False
+    turn_countdown_rearmed = False
+    if self.autoNaviCountDownMode > 0:
+      speed_countdown_distance = self.navdy_section_distance if section_selected else self._speed_countdown_distance(CS)
+      left_spd_sec, self.speed_countdown_distance_last, speed_countdown_rearmed = self._countdown_channel(
+        speed_countdown_distance, self.speed_countdown_distance_last, self.left_spd_sec, v_ego,
+      )
+      left_tbt_sec, self.turn_countdown_distance_last, turn_countdown_rearmed = self._countdown_channel(
+        self.xDistToTurn, self.turn_countdown_distance_last, self.left_tbt_sec, v_ego,
+      )
+    else:
+      self.speed_countdown_distance_last = 0.0
+      self.turn_countdown_distance_last = 0.0
+
+    self.left_spd_sec = left_spd_sec
+    self.left_tbt_sec = left_tbt_sec
+
+    left_sec = 100 if navigation_source_changed or speed_countdown_rearmed or turn_countdown_rearmed else min(left_spd_sec, left_tbt_sec)
+    self._update_countdown_alert(left_sec, source, v_ego_kph)
+
+    self._update_cmd()
+    navdy_selected = self.accepts_navigation(NAVI_SOURCE_NAVDY)
+    # Zero is unknown, not a speed target. Do not publish the last Navdy limit
+    # after its own component expires while TBT or camera data is still fresh.
+    published_road_limit = 0 if navdy_selected and not self.carrot_navi_road_limit_valid else int(self.nRoadLimitSpeed)
+    msg = messaging.new_message('carrotMan')
+    msg.valid = True
+    msg.carrotMan.activeCarrot = self.active_carrot
+    msg.carrotMan.nRoadLimitSpeed = published_road_limit
+    msg.carrotMan.roadLimitSpeedValid = self._road_limit_speed_valid() and published_road_limit > 0
+    msg.carrotMan.remote = remote_ip
+    msg.carrotMan.externalNavigationSource = 'navdy' if navdy_selected else 'network'
+    msg.carrotMan.externalNavigationActive = (
+      self.carrot_navi_active and self.carrot_navi_has_control if navdy_selected else self.external_navigation_active)
+    msg.carrotMan.routeTrafficTotalMeters = self.route_traffic_total
+    msg.carrotMan.routeTrafficSegments = [{'endM': end, 'status': status} for end, status in self.route_traffic_segments]
+    msg.carrotMan.xSpdType = 4 if section_selected else int(self.xSpdType)
+    msg.carrotMan.xSpdLimit = int(section_speed if section_selected else self.xSpdLimit)
+    msg.carrotMan.xSpdDist = int(self.navdy_section_distance if section_selected else self.xSpdDist)
+    msg.carrotMan.xSpdCountDown = int(left_spd_sec)
+    msg.carrotMan.xTurnInfo = int(self.xTurnInfo)
+    msg.carrotMan.xDistToTurn = int(self.xDistToTurn)
+    msg.carrotMan.xTurnCountDown = int(left_tbt_sec)
+    msg.carrotMan.atcType = self.atcType
+    msg.carrotMan.vTurnSpeed = int(vturn_speed)
+    msg.carrotMan.szPosRoadName = f"{self.szPosRoadName} {self.debugText}".strip()
+    msg.carrotMan.szTBTMainText = self.szTBTMainText
+    msg.carrotMan.desiredSpeed = int(desired_speed)
+    msg.carrotMan.desiredSource = source
+    msg.carrotMan.decelerationCandidates = display_candidates
+    vehicle_navi_active, vehicle_navi_speed, vehicle_navi_section_active = self._vehicle_navigation_display(CS)
+    msg.carrotMan.vehicleNaviActive = vehicle_navi_active
+    msg.carrotMan.vehicleNaviSpeed = vehicle_navi_speed
+    msg.carrotMan.vehicleNaviSectionActive = vehicle_navi_section_active
+    msg.carrotMan.vehicleNaviAvailable = bool(getattr(CS, "vehicleNaviAvailable", False))
+    msg.carrotMan.carrotCmdIndex = int(self.carrotCmdIndex)
+    msg.carrotMan.carrotCmd = self.carrotCmd
+    msg.carrotMan.carrotArg = self.carrotArg
+    msg.carrotMan.trafficState = self.traffic_state
+
+    msg.carrotMan.xPosSpeed = float(v_ego_kph) #float(self.nPosSpeed)
+    msg.carrotMan.xPosAngle = float(self.bearing)
+    msg.carrotMan.xPosLat = float(self.vpPosPointLat)
+    msg.carrotMan.positionFixMonoTime = max(0, int(self.last_calculate_gps_time * 1e9))
+    msg.carrotMan.positionMonoTime = max(0, int(self.position_mono_time * 1e9))
+    msg.carrotMan.positionSource = getattr(self, 'position_source', 'none')
+    msg.carrotMan.positionHeadingValid = getattr(self, 'position_heading_valid', False)
+    msg.carrotMan.xPosLon = float(self.vpPosPointLon)
+
+    msg.carrotMan.nGoPosDist = self.nGoPosDist
+    msg.carrotMan.nGoPosTime = self.nGoPosTime
+    description_type = 4 if section_selected else 22 if self.xSpdType == 22 else self.nSdiType
+    msg.carrotMan.szSdiDescr = self._get_sdi_descr(-1 if description_type == 0 and self.nSdiDist == 0 else description_type)
+    if rear_camera_holding and source == "cam":
+      label = {"ko": "후면단속 속도 유지", "en": "Rear camera speed hold", "zh": "后向测速限速保持"}.get(self.lang, "Rear camera speed hold")
+      msg.carrotMan.szSdiDescr = f"{label} {math.ceil(rear_camera_remaining)}m"
+
+    #coords_str = ";".join([f"{x},{y}" for x, y in coords])
+    coords_str = ";".join([f"{x:.2f},{y:.2f},{d:.2f}" for (x, y), d in zip(coords, distances, strict=False)])
+    msg.carrotMan.naviPaths = coords_str
+
+    msg.carrotMan.leftSec = int(self.carrot_left_sec)
+    pm.send('carrotMan', msg)
+
+    inst = messaging.new_message('navInstructionCarrot', valid=False)
+    if self.active_carrot > 1 and self.active_kisa_count <= 0:
+      inst.valid = True
+
+      instruction = inst.navInstructionCarrot
+      instruction.distanceRemaining = self.nGoPosDist
+      instruction.timeRemaining = self.nGoPosTime
+      instruction.speedLimit = published_road_limit / 3.6 if published_road_limit > 0 else 0
+      instruction.maneuverDistance = float(self.nTBTDist)
+      instruction.maneuverSecondaryText = self.szNearDirName
+      if self.szFarDirName and len(self.szFarDirName):
+        instruction.maneuverSecondaryText += "[{}]".format(self.szFarDirName)
+      instruction.maneuverPrimaryText = self.szTBTMainText
+      instruction.timeRemainingTypical = self.nGoPosTime
+
+      navType, navModifier, xTurnInfo1 = "invalid", "", -1
+      if self.nTBTTurnType in nav_type_mapping:
+        navType, navModifier, xTurnInfo1 = nav_type_mapping[self.nTBTTurnType]
+      navTypeNext, navModifierNext, xTurnInfoNext = "invalid", "", -1
+      if self.nTBTTurnTypeNext in nav_type_mapping:
+        navTypeNext, navModifierNext, xTurnInfoNext = nav_type_mapping[self.nTBTTurnTypeNext]
+
+      instruction.maneuverType = navType
+      instruction.maneuverModifier = navModifier
+
+      maneuvers = []
+      if self.nTBTTurnType >= 0:
+        maneuver = {}
+        maneuver['distance'] = float(self.xDistToTurn)
+        maneuver['type'] = navType
+        maneuver['modifier'] = navModifier
+        maneuvers.append(maneuver)
+        if self.nTBTDistNext >= self.nTBTDist:
+          maneuver = {}
+          maneuver['distance'] = float(self.nTBTDistNext)
+          maneuver['type'] = navTypeNext
+          maneuver['modifier'] = navModifierNext
+          maneuvers.append(maneuver)
+
+      instruction.allManeuvers = maneuvers
+    elif (self.accepts_navigation(NAVI_SOURCE_NETWORK) and not self._external_navigation_connected()
+          and sm.alive['navInstruction'] and sm.valid['navInstruction']):
+      inst.valid = True
+      inst.navInstructionCarrot = sm['navInstruction']
+
+    self._stamp_model_instruction(inst, model_route, v_ego)
+    pm.send('navInstructionCarrot', inst)
+
+  def _stamp_model_instruction(self, inst, model_route, speed=0.):
+    from openpilot.selfdrive.navigation.helpers import finite_number, valhalla_type
+    from openpilot.selfdrive.navigation.provenance import TBT_MAX_AGE
+
+    if self.accepts_navigation(NAVI_SOURCE_NAVDY):
+      instruction = inst.navInstructionCarrot
+      instruction.carrotRouteId = instruction.instructionMonoTime = instruction.distanceMonoTime = 0
+      instruction.navigationSource = ''
+      state = getattr(self, 'navdy_model_navigation', None)
+      now = time.monotonic()
+      if (state is not None and model_route.generation and model_route.source == 'navdy'
+          and model_route.session == state.session and 0 <= now - state.observed < TBT_MAX_AGE
+          and finite_number(speed) and speed >= 0 and state.distance >= speed * (now - state.observed)):
+        inst.valid = True
+        instruction.carrotRouteId = model_route.generation
+        instruction.navigationSource = 'navdy'
+        instruction.instructionMonoTime = instruction.distanceMonoTime = int(state.observed * 1e9)
+        instruction.allManeuvers = [{'distance': state.distance, 'type': state.maneuver_type, 'modifier': state.modifier}]
+      return
+
+    if not self._external_navigation_connected():
+      return
+    instruction = inst.navInstructionCarrot
+    instruction.carrotRouteId = instruction.instructionMonoTime = instruction.distanceMonoTime = 0
+    instruction.navigationSource = ''
+    if not inst.valid or not model_route.generation or not finite_number(speed) or speed < 0:
+      return
+    now_ns = time.monotonic_ns()
+    # Shared display/control fields can be updated by either network protocol.
+    # Model inputs use immutable, independently timed observations instead.
+    current = getattr(self, 'model_guidance_current', None)
+    upcoming = getattr(self, 'model_guidance_next', None)
+    for item in (current, upcoming):
+      if item is None:
+        return
+      source, session, observed, turn_type, distance = item
+      if (source != model_route.source or session != model_route.session
+          or observed <= 0 or observed < model_route.observed
+          or not 0 <= now_ns - observed < int(TBT_MAX_AGE * 1e9)
+          or not finite_number(distance) or distance < 0):
+        return
+      maneuver_type, modifier, _ = nav_type_mapping.get(turn_type, ('invalid', '', -1))
+      command = valhalla_type(maneuver_type, modifier)
+      if command is None:
+        return
+      if command <= 6 or distance - speed * ((now_ns - observed) / 1e9) < 0:
+        continue
+      # The wire format has one clock for all maneuvers. Emit only the selected
+      # model maneuver, with its own original distance; MapInput projects it.
+      instruction.allManeuvers = [{'distance': float(distance), 'type': maneuver_type, 'modifier': modifier}]
+      instruction.carrotRouteId = model_route.generation
+      instruction.navigationSource = source
+      instruction.instructionMonoTime = instruction.distanceMonoTime = observed
+      return
+
+  def _publish_model_route(self, sm, pm):
+    if not hasattr(self, 'model_routes'):
+      self.model_routes = RoutePublication()
+    self.navdy_model_navigation = None
+    if self.accepts_navigation(NAVI_SOURCE_NAVDY):
+      state = self.navdy_navigation.model_read()
+      self.navdy_model_navigation = state
+      route_key = (state.identity, state.points) if state else None
+      if route_key != getattr(self, 'navdy_model_route_key', None) or state is None:
+        self.model_routes.offer('navdy', [{'latitude': lat, 'longitude': lon} for lat, lon in state.points] if state else (),
+                                session=state.session if state else '', observed=int(state.observed * 1e9) if state else 0)
+      self.navdy_model_route_key = route_key
+      return self.model_routes.publish('navdy', pm)
+    self.navdy_model_route_key = None
+    if sm.updated['navRouteNavd'] and self.accepts_navigation(NAVI_SOURCE_NETWORK):
+      route = sm['navRouteNavd']
+      self.model_routes.offer('mapbox', route.coordinates if sm.valid['navRouteNavd'] else (),
+                              generation=route.carrotRouteId)
+    navi = self.carrot_navi_control if self.carrot_navi_active else None
+    if navi is not None:
+      source = 'navdy' if self.accepts_navigation(NAVI_SOURCE_NAVDY) else 'network-v2'
+      points = navi.route.polyline if navi.route.present and not navi.off_route else ()
+      self.model_routes.offer(source, [{'latitude': lat, 'longitude': lon} for lat, lon in points],
+                              session=navi.session_id, observed=navi.route.received_mono_time_ns)
+    elif self.accepts_navigation(NAVI_SOURCE_NAVDY):
+      source = 'navdy'
+      self.model_routes.offer(source, ())
+    else:
+      source = 'network-v1' if self._external_navigation_connected() else 'mapbox'
+    return self.model_routes.publish(source, pm)
+
+  def _update_system_time(self, epoch_time_remote, timezone_remote):
+    epoch_time = int(time.time())
+    if epoch_time_remote > 0:
+      epoch_time_offset = epoch_time_remote - epoch_time
+      print(f"epoch_time_offset = {epoch_time_offset}")
+      if abs(epoch_time_offset) > 60:
+        os.system(f"sudo timedatectl set-timezone {timezone_remote}")
+        formatted_time = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(epoch_time_remote))
+        print(f"Setting system time to: {formatted_time}")
+        os.system(f'sudo date -s "{formatted_time}"')
+
+  def set_time(self, epoch_time, timezone):
+    import datetime
+    new_time = datetime.datetime.utcfromtimestamp(epoch_time)
+    localtime_path = "/data/etc/localtime"
+
+    no_timezone = False
+    try:
+      if os.path.getsize(localtime_path) == 0:
+        no_timezone = True
+    except (FileNotFoundError, OSError):
+      no_timezone = True
+
+    diff = datetime.datetime.utcnow() - new_time
+    if abs(diff) < datetime.timedelta(seconds=10) and not no_timezone:
+      #print(f"Time diff too small: {diff}")
+      return
+
+    print(f"Setting time to {new_time}, diff={diff}")
+    zoneinfo_path = f"/usr/share/zoneinfo/{timezone}"
+    if os.path.exists(localtime_path) or os.path.islink(localtime_path):
+        try:
+            subprocess.run(["sudo", "rm", "-f", localtime_path], check=True)
+            print(f"Removed existing file or link: {localtime_path}")
+        except subprocess.CalledProcessError as e:
+            print(f"Error removing {localtime_path}: {e}")
+            return
+    try:
+        subprocess.run(["sudo", "ln", "-s", zoneinfo_path, localtime_path], check=True)
+        print(f"Timezone successfully set to: {timezone}")
+        # 앱이 보낸 타임존은 최고 우선순위로 기록 -> timed.py의 wifi/gps 추정이 덮어쓰지 않음
+        self.params.put("TimezoneName", timezone)
+        self.params.put("TimezoneSource", "app")
+    except subprocess.CalledProcessError as e:
+        print(f"Failed to set timezone to {timezone}: {e}")
+
+
+    try:
+      subprocess.run(f"TZ=UTC date -s '{new_time}'", shell=True, check=True)
+      #subprocess.run()
+    except subprocess.CalledProcessError:
+      print("timed.failed_setting_time")
+
+  def update(self, json, *, source=NAVI_SOURCE_NETWORK):
+    def _i(v, default=0):
+      return default if v is None else int(v)
+    def _f(v, default=0.0):
+      return default if v is None else float(v)  
+    def _s(v, default=""):
+      return default if v is None else str(v)  
+    if json is None:
+      return
+    selected = self.accepts_navigation(source)
+    if not selected:
+      # UDP also carries clock sync, phone GPS and non-navigation commands.
+      # Do not let those packets refresh the selected navigation heartbeat.
+      json = {key: value for key, value in json.items() if key in (
+        "carrotIndex", "epochTime", "timezone", "carrotCmd", "carrotArg",
+        "latitude", "longitude", "heading", "accuracy", "gps_speed",
+      )}
+      if json.get("carrotCmd") == "DETECT":
+        json.pop("carrotCmd", None)
+        json.pop("carrotArg", None)
+      if not json:
+        return
+    if "carrotIndex" in json:
+      self.carrotIndex = int(json.get("carrotIndex") or self.carrotIndex + 1)
+
+    #print(json)
+    if self.carrotIndex % 60 == 0 and "epochTime" in json:
+      epoch = json.get("epochTime")
+      if epoch is not None:
+        # op는 ntp를 사용하기때문에... 필요없는 루틴으로 보임.
+        timezone_remote = json.get("timezone", "Asia/Seoul")
+
+        if not PC:
+          self.set_time(int(epoch), timezone_remote)
+
+      #self._update_system_time(int(json.get("epochTime")), timezone_remote)
+
+    if "carrotCmd" in json:
+      #print(json.get("carrotCmd"), json.get("carrotArg"))
+      self.carrotCmdIndex = self.carrotIndex
+      self.carrotCmd = json.get("carrotCmd")
+      self.carrotArg = json.get("carrotArg")
+      print(f"carrotCmd = {self.carrotCmd}, {self.carrotArg}")
+
+    if selected and any(key in json for key in ('nRoadLimitSpeed', 'nTBTTurnType', 'goalPosX')):
+      self.active_count = 80
+    now = time.monotonic()
+
+    if "goalPosX" in json:
+      gx = json.get("goalPosX")
+      gy = json.get("goalPosY")
+      if gx is not None and gy is not None:
+        self.goalPosX = float(json.get("goalPosX", self.goalPosX))
+        self.goalPosY = float(json.get("goalPosY", self.goalPosY))
+        self.szGoalName = json.get("szGoalName", self.szGoalName)
+
+    if "nRoadLimitSpeed" in json:
+      self.model_guidance_current = self.model_guidance_next = None
+      #print(json)
+      self.active_sdi_count = self.active_sdi_count_max
+      ### roadLimitSpeed
+      nRoadLimitSpeed = int(json.get("nRoadLimitSpeed", 20))
+      self.legacy_road_limit_received_at = now
+      self.legacy_road_limit_kph = 0.0
+      if nRoadLimitSpeed > 0:
+        if nRoadLimitSpeed > 200:
+          nRoadLimitSpeed = (nRoadLimitSpeed - 20) / 10
+        elif nRoadLimitSpeed == 120:
+          nRoadLimitSpeed = 115 # 120 -> 115 fix bug
+        self.legacy_road_limit_kph = nRoadLimitSpeed
+      else:
+        nRoadLimitSpeed = 30
+      #self.nRoadLimitSpeed = nRoadLimitSpeed
+      if self.nRoadLimitSpeed != nRoadLimitSpeed:
+        self.nRoadLimitSpeed_counter += 1
+        if self.nRoadLimitSpeed_counter > 5:
+          self.nRoadLimitSpeed = nRoadLimitSpeed
+      else:
+        self.nRoadLimitSpeed_counter = 0
+
+      ### SDI
+      self.nSdiType = _i(json.get("nSdiType"), -1)
+      self.nSdiSpeedLimit = _i(json.get("nSdiSpeedLimit"), 0)
+      self.nSdiSection = _i(json.get("nSdiSection"), -1)
+      self.nSdiDist = _i(json.get("nSdiDist"), -1)
+      self.nSdiBlockType = _i(json.get("nSdiBlockType"), -1)
+      self.nSdiBlockSpeed = _i(json.get("nSdiBlockSpeed"), 0)
+      self.nSdiBlockDist = _i(json.get("nSdiBlockDist"), 0)
+
+      self.nSdiPlusType = _i(json.get("nSdiPlusType"), -1)
+      self.nSdiPlusSpeedLimit = _i(json.get("nSdiPlusSpeedLimit"), 0)
+      self.nSdiPlusDist = _i(json.get("nSdiPlusDist"), 0)
+      self.nSdiPlusBlockType = _i(json.get("nSdiPlusBlockType"), -1)
+      self.nSdiPlusBlockSpeed = _i(json.get("nSdiPlusBlockSpeed"), 0)
+      self.nSdiPlusBlockDist = _i(json.get("nSdiPlusBlockDist"), 0)
+      self.roadcate = _i(json.get("roadcate"), 0)
+
+      ## GuidePoint
+      self.nTBTDist = int(json.get("nTBTDist", 0))
+      self.nTBTTurnType = int(json.get("nTBTTurnType", -1))
+      self.szTBTMainText = _s(json.get("szTBTMainText"))
+      self.szNearDirName = _s(json.get("szNearDirName"))
+      self.szFarDirName = _s(json.get("szFarDirName"))
+
+      self.nTBTNextRoadWidth = int(json.get("nTBTNextRoadWidth", 0))
+      self.nTBTDistNext = int(json.get("nTBTDistNext", 0))
+      self.nTBTTurnTypeNext = int(json.get("nTBTTurnTypeNext", -1))
+      self.szTBTMainTextNext = json.get("szTBTMainText", "")
+
+      self.nGoPosDist = int(json.get("nGoPosDist", 0))
+      self.nGoPosTime = int(json.get("nGoPosTime", 0))
+      self.szPosRoadName = _s(json.get("szPosRoadName"))
+      if self.szPosRoadName == "null":
+        self.szPosRoadName = ""
+
+      self.vpPosPointLatNavi = float(json.get("vpPosPointLat", 0.0))
+      self.vpPosPointLonNavi = float(json.get("vpPosPointLon", 0.0))
+      if self.vpPosPointLatNavi != 0.0:
+        self.last_update_gps_time_navi = self.last_calculate_gps_time = now
+        self.nPosAngle = float(json.get("nPosAngle", self.nPosAngle))
+        self._gps_sources().put('external_navi', self.vpPosPointLatNavi, self.vpPosPointLonNavi,
+                                _f(json.get('nPosAngle'), math.nan), _f(json.get('nPosSpeed'), 0) / 3.6, now)
+      else:
+        self._gps_sources().remove('external_navi')
+
+      self.nPosSpeed = float(json.get("nPosSpeed", self.nPosSpeed))
+      self._update_tbt()
+      self._update_sdi()
+      source_name = 'network-v1' if source == NAVI_SOURCE_NETWORK else 'navdy'
+      observed = int(now * 1e9)
+      self.model_guidance_current = (source_name, '', observed, int(json.get('nTBTTurnType', -1)),
+                                     int(json.get('nTBTDist', 0)))
+      self.model_guidance_next = (source_name, '', observed, int(json.get('nTBTTurnTypeNext', -1)),
+                                  int(json.get('nTBTDistNext', 0)))
+      print(
+        f"sdi = {self.nSdiType}, {self.nSdiSpeedLimit}, {self.nSdiPlusType}, " +
+        f"tbt = {self.nTBTTurnType}, {self.nTBTDist}, " +
+        f"next = {self.nTBTTurnTypeNext}, {self.nTBTDistNext}"
+      )
+      #print(json)
+    else:
+      #print(json)
+      pass
+
+    # 3초간 navi 데이터가 없으면, phone gps로 업데이트
+    if "latitude" in json:
+      self.phone_latitude = _f(json.get("latitude"), math.nan)
+      self.phone_longitude = _f(json.get("longitude"), math.nan)
+      self.nPosAnglePhone = _f(json.get("heading"), math.nan)
+      self.phone_gps_accuracy = _f(json.get("accuracy"), math.nan)
+      if math.isfinite(self.phone_gps_accuracy) and 0 <= self.phone_gps_accuracy <= 30:
+        self.last_update_gps_time_phone = now
+        self._gps_sources().put('phone', self.phone_latitude, self.phone_longitude, self.nPosAnglePhone,
+                                _f(json.get('gps_speed'), 0) / 3.6, now)
+      else:
+        self._gps_sources().remove('phone')
+
+
+import traceback
+
+def main():
+  print("CarrotManager Started")
+  #print("Carrot GitBranch = {}, {}".format(Params().get("GitBranch"), Params().get("GitCommitDate")))
+  # 延迟导入，避免与 carrot_man 中导入 CarrotServ 的循环依赖
+  from openpilot.selfdrive.carrot.carrot_man import CarrotMan
+  carrot_man = CarrotMan()
+
+  print(f"CarrotMan {carrot_man}")
+  threading.Thread(target=carrot_man.kisa_app_thread).start()
+  while True:
+    try:
+      carrot_man.carrot_man_thread()
+    except Exception as e:
+      print(f"carrot_man error...: {e}")
+      traceback.print_exc()
+      time.sleep(10)
+
+
+if __name__ == "__main__":
+  main()

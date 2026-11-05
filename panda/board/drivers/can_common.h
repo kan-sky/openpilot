@@ -1,0 +1,385 @@
+#include "can_common_declarations.h"
+
+uint32_t safety_tx_blocked = 0;
+uint32_t safety_rx_invalid = 0;
+uint32_t tx_buffer_overflow = 0;
+uint32_t rx_buffer_overflow = 0;
+
+can_health_t can_health[CAN_HEALTH_ARRAY_SIZE] = {{0}, {0}, {0}};
+
+// Ignition detected from CAN meessages
+bool ignition_can = false;
+uint32_t ignition_can_cnt = 0U;
+bool wake_on_can = false;
+uint32_t wake_on_can_cnt = 0U;
+bool tesla_power_on_can = false;
+uint32_t tesla_power_on_can_cnt = 0U;
+
+int can_live = 0;
+int pending_can_live = 0;
+int can_silent = ALL_CAN_SILENT;
+bool can_loopback = false;
+
+// Record actual mux applications, including direct USB requests and orientation
+// changes. Safety policy alone does not establish the physical CAN routing.
+#ifndef PANDA_JUNGLE
+static uint8_t applied_can_mode = 0xFFU;
+static uint8_t applied_can_harness_status = 0xFFU;
+void can_set_mode(uint8_t mode) {
+  current_board->set_can_mode(mode);
+  applied_can_mode = mode;
+  applied_can_harness_status = harness.status;
+}
+#endif
+
+// ********************* instantiate queues *********************
+#define can_buffer(x, size) \
+  static CANPacket_t elems_##x[size]; \
+  extern can_ring can_##x; \
+  can_ring can_##x = { .w_ptr = 0, .r_ptr = 0, .fifo_size = (size), .elems = (CANPacket_t *)&(elems_##x) };
+
+#define CAN_RX_BUFFER_SIZE 4096U
+#define CAN_TX_BUFFER_SIZE 416U
+
+#ifdef STM32H7
+// ITCM RAM and DTCM RAM are the fastest for Cortex-M7 core access
+__attribute__((section(".axisram"))) can_buffer(rx_q, CAN_RX_BUFFER_SIZE)
+__attribute__((section(".itcmram"))) can_buffer(tx1_q, CAN_TX_BUFFER_SIZE)
+__attribute__((section(".itcmram"))) can_buffer(tx2_q, CAN_TX_BUFFER_SIZE)
+#else
+can_buffer(rx_q, CAN_RX_BUFFER_SIZE)
+can_buffer(tx1_q, CAN_TX_BUFFER_SIZE)
+can_buffer(tx2_q, CAN_TX_BUFFER_SIZE)
+#endif
+can_buffer(tx3_q, CAN_TX_BUFFER_SIZE)
+
+// FIXME:
+// cppcheck-suppress misra-c2012-9.3
+can_ring *can_queues[CAN_QUEUES_ARRAY_SIZE] = {&can_tx1_q, &can_tx2_q, &can_tx3_q};
+
+// ********************* interrupt safe queue *********************
+bool can_pop(can_ring *q, CANPacket_t *elem) {
+  bool ret = 0;
+
+  ENTER_CRITICAL();
+  if (q->w_ptr != q->r_ptr) {
+    *elem = q->elems[q->r_ptr];
+    if ((q->r_ptr + 1U) == q->fifo_size) {
+      q->r_ptr = 0;
+    } else {
+      q->r_ptr += 1U;
+    }
+    ret = 1;
+  }
+  EXIT_CRITICAL();
+
+  return ret;
+}
+
+bool can_push(can_ring *q, const CANPacket_t *elem) {
+  bool ret = false;
+  uint32_t next_w_ptr;
+
+  ENTER_CRITICAL();
+  if ((q->w_ptr + 1U) == q->fifo_size) {
+    next_w_ptr = 0;
+  } else {
+    next_w_ptr = q->w_ptr + 1U;
+  }
+  if (next_w_ptr != q->r_ptr) {
+    q->elems[q->w_ptr] = *elem;
+    q->w_ptr = next_w_ptr;
+    ret = true;
+  }
+  EXIT_CRITICAL();
+  if (!ret) {
+    #ifdef DEBUG
+      print("can_push to ");
+      if (q == &can_rx_q) {
+        print("can_rx_q");
+      } else if (q == &can_tx1_q) {
+        print("can_tx1_q");
+      } else if (q == &can_tx2_q) {
+        print("can_tx2_q");
+      } else if (q == &can_tx3_q) {
+        print("can_tx3_q");
+      } else {
+        print("unknown");
+      }
+      print(" failed!\n");
+    #endif
+  }
+  return ret;
+}
+
+uint32_t can_slots_empty(const can_ring *q) {
+  uint32_t ret = 0;
+
+  ENTER_CRITICAL();
+  if (q->w_ptr >= q->r_ptr) {
+    ret = q->fifo_size - 1U - q->w_ptr + q->r_ptr;
+  } else {
+    ret = q->r_ptr - q->w_ptr - 1U;
+  }
+  EXIT_CRITICAL();
+
+  return ret;
+}
+
+void can_clear(can_ring *q) {
+  ENTER_CRITICAL();
+  q->w_ptr = 0;
+  q->r_ptr = 0;
+  EXIT_CRITICAL();
+  // handle TX buffer full with zero ECUs awake on the bus
+  refresh_can_tx_slots_available();
+}
+
+// assign CAN numbering
+// bus num: CAN Bus numbers in panda, sent to/from USB
+//    Min: 0; Max: 127; Bit 7 marks message as receipt (bus 129 is receipt for but 1)
+// cans: Look up MCU can interface from bus number
+// can number: numeric lookup for MCU CAN interfaces (0 = CAN1, 1 = CAN2, etc);
+// bus_lookup: Translates from 'can number' to 'bus number'.
+// can_num_lookup: Translates from 'bus number' to 'can number'.
+// forwarding bus: If >= 0, forward all messages from this bus to the specified bus.
+
+// Helpers
+// Panda:       Bus 0=CAN1   Bus 1=CAN2   Bus 2=CAN3
+bus_config_t bus_config[BUS_CONFIG_ARRAY_SIZE] = {
+  { .bus_lookup = 0U, .can_num_lookup = 0U, .forwarding_bus = -1, .can_speed = 5000U, .can_data_speed = 20000U, .canfd_auto = false, .canfd_enabled = false, .brs_enabled = false, .canfd_non_iso = false },
+  { .bus_lookup = 1U, .can_num_lookup = 1U, .forwarding_bus = -1, .can_speed = 5000U, .can_data_speed = 20000U, .canfd_auto = false, .canfd_enabled = false, .brs_enabled = false, .canfd_non_iso = false },
+  { .bus_lookup = 2U, .can_num_lookup = 2U, .forwarding_bus = -1, .can_speed = 5000U, .can_data_speed = 20000U, .canfd_auto = false, .canfd_enabled = false, .brs_enabled = false, .canfd_non_iso = false },
+  { .bus_lookup = 0xFFU, .can_num_lookup = 0xFFU, .forwarding_bus = -1, .can_speed = 333U, .can_data_speed = 333U, .canfd_auto = false, .canfd_enabled = false, .brs_enabled = false, .canfd_non_iso = false },
+};
+
+void can_init_all(void) {
+  for (uint8_t i=0U; i < PANDA_CAN_CNT; i++) {
+    if (!current_board->has_canfd) {
+      bus_config[i].can_data_speed = 0U;
+    }
+    can_clear(can_queues[i]);
+    (void)can_init(i);
+  }
+}
+
+void can_set_orientation(bool flipped) {
+  bus_config[0].bus_lookup = flipped ? 2U : 0U;
+  bus_config[0].can_num_lookup = flipped ? 2U : 0U;
+  bus_config[2].bus_lookup = flipped ? 0U : 2U;
+  bus_config[2].can_num_lookup = flipped ? 0U : 2U;
+}
+
+#ifdef PANDA_JUNGLE
+void can_set_forwarding(uint8_t from, uint8_t to) {
+  bus_config[from].forwarding_bus = to;
+}
+#endif
+
+// Tesla party bus frames carry a rolling checksum:
+// (addr_lo + addr_hi + sum of all payload bytes except the checksum byte) mod 256,
+// per tesla_model3_party.dbc. Validation here is integrity checking, not
+// authentication; 0x221 also overlaps with Rivian random data, so unvalidated
+// traffic must not move wake/ignition state.
+static uint8_t tesla_expected_checksum(const CANPacket_t *msg, uint32_t len, uint32_t checksum_byte) {
+  uint32_t checksum = (msg->addr & 0xFFU) + ((msg->addr >> 8U) & 0xFFU);
+  for (uint32_t i = 0U; i < len; i++) {
+    if (i != checksum_byte) {
+      checksum += msg->data[i];
+    }
+  }
+  return (uint8_t)checksum;
+}
+
+static bool tesla_frame_valid(const CANPacket_t *msg, uint32_t len, uint32_t checksum_byte) {
+  return (!msg->extended) && (msg->data[checksum_byte] == tesla_expected_checksum(msg, len, checksum_byte));
+}
+
+void ignition_can_hook(CANPacket_t *to_push) {
+  int bus = GET_BUS(to_push);
+  if (bus == 0) {
+    int addr = GET_ADDR(to_push);
+    int len = GET_LEN(to_push);
+    static bool tesla_seatbelt_latched = false;
+    static bool tesla_door_open = false;
+    if (!tesla_power_on_can || (tesla_power_on_can_cnt > 2U)) {
+      tesla_seatbelt_latched = false;
+      tesla_door_open = false;
+    }
+
+    // GM exception
+    if ((addr == 0x1F1) && (len == 8)) {
+      // SystemPowerMode (2=Run, 3=Crank Request)
+      ignition_can = (GET_BYTE(to_push, 0) & 0x2U) != 0U;
+      ignition_can_cnt = 0U;
+    }
+
+    // Rivian R1S/T GEN1 exception
+    if ((addr == 0x152) && (len == 8)) {
+      // 0x152 overlaps with Subaru pre-global which has this bit as the high beam
+      int counter = GET_BYTE(to_push, 1) & 0xFU;  // max is only 14
+
+      static int prev_counter = -1;
+      if ((counter == ((prev_counter + 1) % 15)) && (prev_counter != -1)) {
+        // VDM_OutputSignals->VDM_EpasPowerMode
+        ignition_can = ((GET_BYTE(to_push, 7) >> 4U) & 0x3U) == 1U;  // VDM_EpasPowerMode_Drive_On=1
+        ignition_can_cnt = 0U;
+      }
+      prev_counter = counter;
+    }
+
+    // Tesla Model 3/Y wake state
+    // VCFRONT_LVPowerState: checksum byte 7, counter (data[6] >> 4), power state (data[0] >> 5).
+    // Only standard frames with a valid checksum count; any invalid frame breaks the
+    // counter sequence so two consecutive valid frames are required.
+    if ((addr == 0x221) && (len == 8)) {
+      int counter = GET_BYTE(to_push, 6) >> 4;
+
+      static int prev_power_counter = -1;
+      if (tesla_frame_valid(to_push, 8U, 7U)) {
+        if ((prev_power_counter != -1) && (counter == ((prev_power_counter + 1) % 16))) {
+          // VCFRONT_LVPowerState->VCFRONT_vehiclePowerState
+          int power_state = (GET_BYTE(to_push, 0) >> 5U) & 0x3U;
+          tesla_power_on_can = power_state != 0x0;  // Not VEHICLE_POWER_STATE_OFF
+          tesla_power_on_can_cnt = 0U;
+#ifdef PANDA_TESLA_WAKE_ON_CAN
+          wake_on_can = power_state != 0x0;  // Not VEHICLE_POWER_STATE_OFF
+          wake_on_can_cnt = 0U;
+#endif
+        }
+        prev_power_counter = counter;
+      } else {
+        // invalid checksum or extended frame: break the counter sequence so
+        // a later valid frame alone cannot authorize Tesla state changes
+        prev_power_counter = -1;
+      }
+    }
+
+    // 0x118 also carries Subaru steering torque with the same counter layout.
+    // Only interpret Tesla gear/cabin messages while its power evidence is fresh.
+    const bool tesla_awake = tesla_power_on_can && (tesla_power_on_can_cnt <= 2U);
+    if (tesla_awake && (addr == 0x118) && (len == 8)) {
+      // DI_systemStatus: checksum byte 0, counter (data[1] & 0xF), gear (data[2] >> 5).
+      int counter = GET_BYTE(to_push, 1) & 0xFU;
+
+      static int prev_gear_counter = -1;
+      if (tesla_frame_valid(to_push, 8U, 0U)) {
+        if ((prev_gear_counter != -1) && (counter == ((prev_gear_counter + 1) % 16))) {
+          int tesla_gear = (GET_BYTE(to_push, 2) >> 5U) & 0x7U;  // DI_systemStatus->DI_gear
+          if ((tesla_gear == 2) || (tesla_gear == 3) || (tesla_gear == 4)) {  // R, N, D
+            ignition_can = true;
+          } else if ((tesla_gear == 1) && (!tesla_seatbelt_latched || tesla_door_open)) {  // P
+            ignition_can = false;
+          }
+          if ((tesla_gear >= 1) && (tesla_gear <= 4)) {
+            ignition_can_cnt = 0U;
+          }
+        }
+        prev_gear_counter = counter;
+      } else {
+        prev_gear_counter = -1;
+      }
+    }
+
+    if (tesla_awake && (addr == 0x311U) && (len == 7)) {
+      // UI_warning: checksum byte 0, counter (data[1] & 0xF).
+      int counter = GET_BYTE(to_push, 1) & 0xFU;
+
+      static int prev_cabin_counter = -1;
+      if (tesla_frame_valid(to_push, 7U, 0U)) {
+        if ((prev_cabin_counter != -1) && (counter == ((prev_cabin_counter + 1) % 16))) {
+          tesla_seatbelt_latched = ((GET_BYTE(to_push, 1) >> 5U) & 0x1U) != 0U;  // UI_warning->buckleStatus
+          tesla_door_open = ((GET_BYTE(to_push, 3) >> 4U) & 0x1U) != 0U;  // UI_warning->anyDoorOpen
+        }
+        prev_cabin_counter = counter;
+      } else {
+        prev_cabin_counter = -1;
+      }
+    }
+
+    // Mazda exception
+    if ((addr == 0x9E) && (len == 8)) {
+      ignition_can = (GET_BYTE(to_push, 0) >> 5) == 0x6U;
+      ignition_can_cnt = 0U;
+    }
+
+    // Volkswagen MEB exception (ID.4, ID.3, etc.)
+    // Signal: 0x3C0 bus 0, 4 bytes, byte[2] bit1 = ignition
+    if ((addr == 0x3C0) && (len == 4)) {
+      ignition_can = (GET_BYTE(to_push, 2) >> 1) & 1U;
+      ignition_can_cnt = 0U;
+    }
+
+  }
+}
+
+void ignition_can_tick(void) {
+  if (ignition_can_cnt > 2U) {
+    ignition_can = false;
+  }
+  if (wake_on_can_cnt > 2U) {
+    wake_on_can = false;
+  }
+  if (tesla_power_on_can_cnt > 2U) {
+    tesla_power_on_can = false;
+  }
+  ignition_can_cnt += 1U;
+  wake_on_can_cnt += 1U;
+  tesla_power_on_can_cnt += 1U;
+}
+
+bool can_tx_check_min_slots_free(uint32_t min) {
+  return
+    (can_slots_empty(&can_tx1_q) >= min) &&
+    (can_slots_empty(&can_tx2_q) >= min) &&
+    (can_slots_empty(&can_tx3_q) >= min);
+}
+
+uint8_t calculate_checksum(const uint8_t *dat, uint32_t len) {
+  uint8_t checksum = 0U;
+  for (uint32_t i = 0U; i < len; i++) {
+    checksum ^= dat[i];
+  }
+  return checksum;
+}
+
+void can_set_checksum(CANPacket_t *packet) {
+  packet->checksum = 0U;
+  packet->checksum = calculate_checksum((uint8_t *) packet, CANPACKET_HEAD_SIZE + GET_LEN(packet));
+}
+
+bool can_check_checksum(CANPacket_t *packet) {
+  return (calculate_checksum((uint8_t *) packet, CANPACKET_HEAD_SIZE + GET_LEN(packet)) == 0U);
+}
+
+bool safety_tx_buffered_for_fwd = false;
+void can_send(CANPacket_t *to_push, uint8_t bus_number, bool skip_tx_hook) {
+  safety_tx_buffered_for_fwd = false;
+  if (skip_tx_hook || safety_tx_hook(to_push) != 0) {
+    if (safety_tx_buffered_for_fwd) safety_tx_buffered_for_fwd = false;
+    else if (bus_number < PANDA_BUS_CNT) {
+      can_set_checksum(to_push);
+      // add CAN packet to send queue
+      tx_buffer_overflow += can_push(can_queues[bus_number], to_push) ? 0U : 1U;
+      process_can(CAN_NUM_FROM_BUS_NUM(bus_number));
+    }
+  } else {
+    safety_tx_blocked += 1U;
+    to_push->returned = 0U;
+    to_push->rejected = 1U;
+
+    // data changed
+    can_set_checksum(to_push);
+    rx_buffer_overflow += can_push(&can_rx_q, to_push) ? 0U : 1U;
+  }
+}
+
+bool is_speed_valid(uint32_t speed, const uint32_t *all_speeds, uint8_t len) {
+  bool ret = false;
+  for (uint8_t i = 0U; i < len; i++) {
+    if (all_speeds[i] == speed) {
+      ret = true;
+    }
+  }
+  return ret;
+}

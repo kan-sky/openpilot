@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en" class="notranslate" translate="no">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="referrer" content="same-origin">
+  <title>Carrot Navigation</title>
+  <link rel="icon" href="/assets/img_chffr_wheel.png" type="image/png">
+  <link rel="stylesheet" href="/css/generated/design-tokens.css">
+  <link rel="stylesheet" href="/css/base.css">
+  <style>
+    :root { color-scheme: dark; }
+    * { letter-spacing: 0; }
+    [hidden] { display: none !important; }
+    main { max-width: 1040px; margin: auto; padding: 24px max(16px, env(safe-area-inset-right)) 32px max(16px, env(safe-area-inset-left)); }
+    header, .section-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+    header { padding-bottom: 16px; border-bottom: 1px solid var(--md-outline-var); }
+    h1 { margin: 0; font-size: 24px; }
+    h2 { margin: 0; font-size: 18px; }
+    a { color: var(--md-primary); text-underline-offset: 3px; overflow-wrap: anywhere; }
+    p { margin: 8px 0; }
+    .status-strip { display: flex; flex-wrap: wrap; gap: 12px 32px; padding: 16px 0; }
+    .status-strip > div { min-width: 0; }
+    dt, .muted, figcaption { color: var(--md-outline); font-size: 14px; }
+    dt, dd { margin: 0; }
+    dd { display: flex; align-items: baseline; flex-wrap: wrap; gap: 12px; }
+    .pipeline { border-left: 3px solid var(--md-warning); padding: 4px 12px; margin-bottom: 24px; }
+    #pipelineStatus { color: var(--md-warning); font-weight: 700; }
+    #pipelineStatus[data-ready="true"] { color: var(--md-success); }
+    .layout { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 32px; align-items: start; }
+    section { min-width: 0; }
+    form { display: flex; gap: 8px; margin-top: 16px; }
+    input, button { font: inherit; color: inherit; border: 1px solid var(--md-outline-var); border-radius: 8px; background: var(--md-surface-cont); min-height: 44px; padding: 10px 12px; }
+    input { width: 100%; min-width: 0; }
+    button { cursor: pointer; overflow-wrap: anywhere; }
+    button:hover:not(:disabled) { border-color: var(--md-primary); }
+    button:disabled { opacity: .55; cursor: not-allowed; }
+    #search { flex: 0 0 auto; }
+    #results { padding: 0; list-style: none; margin: 12px 0; max-height: 360px; overflow-y: auto; }
+    #results li + li { margin-top: 8px; }
+    #results button { width: 100%; text-align: left; }
+    #status { min-height: 3em; overflow-wrap: anywhere; color: var(--md-info); }
+    .destination { border-top: 1px solid var(--md-outline-var); padding-top: 16px; }
+    #current { overflow-wrap: anywhere; }
+    #clear { margin-top: 8px; }
+    #editStatus { color: var(--md-warning); font-size: 14px; }
+    figure { margin: 16px 0 0; }
+    .map-frame { position: relative; aspect-ratio: 1; width: 100%; max-width: 420px; background: var(--md-surface-cont); border: 1px solid var(--md-outline-var); border-radius: 8px; overflow: hidden; }
+    #map { display: block; width: 100%; height: 100%; object-fit: contain; }
+    #mapStatus { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; padding: 24px; text-align: center; overflow-wrap: anywhere; color: var(--md-outline); }
+    figcaption { margin-top: 8px; }
+    .attribution { font-size: 12px; margin-top: 12px; }
+    @media (max-width: 700px) { main { padding-top: 16px; } .layout { grid-template-columns: minmax(0, 1fr); gap: 24px; } .map-frame { max-width: 100%; } }
+  </style>
+</head>
+<body>
+  <main>
+    <header><h1 id="title">Carrot Navigation</h1><a href="/">Carrot Web</a></header>
+    <dl class="status-strip">
+      <div><dt id="sourceLabel">Configured source</dt><dd><span id="sourceStatus">Checking</span><a id="sourceSettings" href="/?navigation_settings=source">Source settings</a></dd></div>
+      <div><dt>Mapbox Public key</dt><dd><span id="keyStatus">Checking</span><a id="keySettings" href="/?navigation_settings=mapbox">Key settings</a></dd></div>
+    </dl>
+    <div class="pipeline" role="status" aria-live="polite"><div id="pipelineStatus">Checking navigation input</div><p id="pipelineReason" class="muted">Camera inference is independent of this optional navigation input.</p></div>
+    <div class="layout">
+      <section aria-labelledby="searchTitle">
+        <h2 id="searchTitle">Find a destination</h2>
+        <form id="form" role="search"><input id="query" type="search" maxlength="200" minlength="2" required autocomplete="off" aria-label="Destination"><button id="search" type="submit">Search</button></form>
+        <ul id="results" aria-label="Search results" aria-busy="false"></ul>
+        <p id="status" role="status" aria-live="polite"></p>
+        <div class="destination"><h2 id="currentTitle">Saved destination</h2><p id="current">Checking</p><p id="editStatus"></p><button id="clear" type="button" disabled>Clear destination</button></div>
+      </section>
+      <section aria-labelledby="previewTitle">
+        <div class="section-heading"><h2 id="previewTitle">Map preview</h2><button id="refresh" type="button">Refresh status</button></div>
+        <figure><div class="map-frame"><img id="map" alt="Route map preview" hidden><p id="mapStatus" role="status">Checking map availability.</p></div><figcaption id="previewNote">Map preview · Model input status checked separately</figcaption></figure>
+        <p class="attribution" id="attribution" hidden>&copy; <a href="https://www.mapbox.com/about/maps/" rel="noreferrer">Mapbox</a> &middot; &copy; <a href="https://www.openstreetmap.org/copyright" rel="noreferrer">OpenStreetMap</a> &middot; <a href="https://protomaps.com/" rel="noreferrer">Protomaps</a></p>
+      </section>
+    </div>
+    <noscript>JavaScript is required for destination search and status.</noscript>
+  </main>
+  <script src="/js/pages/navigation_map.js" defer></script>
+</body>
+</html>

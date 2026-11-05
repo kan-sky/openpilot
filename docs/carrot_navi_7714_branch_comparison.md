@@ -1,0 +1,200 @@
+# 7714 내비 감속 브랜치 비교
+
+## 2026-10-22 WIP-FR Navdy 입력 보완
+
+`WIP-FR`의 Navdy 선택 경로는 이제 연결 소스를 별도로 발행하여, 신선하고 유효한 안내가 있을 때
+NAVI를 표시한다. 다른 SDI가 선택되었을 때 별도 preview 방지턱을 보완하되, 명시적인 방지턱 삭제와
+각 입력의 만료시간을 우선한다. 카메라/구간단속 우선순위와 기존 7713/7714 거리 해석은 유지한다.
+만료된 Navdy 제한속도는 0(정보 없음)으로 발행하며, 크루즈 자동속도 계산은 이를 정지 목표로 쓰지 않는다.
+교통구간은 상태 메시지와 웹 데이터에 전달하지만 감속에는 사용하지 않는다.
+세부 검증과 미해결 TBT 거리·TMAP 전체 경로 범위는 `docs/navdy_navigation_fields_20261022.md`를 참조한다.
+
+## 2026-09-13 순정 거리 연결 및 외부 후면단속 유지
+
+`carrot-wip` 및 유지 중인 `carrot-*`는 현재 순정 카메라 경고를 같은 제한속도의 먼 미래 이벤트와
+연결하지 않는다. 경고 시작 때 계산한 가상 끝점에 40m 여유를 둔 범위 안에서만 연결하며,
+일치 후보가 없으면 현재 경고의 가상거리를 사용하고 경고 종료까지 감속 후보를 유지한다.
+
+외부 TMAP SDI `75/76`은 각각 후면 과속/후면 신호·과속이다.
+[공식 EDC SDI 정의](https://tmapapi.tmapmobility.com/main.html#androidEDCSDK/docs/androidDoc.RGData_SDIType)에 따라
+마지막 50m 접근에서 위치를 기억하고 `AutoNaviRearCameraHoldDistance`만큼 통과 후 상한을 유지한다.
+기본 100m, 0~300m/10m 단위이며 0은 추가 유지 해제다. 7713/7714 모두 공유 `CarrotServ`에서 적용한다.
+안내 소실·다음 항목 전환·정차로 조기 해제하지 않으며 카운트다운 거리는 카메라 위치 그대로다.
+외부 연결 종료·새 세션·경로 이탈·주행거리 초기화·카메라 제어 비활성화는 유지 상태를 초기화한다.
+순정 CAN의 후면 종류 매핑은 확인되지 않아 이 추가 거리는 순정에 적용하지 않는다.
+위 변경은 아래 과거 `navi-stream` 비교 기준에 소급 적용하지 않는다.
+
+검증: `test_speed_camera.py`, `test_external_navigation_priority.py`, `test_carrot_navi_serv.py`,
+`test_vehicle_speed_camera_control.py`. 현재 경고/미래 거리 오연결, 거리 소진 후 유지, 후면 통과 후 유지와
+거리 기반 해제, 다음 감속 조건과의 공존 및 외부 연결 종료 후 순정 복귀를 포함한다.
+
+## 2026-09-13 외부 내비 우선 선택 (`carrot-wip` 및 유지 중인 `carrot-*`)
+
+외부 내비 연결 중에는 순정 내비 카메라·방지턱·구간단속·30km/h 구역 후보와 순정 내비 속도 표시를 제외한다.
+7714는 유효하고 살아 있는 서비스의 `connected` snapshot으로 판단하며 speed/guidance 항목이 없어도 연결로 본다.
+7713/legacy와 KISA는 기존 수신 카운터가 만료될 때까지 연결 상태를 유지한다. `activeCarrot`은 순정 감속에도
+변하므로 연결 판정에 쓰지 않는다. 모든 외부 연결이 끝나면 순정 후보를 기존 설정에 따라 다시 사용한다.
+
+카운트다운 거리도 같은 연결 선택을 따르며 외부·순정 거리의 최솟값을 섞지 않는다. 전환 시 카운트다운과
+가속 오버라이드·구역 억제 상태를 초기화하고 알림에 한 번 idle을 보낸다. 순정 CAN 수신과 이벤트 추적은 계속하여
+복귀 시 현재 거리와 상태를 사용한다. 이 변경은 아래 과거 `navi-stream` 비교 기준에 소급 적용하지 않는다.
+
+검증: `test_external_navigation_priority.py`, `test_vehicle_speed_camera_control.py`, `test_carrot_navi_serv.py`.
+외부 안내 항목 없음, 각 순정 감속 종류 배제, 연결 만료 후 복귀, 7714 idle heartbeat와 disconnect/invalid/dead,
+외부 13m·순정 30.62m 방지턱의 외부 거리 기준 해제를 확인한다.
+
+## 비교 기준
+
+- `origin/carrot-wip`: `031cb441501ac3cbda4f28cae48767a5cf2d086e`
+- `origin/thftgr/navi-stream`: `4488bd591b26dad1b9d44a6f3890336a0ba25ec8`
+- 확인일: 2026-07-16
+- 범위: TCP 7714 WebSocket v2에서 수신한 데이터가 실제 `desiredSpeed/desiredSource`와 종방향 감속에
+  연결되는 경로
+
+두 브랜치의 공통 조상은 `b98c469bbe33a7fc9ce052f0ebe144599bdbfad9`이다. `navi-stream`의 관련
+차이는 주로 `de18d530`의 secondary SDI 및 route 제어 연결에서 왔다.
+
+## 핵심 결론
+
+공통으로 지원하는 도로 제한속도, primary 일반 SDI, primary 방지턱, explicit section, 현재/다음 TBT의
+최종 감속 공식과 후보 최솟값 선택 방식은 같다. 다만 **primary type 22는 두 브랜치 모두 7714의
+road-category 갱신 순서 문제 때문에 수신되어도 실제 후보가 생기지 않을 수 있다.** `navi-stream`이 실제
+제어 범위를 다음 세 가지로 넓혔다.
+
+1. primary `sdi.block_*`를 legacy block 상태로 변환하여 section 감속에 사용한다.
+2. `sdi_secondary`를 전달하여 type 22 secondary 방지턱을 조건부 감속에 사용한다.
+3. 7714 `route.polyline`과 `vehicle` 위치를 기존 route 곡률 계산기로 연결한다.
+
+따라서 7714만 사용할 때 `carrot-wip`에서는 감속되지 않던 block/secondary bump/route가
+`navi-stream`에서는 감속될 수 있다. 그러나 primary bump의 gate 문제는 그대로다. `navi-stream`에서
+방지턱 지점에 `route 30`만 표시되면 route가 정상 bump 후보보다 낮은 경우뿐 아니라, bump 후보가
+road-category gate에서 아예 제거된 경우도 확인해야 한다.
+
+## 기능별 실제 감속 비교
+
+| 7714 입력 | `carrot-wip` | `navi-stream` | 실제 차이 |
+|---|---|---|---|
+| `speed.road_limit_kph` | 적용 | 적용 | 동일. control parser는 1..200만 valid, 실제 road 후보는 `AutoRoadSpeedLimitOffset >= 0` 필요 |
+| primary `sdi.type/distance_m/speed_limit_kph` | 적용 | 적용 | 지원 SDI type과 공식 동일 |
+| primary type 22 방지턱 | 조건부 | 조건부 | 동일. 코드 경로는 있으나 `road_category > 1` 필요. 7714 갱신 순서/누락 key→0 때문에 수신되어도 미적용 가능 |
+| explicit `speed.section` | 적용 | 적용 | 동일. active/not suspended/not off-route/limit > 0 gate |
+| primary `sdi.section_type` | cereal/control에 없음 | 전달/저장 | `navi-stream`도 감속 판단에는 미사용 |
+| primary `sdi.block_type/block_distance_m` | 미전달·미적용 | 적용 | `navi-stream`은 block type 2/3을 `xSpdType=4`, block distance로 변환하여 `section` source 생성 |
+| primary `sdi.block_speed_kph` | 미전달·미적용 | 전달/저장 | `navi-stream`도 실제 제한속도에는 사용하지 않고 primary `sdi.speed_limit_kph` 사용 |
+| `sdi_secondary` 전체 | 미전달·미적용 | 전달/저장 | 아래 type 22만 실제 감속 가능 |
+| secondary type 22 방지턱 | 미적용 | 조건부 적용 | `navi-stream`에서 primary camera/section 분기가 없을 때만 bump 후보 생성 |
+| secondary 일반 camera/section | 미적용 | 미적용 | `navi-stream`도 저장만 하고 후보를 만들지 않음 |
+| current/next guidance TBT | 적용 | 적용 | 동일. off-route에서 억제, `AutoTurnControl` 설정 필요 |
+| `route.polyline` | 7714 제어에는 미적용 | route 곡률 감속 적용 | `navi-stream`은 최대 256점을 기존 route 계산기에 연결 |
+| `vehicle` 위치/방향 | 7714 제어 상태에 미적용 | route/GPS 상태에 반영 | `navi-stream` route 매칭 및 road name 유지에 사용; 차량속도 자체는 `carState` 사용 |
+| `traffic_signal` | 종방향 미적용 | 종방향 미적용 | `navi-stream`은 UI/shared-memory 전달만 추가 |
+
+## 두 브랜치 공통 primary bump 결함
+
+두 브랜치 모두 `_update_carrot_navi()`에서 새 speed sequence를 먼저 `_apply_carrot_navi_speed()`로
+보내고, 이후에 `self.roadcate = navi.road_category`를 수행한다. `_apply_carrot_navi_speed()` 끝의
+`_update_sdi()`는 이 때문에 현재 snapshot이 아닌 이전 road category를 사용한다.
+
+- 이전값이 0/1이면 현재 snapshot의 primary `sdi.type=22`는 `xSpdType=-1`로 제거된다.
+- 같은 snapshot의 새 road category가 8이어도 이미 끝난 판정을 자동 재실행하지 않는다.
+- lane sequence만 바뀌어도 speed sequence가 같으면 재판정하지 않는다.
+- present `lane_current`에 `road_category`가 누락되면 cereal 변환이 0을 넣으므로 이후 bump를 계속 막는다.
+- `navi-stream`의 secondary/route 기능 추가는 이 순서를 변경하지 않았다.
+
+반면 7713 legacy `update(json)`은 같은 JSON의 `roadcate`를 저장한 뒤 마지막에 `_update_sdi()`를 호출한다.
+따라서 동일 차량에서 7713은 감속하고 7714는 감속하지 않는 현상은 코드와 일치한다.
+
+## block 동작 차이
+
+`carrot-wip` parser는 primary SDI의 type/distance/speed만 보존한다. 앱이 다음처럼 block을 보내도
+`block_type`, `block_distance_m`, `block_speed_kph`는 cereal/control 경로에서 사라진다.
+
+`navi-stream`은 이를 보존하여 `_update_sdi()`에 전달한다. block type 2/3이면 다음과 같이 동작한다.
+
+- `xSpdDist = block_distance_m`
+- `xSpdType = 4`
+- `xSpdLimit`은 `block_speed_kph`가 아니라 primary `speed_limit_kph * safetyFactor`
+- 이후 공통 로직에서 type 4는 거리 기반 계산 결과를 다시 `xSpdLimit`으로 덮으므로 active section 동안
+  사실상 즉시 section 제한속도 후보가 된다.
+
+## secondary 방지턱 차이
+
+`carrot-wip`의 cereal schema/control parser에는 secondary SDI 필드가 없고 `CarrotServ`가 매 speed 갱신마다
+`nSdiPlus*`를 clear한다. 따라서 7714 `sdi_secondary.type == 22`는 감속하지 않는다.
+
+`navi-stream`은 secondary 필드를 `nSdiPlus*`로 변환한다. 다만 공통 `_update_sdi()`가 `if primary ... elif
+bump ...` 구조라서, 적용 가능한 primary camera 또는 section이 있으면 secondary 방지턱은 별도 후보로
+계산되지 않는다. primary 분기가 없고 road category/mode gate를 통과할 때만 `bump`가 된다.
+
+## route 감속 차이와 `route 30`
+
+`carrot-wip`도 7714 route item을 receiver/cereal/cluster UI까지는 전달하지만, control parser와
+`CarrotMan.navi_points`로 연결하지 않는다. 따라서 다른 route 소스가 없는 조건에서 7714 polyline 자체는
+실제 route 감속을 만들지 않는다.
+
+`navi-stream`은 다음을 추가한다.
+
+- route/vehicle parsing
+- session/sequence/ownership 기반 route bridge
+- 7714 polyline을 기존 약 300 m 곡률/역방향 감속 계산에 입력
+- `TurnSpeedControlMode`가 허용할 때 `route` 후보 생성
+
+공통 후보 선택은 최저속도가 승리한다. `AutoCurveSpeedLowerLimit=30`인 route 후보가 방지턱 후보보다
+낮으면 `desiredSource=route`, `desiredSpeed=30`이 된다. 이 현상은 `navi-stream`의 7714 route 연결 때문에
+`carrot-wip` 대비 새로 관측될 수 있다.
+
+추가 주의사항은 다음과 같다.
+
+- mode 2의 조건 `-500 < xDistToTurn < 500`은 유효 TBT가 없을 때의 `xDistToTurn == 0`도 통과시킨다.
+- route parser/bridge는 현재 `navigation_status.off_route`로 route를 억제하지 않는다. SDI와 TBT는
+  off-route에서 억제되지만, route item이 남아 있으면 route 후보는 계속 생길 수 있다.
+
+## 연결과 호환성 차이
+
+두 브랜치 모두 7714 protocol v2, stream별 strictly increasing sequence와 session/manifest 검사를 한다.
+`navi-stream`은 envelope 검사를 더 엄격하게 했다.
+
+- requirements query에 `catalog_revision == 1` 필수
+- JSON item에 `sent_at_ms` 필수
+- `value` key 필수, present item은 stream에 맞는 object/array 형태 필수
+- absent item은 `value: null`과 비어 있지 않은 `reason` 필수
+
+따라서 `carrot-wip`에서 동작하던 구형 client가 이 필드를 누락하면 `navi-stream`에서는 7714 연결/JSON이
+거절되어 어떤 감속도 적용되지 않을 수 있다. 호환 envelope를 보내면 공통 기능의 감속 공식 차이는 없다.
+
+## 상태 유지와 clear 차이
+
+### carrot-wip 비전 커브 속도 변경 (2026-09-11)
+
+`carrot-wip`은 `ModelTurnSpeedFactor` 미래속도 후보를 제거했다. 7713/7714에 공통인
+`CarrotServ` 최저속도 선택에서 `model` 후보와 vTurn 120km/h 경계 조건이 없어졌다.
+비전 커브의 `vturn` 후보는 예측 요레이트/속도로 얻은 곡률과 커브까지 남은 거리로
+현재 위치의 속도 상한을 계산한다. 커브 최저속도·모드별 비전/경로 선택은 유지한다.
+별도 `ApplyModelSpeed` 설정속도 기능과 SDI/TBT 입력 처리에는 적용되지 않는다.
+이는 `navi-stream`에 같은 변경이 적용됐다는 뜻은 아니다.
+검증: `test_curve_speed.py`, `test_carrot_navi_serv.py`의 모드별 속도 선택 및 기존
+`test_vehicle_speed_camera_control.py`.
+
+### carrotMan 미수신·중단 시 속도 적용 방어 (2026-09-10)
+
+`carrot-wip`의 플래너·크루즈·제어 출력은 `carrotMan`을 실제 수신했고, 메시지가 valid/alive이며,
+수신 후 1초 이내이고 `desiredSpeed`가 1..250 km/h인 경우에만 내비 속도 상한을 적용한다.
+`carrotMan`은 frequency 0 서비스여서 SubMaster의 alive/valid 초기값만으로 수신 여부를 판단할 수 없다.
+미수신 또는 중단 시 설정속도를 유지하고 내비 회전·신호 상태와 크루즈의 내비 속도/명령을 정리한다.
+모델 신호 정지와 전방 차량에 따른 감속 판단은 별도로 유지한다. 이 방어는 7713/7714의 개별
+입력 만료 규칙이 아니라, 두 입력을 처리하는 `carrot_man` 서비스 자체의 발행 상태 검사다.
+
+차량 시작 시에는 소스 `params_keys.h`와 로드한 네이티브 Params 키 목록을 대조한다.
+불일치하면 prebuilt 여부와 무관하게 SCons를 실행하고, 빌드 후에도 불일치하면 manager를 시작하지 않는다.
+이는 새 키를 모르는 바이너리에서 `carrot_man`이 `UnknownKeyName`으로 반복 종료되는 상황을 방지한다.
+검증: `test_carrot_man_input.py`, `test_params_check.py`. 이 변경을 `navi-stream`에 적용했다는 뜻은 아니다.
+
+### 기존 7714 입력 상태 정책
+
+- `carrot-wip`의 control 활성 판정은 speed/current/next presence만 본다.
+- `navi-stream`은 여기에 `guidance_active`와 route presence를 포함하여 route-only 상태도 active로 유지한다.
+- `navi-stream`은 disconnect에서 speed/TBT 외에도 7714 route ownership, vehicle freshness, 남은
+  거리/시간과 traffic UI 상태를 정리한다.
+- 두 브랜치 모두 receiver가 advertised stale timeout만으로 control item을 자동 expire하지는 않는다.
+  연결과 item presence가 유지되면 2 Hz cereal heartbeat가 계속되고, SDI/TBT 거리는 차량 이동량만큼
+  로컬 차감된다.

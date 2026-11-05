@@ -1,0 +1,311 @@
+"""Read-only display snapshots over a negotiated Jetlink extension."""
+import base64
+from dataclasses import asdict, replace
+import hashlib
+import json
+import math
+from pathlib import Path
+import struct
+import socket
+import subprocess
+import sys
+import time
+
+HUD_MESSAGE = 0x4000
+HUD_CAPABILITY = 'carrot_hud_v1'
+MAX_HUD_BYTES = 512 * 1024
+HUD_PACKET = Path('/dev/shm/carrot-jetlink-hud.packet')
+HEADER = struct.Struct('<d')
+PHONE_ART_CHUNK_CHARS = 8 * 1024
+MAX_PHONE_ART_CHARS = 512 * 1024
+SERVICES = ('carState', 'carParams', 'modelV2', 'radarState', 'liveTracks', 'longitudinalPlan',
+            'lateralPlan', 'controlsState', 'selfdriveState', 'carControl', 'carOutput', 'deviceState',
+            'roadCameraState', 'cameraOdometry', 'liveCalibration', 'livePose', 'drivingModelData',
+            'liveDelay', 'liveParameters', 'liveTorqueParameters', 'navInstruction', 'navInstructionCarrot',
+            'navRoute', 'carrotMan', 'carrotNavi', 'wideRoadCameraState')
+PARAMS = ('ClusterHud', 'ClusterHudDebug', 'ClusterHudBrightness', 'ClusterHudOrientation',
+          'ClusterHudMirror', 'ClusterHudTheme', 'ClusterHudRadarInfo', 'ClusterHudRadarDisplay',
+          'ClusterHudRadarSourceColor', 'ClusterHudCameraViewMode', 'ClusterHudPanelLayout',
+          'ClusterHudScreenMode', 'ShowPlotMode', 'LanguageSetting', 'IsMetric', 'ShowDateTime',
+          'IsOnroad', 'CarParams', 'CalibrationParams', 'CustomSteerRatio', 'SteerActuatorDelay',
+          'LateralAccelerationFactor', 'UsbGpuActive')
+
+
+class PhoneMediaEncoder:
+  """Add optional bounded phone data without changing cereal or media framing."""
+  def __init__(self):
+    self.art = ''
+    self.key = ''
+    self.offset = 0
+
+  def encode(self, media, wall_time=None):
+    if media is None:
+      self.art, self.key, self.offset = '', '', 0
+      return None
+    now_ms = int((time.time() if wall_time is None else wall_time) * 1000)
+    metadata = asdict(media)
+    art = metadata.pop('art_base64')
+    if len(art) > MAX_PHONE_ART_CHARS or not art.isascii():
+      art = ''
+    if art != self.art:
+      self.art = art
+      self.key = hashlib.sha256(art.encode('ascii')).hexdigest() if art else ''
+      self.offset = 0
+    position = media.position_ms
+    if position is not None and media.is_playing and media.received_at_ms is not None:
+      position += max(0, now_ms - media.received_at_ms)
+    if position is not None and media.duration_ms is not None:
+      position = min(position, media.duration_ms)
+    metadata.update(position_ms=position, received_at_ms=now_ms, art_hash=self.key)
+    record = {'metadata': metadata, 'art_key': self.key}
+    if self.art:
+      chunk = self.art[self.offset:self.offset + PHONE_ART_CHUNK_CHARS]
+      record['art'] = {'offset': self.offset, 'total': len(self.art), 'data': chunk}
+      # Repeat a bounded cycle so a newly attached receiver or a lost packet recovers.
+      self.offset = (self.offset + len(chunk)) % len(self.art)
+    return record
+
+
+class PhoneMediaReceiver:
+  def __init__(self):
+    self.key = ''
+    self.parts = ''
+    self.art = ''
+    self.total = 0
+    self.last_received = None
+
+  def decode(self, snapshot, wall_time=None, monotonic=None):
+    from openpilot.selfdrive.carrot.cluster.cluster_phone_media import phone_media_from_mapping
+    if snapshot is None:
+      self.__init__()
+      return None
+    received, value = snapshot
+    now = time.monotonic() if monotonic is None else monotonic
+    age = now - received
+    if not math.isfinite(age) or not 0 <= age < .5:
+      self.__init__()
+      return None
+    record = value.get('phone_media')
+    if not isinstance(record, dict):
+      self.__init__()
+      return None
+    key = record.get('art_key', '')
+    if not isinstance(key, str) or (key and (len(key) != 64 or any(c not in '0123456789abcdef' for c in key))):
+      return None
+    if key != self.key:
+      self.__init__()
+      self.key = key
+    chunk = record.get('art')
+    if received != self.last_received and key and isinstance(chunk, dict):
+      offset, total, data = chunk.get('offset'), chunk.get('total'), chunk.get('data')
+      valid = (type(offset) is int and type(total) is int and isinstance(data, str) and data.isascii()
+               and 0 < len(data) <= PHONE_ART_CHUNK_CHARS and 0 < total <= MAX_PHONE_ART_CHARS
+               and 0 <= offset < total and offset + len(data) <= total)
+      if valid:
+        if offset == 0:
+          self.parts, self.total = '', total
+        if total == self.total and offset == len(self.parts):
+          self.parts += data
+          if len(self.parts) == total:
+            if hashlib.sha256(self.parts.encode('ascii')).hexdigest() == key:
+              self.art = self.parts
+            self.parts = ''
+      else:
+        self.parts = ''
+    self.last_received = received
+    metadata = record.get('metadata')
+    if not isinstance(metadata, dict):
+      return None
+    # Artwork is only accepted after complete, digest-checked assembly.
+    media = phone_media_from_mapping({**metadata, 'art_base64': self.art, 'art_hash': key})
+    if media is None:
+      return None
+    now_ms = int((time.time() if wall_time is None else wall_time) * 1000)
+    return replace(media, received_at_ms=now_ms - int(age * 1000))
+
+
+class Publisher:
+  """Keep cereal decoding, JSON and preview work outside the USB owner's GIL."""
+  def __init__(self, navi=False):
+    import os
+    self.media_socket = self.media_process = None
+    if navi:
+      self.media_socket, child = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+      self.media_socket.setblocking(False)
+      try:
+        self.media_process = subprocess.Popen(['chrt', '--other', '0', sys.executable,
+          str(Path(__file__).with_name('hud_navi.py')), str(child.fileno())], pass_fds=(child.fileno(),),
+          stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+      finally:
+        child.close()
+    self.path = Path(f'/dev/shm/carrot-jetlink-display-{os.getpid()}.packet')
+    self.last_sent = 0.
+    self.process = subprocess.Popen(['chrt', '--other', '0', sys.executable,
+                                    str(Path(__file__).with_name('hud_publisher.py')), str(self.path)],
+                                    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+
+  def media_packet(self):
+    if self.media_socket is not None:
+      from hud_navi import CHUNK, HEADER as MEDIA_HEADER
+      try:
+        return self.media_socket.recv(CHUNK + MEDIA_HEADER.size)
+      except BlockingIOError:
+        pass
+    return None
+
+  def packet(self):
+    try:
+      with self.path.open('rb') as f:
+        data = f.read(96 * 1024 + HEADER.size + 1)
+      if not HEADER.size < len(data) <= 96 * 1024 + HEADER.size:
+        return None
+      stamp, = HEADER.unpack_from(data)
+      if stamp == self.last_sent or not 0 <= time.monotonic() - stamp < .3:
+        return None
+      self.last_sent = stamp
+      return data[HEADER.size:]
+    except (OSError, struct.error):
+      return None
+
+  def close(self):
+    if self.media_process is not None:
+      self.media_process.terminate()
+      try:
+        self.media_process.wait(timeout=1)
+      except subprocess.TimeoutExpired:
+        self.media_process.kill()
+        self.media_process.wait(timeout=1)
+      self.media_socket.close()
+    self.process.terminate()
+    try:
+      self.process.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+      self.process.kill()
+      self.process.wait(timeout=1)
+    self.path.unlink(missing_ok=True)
+    self.path.with_suffix('.tmp').unlink(missing_ok=True)
+
+
+class SnapshotBuilder:
+  def __init__(self):
+    from openpilot.cereal import messaging
+    from openpilot.common.params import Params
+    self.sm = messaging.SubMaster(list(SERVICES))
+    self.params = Params()
+    self.cached = {}
+    self.settings = {}
+    self.next_params = self.next_send = 0.
+    self.host_release = None
+    release_file = Path(__file__).resolve().parents[2] / 'openpilot/selfdrive/modeld/jetlink/host_release.json'
+    if release_file.is_file():
+      self.host_release = json.loads(release_file.read_text())
+    self.camera = None
+    from openpilot.selfdrive.carrot.cluster.cluster_system_monitor import NetworkAddressProvider
+    self.network = NetworkAddressProvider()
+    from openpilot.selfdrive.carrot.cluster.cluster_phone_media import PhoneMediaReader
+    self.phone_media = PhoneMediaReader()
+    self.phone_encoder = PhoneMediaEncoder()
+
+  def close(self):
+    if self.camera is not None:
+      self.camera.close()
+    self.network.close()
+
+  def camera_previews(self):
+    from openpilot.common.jetlink_status import LINK_STATUS, _fresh, host_label
+    now = time.monotonic()
+    link = _fresh(LINK_STATUS, now)
+    try:
+      host_display = (host_label(link.get('peer')) == 'jetSON' and
+                      0 <= now - float(link['telemetry_updated']) < 3 and
+                      link['telemetry'].get('carrot_hud_connected') is True)
+    except (KeyError, TypeError, ValueError):
+      host_display = False
+    # A host panel can start rendering without a camera preview. Only its
+    # fresh output heartbeat starts this worker; no panel means no allocation.
+    enabled = ((host_display or self.params.get_int('ClusterHud') == 1) and
+               (self.params.get_bool('IsOnroad') or self.params.get_int('ClusterHudDebug') >= 1))
+    if enabled and self.camera is None:
+      from hud_camera import CameraPublisher
+      self.camera = CameraPublisher()
+    elif not enabled and self.camera is not None:
+      self.camera.close()
+      self.camera = None
+    return self.camera.latest if self.camera is not None else {}
+
+  def packet(self):
+    from openpilot.cereal import log
+    from openpilot.common.jetlink_status import badge
+    now = time.monotonic()
+    if now < self.next_send:
+      return None
+    self.next_send = now + .1 if now - self.next_send > .2 else self.next_send + .1
+    self.sm.update(0)
+    for name in SERVICES:
+      if self.sm.updated[name]:
+        event = log.Event.new_message(logMonoTime=self.sm.logMonoTime[name], valid=self.sm.valid[name])
+        setattr(event, name, self.sm[name])
+        self.cached[name] = base64.b64encode(event.to_bytes()).decode()
+    if now >= self.next_params:
+      self.settings = {}
+      for key in PARAMS:
+        try:
+          value = self.params.get(key)
+          if value is not None:
+            if isinstance(value, bool):
+              value = b'1' if value else b'0'
+            self.settings[key] = base64.b64encode(value if isinstance(value, bytes) else str(value).encode()).decode()
+        except Exception:
+          pass
+      self.next_params = now + 1
+    device_badge = badge()
+    record = {'version': 1, 'sent': now, 'events': self.cached, 'params': self.settings,
+              **({'jetson_release': self.host_release} if self.host_release is not None else {}),
+              'vehicle_network_address': self.network.address(),
+              'external_compute_label': device_badge[0] if device_badge and device_badge[1] == 'active' else '',
+              'received': self.sm.recv_time, 'mono': self.sm.logMonoTime,
+              'valid': self.sm.valid, 'alive': self.sm.alive, 'cameras': self.camera_previews()}
+    record['phone_media'] = self.phone_encoder.encode(self.phone_media.read())
+    data = json.dumps(record, separators=(',', ':')).encode()
+    if len(data) > 96 * 1024:
+      record['cameras'] = {}
+      data = json.dumps(record, separators=(',', ':')).encode()
+    if len(data) > 96 * 1024:
+      record['events'] = {k:v for k,v in self.cached.items() if k != 'navRoute'}
+      data = json.dumps(record, separators=(',', ':')).encode()
+    if len(data) > 96 * 1024:
+      # Core vehicle state takes precedence over an optional artwork fragment.
+      if record['phone_media'] is not None:
+        record['phone_media'].pop('art', None)
+      data = json.dumps(record, separators=(',', ':')).encode()
+    if len(data) > 96 * 1024:
+      raise ValueError('HUD snapshot exceeds bounded USB allocation')
+    return data
+
+
+_cached_snapshot = None
+_next_snapshot_read = 0.
+
+
+def read_snapshot():
+  global _cached_snapshot, _next_snapshot_read
+  now = time.monotonic()
+  if now < _next_snapshot_read:
+    return _cached_snapshot
+  _next_snapshot_read = now + .02
+  _cached_snapshot = None
+  try:
+    with HUD_PACKET.open('rb') as f:
+      data = f.read(MAX_HUD_BYTES + HEADER.size + 1)
+    if len(data) > MAX_HUD_BYTES + HEADER.size:
+      return None
+    received, = HEADER.unpack_from(data)
+    if not 0 <= time.monotonic() - received < .5:
+      return None
+    value = json.loads(data[HEADER.size:])
+    if isinstance(value, dict) and value.get('version') == 1:
+      _cached_snapshot = received, value
+      return _cached_snapshot
+  except (OSError, ValueError, struct.error):
+    pass
+  return None

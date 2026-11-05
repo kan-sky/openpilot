@@ -1,0 +1,778 @@
+import time
+from enum import Enum
+
+from openpilot.cereal import log
+from openpilot.common.params import Params
+import numpy as np
+from openpilot.common.realtime import DT_MDL
+from openpilot.common.constants import CV
+from openpilot.common.filter_simple import MyMovingAverage
+from openpilot.selfdrive.carrot.carrot_man_input import get_carrot_man
+from openpilot.selfdrive.carrot.t_follow import (
+  get_t_follow_mode_factor, get_t_follow_mode_max, get_speed_t_follow_factor, get_lead_response_for_gap, ramp_t_follow,
+  ramp_mode_t_follow_factor,
+)
+from openpilot.selfdrive.carrot.radar_motion.lane_change_gap import LaneChangeGapPlan, LaneChangeGapTracker
+from openpilot.selfdrive.carrot.driving_mode import DrivingMode, DrivingModeDetector, get_mode_lead_response
+from openpilot.selfdrive.carrot.traffic_stop import TrafficStopModelLeadMatcher, is_traffic_stop_entry_allowed
+from openpilot.selfdrive.controls.radar_constants import RADAR_TO_CAMERA
+from openpilot.selfdrive.selfdrived.events import Events
+
+EventName = log.OnroadEvent.EventName
+LaneChangeState = log.LaneChangeState
+
+class XState(Enum):
+  lead = 0
+  cruise = 1
+  e2eCruise = 2
+  e2eStop = 3
+  e2ePrepare = 4
+  e2eStopped = 5
+  e2eStopPrepare = 6
+
+  def __str__(self):
+    return self.name
+
+def get_driving_mode_factors(driving_mode: DrivingMode, eco_factor: float = 0.9,
+                             safe_factor: float = 0.8) -> tuple[float, float]:
+  """Return the accel/comfort and following-time factors for a drive mode."""
+  if driving_mode == DrivingMode.Eco:
+    return eco_factor, get_t_follow_mode_factor(eco_factor)
+  if driving_mode == DrivingMode.Safe:
+    return safe_factor, get_t_follow_mode_factor(safe_factor)
+  return 1.0, 1.0
+
+
+def get_driving_mode_comfort_brake_factor(driving_mode: DrivingMode) -> float:
+  """Keep Eco efficient while giving Safe a modestly earlier braking profile."""
+  return 0.9 if driving_mode == DrivingMode.Safe else 1.0
+
+class TrafficState(Enum):
+  off = 0
+  red = 1
+  green = 2
+
+  def __str__(self):
+    return self.name
+
+A_CRUISE_MAX_BP_CARROT = [0., 10 * CV.KPH_TO_MS, 40 * CV.KPH_TO_MS, 60 * CV.KPH_TO_MS, 80 * CV.KPH_TO_MS, 110 * CV.KPH_TO_MS, 140 * CV.KPH_TO_MS]
+
+class CarrotPlanner:
+  def __init__(self, signal_assist=None, start_guard=None, stop_prepare=None):
+    # SignalAssistMode defaults OFF; injected helpers support offline comparison.
+    self.signal_assist = signal_assist
+    self._signal_runtime = None
+    if signal_assist is None:
+      from openpilot.selfdrive.carrot.signal_assist_runtime import SignalAssistRuntime
+      runtime = SignalAssistRuntime()
+      if runtime.assist is not None:
+        self._signal_runtime = runtime
+        self.signal_assist = runtime.assist
+    self.signal_decision = None
+    from openpilot.selfdrive.carrot.signal_start_guard import SignalStartRuntime
+    self._start_runtime = SignalStartRuntime() if start_guard is None else None
+    self.start_guard = start_guard if start_guard is not None else self._start_runtime.guard
+    self.start_decision = None
+    from openpilot.selfdrive.carrot.signal_stop_prepare_runtime import SignalPrepareRuntime
+    self._prepare_runtime = SignalPrepareRuntime() if stop_prepare is None else None
+    self.stop_prepare = stop_prepare if stop_prepare is not None else self._prepare_runtime.prepare
+    self.prepare_decision = None
+    self.prepare_control_active = False
+    self.signal_detection_suspended = False
+    self.signal_observation_color = 0
+    self.signal_green_active = False
+    self.params = Params()
+    self.params_count = 0
+    self.frame = 0
+
+    #self.log = ""
+
+    #self.aChangeCost = 200
+    #self.aChangeCostStart = 40
+    #self.tFollowSpeedAdd = 0.0
+    #self.tFollowSpeedAddM = 0.0
+    #self.tFollowLeadCarSpeed = 0.0
+    #self.tFollowLeadCarAccel = 0.0
+    #self.lo_timer = 0
+    #self.v_ego_prev = 0.0
+
+    self.trafficState = TrafficState.off
+    self.xStopFilter = MyMovingAverage(3)
+    self.xStopFilter2 = MyMovingAverage(15)
+    self.vFilter = MyMovingAverage(10)
+    #self.t_follow_prev = self.get_T_FOLLOW()
+    self.stop_distance = 6.0
+    self.fakeCruiseDistance = 0.0
+    self.xState = XState.cruise
+    self.xStop = 0.0
+    self.actual_stop_distance = 0.0
+    #self.debugLongText = ""
+    self.stopping_count = 0
+    self.traffic_starting_count = 0
+    self.user_stop_distance = -1
+
+    self.t_follow_last = 1.5
+    self._tf_base_last = 1.5
+    self.lane_change_active = False
+    self.lane_change_gap = LaneChangeGapPlan()
+    self._lane_change_tracker = LaneChangeGapTracker()
+    self._lane_change_model_ns = 0
+
+    self.startSignCount = 0
+    self.stopSignCount = 0
+
+    self.stop_distance = 6.0
+    self.trafficStopDistanceAdjust = 2.5 #params.get_float("TrafficStopDistanceAdjust") / 100.
+    self.comfortBrake = 2.4
+    self.comfort_brake = self.comfortBrake
+
+    self.soft_hold_active = 0
+    self.events = Events()
+    self.myDrivingMode = DrivingMode(self.params.get_int("MyDrivingMode"))
+    self.myDrivingMode_last = self.myDrivingMode
+    self.myDrivingModeAuto = self.params.get_int("MyDrivingModeAuto")
+    self.myDrivingMode_disable_auto = False
+    self.myEcoModeFactor = 0.9
+    self.mySafeModeFactor = 0.8
+    self.myHighModeFactor = 1.2
+    self.drivingModeDetector = DrivingModeDetector()
+    self.mySafeFactor = 1.0
+    self.myTFollowFactor = 1.0
+
+    self.tFollowGap1 = 1.1
+    self.tFollowGap2 = 1.3
+    self.tFollowGap3 = 1.45
+    self.tFollowGap4 = 1.6
+
+    self.leadAccelResponse = 0
+    self.leadAccelResponseBase = 0
+    self.leadAccelResponseTF = [-1] * 4
+    self.dynamicTFollowLC = 1.0
+    self.speedTFFactor = 10
+    self.tFollowDecelBoost = 0.0
+    self._tf_decel_extra = 0.0
+    self._tf_decel_base = None
+    self._tf_mode_factor = None
+    self.personality = 1
+
+    self.cruiseMaxVals0 = 1.6
+    self.cruiseMaxVals1 = 1.6
+    self.cruiseMaxVals2 = 1.2
+    self.cruiseMaxVals3 = 1.0
+    self.cruiseMaxVals4 = 0.8
+    self.cruiseMaxVals5 = 0.7
+    self.cruiseMaxVals6 = 0.6
+
+    self.aChangeCostStarting = 10.0
+
+    self.trafficLightDetectMode = 2 # 0: None, 1:Stop, 2:Stop&Go
+    self.trafficState_carrot = 0
+    self.carrot_stay_stop = False
+
+    self.eco_over_speed = 2
+    self.eco_target_speed = 0
+    
+    self.autoNaviSpeedDecelRate = 1.5
+
+    self.desireState = 0.0
+    self.desireStateCount = 0
+    self.jerk_factor = 1.0
+
+    self.activeCarrot = 0
+    self.xDistToTurn = 0
+    self.atcType = ""
+    self.atc_active = False
+
+    self._stop_x_rl = None
+    self._traffic_stop_model_lead_matcher = TrafficStopModelLeadMatcher()
+    self.trafficStopModelLeadOffset = 0.0
+    self.last_event_time = 0.0
+
+  def _params_update(self):
+    self.frame += 1
+    self.params_count += 1
+    if self.params_count % 10 == 0:
+      myDrivingMode = DrivingMode(self.params.get_int("MyDrivingMode"))
+      if myDrivingMode != self.myDrivingMode_last:
+        self.myDrivingMode_disable_auto = True
+      self.myDrivingMode_last = myDrivingMode
+      
+      self.myDrivingModeAuto = self.params.get_int("MyDrivingModeAuto")
+      if self.myDrivingModeAuto > 0 and not self.myDrivingMode_disable_auto:
+        self.myDrivingMode = self.drivingModeDetector.get_mode(self.myDrivingModeAuto)
+      else:
+        self.myDrivingMode = myDrivingMode
+
+    if self.params_count == 10:
+      self.myHighModeFactor = 1.2 #float(self.params.get_int("MyHighModeFactor")) / 100.
+      self.trafficLightDetectMode = self.params.get_int("TrafficLightDetectMode") # 0: None, 1:Stop, 2:Stop&Go
+    elif self.params_count == 20:
+      self.tFollowGap1 = self.params.get_float("TFollowGap1") / 100.
+      self.tFollowGap2 = self.params.get_float("TFollowGap2") / 100.
+      self.tFollowGap3 = self.params.get_float("TFollowGap3") / 100.
+      self.tFollowGap4 = self.params.get_float("TFollowGap4") / 100.
+      self.leadAccelResponseBase = int(np.clip(self.params.get_int("LeadAccelResponse"), 0, 5))
+      self.leadAccelResponseTF = [int(np.clip(self.params.get_int(f"LeadAccelResponseTF{i}"), -1, 5)) for i in range(1, 5)]
+      self.dynamicTFollowLC = self.params.get_float("DynamicTFollowLC") / 100.
+      self.speedTFFactor = int(np.clip(self.params.get_int("SpeedTFFactor"), 10, 30))
+      self.tFollowDecelBoost = self.params.get_float("TFollowDecelBoost") / 100.
+    elif self.params_count == 30:
+      self.cruiseMaxVals0 = self.params.get_float("CruiseMaxVals0") / 100.
+      self.cruiseMaxVals1 = self.params.get_float("CruiseMaxVals1") / 100.
+      self.cruiseMaxVals2 = self.params.get_float("CruiseMaxVals2") / 100.
+      self.cruiseMaxVals3 = self.params.get_float("CruiseMaxVals3") / 100.
+      self.cruiseMaxVals4 = self.params.get_float("CruiseMaxVals4") / 100.
+      self.cruiseMaxVals5 = self.params.get_float("CruiseMaxVals5") / 100.
+      self.cruiseMaxVals6 = self.params.get_float("CruiseMaxVals6") / 100.
+    elif self.params_count == 40:
+      self.stop_distance = self.params.get_float("StopDistanceCarrot") / 100.
+      self.eco_over_speed = self.params.get_int("CruiseEcoControl")
+      self.autoNaviSpeedDecelRate = float(self.params.get_int("AutoNaviSpeedDecelRate")) * 0.01
+      self.aChangeCostStarting = self.params.get_float("AChangeCostStarting")
+      self.trafficStopDistanceAdjust = self.params.get_float("TrafficStopDistanceAdjust") / 100.
+    elif self.params_count >= 100:
+
+      self.params_count = 0
+
+  def get_carrot_accel(self, v_ego):
+    cruiseMaxVals = [self.cruiseMaxVals0, self.cruiseMaxVals1, self.cruiseMaxVals2, self.cruiseMaxVals3, self.cruiseMaxVals4, self.cruiseMaxVals5, self.cruiseMaxVals6]
+    factor = self.myHighModeFactor if self.myDrivingMode == DrivingMode.High else self.mySafeFactor
+    return np.interp(v_ego, A_CRUISE_MAX_BP_CARROT, cruiseMaxVals) * factor
+
+  def _get_base_t_follow(self, personality, v_ego):
+    if personality == log.LongitudinalPersonality.moreRelaxed:
+      self.jerk_factor = 1.0
+      tf_base = self.tFollowGap4
+    elif personality == log.LongitudinalPersonality.relaxed:
+      self.jerk_factor = 1.0
+      tf_base = self.tFollowGap3
+    elif personality == log.LongitudinalPersonality.standard:
+      self.jerk_factor = 0.7
+      tf_base = self.tFollowGap2
+    elif personality == log.LongitudinalPersonality.aggressive:
+      self.jerk_factor = 0.5
+      tf_base = self.tFollowGap1
+    else:
+      raise NotImplementedError("Longitudinal personality not supported")
+    return float(tf_base)
+
+  def _apply_speed_t_follow_scale(self, tf_base, v_ego):
+    return float(tf_base * get_speed_t_follow_factor(self.speedTFFactor, v_ego * CV.MS_TO_KPH))
+
+  def _apply_decel_hold_and_boost_t_follow(self, tf_target, a_ego):
+    # Hold only the unboosted baseline. Feeding the previous boosted target
+    # back here would add the same margin on every planner cycle.
+    previous_extra = self._tf_decel_extra
+    previous_base = tf_target - previous_extra if self._tf_decel_base is None else self._tf_decel_base
+    self._tf_decel_base = max(tf_target, previous_base) if a_ego <= -0.2 else tf_target
+    requested_extra = float(np.interp(a_ego, [-2.5, -1.0, -0.3, 0.0], [0.50, 0.25, 0.06, 0.0])) * self.tFollowDecelBoost
+    # Add braking margin promptly; release only the extra margin progressively
+    # so its removal does not suddenly invite acceleration to a shorter gap.
+    self._tf_decel_extra = max(requested_extra, previous_extra - 0.10 * DT_MDL)
+    return float(self._tf_decel_base + self._tf_decel_extra)
+
+
+  def _clip_t_follow(self, t_follow):
+    # The selected, speed-scaled baseline can exceed every configured static gap.
+    # Preserve the deceleration hold when speed (and its multiplier) falls.
+    tf_max = max(self._tf_mode_target, self._tf_decel_base)
+    tf_max = get_t_follow_mode_max(tf_max, 1.0, self._tf_decel_extra)
+    return float(np.clip(t_follow, 0.3, max(0.3, tf_max)))
+
+  def get_T_FOLLOW(self, personality=log.LongitudinalPersonality.standard, v_ego=0.0, a_ego=0.0):
+    tf_base = self._get_base_t_follow(personality, v_ego)
+    tf_target = self._apply_speed_t_follow_scale(tf_base, v_ego)
+    self._tf_mode_factor = ramp_mode_t_follow_factor(
+      self.myTFollowFactor, self.myTFollowFactor if self._tf_mode_factor is None else self._tf_mode_factor, DT_MDL,
+    )
+    tf_mode_target = float(tf_target * self._tf_mode_factor)
+    self._tf_mode_target = tf_mode_target
+    tf_adjusted = self._apply_decel_hold_and_boost_t_follow(tf_mode_target, a_ego)
+    tf_final = self._clip_t_follow(tf_adjusted)
+    self._tf_applied = float(tf_final)
+    # Apply the baseline increase ramp once per planner cycle.
+    self._tf_base_last = ramp_t_follow(tf_final, self._tf_base_last, self._tf_decel_extra, DT_MDL)
+    self.t_follow_last = float(self._tf_base_last)
+    return self.t_follow_last
+
+
+  def _update_model_desire(self, sm):
+    meta = sm['modelV2'].meta
+    carState = sm['carState']
+    self.lane_change_active = meta.laneChangeState in (LaneChangeState.laneChangeStarting, LaneChangeState.laneChangeFinishing)
+
+    if meta.laneChangeState == LaneChangeState.laneChangeStarting:
+      self.desireState = meta.desireState[3] if carState.leftBlinker else meta.desireState[4]
+      self.desireStateCount += 1
+    else:
+      self.desireState = 0.0
+      self.desireStateCount = 0
+
+    self._update_lane_change_gap(sm)
+
+  def _update_lane_change_gap(self, sm):
+    state, model, radar = sm['carState'], sm['modelV2'], sm['radarState']
+    signal = state.leftBlinker != state.rightBlinker
+    direction = ((-1 if state.leftBlinker else 1) if signal else self._lane_change_tracker.direction) if self.lane_change_active else 0
+    now_ns = int(sm.logMonoTime['modelV2'])
+    valid = all(sm.valid[key] and sm.alive[key] for key in ('carState', 'modelV2', 'radarState'))
+    valid = valid and abs(now_ns - int(sm.logMonoTime['radarState'])) <= 200_000_000
+    if not valid or direction == 0:
+      self._lane_change_tracker.reset()
+      self.lane_change_gap = LaneChangeGapPlan(active=self.lane_change_active, reason='invalid-input' if self.lane_change_active else 'inactive')
+      self._lane_change_model_ns = 0
+      return
+    if now_ns == self._lane_change_model_ns:
+      return  # fast radar must not count the same model/pose twice
+    self._lane_change_model_ns = now_ns
+    pose = sm['livePose']
+    angular = pose.angularVelocityDevice
+    pose_valid = (sm.valid['livePose'] and sm.alive['livePose'] and pose.inputsOK and pose.sensorsOK and angular.valid
+                  and abs(now_ns - int(sm.logMonoTime['livePose'])) <= 150_000_000)
+    self.lane_change_gap = self._lane_change_tracker.update(
+      now=now_ns * 1e-9, direction=direction, v_ego=float(state.vEgo),
+      yaw_rate=float(angular.z) if pose_valid else float('nan'),
+      path_t=tuple(model.position.t), path_x=tuple(model.position.x), path_y=tuple(model.position.y),
+      primary=radar.leadOne, secondary=radar.leadTwo,
+      blindspot=not signal or bool(state.leftBlindspot if direction == -1 else state.rightBlindspot), valid=valid,
+    )
+
+
+  def update_stop_dist(self, stop_x):
+    stop_x = self.xStopFilter.process(stop_x, median = True)
+    stop_x = self.xStopFilter2.process(stop_x)
+    return stop_x
+
+  def check_model_stopping(self, v_cruise, v, v_ego, a_ego, model_x, y, d_rel):
+    v_ego_kph = v_ego * CV.MS_TO_KPH
+    model_v = self.vFilter.process(v[-1])
+    startSign = model_v > 5.0 or model_v > (v[0] + 2)
+
+    if v_ego_kph < 1.0:
+      stopSign = model_x < 20.0 and model_v < 10.0
+    elif v_ego_kph < 82.0:
+      stopSign = (model_x < d_rel - 3.0 and
+                  model_x < np.interp(v[0] * 3.6, [60, 80], [120.0, 150]) and
+                  ((model_v < 3.0) or (model_v < v[0] * 0.7)) and
+                  abs(y[-1]) < 5.0)
+      # 정상 주행 중 감속하는 경우(카메라 감속 등)에는 오감지가 많음.
+      # 회생 감속으로 v_cruise가 0인 경우에는 신호를 감지하도록 함.
+      if v_cruise != 0 and (self.xState == XState.e2eCruise and a_ego < -1.0):
+        stopSign = False
+    else:
+      stopSign = False
+
+    # self.stopSignCount = (
+    #   self.stopSignCount + 1
+    #   if (
+    #     stopSign
+    #     and (
+    #       model_x > get_safe_obstacle_distance(
+    #         v_ego,
+    #         t_follow=0,
+    #         comfort_brake=COMFORT_BRAKE,
+    #         stop_distance=-1.0,
+    #       )
+    #     )
+    #   )
+    #   else 0
+    # )
+    self.stopSignCount = self.stopSignCount + 1 if stopSign else 0
+    self.startSignCount = self.startSignCount + 1 if startSign and not stopSign else 0
+
+    if self.stopSignCount * DT_MDL > 0.0:
+      self.trafficState = TrafficState.red
+    elif self.startSignCount * DT_MDL > 0.2:
+      self.trafficState = TrafficState.green
+    else:
+      self.trafficState = TrafficState.off
+
+  def _update_carrot_man(self, sm, v_ego_kph, v_cruise_kph):
+    atc_active = False
+    carrot_man = get_carrot_man(sm)
+    if carrot_man is not None:
+      traffic_state = 0 if self.signal_detection_suspended else carrot_man.trafficState
+      atc_turn_left = carrot_man.atcType in ["turn left", "atc left"]
+      trigger_start = self.carrot_stay_stop = False
+      if atc_turn_left or sm['carState'].leftBlinker:
+        if self.trafficState_carrot == 1 and traffic_state == 3: # red -> left triggered
+          trigger_start = True
+        elif traffic_state in [1, 2]:
+          self.carrot_stay_stop = True
+      elif self.trafficState_carrot == 1 and traffic_state == 2:  # red -> green triggered
+        trigger_start = True
+      else:
+        trigger_start = False
+      self.trafficState_carrot = traffic_state
+
+      if trigger_start:
+        if self.soft_hold_active > 0:
+          self.add_event(EventName.trafficSignChanged)
+        elif self.xState in [XState.e2eStop, XState.e2eStopped]:
+          self.xState = XState.e2eCruise
+          self.traffic_starting_count = 10.0 / DT_MDL
+
+      self.activeCarrot = carrot_man.activeCarrot
+      self.xDistToTurn = carrot_man.xDistToTurn
+      atc_active = self.activeCarrot > 1 and 0 < self.xDistToTurn < 100
+      self.atcType = carrot_man.atcType
+
+      v_cruise_kph = min(v_cruise_kph, carrot_man.desiredSpeed)
+    else:
+      self.trafficState_carrot = 0
+      self.carrot_stay_stop = False
+      self.activeCarrot = 0
+      self.xDistToTurn = 0
+      self.atcType = ""
+
+    return v_cruise_kph, atc_active
+
+  def cruise_eco_control(self, v_ego_kph, v_cruise_kph):
+    v_cruise_kph_apply = v_cruise_kph
+    if self.eco_over_speed > 0:
+      if self.eco_target_speed > 0:
+        if self.eco_target_speed < v_cruise_kph:
+          self.eco_target_speed = v_cruise_kph
+        elif self.eco_target_speed > v_cruise_kph:
+          self.eco_target_speed = 0
+      elif self.eco_target_speed == 0 and v_ego_kph + 3 < v_cruise_kph and v_cruise_kph > 20.0:  # 주행중 속도가 떨어지면 다시 크루즈연비제어 시작.
+        self.eco_target_speed = v_cruise_kph
+
+      if self.eco_target_speed != 0:  ## 크루즈 연비 제어모드 작동중일때: 연비제어 종료지점
+        if v_ego_kph > self.eco_target_speed: # 설정속도를 초과하면..
+          self.eco_target_speed = 0
+        else:
+          v_cruise_kph_apply = self.eco_target_speed + self.eco_over_speed  # + 설정 속도로 설정함.
+    else:
+      self.eco_target_speed = 0
+
+    return v_cruise_kph_apply
+
+  def add_event(self, event_name):
+    now = time.time()
+    if now - self.last_event_time > 5.0:
+      self.events.add(event_name)
+      self.last_event_time = now
+
+  def _update_driving_mode(self, sm):
+    self.drivingModeDetector.update_data(
+      sm['carState'], sm['radarState'].leadOne, valid=sm.all_checks(['carState', 'radarState']),
+    )
+    if self.myDrivingModeAuto > 0 and not self.myDrivingMode_disable_auto:
+      self.myDrivingMode = self.drivingModeDetector.get_mode(self.myDrivingModeAuto)
+
+  def update(self, sm, v_cruise_kph, mode, *, signal_observation=None, signal_context=None,
+             start_observation=None, start_context=None, prepare_observation=None, prepare_context=None):
+    from openpilot.selfdrive.carrot.signal_road_policy import signal_detection_suspended
+    suspended = signal_detection_suspended(sm)
+    if suspended != self.signal_detection_suspended:
+      self.vFilter = MyMovingAverage(10)
+      self.stopSignCount = self.startSignCount = 0
+    self.signal_detection_suspended = suspended
+    if suspended and sm['carState'].softHoldActive == 0 and self.user_stop_distance < 0:
+      if self.xState in (XState.e2eStop, XState.e2eStopped, XState.e2ePrepare, XState.e2eStopPrepare):
+        self.xState = XState.e2eCruise
+        self.actual_stop_distance = 0.0
+        self.stopping_count = 0
+    self._params_update()
+    self._update_driving_mode(sm)
+    self.leadAccelResponse = get_mode_lead_response(get_lead_response_for_gap(
+      self.leadAccelResponseBase, self.leadAccelResponseTF, sm['selfdriveState'].personality,
+    ), self.myDrivingMode)
+    self._update_model_desire(sm)
+
+    self.events = Events()
+    carstate = sm['carState']
+    vCluRatio = carstate.vCluRatio
+    #controlsState = sm['controlsState']
+    radarstate = sm['radarState']
+    model = sm['modelV2']
+
+    #self.soft_hold_active = sm['carControl'].hudControl.softHoldActive # carrot 1
+    self.soft_hold_active = sm['carState'].softHoldActive # carrot 2
+
+    mode_comfort_brake = self.comfortBrake * get_driving_mode_comfort_brake_factor(self.myDrivingMode)
+    self.comfort_brake = mode_comfort_brake
+
+    v_ego = carstate.vEgo
+    a_ego = carstate.aEgo
+    v_ego_kph = v_ego * CV.MS_TO_KPH
+    v_ego_cluster = carstate.vEgoCluster
+    v_ego_cluster_kph = v_ego_cluster * CV.MS_TO_KPH
+
+    self.mySafeFactor, self.myTFollowFactor = get_driving_mode_factors(
+      self.myDrivingMode, self.myEcoModeFactor, self.mySafeModeFactor,
+    )
+
+
+    v_cruise_kph = self.cruise_eco_control(v_ego_cluster_kph, v_cruise_kph)
+    v_cruise_kph, atc_active = self._update_carrot_man(sm, v_ego_kph, v_cruise_kph)
+    
+    #if atc_active and not self.atc_active and self.xState not in [XState.e2eStop, XState.e2eStopped, XState.lead]:
+    #  if self.atcType in ["turn left", "turn right", "atc left", "atc right"]:
+    #    self.xState = XState.e2ePrepare
+    self.atc_active = atc_active
+
+    v_cruise = v_cruise_kph * CV.KPH_TO_MS
+    if vCluRatio > 0.5:
+      v_cruise *= vCluRatio
+
+    x = model.position.x
+    y = model.position.y
+    v = model.velocity.x
+
+    self.fakeCruiseDistance = 0.0
+    lead_detected = radarstate.leadOne.status # & radarstate.leadOne.radar
+
+    self.xStop = self.update_stop_dist(x[31])
+    stop_model_x_raw = self.xStop
+    if self._stop_x_rl is None:
+      self._stop_x_rl = stop_model_x_raw
+    else:
+      max_close = v_ego * DT_MDL + 0.5
+      if stop_model_x_raw > self._stop_x_rl:
+        self._stop_x_rl = stop_model_x_raw
+      else:
+        self._stop_x_rl = max(self._stop_x_rl - max_close, stop_model_x_raw)
+
+    stop_model_x = self._stop_x_rl
+    stop_model_x_rl = self._stop_x_rl
+
+    trafficState_last = self.trafficState
+    #self.check_model_stopping(v, v_ego, self.xStop, y)
+    if suspended:
+      self.trafficState = TrafficState.off
+      self.stopSignCount = self.startSignCount = 0
+    else:
+      self.check_model_stopping(v_cruise, v, v_ego, a_ego, x[-1], y, radarstate.leadOne.dRel if lead_detected else 1000)
+
+    if self.myDrivingMode == DrivingMode.High or self.trafficLightDetectMode == 0:
+      self.trafficState = TrafficState.off
+
+    start_hold = False
+    self.signal_observation_color = 0
+    self.signal_green_active = False
+    if self.start_guard is not None:
+      if start_context is None and self._start_runtime is not None:
+        start_observation, start_context = self._start_runtime.read(sm)
+      context = start_context or {'now': time.monotonic(), 'enabled': False, 'valid': False, 'drive': False}
+      from openpilot.selfdrive.carrot.signal_start_guard import observation_color
+      self.signal_observation_color = observation_color(
+        start_observation, context['now'], enabled=context['enabled'] and not suspended,
+        valid=context['valid'], drive=context['drive'])
+      self.start_decision = self.start_guard.update(
+        context['now'], start_observation,
+        enabled=context['enabled'] and not suspended, valid=context['valid'],
+        drive=context['drive'], gas=carstate.gasPressed, speed=v_ego,
+        departure=self.trafficState == TrafficState.green or lead_detected or
+                  self.xState not in (XState.e2eStop, XState.e2eStopped))
+      start_hold = self.start_decision.hold
+      # A fresh transition from the same previously red signal supplies the
+      # normal green input. It does not set acceleration or bypass driver holds.
+      if (getattr(self.start_decision, 'green_confirmed', False) and v_ego < 5/3.6
+          and self.xState in (XState.e2eStop, XState.e2eStopped, XState.e2eCruise)
+          and self.soft_hold_active == 0 and not self.carrot_stay_stop and self.user_stop_distance < 0
+          and not (carstate.brakePressed or carstate.gasPressed or carstate.leftBlinker or carstate.rightBlinker)
+          and self.trafficLightDetectMode == 2 and self.myDrivingMode != DrivingMode.High):
+        self.trafficState = TrafficState.green
+        self.signal_green_active = True
+        if (self.start_decision.released and self.xState == XState.e2eStopped
+            and getattr(carstate, 'standstill', False) and abs(v_ego) < .1):
+          # The stopped red guard already confirmed >=700ms of fresh green.
+          # Do not add its repeatedly rearmed 0.5s stop timer after release.
+          self.stopping_count = 0
+      if self.start_decision.warn:
+        # Bypass unrelated navigation-event cooldown. refuse.wav plays once.
+        self.events.add(EventName.audioRefuse)
+      if self._start_runtime is not None:
+        self._start_runtime.record(self.start_decision, v_ego, stop_model_x_rl)
+
+    signal_hold = False
+    if self.signal_assist is not None:
+      if signal_context is None and self._signal_runtime is not None:
+        signal_observation, signal_context = self._signal_runtime.read(sm)
+      context = signal_context or {'now': time.monotonic(), 'enabled': False, 'valid': False, 'drive': False}
+      self.signal_decision = self.signal_assist.update(
+        context['now'], signal_observation,
+        enabled=context['enabled'] and not suspended and self.myDrivingMode != DrivingMode.High and self.trafficLightDetectMode != 0,
+        valid=context['valid'], drive=context['drive'],
+        gas=carstate.gasPressed, speed=v_ego, model_distance=stop_model_x_rl,
+        model_y=y[-1], comfort_brake=mode_comfort_brake, lead=lead_detected,
+        entry_allowed=is_traffic_stop_entry_allowed(carstate.steeringAngleDeg) and self.traffic_starting_count == 0,
+        turning=carstate.leftBlinker or carstate.rightBlinker)
+      signal_hold = self.signal_decision.hold
+      if self.signal_decision.red_sign:
+        self.trafficState = TrafficState.red
+      if self._signal_runtime is not None:
+        self._signal_runtime.record(self.signal_decision, v_ego, stop_model_x_rl)
+
+    #self.update_user_control()
+    if carstate.gasPressed or carstate.brakePressed:
+      self.user_stop_distance = -1
+
+    if signal_hold or start_hold:
+      # Keep the stop even if a lead appears/moves. Radar obstacles remain in MPC.
+      # Unknown retains this override; only a confirmed transition can remove it.
+      self.xState = XState.e2eStopped
+      self.actual_stop_distance = 0.0
+      stop_model_x = 0.0
+      self.stopping_count = max(self.stopping_count, 0.5 / DT_MDL)
+      v_cruise = 0.0
+      if start_hold:
+        self.trafficState = TrafficState.red
+    elif self.soft_hold_active > 0:
+      self.xState = XState.e2eStopped
+      if trafficState_last in [TrafficState.off, TrafficState.red] and self.trafficState == TrafficState.green:
+        self.add_event(EventName.trafficSignChanged)
+    elif self.xState == XState.e2eStopped:
+      if carstate.gasPressed:
+        self.xState = XState.e2eCruise #XState.e2ePrepare
+      elif lead_detected and (radarstate.leadOne.dRel - stop_model_x_raw) < 2.0:
+        self.xState = XState.lead
+      elif self.stopping_count == 0:
+        if self.trafficState == TrafficState.green and not self.carrot_stay_stop and not carstate.leftBlinker and self.trafficLightDetectMode != 1:
+          #self.xState = XState.e2ePrepare
+          self.xState = XState.e2eCruise  # 실험모드를 거치지 않고 바로 출발.
+          self.add_event(EventName.trafficSignGreen)
+      self.stopping_count = max(0, self.stopping_count - 1)
+      v_cruise = 0
+    elif self.xState == XState.e2eStop:
+      self.stopping_count = 0
+      if carstate.gasPressed:  # Stop detecting traffic signal for 10 seconds
+        #self.xState = XState.e2ePrepare
+        self.xState = XState.e2eCruise
+        self.traffic_starting_count = 10.0 / DT_MDL
+      elif lead_detected and (radarstate.leadOne.dRel - stop_model_x_raw) < 2.0:
+        self.xState = XState.lead
+      else:
+        if self.trafficState == TrafficState.green:
+          self.add_event(EventName.trafficSignGreen)
+          self.xState = XState.e2eCruise
+        else:
+          self.comfort_brake = min(mode_comfort_brake, self.comfortBrake * 0.9)
+          #self.comfort_brake = COMFORT_BRAKE
+          self.trafficStopAdjustRatio = np.interp(v_ego_kph, [0, 100], [1.0, 0.7])
+          # 속도가 높을수록 먼 정지거리 추정값을 줄여 보정함.
+          stop_dist = stop_model_x_rl * np.interp(stop_model_x_rl, [0, 50], [1.0, self.trafficStopAdjustRatio])
+          if stop_dist > 10.0:  # 10m 이상일 때만 실제 정지거리를 갱신함.
+            self.actual_stop_distance = stop_dist
+          stop_model_x = 0
+          self.fakeCruiseDistance = 0 if self.actual_stop_distance > 10.0 else 10.0
+          if v_ego < 0.3:
+            self.stopping_count = 0.5 / DT_MDL
+            self.xState = XState.e2eStopped
+    elif self.xState == XState.e2ePrepare:
+      if lead_detected:
+        self.xState = XState.lead
+      elif self.atc_active:
+        if carstate.gasPressed:
+          self.xState = XState.e2eCruise
+      elif v_ego_kph < 5.0 and self.trafficState != TrafficState.green and not suspended:
+        self.xState = XState.e2eStop
+        self.actual_stop_distance = 5.0 #2.0
+      elif v_ego_kph > 5.0: # and stop_model_x > 30.0:
+        self.xState = XState.e2eCruise
+    else: #XState.lead, XState.cruise, XState.e2eCruise
+      self.traffic_starting_count = max(0, self.traffic_starting_count - 1)
+      if lead_detected:
+        self.xState = XState.lead
+      elif self.trafficState == TrafficState.red and is_traffic_stop_entry_allowed(carstate.steeringAngleDeg) and self.traffic_starting_count == 0:
+        self.add_event(EventName.trafficStopping)
+        self.xState = XState.e2eStop
+        self.actual_stop_distance = stop_model_x_rl
+      else:
+        self.xState = XState.e2eCruise
+
+    if self.trafficState in [TrafficState.off, TrafficState.green] or self.xState not in [XState.e2eStop, XState.e2eStopped]:
+      stop_model_x = 1000.0
+
+    if self.user_stop_distance >= 0 and not start_hold:
+      if suspended:
+        stop_model_x = 0.0  # highway policy must not cancel an explicit user stop
+      self.user_stop_distance = max(0, self.user_stop_distance - v_ego * DT_MDL)
+      self.actual_stop_distance = self.user_stop_distance
+      self.xState = XState.e2eStop if self.user_stop_distance > 0 else XState.e2eStopped
+
+    if start_hold:
+      mode = 'acc'  # The blended path otherwise ignores the traffic-stop obstacle.
+    elif mode == 'acc':
+      mode = 'blended' if self.xState in [XState.e2ePrepare] else 'acc'
+
+    # Drive modes shape transient response through lead preview and preserve
+    # steady-state spacing through tFollow.  Keep the MPC braking-distance model
+    # independent of mode so its v^2 term does not create a large high-speed gap
+    # jump (Safe/Eco max acceleration still uses mySafeFactor).
+    self.actual_stop_distance = max(0, self.actual_stop_distance - (v_ego * DT_MDL))
+
+    if stop_model_x == 1000.0:  # e2eCruise 또는 lead 상태
+      self.actual_stop_distance = 0.0
+    elif self.actual_stop_distance > 0:  # e2eStop 또는 e2eStopped 상태
+      stop_model_x = 0.0
+
+    stopping_active = self.xState not in [XState.e2eStop, XState.e2eStopped]
+    if not stopping_active:
+      self._stop_x_rl = stop_model_x_raw
+
+    # self.debugLongText = (
+    #   f"XState({str(self.xState)})," +
+    #   f"stop_x={stop_x:.1f}," +
+    #   f"stopDist={self.actual_stop_distance:.1f}," +
+    #   f"Traffic={str(self.trafficState)}"
+    # )
+    stop_dist =  stop_model_x + self.actual_stop_distance
+    stop_dist = max(stop_dist, 0.0)
+
+    stopping_active = self.xState in [XState.e2eStop, XState.e2eStopped]
+    model_lead = model.leadsV3[0] if stopping_active and not lead_detected and len(model.leadsV3) > 0 else None
+    model_lead_x = float(model_lead.x[0]) - RADAR_TO_CAMERA if model_lead is not None and len(model_lead.x) > 0 else np.nan
+    model_lead_v = float(model_lead.v[0]) if model_lead is not None and len(model_lead.v) > 0 else np.nan
+    model_lead_x_std = float(model_lead.xStd[0]) if model_lead is not None and len(model_lead.xStd) > 0 else np.nan
+    model_lead_y_std = float(model_lead.yStd[0]) if model_lead is not None and len(model_lead.yStd) > 0 else np.nan
+    model_lead_v_std = float(model_lead.vStd[0]) if model_lead is not None and len(model_lead.vStd) > 0 else np.nan
+    self.trafficStopModelLeadOffset = self._traffic_stop_model_lead_matcher.update(
+      stop_active=stopping_active and stop_dist < 300.0,
+      allow_confirmation=self.trafficState == TrafficState.red and v_ego > 0.3,
+      active_lead=lead_detected,
+      stop_distance=stop_dist,
+      lead_probability=float(model_lead.prob) if model_lead is not None else np.nan,
+      lead_distance=model_lead_x,
+      lead_velocity=model_lead_v,
+      lead_x_std=model_lead_x_std,
+      lead_y_std=model_lead_y_std,
+      lead_v_std=model_lead_v_std,
+    )
+
+    if stopping_active and stop_dist < 300.0:
+      stop_dist_soft = max(stop_dist - 1.0, 0.0)
+      v_soft = float(np.sqrt(max(0.0, 2.0 * self.comfort_brake * stop_dist_soft)))
+      v_cruise = min(v_cruise, v_soft)
+
+    self.v_cruise = v_cruise
+    self.stop_dist = stop_dist
+    self.mode = mode
+    if self.stop_prepare is not None:
+      from openpilot.selfdrive.carrot.signal_stop_prepare import prepare_lead_blocked
+      if prepare_context is None and self._prepare_runtime is not None:
+        prepare_observation, prepare_context = self._prepare_runtime.read(sm)
+      context = prepare_context or {'now': time.monotonic(), 'enabled': False, 'valid': False, 'drive': False}
+      self.prepare_decision = self.stop_prepare.update(
+        context['now'], prepare_observation,
+        enabled=context['enabled'] and not suspended and self.myDrivingMode != DrivingMode.High and self.trafficLightDetectMode != 0,
+        valid=context['valid'], drive=context['drive'],
+        speed=v_ego, gas=carstate.gasPressed, brake=carstate.brakePressed,
+        lead=prepare_lead_blocked(radarstate),
+        turning=bool(context.get('turning', True)) or carstate.leftBlinker or carstate.rightBlinker,
+        model_stopping=self.xState in (XState.e2eStop, XState.e2eStopped, XState.e2ePrepare),
+        entry_allowed=self.traffic_starting_count == 0 and self.user_stop_distance < 0 and mode == 'acc' and self.soft_hold_active == 0,
+        geometry=context.get('geometry', lambda box: None), alignment=context.get('alignment'),
+        night_geometry=context.get('night_geometry'))
+      self.prepare_control_active = self.prepare_decision.active and context.get('actuate', True)
+      if self.prepare_control_active:
+        self.xState = XState.e2eStopPrepare
+      if self.prepare_decision.entered:
+        self.events.add(EventName.trafficSignChanged)
+      if self._prepare_runtime is not None:
+        self._prepare_runtime.record_prepare(self.prepare_decision)
+    #return v_cruise, stop_dist, mode
+
+    return v_cruise_kph

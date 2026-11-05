@@ -1,0 +1,410 @@
+# Camera CPU placement trials
+
+## October 7: USB cluster moves from core7 to core4
+
+After reviewing the September 23 conversation and current parked MDM/eGPU
+measurements, the user explicitly requested changing and pushing the cluster
+placement to the maintained `carrot-*` branches (`carrot-wip`, `carrot-mdm`).
+Onroad USB cluster workers now use core4 with the existing SCHED_OTHER/nice19
+policy, including render/USB/native encoder threads and the software encoder
+child. The supervisor still waits on little cores. Offroad, unavailable-core
+fallback, half-second worker correction and fixed10FPS/active-eGPU5FPS are
+unchanged. Main UI, model/DM, planner/radarcan, controls/camera and IRQ policies
+are unchanged. This supersedes the September 23 USB cluster core7 selection.
+
+The original comparison selected UI6/cluster7 among original/common6-7/split6-7
+arrangements; it did not compare cluster4. Core7 still briefly reached100%.
+The current parked C4 MDM observation before this change measured core4 mean
+46.2% (maximum60.8%), core7 mean83.1% (maximum94.8%), and cluster threads about
+14.6% of one CPU. Core4 planner and radarcan used about17.4% and18.6%, both
+FIFO51, above ordinary cluster workers. These measurements motivate moving
+display work; they are not measurements of the new placement's performance.
+
+Focused desktop checks passed71 cases covering core4 onroad/offroad transitions,
+encoder-child placement and core4 unavailability/hotplug recovery, alongside
+the existing display, USB rate and main UI placement contracts. One Linux-only
+thread-policy test was skipped on Windows; autorun imports used Params/hardware
+stubs for three tests. Target Linux scheduling, post-change
+planner/radar latency, actual cluster cadence, loaded driving and C3 behavior
+remain unvalidated. No device installation or restart is part of this change.
+
+Docs-Not-Needed: Internal CPU placement change; no setting or user workflow changes.
+
+## October 3: C3 UI also permits core7
+
+The user explicitly approved adding core7 to C3/C3X main UI affinity after
+reviewing the Casper scheduling delay. This supersedes the earlier exclusion
+of core7 for this UI. Onroad `tici`/`tizi` now permit cores0,1,2,3,6,7 with
+SCHED_OTHER/nice19. C4 (`mici`) remains on core6. This expands the allowed mask;
+it neither pins the UI to core7 nor reserves a CPU share or creates parallel
+render workers. The scheduler may run most UI work on core7.
+
+The existing half-second worker sweep applies the mask to all UI threads.
+Each big core is checked independently, so either core6 or core7 may remain
+eligible when the other is offline. Offroad returns to cores0..3, and a hotplug
+race falls back to those cores until the next sweep. Model/DM, camera/control,
+GPU/camera IRQ, USB cluster placement and realtime priorities are unchanged.
+
+The previous Casper `a0f1a004` route recorded about 602 ms/s of UI runnable
+wait, 28.3% main-thread CPU allocation and 13.8 Hz redraws. This motivates the
+trial, but predates recent geometry/text optimizations and does not validate
+this new mask. Its rendering timers combine geometry and drawing. No current
+C3 report establishes the new affinity, FPS improvement or model/DM impact.
+See `casper_c3_ui_after_20261003.md` for measurements and accounting limits.
+
+Focused tests cover C3/C3X/C4 selection, independent core availability, worker
+inheritance/correction, SCHED_OTHER/nice19, and offroad/hotplug fallback. Desktop
+tests mock Linux scheduling syscalls; Linux CI also checks the UI scheduler
+contract. No live device installation or affinity modification is performed.
+
+Docs-Not-Needed: Internal C3 CPU-affinity trial; no setting or user workflow changes.
+
+## September 28: C3 UI shares little cores and core6
+
+The user approved expanding C3/C3X (`tici`/`tizi`) onroad main UI affinity
+from core6 to cores0,1,2,3,6, retaining SCHED_OTHER/nice19. C4 (`mici`) keeps
+core6. The scheduler applies the mask to all UI threads, including new workers
+on its existing half-second sweep. Affinity permits migration within a frame;
+it neither reserves a core nor guarantees little-first placement or parallel
+execution of a single rendering thread. Kernel isolation/load balancing can
+also affect where an eligible thread actually runs.
+
+Offroad still returns to cores0..3 before restoring nice0 when permitted.
+Onroad C3 retains nice19 even when core6 is unavailable; hotplug failures fall
+back to little cores and the next sweep retries the expanded mask. USB cluster
+core7/rates, camera, control, radar, model/DM and IRQ policies are unchanged.
+
+The Casper C3 route 00001e69--fe9b90d8dd segments0/1 measured UI redraw rates
+15.54/14.68 Hz, while camera publications remained near20 Hz with consecutive
+frame IDs. The original logs identify a3278c04, not the upload metadata's
+5f9a8b36. Steady UI diagnostics measured44.47 ms drawing wall time versus
+18.13 ms thread CPU time, and570.4 ms runnable scheduler wait per second.
+Core6 averaged88.4% utilization. These support scheduling contention as a
+material contributor, but do not prove this new mask improves physical display
+smoothness. uiDebug measures application redraw, not panel presentation.
+
+Windows mocked scheduling/startup tests cover all workers, new-worker policy,
+hotplug fallback/recovery, offroad restoration and C3/C3X/C4 selection. Target
+Linux affinity readback and comparable C3 driving measurements remain required;
+prior parked C4 measurements do not validate this C3 change.
+Validation: 27 tests passed, five Linux-only scheduler tests skipped; the UI
+guard suite used hardware/logging import stubs on Windows. Ruff and whitespace
+checks passed. These checks do not execute target Linux scheduler syscalls.
+
+Docs-Not-Needed: Internal C3 CPU-affinity trial; no setting or user workflow changes.
+
+## September 23: approved onroad display placement and fixed USB rate
+
+The user approved main UI on core6 and USB cluster on core7 only while onroad,
+both SCHED_OTHER/nice19. Existing camera (SCHED_OTHER/nice0), control, model/DM,
+radar, planner and IRQ placement/priorities are unchanged. Offroad display
+workers return to cores0..3, including the always-on cluster debug mode.
+The main UI bootstraps on core0 before applying the shared display scheduler.
+Workers are checked every0.5 seconds, with immediate checks on state transitions;
+an unavailable big core or a hotplug race falls back to little cores. This covers
+render/USB/native-encoder threads and the software encoder child. Offroad restores
+nice0 when permitted; older limits that prohibit this retain nice19 on little cores.
+
+USB rendering, encoding and controller rate are fixed at10 FPS, or5 FPS while
+UsbGpuActive. Runtime changes restart H.264 when its encoder rate changes;
+JPEG/PNG update their cap and controller rate in place. ClusterHudLiveFps and
+ClusterHudCoreMode are removed from Params and the settings catalog; old FPS/core
+environment overrides are ignored. ClusterNaviMapFps remains a separate setting.
+
+Parked C4 comparisons used whole-core /proc/stat, with continuous P/zero-speed/
+controls-disabled/onroad guards, automatic restoration and five-second settles.
+All application threads received the trial placement and nice19. A temporary
+cpuset with sched_load_balance=0 retained the isolated-core behavior: a common
+6/7 mask concentrated work on6. This is not a universal property of a 6/7 mask.
+
+| DM-enabled condition | Seconds | CPU2 mean % | CPU6 mean % | CPU7 mean % | UI draw Hz | Model mean/max ms | Road/wide max age ms |
+| --- | ---: | ---: | ---: | ---: | ---: | --- | --- |
+| Original display placement | 30 | 82.7 | 45.1 | 66.9 | 19.68 | 40.61/43.09 | 47.86/49.38 |
+| **UI6, cluster7 (selected)** | 60 | 61.7 | 77.6 | 85.2 | 19.77 | 40.98/44.64 | 48.73/49.02 |
+| UI7, cluster6 | 60 | 60.4 | 64.7 | 93.5 | 16.44 | 41.08/43.85 | 46.82/47.63 |
+| Original placement restored | 30 | 83.1 | 44.6 | 68.8 | 19.74 | 40.63/42.81 | 48.32/48.47 |
+
+Earlier common-6/7 trials reduced little-core load but reduced UI draw frequency
+to18.14Hz with DM off and17.65Hz with DM on. The selected split retained UI
+frequency. Across all11 phases (570.4 seconds), there were no observed camera,
+driving-model or DM frame gaps, invalid pose/odometry inputs or CAN validity
+failures; DM produced6607 valid frames. The selected phase included1202 valid DM
+frames and maximum gyro age32.40ms. Core7 nevertheless reached100% briefly
+(seven one-second samples at least90%); this does not establish unlimited headroom.
+Camera age here is publication time minus estimated EOF, not direct consumer
+delivery latency. UI Hz is uiDebug draw frequency; cluster FPS was not measured
+directly. These trials used the prior eGPU5 FPS cap.
+
+All trial affinities, priorities and DisableDM=2 were restored and trial resources
+removed. The final shared scheduler additionally passed real Linux syscalls in
+an isolated comma-owned process: main thread, worker and child each transitioned
+little/nice0 -> core6 or7/nice19 -> little/nice0 with SCHED_OTHER throughout.
+Desktop tests cover hotplug races, worker correction, old nice limits, both FPS
+states and settings removal. This is **not** actual ignition-off/hotplug testing,
+nor driving validation of the final code. The earlier driving segment showed
+no camera/model gaps or pose/CAN invalidity but ran the old display placement.
+C3 and loaded driving, especially with DM, still need vehicle validation.
+
+## September 22 placement: balance short control work with camera processing
+
+The user reported low core6 usage and saturated cores4/5 after the first
+grouping and requested redistribution. A whole-core 20-second measurement
+confirmed mean4/5/6/7 usage of90.83/71.46/16.62/44.61%, with a one-second
+core5 sample at100%. Earlier per-process sums omitted other threads, cluster
+and general background work and did not establish whole-core headroom.
+
+The revised placement preserves all scheduling priorities:
+
+| Core | Main application work | Scheduling |
+| --- | --- | --- |
+| 4 | planner, radarcan | FIFO51 |
+| 5 | card; radard | FIFO53; FIFO51 |
+| 6 | controlsd, selfdrived; camerad and camera IRQ targets | FIFO53; camera SCHED_OTHER/nice0 |
+| 7 | modeld/eGPU worker; DM model when enabled; GPU IRQ | FIFO54; FIFO5 |
+
+Camera no longer has an application-exclusive core. The short 100Hz control
+and state loops share its isolated core; the heavier card loop stays off it.
+UI remains little-core/SCHED_OTHER. This shared code covers C3/C4 but current
+measurements are parked C4 only. No control, radar or model algorithm changes.
+
+Two new 30/90/30-second A/B/A trials moved first controlsd alone, then both
+controlsd and selfdrived, from core4 to6. Five-second settles, continuous
+P/zero-speed/disabled guards and automatic restoration were used. CPU figures
+come from whole-core /proc/stat deltas, cross-checked with deviceState's
+screen-facing usage samples; short periodic work can produce different
+usage estimates across windows, including near-zero displayed camera usage
+despite about6.6% camerad scheduler CPU time. Do not interpret zero as inactivity.
+
+| Measurement | Before both-controls trial | Both controls on6 | Restored |
+| --- | ---: | ---: | ---: |
+| Whole-core4 mean usage (%) | 90.82 | 59.19 | 90.92 |
+| Whole-core5 mean usage (%) | 64.79 | 62.89 | 70.67 |
+| Whole-core6 mean usage (%) | 6.68 | 53.58 | 10.04 |
+| Whole-core7 mean usage (%) | 50.26 | 47.74 | 52.24 |
+| Road max age (ms) | 36.807 | 47.261 | 36.835 |
+| Wide max age (ms) | 37.454 | 49.151 | 37.596 |
+| Planner max work (ms) | 19.936 | 8.613 | 16.672 |
+| Radar input max age (ms) | 26.663 | 13.360 | 21.120 |
+
+Controlsd alone left core4 at78.05% and road/wide max43.203/41.946ms; moving
+both gives more planning/radar headroom at a camera-tail cost. Both-controls
+core4 still briefly reached100% in deviceState; camera runnable wait rose
+from5.62 to54.03ms/s. CarControl maximum publication interval was20.218ms
+versus19.587ms before. No model gaps, invalid odometry/pose/CAN/radar/plans
+or control messages occurred in measured phases; no odometry/pose failures
+occurred in transitions, and IMU ages stayed below34ms. Neither average
+utilization nor these short samples prove loaded-driving deadlines, failure
+rates, C3 behavior or resolution of historical SOF/IFE faults. Camera ages
+continue to mean construction time minus estimated SOF+11ms EOF.
+
+Final confirmation retained the balanced placement for40 seconds with DM off,
+then enabled DM for a20-second startup, five-second settle and90-second
+measurement. DisableDM was restored from0 to its original2 afterwards.
+All startup/settle/measured intervals had no driving-model frame gaps or
+invalid odometry/pose inputs. DM published1804 valid frames with no frame-ID
+skips; mean/max model execution was22.335/34.912ms. The enabled-DM whole-core
+4/5/6/7 means were61.24/70.75/46.39/69.11%, with deviceState maxima of
+100/79/56/75%. Road/wide maximum ages were51.370/52.838ms and camera runnable
+wait40.33ms/s. Planner maximum work was8.557ms, radar input maximum age13.551ms,
+and carControl maximum interval19.873ms. IMU ages remained below36ms.
+This confirms parked DM-enabled operation for the short sample, not driving
+validation. The selected runtime placement was kept and checked by thread.
+Local placement/UI/pairing checks passed30 tests with5 Linux-only skips;
+controlsd's11 pre-existing Ruff findings were unchanged and other edited
+Python files passed. No camera binary code or scheduling priority changed.
+
+## Historical September 22 task grouping
+
+After the rollback and three parked grouping comparisons below, the user
+approved moving card to core5 and planner to core4. Camera userspace and its
+IRQ targets stay on isolated core6 with normal scheduling. This supersedes
+the card/planner placements in the historical sections of this document.
+
+| Core | Main application work | Scheduling |
+| --- | --- | --- |
+| 4 | controlsd, selfdrived; radarcan, planner | FIFO53; FIFO51 |
+| 5 | card; radard | FIFO53; FIFO51 |
+| 6 | camerad and camera IRQ targets | Camera SCHED_OTHER/nice0 |
+| 7 | modeld/eGPU worker; DM model when enabled; GPU IRQ | FIFO54; FIFO5 |
+
+UI remains on cores0..3/SCHED_OTHER. Core6 is reserved by application placement;
+this is not a guarantee that no other kernel work or interrupt runs there.
+The shared runtime placement applies to C3/C4, but only parked C4 measurements
+are available. No inference, radar detection, lead-selection, CAN joining,
+control algorithm, priority, validity threshold or user setting is changed.
+
+Three separate 30/60/30-second before/trial/restored comparisons held the
+camera/IRQ on core6. Each transition had a five-second settle, P/zero speed/
+controls-disabled guards, and no ftrace. Card moved to core5 in all trials:
+
+| Candidate | Planner / radarcan / radard cores | Road / wide max age (ms) | Planner max work (ms) | Radar input max age (ms) |
+| --- | --- | --- | --- | --- |
+| All card/planner/radard on core5 | 5 / 4 / 5 | 37.050 / 37.434 | 32.080 | 15.513 |
+| **Selected: planner on core4** | **4 / 4 / 5** | **36.889 / 37.335** | **19.132** | **24.953** |
+| CAN work on core5, planning/radard on core4 | 4 / 5 / 4 | 36.738 / 37.215 | 20.273 | 19.075 |
+
+Surrounding baseline maxima were 51.451-58.083ms for road/wide cameras. Camera
+runnable wait fell from 59.21-97.60ms/s to 5.69-5.88ms/s. Camera age means
+message construction minus estimated SOF+11ms EOF, not measured hardware EOF
+or IPC arrival. Card still consumed about 57% CPU and 5.5ms per 100Hz cycle.
+Moving it away repeatedly improved camera timing; this is evidence of a CPU
+sharing cost in these conditions, not an explanation of every past SOF/IFE fault.
+
+The selected trial's planner max work increased from about 8ms to 19ms and
+radar input max age from about 15ms to 25ms. Its radard model age averaged
+5.321ms (max 15.428), compared with trial1's 24.234ms (max 36.488) and trial3's
+18.037ms (max 28.140). Named core4 tasks used about 76% CPU and core5 about 61%,
+excluding other threads, background tasks and IRQs. Extra load remains a risk.
+All measured phases had no model gaps, invalid odometry/pose inputs, CAN-invalid
+carState, invalid radar/plan/control messages; IMU ages stayed below 34ms.
+DM was disabled (DisableDM=2). Driving with more radar objects, DM-enabled
+operation, C3, thermal behavior and failure-rate improvements are unvalidated.
+
+After approval, the selected placement was applied live and retained after a
+further 90-second check: road/wide maximum ages 36.782/37.258ms, camera runnable
+wait 5.80ms/s, zero model gaps or invalid odometry/pose/CAN/radar/plan messages.
+Planner maximum work was 20.813ms and radar input maximum age 26.824ms; these
+remain trade-offs rather than universally improved timings. All card threads
+read back core5 and planner threads core4. The vehicle checkout was still
+eda4f745: this live application does not install the committed source update.
+The new commit must be installed for the grouping to persist after process
+restarts. Local regression checks passed 30 tests with 5 Linux-only skips.
+Card's 22 existing Ruff findings were unchanged; other edited Python files
+passed Ruff. No native camerad build was needed for its comment-only change.
+
+The following sections retain the earlier trial and rollback evidence.
+
+## Historical September 22 follow-up: camera placement rolled back
+
+The camera/IRQ part of this trial is reverted to core6. The UI remains on
+cores0..3 with its verified SCHED_OTHER policy. All control, radar, model and
+cluster placements are unchanged. Camera policy/nice remain SCHED_OTHER/0.
+The table and rationale below describe the historical September 21 trial.
+
+Parked Ioniq 5 C4 testing on `eda4f745` verified the live kernel command line
+`isolcpus=6,7`: core5 admits ordinary background work. A complete scheduler
+trace showed camerad runnable but waiting 24.266ms while proclogd consumed
+13.155ms and planner/radard about 10.6ms on core5. The preceding sensor
+exposure ioctl had completed its CCI wait, and the next road frame's ISP
+completion was already recorded. A later 93.856ms wide-camera delay included
+43.393ms of kswapd execution across two camerad runnable waits. That latter
+sample had substantial temporary tracing storage on tmpfs, so it demonstrates
+the interference path without proving an unperturbed incident frequency.
+The tracing footprint and locally backed-up temporary files were then reduced.
+
+With ftrace off, P/zero speed/selfdrive disabled throughout, the original
+core5/SCHED_OTHER/nice0 configuration reproduced a 91.961ms road-camera age,
+model frame 47481 -> 47483, invalid cameraOdometry, and livePose.inputsOK=false.
+IMU ages remained below 34ms and sensorsOK stayed true. Camera ages here use
+message construction time minus the estimated SOF+11ms EOF, not an independently
+measured hardware EOF. A nice=-10 trial did not materially improve mean/p99
+camera age, so no priority change is retained.
+
+A separate camera+IRQ-only core5/core6/core5 comparison retained normal
+scheduling and all other placements. Each transition had a five-second settle
+interval; the measured phases were 45/90/45 seconds:
+
+| Measurement | core5 before | core6 | core5 restored |
+| --- | ---: | ---: | ---: |
+| Road mean age (ms) | 37.657 | 40.041 | 36.749 |
+| Road max age (ms) | 63.124 | 52.822 | 65.269 |
+| Wide max age (ms) | 60.834 | 56.091 | 81.477 |
+| Camera runnable wait (ms per second) | 84.595 | 56.649 | 69.018 |
+
+There were no model gaps/invalid odometry in these three measured phases or
+their transition intervals. Gyro/accelerometer ages stayed below 34ms.
+Core6 reduced the observed tail and runnable wait, with a roughly 3ms mean-age
+cost. This supports ending the unproven core5 trial; it does not establish a
+failure-rate reduction from a short sequential test, a driving fix, C3 results,
+or the cause of older SOF gaps/IFE faults. The earlier core6 IFE/SOF incidents
+remain distinct evidence and must not be described as solved by this rollback.
+
+Rollback regression checks: 30 placement/UI/pairing tests passed on Windows
+with UTF-8 enabled; five Linux-only UI scheduler tests were skipped. Hardware
+imports for UI guards were stubbed. Ruff and the patch whitespace check passed.
+The live comparison exercised real Linux affinity/IRQ writes and restoration;
+a full native camerad build and driving validation are not established by it.
+
+The selected core6 placement was then applied live without restarting the
+vehicle. A further 90 seconds / 1,801 frames per road camera measured maximum
+ages of 54.807ms road and 56.935ms wide, with no model gaps/invalid odometry/pose
+input failures. Camera runnable wait was 102.093ms/s in this later sample,
+so the initial runqueue reduction is not a consistent result across samples.
+The observed tail remained bounded in this sample; a short quiet interval does
+not establish a fixed failure rate. The vehicle checkout remained `eda4f745`;
+live affinity changes require the committed update to persist after restarts
+or subsequent power-state reconfiguration.
+
+The user authorized this trial on 2026-09-21 after Ioniq 5 C4 route
+`00000f90--96d7dcd525--4` again produced a temporary Location alert.
+Its wide-camera SOF interval was 101.038 ms despite consecutive frame and
+request IDs. Pairing skipped one main frame, followed by one invalid odometry
+message. IMU timestamps stayed within 35 ms and model execution stayed below
+42 ms. These observations do not identify the cause of the camera time gap.
+
+## Placement
+
+| Work | Previous | Trial | Scheduling |
+| --- | --- | --- | --- |
+| On-road/off-road main UI | core0 bootstrap, then core5 | core0 bootstrap, then cores0..3 | SCHED_OTHER, verified at startup |
+| camerad | core6 | core5 | Existing normal scheduling |
+| Camera IRQ targets | core6 | core5 | Existing IRQ policy |
+| card | core6 | core6 | FIFO53 |
+| controlsd / selfdrived | core4 | core4 | FIFO53 |
+| radarcan | core4 | core4 | FIFO51 |
+| radard / plannerd | core5 | core5 | FIFO51 |
+| modeld / eGPU worker | core7 | core7 | Existing FIFO54 |
+
+All eight camera IRQ action names configured by Tici.set_power_save move
+together: a5, cci, cpas_camnoc, cpas-cdm, csid, ife, csid-lite, ife-lite.
+The GPU IRQ stays on core7. Offroad CPU online/offline policy is unchanged.
+The UI still starts on core0 before creating its window and retries affinity
+changes after OSError. Cores0..3 remain online during power saving.
+
+The common TICI path covers C3/C3X/C4; it is not gated by the eGPU model.
+External cluster HUD affinity/FPS, setup/updater apps, models, AGNOS, Bluetooth,
+camera synchronization limits and pose validity policy are unchanged.
+No new user setting is introduced. No radar detection, lead-selection or
+replay code changes are part of this trial.
+
+## Rationale and limits
+
+The incident log places card (FIFO53) and camerad (normal policy) on core6.
+Their mean CPU usage is 58.18% and 6.70% of one core. UI consumes 38.64% on
+core5. Core5's observed total mean is 74.01%; replacing UI with camerad gives
+an arithmetic estimate of about 42%, not a measured post-change result.
+Moving the UI increases load on cores0..3. Its normal policy remains mandatory
+so sensord, locationd and other realtime work take precedence.
+
+This separates camera userspace work from card but does not reserve core5:
+planner/radar realtime work and other allowed background tasks still run there.
+Keep camera priority unchanged to isolate the affinity change. Do not infer
+that card blocked hard IRQ execution or that same-core contention caused the
+observed SOF gap. A core relocation cannot repair a physical sensor fault.
+
+## Validation and vehicle follow-up
+
+Desktop tests execute the real UI main function with mocked GUI/affinity calls
+for both UI layouts, including a transient affinity failure. They execute the
+real power-save method with mocked sysfs/IRQ operations across on/off/on
+transitions and cross-check the C++ camerad target. Separate guards preserve
+the control/model placements and UI's prohibition on FIFO promotion.
+These are code-level regressions, not on-device scheduling or camera validation.
+The Windows run passed 30 tests across placement, UI guards and camera pairing;
+five Linux-only scheduler tests were skipped. Existing UI guards were loaded
+with hardware/logging imports stubbed because Windows has no fcntl. Ruff and
+the diff whitespace check passed. No device scheduler syscall was tested.
+
+After updating and restarting, verify actual thread affinity and policy, all
+available camera IRQ affinity readbacks, UI FPS, sensor publication/timestamp
+ages, control/planner cadence, and camera SOF/EOF gaps. Compare repeated
+similar drives; one quiet minute is inconclusive. procLog's last-CPU samples
+can corroborate placement but do not replace affinity masks or IRQ readbacks.
+Measure C3 and C4 separately. A full Linux camerad build and physical validation
+remain required on the target; neither is established by Windows tests.
+
+Rollback is the reverse of this placement change: UI render affinity core5,
+camerad and camera IRQs core6. Keep normal UI/camera policy and all pose/sensor
+validity checks. Do not roll back unrelated radar isolation or cluster changes.
+
+Docs-Not-Needed: Internal CPU/IRQ placement trial; no setting or user workflow changes.

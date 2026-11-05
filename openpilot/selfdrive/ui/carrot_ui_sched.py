@@ -1,0 +1,31 @@
+"""Verify normal UI scheduling before applying onroad/offroad display placement."""
+import os
+import sys
+
+from openpilot.common.realtime import drop_realtime
+from openpilot.common.swaglog import cloudlog
+from openpilot.system.hardware import PC
+
+_VERIFY_ATTEMPTS = 2  # bounded 재시도 — 무한/매 프레임 syscall 폭주 금지
+
+
+def ensure_ui_sched_other() -> None:
+  """UI 메인 스레드를 SCHED_OTHER로 명시 강등하고 readback으로 검증한다.
+
+  검증 실패는 fail-stop — RT policy UI가 센서·위치 추정을 굶기며 계속
+  실행되는 것보다 manager 재시작(restart_if_crash)이 낫다 (fail-closed).
+  readback이 SCHED_OTHER가 아니면 성공 로그를 내지 않는다 (false success 금지)."""
+  if sys.platform != "linux" or PC:
+    return  # RT 스케줄링이 없는 환경 — 계약 자체가 불필요
+  policy = None
+  for _ in range(_VERIFY_ATTEMPTS):
+    try:
+      drop_realtime()
+      policy = os.sched_getscheduler(0)
+    except OSError:
+      continue
+    if policy == os.SCHED_OTHER:
+      cloudlog.info("UISCHED: UI SCHED_OTHER verified (core0 bootstrap)")
+      return
+  cloudlog.critical(f"UISCHED: UI could not be verified SCHED_OTHER (policy={policy}); fail-stop")
+  raise RuntimeError("UI must run SCHED_OTHER (realtime preemption contract)")
