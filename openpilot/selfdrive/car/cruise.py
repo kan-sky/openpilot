@@ -285,6 +285,9 @@ class VCruiseCarrot:
     if self.frame % 10 == 0:
       self.navigation_set_speed = self.params.get_bool("NavigationSetSpeed")
       self.autoCruiseControl = self.params.get_int("AutoCruiseControl") * unit_factor
+      # 트래버스 SDGM 롱컨: 합성 SET이 ECM에 닿지 않고 2CB apply만으로 켜면 0.5초 뒤 크루즈 폴트. 자동 체결 금지
+      if getattr(self.CP, 'carFingerprint', None) == GM_CAR.CHEVROLET_TRAVERSE and getattr(self.CP, 'openpilotLongitudinalControl', False):
+        self.autoCruiseControl = 0
       self.soft_hold_on_cancel = self.params.get_bool("SoftHoldOnCancel")
       self.autoGasTokSpeed = self.params.get_int("AutoGasTokSpeed") * unit_factor
       self.autoGasCancelSpeed = self.params.get_int("AutoGasCancelSpeed") * unit_factor

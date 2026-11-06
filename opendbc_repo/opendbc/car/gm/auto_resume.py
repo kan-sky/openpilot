@@ -54,7 +54,8 @@ class GMAutoResume:
   def _update_params(self):
     self.cruiseDelay_time = self.params_.get_float("CruiseDelay") * 0.01
     self.resumeDelay_time = self.params_.get_float("ResumeDelay") * 0.01
-    self.auto_cruise_enabled = self.params_.get_int("AutoCruiseControl") > 0
+    # 트래버스 SDGM: 합성 SET이 ECM에 닿지 않으므로 오토크루즈 사용 안 함
+    self.auto_cruise_enabled = False
     self.auto_resume_enabled = self.params_.get_int("AutoEngage") == 2
     self.accel_force = self.params_.get_int("AccelForce")
 
