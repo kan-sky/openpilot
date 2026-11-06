@@ -9,14 +9,7 @@ import pytest
 from opendbc.car import Bus, gen_empty_fingerprint, structs
 from opendbc.car.gm.manual_auto_hold import ManualAutoHold, manual_hold_supported
 from opendbc.car.gm.values import CAR, DBC, GMSafetyFlags
-from opendbc.car.gm.tests.test_display_speed import MemoryParams, build_cp as base_build_cp, controller_state, runtime as desktop_runtime
-
-
-def build_cp(runtime, *args, **kwargs):
-  # 기본 설정에서는 꺼져 있으므로 이 기능의 플래그를 직접 켜서 검증
-  cp = base_build_cp(runtime, *args, **kwargs)
-  cp.safetyConfigs[0].safetyParam |= int(GMSafetyFlags.MANUAL_AUTO_HOLD)
-  return cp
+from opendbc.car.gm.tests.test_display_speed import MemoryParams, build_cp, controller_state, runtime as desktop_runtime
 
 
 @pytest.fixture(scope="module")

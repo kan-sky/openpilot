@@ -7,7 +7,6 @@ from opendbc.can.packer import CANPacker
 from opendbc.car import Bus, DT_CTRL, apply_driver_steer_torque_limits, structs, create_gas_interceptor_command
 from opendbc.car.gm import gmcan
 from opendbc.car.gm.auto_resume import GMAutoResume
-from opendbc.car.gm.auto_hold import GMAutoHold
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.gm.cluster_speed import gm_raw_display_kph_from_cluster_display_kph
 from opendbc.car.gm.manual_auto_hold import manual_hold_supported
@@ -75,10 +74,9 @@ class CarController(CarControllerBase):
     # GM: AutoResume
     self.activateCruise_after_brake = False
     self.v_cruise_carrot = VCruiseCarrot(self.CP)
-    # 트래버스 오픈파일럿 롱컨: 오토리쥼/오토크루즈/오토홀드 모듈 사용
+    # 트래버스 오픈파일럿 롱컨: 오토리쥼/오토크루즈 모듈 사용
     self.traverse_long = CP.carFingerprint == CAR.CHEVROLET_TRAVERSE and CP.openpilotLongitudinalControl
     self.auto_resume = GMAutoResume(self.CP, self.params) if self.traverse_long else None
-    self.auto_hold = GMAutoHold() if self.traverse_long else None
     self.btn_rc_pt = -1
 
   @staticmethod
@@ -277,11 +275,10 @@ class CarController(CarControllerBase):
             acc_engaged = CC.enabled
 
           send_gas = self.apply_gas
-          auto_hold_cmd = False
           if self.traverse_long:
-            auto_hold_cmd = self.auto_hold.update(CC, CS, self.frame)
             send_gas, self.apply_brake, at_full_stop, acc_engaged = self.auto_resume.update(
-              CC, CS, self.frame, self.apply_gas, self.apply_brake, at_full_stop, lambda btn: self.send_btn(CS, can_sends, btn))
+              CC, CS, self.frame, self.apply_gas, self.apply_brake, at_full_stop, lambda btn: self.send_btn(CS, can_sends, btn),
+              bool(manual_brake))
             # 판다는 2CB apply 상승 에지로 권한을 주므로, 오픈파일럿이 꺼져 있으면 apply와 가스 펄스를 내보내지 않음
             acc_engaged = acc_engaged and CC.enabled
             if not CC.longActive:
@@ -295,16 +292,8 @@ class CarController(CarControllerBase):
           if manual_brake:
             self.apply_brake = manual_brake
             near_stop, at_full_stop = True, False
-          if auto_hold_cmd:
-            hold_brake = max(self.apply_brake, self.params.NEAR_STOP_BRAKE_PHASE)
-            hold_near_stop = CS.out.vEgo < self.params.NEAR_STOP_BRAKE_PHASE
-            can_sends.append(gmcan.create_friction_brake_command(self.packer_ch, friction_brake_bus, hold_brake,
-                                                                 idx, False, hold_near_stop, False, self.CP))
-            CS.autoHoldActivated = True
-          else:
-            can_sends.append(gmcan.create_friction_brake_command(self.packer_ch, friction_brake_bus, self.apply_brake,
-                                                                 idx, CC.enabled, near_stop, at_full_stop, self.CP))
-            CS.autoHoldActivated = False
+          can_sends.append(gmcan.create_friction_brake_command(self.packer_ch, friction_brake_bus, self.apply_brake,
+                                                               idx, CC.enabled, near_stop, at_full_stop, self.CP))
 
           # Send dashboard UI commands (ACC status)
           send_fcw = hud_alert == VisualAlert.fcw or test_fcw

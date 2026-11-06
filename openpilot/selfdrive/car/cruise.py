@@ -207,7 +207,6 @@ class VCruiseCarrot:
     self._activate_cruise = 0
     self._cruise_available = False
     self._hold_interlock_active = False
-    self._auto_hold_frame = -1000
     self._steering_interlock_active = False
     self._lat_enabled = self.params.get_int("AutoEngage") > 0
     self._v_cruise_kph_at_brake = 0
@@ -379,11 +378,7 @@ class VCruiseCarrot:
       self._paddle_decel_active = False
       self._soft_hold_count = 0
       self._soft_hold_active = 0
-    # autoHoldActivated는 25Hz로 깜빡이므로 최근 0.2초 내 감지되면 오토홀드 중으로 판단
-    if CS.autoHoldActivated:
-      self._auto_hold_frame = self.frame
-    auto_hold_on = (self.frame - self._auto_hold_frame) * 0.01 < 0.2
-    self._hold_interlock_active = is_hold_interlock_active(CS) or auto_hold_on
+    self._hold_interlock_active = is_hold_interlock_active(CS)
     self._steering_interlock_active = abs(CS.steeringAngleDeg) >= AUTO_CRUISE_MAX_STEERING_ANGLE
     if self._hold_interlock_active:
       # Drop queued automatic engagement state while AVH or the parking brake

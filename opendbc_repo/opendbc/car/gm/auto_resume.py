@@ -5,7 +5,6 @@ from openpilot.common.params import Params
 from openpilot.common.swaglog import cloudlog
 from opendbc.car import DT_CTRL, structs
 from opendbc.car.gm.values import CanBus, CruiseButtons, CAMERA_ACC_CAR, EV_CAR, SDGM_CAR
-from opendbc.car.gm.auto_hold import is_auto_hold
 
 LongCtrlState = structs.CarControl.Actuators.LongControlState
 
@@ -79,7 +78,7 @@ class GMAutoResume:
       self.lead_distance = float('inf')
       self.lead_vrel = 0.0
 
-  def update(self, CC, CS, frame, apply_gas, apply_brake, at_full_stop, send_btn):
+  def update(self, CC, CS, frame, apply_gas, apply_brake, at_full_stop, send_btn, manual_auto_hold=False):
     """반환: (send_gas, apply_brake, at_full_stop, acc_engaged)"""
     actuators = CC.actuators
     activate_cruise = self._activate_latch
@@ -115,8 +114,7 @@ class GMAutoResume:
       acc_engaged = True
       at_full_stop = False
 
-    # 오토홀드 중(브레이크로 정지해 크루즈가 꺼지고 정지 유지)이면 오토크루즈/오토리쥼 차단
-    manual_auto_hold = is_auto_hold(CC, CS)
+    # 오토홀드 중이면 오토크루즈/오토리쥼 차단
     if manual_auto_hold:
       self._pending_activateCruise = False
       self.autoCruise_activate = False
