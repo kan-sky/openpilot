@@ -22,7 +22,7 @@ class GMAutoResume:
     self.CP = CP
     self.params = params  # CarControllerParams
     self.params_ = Params()
-    self.sm = messaging.SubMaster(['radarState'])
+    self.sm = messaging.SubMaster(['radarState', 'longitudinalPlan'])
 
     self.auto_resume_enabled = False
     self.auto_cruise_enabled = False
@@ -50,6 +50,7 @@ class GMAutoResume:
     self.lead_present = False
     self.lead_distance = float('inf')
     self.lead_vrel = 0.0
+    self.start_guard_hold = False
 
   def _update_params(self):
     self.cruiseDelay_time = self.params_.get_float("CruiseDelay") * 0.01
@@ -68,8 +69,11 @@ class GMAutoResume:
     try:
       self.sm.update(0)
       lead = self.sm['radarState'].leadOne
+      # 플래너의 신호 출발 가드가 정지를 유지 중인지 (1 = 출발 금지)
+      self.start_guard_hold = self.sm['longitudinalPlan'].signalAssistAction == 1
     except Exception:
       lead = None
+      self.start_guard_hold = False
     if lead is not None and lead.present:
       self.lead_present = True
       self.lead_distance = float(lead.dRel)
@@ -178,7 +182,7 @@ class GMAutoResume:
     # 완전 정지 후 앞차 출발이 확인되면 starting 진입 전 브레이크를 잠시 풀어준다.
     # resume_frame은 실제 AutoResume까지 이어지는 리쥼윈도우로 유지한다.
     if (auto_resume_enabled and lead_start and resume_standstill and self.resume_frame == 0 and
-        standstill_dt >= CREEP_RELEASE_MIN_STANDSTILL and
+        standstill_dt >= CREEP_RELEASE_MIN_STANDSTILL and not self.start_guard_hold and
         not CS.out.brakePressed and not CS.out.gasPressed and not manual_auto_hold):
       self.resume_frame = frame
       self.resume_fault_guard = -1
@@ -197,7 +201,7 @@ class GMAutoResume:
       elif CS.out.vEgo > 0.4:
         self.resume_fault_guard = 0
       # 완전 정지 상태에서 확인된 앞차 출발에 한해서만 브레이크 해제.
-      elif creep_dt < 0.22 and lead_start and resume_standstill:
+      elif creep_dt < 0.22 and lead_start and resume_standstill and not self.start_guard_hold:
         apply_brake = 0
       # Creep Release 시간만 종료. resume_frame은 아래 AutoResume cleanup에서 정리한다.
       else:
@@ -307,6 +311,7 @@ class GMAutoResume:
 
     # resume_active는 "가스 펄스" 조건 -> starting/크루즈ON 게이트
     resume_active = ((self.resume_frame != 0) and auto_longcontrol and (CS.out.vEgo < 3.5) and lead_ok and
+                     not self.start_guard_hold and
                      (starting or CS.out.cruiseState.enabled) and (CS.out.standstill or CS.out.cruiseState.standstill))
 
     # 2CB: 실제 가스 송신
