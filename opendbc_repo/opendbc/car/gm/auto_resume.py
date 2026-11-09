@@ -62,7 +62,7 @@ class GMAutoResume:
       lead = self.sm['radarState'].leadOne
     except Exception:
       lead = None
-    if lead is not None and lead.present:
+    if lead is not None and lead.status
       self.lead_present = True
       self.lead_distance = float(lead.dRel)
       self.lead_vrel = float(lead.vRel)
