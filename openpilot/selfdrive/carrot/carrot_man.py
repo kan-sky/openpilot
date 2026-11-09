@@ -194,6 +194,14 @@ def get_path_after_distance(start_index, coordinates, current_position, distance
     path_after_distance.append(closest_point)
     path_after_distance.append(coordinates[closest_index + 1])
     total_distance = haversine(closest_point[0], closest_point[1], coordinates[closest_index + 1][0], coordinates[closest_index + 1][1])
+    # 첫 구간이 이미 요청 거리보다 길면 그 구간 위에서 자른다
+    # (다음 구간에서 음수 비율로 보간하면 경로가 꼭짓점에서 뒤로 접혀 직선에서도 큰 곡률이 생긴다)
+    if total_distance >= distance_m:
+      ratio = distance_m / total_distance
+      next_point = coordinates[closest_index + 1]
+      path_after_distance[-1] = (closest_point[0] + ratio * (next_point[0] - closest_point[0]),
+                                 closest_point[1] + ratio * (next_point[1] - closest_point[1]))
+      return path_after_distance, start_index, closest_point
     for i in range(closest_index + 1, len(coordinates) - 1):
       coord1 = coordinates[i]
       coord2 = coordinates[i + 1]
