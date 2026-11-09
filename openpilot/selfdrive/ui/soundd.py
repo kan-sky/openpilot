@@ -34,6 +34,7 @@ if HARDWARE.get_device_type() == "tizi":
 
 AudibleAlert = log.SelfdriveState.AudibleAlert
 CRITICAL_MAX = -1 # internal sound key, not an AudibleAlert
+CARROT_SDI_INFORM = -2 # 내부 사운드 키: 카메라 카운트다운 시작 안내음
 
 
 sound_list: dict[int, tuple[str, int | None, float]] = {
@@ -57,6 +58,20 @@ sound_list: dict[int, tuple[str, int | None, float]] = {
   AudibleAlert.trafficSignGreen: ("traffic_sign_green.wav", 1, MAX_VOLUME),
   AudibleAlert.trafficSignChanged: ("traffic_sign_changed.wav", 1, MAX_VOLUME),
   AudibleAlert.stopping: ("audio_stopping.wav", 1, MAX_VOLUME),
+  # Kans: 캐럿 내비 카운트다운 (carrotMan.leftSec: 11=안내음, 10~1=숫자, 0=지점 도달)
+  # 루프 사운드는 다음 프레임의 none에 즉시 끊기므로 한 번만 재생
+  CARROT_SDI_INFORM: ("prompt_distracted.wav", 1, MAX_VOLUME),
+  AudibleAlert.longDisengaged: ("tici_disengaged.wav", 1, MAX_VOLUME),
+  AudibleAlert.audio1: ("audio_1.wav", 1, MAX_VOLUME),
+  AudibleAlert.audio2: ("audio_2.wav", 1, MAX_VOLUME),
+  AudibleAlert.audio3: ("audio_3.wav", 1, MAX_VOLUME),
+  AudibleAlert.audio4: ("audio_4.wav", 1, MAX_VOLUME),
+  AudibleAlert.audio5: ("audio_5.wav", 1, MAX_VOLUME),
+  AudibleAlert.audio6: ("audio_6.wav", 1, MAX_VOLUME),
+  AudibleAlert.audio7: ("audio_7.wav", 1, MAX_VOLUME),
+  AudibleAlert.audio8: ("audio_8.wav", 1, MAX_VOLUME),
+  AudibleAlert.audio9: ("audio_9.wav", 1, MAX_VOLUME),
+  AudibleAlert.audio10: ("audio_10.wav", 1, MAX_VOLUME),
 }
 
 def check_selfdrive_timeout_alert(sm):
@@ -107,6 +122,7 @@ class Soundd:
 
     self.selfdrive_timeout_alert = False
     self.pending_stop = False
+    self.carrot_count_down = 0
 
     self.spl_filter_weighted = FirstOrderFilter(0, 2.5, FILTER_DT, initialized=False)
 
@@ -188,9 +204,24 @@ class Soundd:
       self.current_sound = new_alert
       self.current_sound_frame = 0
 
+  def update_carrot_alert(self, sm, new_alert):
+    # Kans: 다른 알림음이 없을 때만, leftSec이 바뀐 순간에 한 번 재생
+    if new_alert == AudibleAlert.none:
+      count_down = sm['carrotMan'].leftSec
+      if self.carrot_count_down != count_down:
+        self.carrot_count_down = count_down
+        if count_down == 0:
+          new_alert = AudibleAlert.longDisengaged
+        elif 0 < count_down <= 10:
+          new_alert = getattr(AudibleAlert, f'audio{count_down}')
+        elif count_down == 11:
+          new_alert = CARROT_SDI_INFORM
+    return new_alert
+
   def get_audible_alert(self, sm):
     if sm.updated['selfdriveState']:
       new_alert = sm['selfdriveState'].alertSound.raw
+      new_alert = self.update_carrot_alert(sm, new_alert)
       self.update_alert(new_alert)
     elif check_selfdrive_timeout_alert(sm):
       self.update_alert(AudibleAlert.warningImmediate)
@@ -215,7 +246,7 @@ class Soundd:
     import sounddevice as sd
     micd.patch_sounddevice(sd)
 
-    sm = messaging.SubMaster(['selfdriveState', 'soundPressure'])
+    sm = messaging.SubMaster(['selfdriveState', 'soundPressure', 'carrotMan'])
 
     with self.get_stream(sd) as stream:
       rk = Ratekeeper(20)
