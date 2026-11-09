@@ -74,7 +74,7 @@ class GMAutoResume:
     except Exception:
       lead = None
       self.start_guard_hold = False
-    if lead is not None and lead.present:
+    if lead is not None and lead.status:
       self.lead_present = True
       self.lead_distance = float(lead.dRel)
       self.lead_vrel = float(lead.vRel)
