@@ -2880,8 +2880,8 @@
       "etitle": "Accel for Resume: 200",
       "edescr": "Acceleration for Resume (min gas during auto resume)",
       "min": 0,
-      "max": 1018,
-      "default": 200,
+      "max": 1346,
+      "default": 1346,
       "unit": 10
     },
     {
