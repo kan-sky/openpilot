@@ -181,8 +181,9 @@ class GMAutoResume:
     # Kans: Creep Release Window
     # 완전 정지 후 앞차 출발이 확인되면 starting 진입 전 브레이크를 잠시 풀어준다.
     # resume_frame은 실제 AutoResume까지 이어지는 리쥼윈도우로 유지한다.
+    # ECM이 STANDSTILL(4)이면 가스를 받지 않으므로 브레이크를 풀지 않는다 (운전자 RES 대기)
     if (auto_resume_enabled and lead_start and resume_standstill and self.resume_frame == 0 and
-        standstill_dt >= CREEP_RELEASE_MIN_STANDSTILL and not self.start_guard_hold and
+        standstill_dt >= CREEP_RELEASE_MIN_STANDSTILL and not pcm_standstill and not self.start_guard_hold and
         not CS.out.brakePressed and not CS.out.gasPressed and not manual_auto_hold):
       self.resume_frame = frame
       self.resume_fault_guard = -1
