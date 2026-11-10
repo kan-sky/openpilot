@@ -2874,10 +2874,10 @@
     {
       "group": "가속설정",
       "name": "AccelForce",
-      "title": "리쥼 가속도: 200",
-      "descr": "리쥼 가속도 (오토리쥼 출발 가스 최소값)\n\n CAMERA_CAR: 200, Volt(ASCM): 950",
+      "title": "리쥼 가속도: 1018~1346",
+      "descr": "리쥼 가속도 (오토리쥼 출발 가스 최소값)\n\n CAMERA_CAR: 1346, Volt(ASCM): 1018",
       "egroup": "ACCEL",
-      "etitle": "Accel for Resume: 200",
+      "etitle": "Accel for Resume: 1018~1346",
       "edescr": "Acceleration for Resume (min gas during auto resume)",
       "min": 0,
       "max": 1346,

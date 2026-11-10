@@ -11,6 +11,13 @@ LongCtrlState = structs.CarControl.Actuators.LongControlState
 # 정지 직후에는 레이더 앞차 속도가 흔들려 앞차 출발로 오검출된다 - 이 시간 동안 정지를 유지해야 Creep Release 허용
 CREEP_RELEASE_MIN_STANDSTILL = 1.0  # s
 
+# 카메라 ACC(롱컨 openpilot) RES 연속 송신
+# 실제 버튼은 스티어링 모듈 0x1E1 흐름에서 RES 4프레임(카운터 연속, 약 0.12초)이 나가고 ECM이 STANDSTILL(4)을 푼다.
+# 0.12초마다 1프레임씩 자체 카운터로 끼워 넣으면 ECM이 반응하지 않았다 (rlog-tbl02).
+RES_BURST_FRAMES = 4
+RES_BURST_MIN_GAP = 0.3  # s, 연속 송신 사이 최소 간격 (길게 누름으로 보이지 않게)
+RES_BURST_TIMEOUT = 0.25  # s, 모듈 프레임 30ms x 4 = 0.12초에 여유
+
 # Kans: GM 오토리쥼/오토크루즈 모듈
 # - carcontroller 25Hz 블록에서 가스/브레이크 계산 직후, 2CB/브레이크 송신 직전에 호출
 # - 앞차 정보는 이 모듈에서 radarState를 직접 구독
@@ -43,6 +50,13 @@ class GMAutoResume:
     self.autoCruise_frame = 0
     self.autoCruise_try_count = 0  # 오토크루즈 버튼 재시도 횟수
     self._pending_activateCruise = False
+
+    # RES 연속 송신 상태
+    self.res_burst_enabled = CP.carFingerprint in CAMERA_ACC_CAR and CP.openpilotLongitudinalControl
+    self.res_burst_left = 0
+    self.res_burst_last_cnt = -1
+    self.res_burst_end_frame = 0
+    self.res_burst_start_frame = 0
 
     # 앞차 정보
     self.lead_present = False
@@ -261,7 +275,11 @@ class GMAutoResume:
             if self.resume_fault_guard == 0:
               cloudlog.warning(f"[gm autoresume] first RES_ACCEL sent: leadDRel={lead_drel:.2f} vEgo={CS.out.vEgo:.2f} "
                                f"cstill={int(pcm_standstill)} resumeDelay={self.resumeDelay_time:.2f}")
-            send_btn(CruiseButtons.RES_ACCEL)
+            if self.res_burst_enabled:
+              # 실제 송신은 100Hz 루프의 update_res_burst에서 모듈 프레임마다
+              self._request_res_burst(frame, CS)
+            else:
+              send_btn(CruiseButtons.RES_ACCEL)
             self.last_button_frame = frame
             self.resume_fault_guard += 1  # 송신횟수 기록
         # 리쥼버튼 중단까지 지연시간(0.16~0.20)
@@ -298,6 +316,37 @@ class GMAutoResume:
       send_gas = apply_gas
 
     return send_gas, apply_brake, at_full_stop, acc_engaged
+
+  def _request_res_burst(self, frame, CS):
+    if self.res_burst_left > 0 or (frame - self.res_burst_end_frame) * DT_CTRL < RES_BURST_MIN_GAP:
+      return
+    self.res_burst_left = RES_BURST_FRAMES
+    self.res_burst_last_cnt = -1
+    self.res_burst_start_frame = frame
+    cloudlog.warning(f"[gm autoresume] RES burst start: btnCnt={int(CS.buttons_counter) & 0x3} "
+                     f"pcm={int(getattr(CS, 'pcm_acc_status', -1))} vEgo={CS.out.vEgo:.2f}")
+
+  def update_res_burst(self, CS, frame, send_res):
+    # 100Hz 호출: 스티어링 모듈의 새 0x1E1 프레임이 들어올 때마다 그 카운터+1로 RES 1프레임
+    # (모듈 N → RES N+1 → 모듈 N+1 → RES N+2 ... 로 실제 버튼처럼 카운터가 이어지게)
+    if self.res_burst_left <= 0:
+      return
+    # 운전자 페달 개입 또는 모듈 프레임이 끊겨 늦어지면 남은 RES는 버린다 (뒤늦은 RES 방지)
+    if CS.out.brakePressed or CS.out.gasPressed or (frame - self.res_burst_start_frame) * DT_CTRL > RES_BURST_TIMEOUT:
+      cloudlog.warning(f"[gm autoresume] RES burst aborted: left={self.res_burst_left} brake={int(CS.out.brakePressed)} "
+                       f"gas={int(CS.out.gasPressed)}")
+      self.res_burst_left = 0
+      self.res_burst_end_frame = frame
+      return
+    cnt = int(CS.buttons_counter) & 0x3
+    if cnt == self.res_burst_last_cnt:
+      return
+    self.res_burst_last_cnt = cnt
+    send_res((cnt + 1) & 0x3)
+    self.res_burst_left -= 1
+    if self.res_burst_left == 0:
+      self.res_burst_end_frame = frame
+      cloudlog.warning(f"[gm autoresume] RES burst end: pcm={int(getattr(CS, 'pcm_acc_status', -1))} vEgo={CS.out.vEgo:.2f}")
 
   def button_bus(self):
     # 0x1E1 송신 버스: gm.h 허용목록에 맞춤 (카메라 스톡롱=2, 그 외=0)

@@ -272,6 +272,10 @@ class CarController(CarControllerBase):
       if self.CP.networkLocation == NetworkLocation.gateway and self.frame % self.params.ADAS_KEEPALIVE_STEP == 0:
         can_sends += gmcan.create_adas_keepalive(CanBus.POWERTRAIN)
 
+      # Kans: 오토리쥼 RES 연속 송신 (100Hz, 스티어링 모듈 0x1E1 프레임에 맞춤)
+      self.auto_resume.update_res_burst(
+        CS, self.frame, lambda rc: can_sends.append(gmcan.create_buttons(self.packer_pt, CanBus.POWERTRAIN, rc, CruiseButtons.RES_ACCEL)))
+
       # TODO: integrate this with the code block below?
       if (
           (self.CP.flags & GMFlags.PEDAL_LONG.value)  # Always cancel stock CC when using pedal interceptor
