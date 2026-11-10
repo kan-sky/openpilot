@@ -92,6 +92,7 @@ class Car:
 
     self.CC_prev = car.CarControl.new_message()
     self.CS_prev = car.CarState.new_message()
+    self.driver_resume_t = -1e9
     self.initialized_prev = False
     self.lateral_startup = LateralStartupGate()
     self.cruise_main_toggle = CruiseMainOpenpilotToggle(ButtonType.mainCruise)
@@ -307,6 +308,12 @@ class Car:
     CS.latEnabled = self.v_cruise_helper._lat_enabled
     CS.useLaneLineSpeed = self.v_cruise_helper.useLaneLineSpeedApply
     CS.carrotCruise = 1 if self.v_cruise_helper.carrot_cruise_active else 0
+    # 정지 중 운전자가 RES를 누르면 출발 의사로 본다. 플래너(20Hz)가 놓치지 않도록 0.5초 유지
+    # 체결 전 RES(크루즈 켜기)는 제외: 이전 사이클에 이미 체결된 상태에서만 인정
+    if (self.CC_prev.enabled and CS.vEgo < 0.3 and
+        any(b.type in (ButtonType.accelCruise, ButtonType.resumeCruise) and b.pressed for b in CS.buttonEvents)):
+      self.driver_resume_t = time.monotonic()
+    CS.driverResumeRequest = time.monotonic() - self.driver_resume_t < 0.5
 
     self.CI.CS.softHoldActive = CS.softHoldActive
     state_done_ns = time.monotonic_ns()

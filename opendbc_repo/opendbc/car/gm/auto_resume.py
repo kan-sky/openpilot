@@ -36,6 +36,7 @@ class GMAutoResume:
     self.resume_fault_guard = 0
     self.lead_start_count = 0  # 앞차 출발시도 횟수
     self.standstill_frame = 0  # 정지 시작 프레임 (0 = 주행 중)
+    self.driver_res_frame = -100000  # 정지 중 운전자 실제 RES 프레임
     self.activateCruise_after_brake = False
     self.last_button_frame = 0
 
@@ -322,6 +323,15 @@ class GMAutoResume:
     else:
       # GasRegenCmdActive needs to be 1 to avoid cruise faults. It describes the ACC state, not actuation
       send_gas = apply_gas
+
+    # 정지 중 운전자 실제 RES: ECM이 4에서 1로 나온 직후 플래너가 출발로 바뀌기 전까지
+    # FullStopActive를 1초간 보내지 않는다 (stopping 잔여로 ECM이 곧바로 4로 되돌아가는 것 방지)
+    if CC.enabled and CS.out.vEgo < 0.3 and any(b.type == structs.CarState.ButtonEvent.Type.accelCruise and b.pressed
+                                                for b in CS.out.buttonEvents):
+      self.driver_res_frame = frame
+      cloudlog.warning(f"[gm autoresume] driver RES at stop: cstill={int(pcm_standstill)}")
+    if (frame - self.driver_res_frame) * DT_CTRL < 1.0:
+      at_full_stop = False
 
     return send_gas, apply_brake, at_full_stop, acc_engaged
 

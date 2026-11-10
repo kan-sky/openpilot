@@ -483,6 +483,9 @@ class CarrotPlanner:
 
     self.events = Events()
     carstate = sm['carState']
+    # 운전자 출발 의사: 가속페달 또는 정지 중 RES 버튼
+    driver_resume = bool(getattr(carstate, 'driverResumeRequest', False))
+    driver_go = carstate.gasPressed or driver_resume
     vCluRatio = carstate.vCluRatio
     #controlsState = sm['controlsState']
     radarstate = sm['radarState']
@@ -563,7 +566,7 @@ class CarrotPlanner:
       self.start_decision = self.start_guard.update(
         context['now'], start_observation,
         enabled=context['enabled'] and not suspended, valid=context['valid'],
-        drive=context['drive'], gas=carstate.gasPressed, speed=v_ego,
+        drive=context['drive'], gas=driver_go, speed=v_ego,
         departure=self.trafficState == TrafficState.green or lead_detected or
                   self.xState not in (XState.e2eStop, XState.e2eStopped))
       start_hold = self.start_decision.hold
@@ -596,7 +599,7 @@ class CarrotPlanner:
         context['now'], signal_observation,
         enabled=context['enabled'] and not suspended and self.myDrivingMode != DrivingMode.High and self.trafficLightDetectMode != 0,
         valid=context['valid'], drive=context['drive'],
-        gas=carstate.gasPressed, speed=v_ego, model_distance=stop_model_x_rl,
+        gas=driver_go, speed=v_ego, model_distance=stop_model_x_rl,
         model_y=y[-1], comfort_brake=mode_comfort_brake, lead=lead_detected,
         entry_allowed=is_traffic_stop_entry_allowed(carstate.steeringAngleDeg) and self.traffic_starting_count == 0,
         turning=carstate.leftBlinker or carstate.rightBlinker)
@@ -607,7 +610,7 @@ class CarrotPlanner:
         self._signal_runtime.record(self.signal_decision, v_ego, stop_model_x_rl)
 
     #self.update_user_control()
-    if carstate.gasPressed or carstate.brakePressed:
+    if driver_go or carstate.brakePressed:
       self.user_stop_distance = -1
 
     if signal_hold or start_hold:
@@ -627,6 +630,10 @@ class CarrotPlanner:
     elif self.xState == XState.e2eStopped:
       if carstate.gasPressed:
         self.xState = XState.e2eCruise #XState.e2ePrepare
+      elif driver_resume:
+        # RES 출발: 빨간불 인식이 남아 있어도 10초간 신호 정지 재진입 금지 (곧바로 다시 서는 것 방지)
+        self.xState = XState.e2eCruise
+        self.traffic_starting_count = 10.0 / DT_MDL
       elif lead_detected and (radarstate.leadOne.dRel - stop_model_x_raw) < 2.0:
         self.xState = XState.lead
       elif self.stopping_count == 0:

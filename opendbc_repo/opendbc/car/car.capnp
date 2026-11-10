@@ -294,6 +294,7 @@ struct CarState {
   }
 
   outsideAirTemp @106 :OutsideAirTemp; # display-only ECM outside air temperature (the value the cluster shows)
+  driverResumeRequest @107 :Bool; # 정지 중 운전자 RES(accel) 버튼 출발 요청, 0.5초 유지
 
   struct OutsideAirTemp {
     valid @0 :Bool;     # false: unsupported car, no fresh frame, or CAN invalid
