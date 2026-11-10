@@ -311,7 +311,8 @@
                 "VEgoStopping",
                 "AChangeCostStarting",
                 "CruiseDelay",
-                "ResumeDelay"
+                "ResumeDelay",
+                "TblNoFullStop"
               ]
             },
             {
@@ -2883,6 +2884,19 @@
       "max": 1346,
       "default": 1346,
       "unit": 10
+    },
+    {
+      "group": "가속설정",
+      "name": "TblNoFullStop",
+      "title": "트레일블레이저 풀스톱 미사용(시험)",
+      "descr": "1: 정지 시 풀스톱 신호를 보내지 않고 일반 브레이크로 정지 유지\nECM이 정지대기(4)로 들어가지 않으면 앞차 출발 시 자동 출발\n폴트나 밀림이 생기면 0으로",
+      "egroup": "ACCEL",
+      "etitle": "Trailblazer no full stop (test)",
+      "edescr": "1: hold the stop with normal brake instead of full-stop signal so ECM stays active for auto resume",
+      "min": 0,
+      "max": 1,
+      "default": 0,
+      "unit": 1
     },
     {
       "group": "주행튜닝",

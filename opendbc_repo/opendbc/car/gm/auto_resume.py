@@ -4,7 +4,7 @@ import openpilot.cereal.messaging as messaging
 from openpilot.common.params import Params
 from openpilot.common.swaglog import cloudlog
 from opendbc.car import DT_CTRL, structs
-from opendbc.car.gm.values import CanBus, CruiseButtons, CAMERA_ACC_CAR, EV_CAR, SDGM_CAR
+from opendbc.car.gm.values import CAR, CanBus, CruiseButtons, CAMERA_ACC_CAR, EV_CAR, SDGM_CAR
 
 LongCtrlState = structs.CarControl.Actuators.LongControlState
 
@@ -17,6 +17,11 @@ CREEP_RELEASE_MIN_STANDSTILL = 1.0  # s
 RES_BURST_FRAMES = 4
 RES_BURST_MIN_GAP = 0.3  # s, 연속 송신 사이 최소 간격 (길게 누름으로 보이지 않게)
 RES_BURST_TIMEOUT = 0.25  # s, 모듈 프레임 30ms x 4 = 0.12초에 여유
+
+# Trailblazer 풀스톱 미사용 정지 유지 (TblNoFullStop)
+# ECM은 2CB GasRegenFullStopActive=1을 받으면 STANDSTILL(4)로 들어가고, 4에서는 가스와 합성 RES를 무시한다 (rlog-tbl02/03/-4).
+# FullStopActive를 보내지 않으면 0xD 풀스톱 브레이크도 못 쓰므로 일반 브레이크(0xA)를 최대값까지 올려 정지를 유지한다.
+HOLD_BRAKE_STEP = 40  # 25Hz 송신 1회당 증가량, 약 0.4초에 최대값 도달
 
 # Kans: GM 오토리쥼/오토크루즈 모듈
 # - carcontroller 25Hz 블록에서 가스/브레이크 계산 직후, 2CB/브레이크 송신 직전에 호출
@@ -35,6 +40,10 @@ class GMAutoResume:
     self.cruiseDelay_time = 0.0
     self.resumeDelay_time = 0.0
     self.accel_force = 0
+    self.no_full_stop_capable = CP.carFingerprint == CAR.CHEVROLET_TRAILBLAZER and CP.openpilotLongitudinalControl
+    self.no_full_stop = False
+    self.hold_brake = 0
+    self.hold_logged = False
     self._update_params()
 
     self.resume_activate = False
@@ -69,6 +78,7 @@ class GMAutoResume:
     self.auto_cruise_enabled = self.params_.get_int("AutoCruiseControl") > 0
     self.auto_resume_enabled = self.params_.get_int("AutoEngage") == 2
     self.accel_force = self.params_.get_int("AccelForce")
+    self.no_full_stop = self.no_full_stop_capable and self.params_.get_int("TblNoFullStop") > 0
 
   def _update_lead(self):
     try:
@@ -173,7 +183,7 @@ class GMAutoResume:
     # resume_frame은 실제 AutoResume까지 이어지는 리쥼윈도우로 유지한다.
     # ECM이 STANDSTILL(4)이면 가스를 받지 않으므로 브레이크를 풀지 않는다 (운전자 RES 대기)
     if (auto_resume_enabled and lead_start and resume_standstill and self.resume_frame == 0 and
-        standstill_dt >= CREEP_RELEASE_MIN_STANDSTILL and not pcm_standstill and
+        standstill_dt >= CREEP_RELEASE_MIN_STANDSTILL and not pcm_standstill and not self.no_full_stop and
         not CS.out.brakePressed and not CS.out.gasPressed):
       self.resume_frame = frame
       self.resume_fault_guard = -1
@@ -229,7 +239,8 @@ class GMAutoResume:
           self._pending_activateCruise = False
 
     # Kans: Auto Resume (RES only)
-    elif auto_resume_enabled and starting:
+    # 풀스톱 미사용 모드는 ECM이 ACTIVE(1)에 머무르므로 RES 없이 longcontrol starting 가스로 출발한다
+    elif auto_resume_enabled and starting and not self.no_full_stop:
       if self.resume_frame == 0 or self.resume_activate:
         self.resume_frame = frame
         self.resume_activate = False
@@ -305,7 +316,7 @@ class GMAutoResume:
     lead_ok = lead_follow_ok or no_lead_hill_ok
 
     # resume_active는 "가스 펄스" 조건 -> starting/크루즈ON 게이트
-    resume_active = ((self.resume_frame != 0) and auto_longcontrol and (CS.out.vEgo < 3.5) and lead_ok and
+    resume_active = ((self.resume_frame != 0) and auto_longcontrol and not self.no_full_stop and (CS.out.vEgo < 3.5) and lead_ok and
                      (starting or CS.out.cruiseState.enabled) and (CS.out.standstill or CS.out.cruiseState.standstill))
 
     # 2CB: 실제 가스 송신
@@ -316,7 +327,27 @@ class GMAutoResume:
       # GasRegenCmdActive needs to be 1 to avoid cruise faults. It describes the ACC state, not actuation
       send_gas = apply_gas
 
+    if self.no_full_stop:
+      apply_brake = self._update_no_full_stop_hold(CC, CS, apply_brake, pcm_standstill)
+      at_full_stop = False
+
     return send_gas, apply_brake, at_full_stop, acc_engaged
+
+  def _update_no_full_stop_hold(self, CC, CS, apply_brake, pcm_standstill):
+    # 정지 상태에서 정지 브레이크 요청이 있을 때만 브레이크를 최대값까지 올린다 (출발 요청이면 apply_brake=0으로 즉시 해제)
+    if CC.longActive and CS.out.standstill and apply_brake > 0:
+      self.hold_brake = min(self.hold_brake + HOLD_BRAKE_STEP, self.params.MAX_BRAKE)
+      if not self.hold_logged:
+        cloudlog.warning(f"[gm nofullstop] hold start: cstill={int(pcm_standstill)} brake={apply_brake}")
+        self.hold_logged = True
+      return max(apply_brake, self.hold_brake)
+
+    if self.hold_logged:
+      cloudlog.warning(f"[gm nofullstop] hold end: cstill={int(pcm_standstill)} vEgo={CS.out.vEgo:.2f} "
+                       f"longActive={CC.longActive} brake={apply_brake}")
+      self.hold_logged = False
+    self.hold_brake = 0
+    return apply_brake
 
   def _request_res_burst(self, frame, CS):
     if self.res_burst_left > 0 or (frame - self.res_burst_end_frame) * DT_CTRL < RES_BURST_MIN_GAP:
