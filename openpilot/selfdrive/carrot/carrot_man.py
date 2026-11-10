@@ -516,8 +516,10 @@ class CarrotMan:
       curvature = calculate_curvature(p1, p2, p3)
       speed = float(np.interp(abs(curvature), V_CURVE_LOOKUP_BP, V_CRUVE_LOOKUP_VALS))
 
+      # 반경 50m보다 완만한 곡선은 경로 속도를 적용하지 않는다 (비전/모델 곡선 감속이 담당)
+      # 도로제한속도를 하한으로 쓰면 제한속도가 바뀌는 순간 완만한 굽이에서 감속이 생긴다
       if abs(curvature) < 0.02:
-        speed = max(speed, self.carrot_serv.nRoadLimitSpeed)
+        speed = 300.0
 
       speeds.append(speed)
 
