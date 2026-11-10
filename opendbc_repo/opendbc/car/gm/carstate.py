@@ -200,7 +200,9 @@ class CarState(CarStateBase):
     ret.cruiseState.enabled = pt_cp.vl["AcceleratorPedal2"]["CruiseState"] != AccState.OFF
     ret.cruiseState.standstill = pt_cp.vl["AcceleratorPedal2"]["CruiseState"] == AccState.STANDSTILL
     # kans: avoid to accFault
-    if self.CP.carFingerprint not in CAR.CHEVROLET_VOLT:
+    # Trailblazer(카메라 ACC, 롱컨 openpilot)는 ECM STANDSTILL(4)에서 가스를 무시하고 실제 RES만 받는다.
+    # 실제 값을 그대로 넘겨야 longcontrol이 정지를 유지하고 resumeRequired 안내가 뜬다 (rlog-tbl02/03: 강제 False면 브레이크만 풀려 크리프)
+    if self.CP.carFingerprint not in (CAR.CHEVROLET_VOLT, CAR.CHEVROLET_TRAILBLAZER):
       ret.cruiseState.standstill = False
     if self.CP.networkLocation == NetworkLocation.fwdCamera and not self.CP.flags & GMFlags.NO_CAMERA.value:
       if self.CP.carFingerprint not in CC_ONLY_CAR:
