@@ -65,8 +65,8 @@ static void gm_rx_hook(const CANPacket_t *msg) {
   // https://github.com/commaai/openpilot/blob/master/selfdrive/car/gm/carstate.py
   // Prefer 0xC9 (ECMEngineStatus) when gm_force_brake_c9 is set, otherwise keep legacy behavior.
   // This allows SDGM/Traverse variants without 0xBE (ECMAcceleratorPos) to report brake correctly.
-  // Kans: EV(Volt µî)´Â 0xBE(ECMAcceleratorPos)ÀÇ threshold=8 ±ÙÃ³ ³ëÀÌÁî·Î brake_pressed°¡
-  // Æ¢´Â ¹®Á¦°¡ ½ÇÁ¦ ·Î±×·Î È®ÀÎµÅ¼­, EBCM ºê·¹ÀÌÅ© Æä´Ş ¼¾¼­(0xF1)·Î ÀüÈ¯ (opgm/opendbc Âü°í)
+  // Kans: EV(Volt ë“±)ëŠ” 0xBE(ECMAcceleratorPos)ì˜ threshold=8 ê·¼ì²˜ ë…¸ì´ì¦ˆë¡œ brake_pressedê°€
+  // íŠ€ëŠ” ë¬¸ì œê°€ ì‹¤ì œ ë¡œê·¸ë¡œ í™•ì¸ë¼ì„œ, EBCM ë¸Œë ˆì´í¬ í˜ë‹¬ ì„¼ì„œ(0xF1)ë¡œ ì „í™˜ (opgm/opendbc ì°¸ê³ )
   if (msg_matches(msg, 0xC9U, 0U) && safety_setup.gm_force_brake_c9) {
     safety.brake_pressed = GET_BIT(msg, 40U);
   } else if (msg_matches(msg, 0xF1U, 0U) && (safety_setup.gm_hw == GM_ASCM) && safety_setup.gm_ev) {
