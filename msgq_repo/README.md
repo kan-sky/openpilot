@@ -1,9 +1,122 @@
-# MSGQ: A lock free single producer multi consumer message queue
+<div align="center" style="text-align: center;">
 
-## What is this library?
-MSGQ is a generic high performance IPC pub sub system with a single publisher and multiple subscribers. It uses a ring buffer in shared memory to efficiently read and write data. Each read requires a copy. Writing can be done without a copy, as long as the size of the data is known in advance. This library also provides a spoofed implementation that can be used for deterministic testing, and visionipc, an IPC system specifically for large contiguous buffers (like images/video).
+<h1>MSGQ</h1>
+<p><b>High-performance <a href="https://en.wikipedia.org/wiki/Publish%E2%80%93subscribe_pattern">pub/sub</a> messaging, made simple.<br>For Python, C, and C++.</b></p>
 
-## Storage
+<h3>
+  <a href="#quickstart">Quickstart</a>
+  <span> · </span>
+  <a href="#cheatsheet">Cheatsheet</a>
+  <span> · </span>
+  <a href="https://github.com/commaai/msgq/tree/master/msgq/examples">Examples</a>
+  <span> · </span>
+  <a href="https://discord.comma.ai">Discord</a>
+</h3>
+
+[![Discord](https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white)](https://discord.comma.ai)
+[![PyPI](https://img.shields.io/pypi/v/msgq-ipc)](https://pypi.org/project/msgq-ipc/)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/commaai/msgq)
+[![Tests](https://github.com/commaai/msgq/actions/workflows/tests.yml/badge.svg?branch=master)](https://github.com/commaai/msgq/actions/workflows/tests.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/commaai/msgq/blob/master/LICENSE)
+
+</div>
+
+---
+
+MSGQ lets programs on the same machine exchange messages. A publisher sends messages to a named endpoint, and subscribers listen on that same endpoint. Each endpoint supports one publisher and multiple subscribers.
+
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/79bb91cf-c9ad-4fb4-97d9-33359a083f0f" alt="1 KiB cross-process ping-pong benchmark"><br>
+  <sub>1 KiB cross-process ping-pong on x86 Linux. <a href="https://github.com/commaai/msgq/blob/master/msgq/examples/benchmark.py">Benchmark script</a>.</sub>
+</p>
+
+## Quickstart
+
+```sh
+python -m pip install msgq-ipc
+```
+
+Run the included [publisher](https://github.com/commaai/msgq/blob/master/msgq/examples/publisher.py) and [subscriber](https://github.com/commaai/msgq/blob/master/msgq/examples/subscriber.py) examples in separate terminals:
+
+```sh
+python -m msgq.examples.publisher --endpoint demo   # terminal 1
+python -m msgq.examples.subscriber --endpoint demo  # terminal 2
+```
+
+The subscriber prints `Hello from MSGQ!` once per second.
+
+The core API sends and receives bytes:
+
+```python
+import msgq
+
+publisher = msgq.pub_sock("hello")
+subscriber = msgq.sub_sock("hello")
+publisher.send(b"Hello from MSGQ!")
+print(subscriber.receive())  # b'Hello from MSGQ!'
+```
+
+## Cheatsheet
+
+```python
+import msgq
+
+# API reference; calls are not intended to run in sequence.
+
+# === Create sockets ===
+pub = msgq.pub_sock("demo")                       # One publisher per endpoint
+sub = msgq.sub_sock("demo")                       # Receive messages from that endpoint
+sub = msgq.sub_sock("demo", timeout=1000)         # Wait up to 1000 milliseconds per receive
+sub = msgq.sub_sock("demo", conflate=True)        # Receive only the latest available message
+
+
+# === Send & Receive ===
+pub.send(b"hello")                               # Send nonempty bytes; returns None
+sub.receive()                                    # Return bytes; block by default
+sub.receive(non_blocking=True)                   # Return bytes immediately, or None
+sub.setTimeout(1000)                             # Set receive timeout in milliseconds
+sub.setTimeout(-1)                               # Restore indefinite blocking
+msgq.drain_sock_raw(sub)                         # Return a list of all available messages
+msgq.drain_sock_raw(sub, wait_for_one=True)      # Wait for the first message, then drain
+
+# A receive timeout returns None; draining returns [] if no messages arrive.
+# Slow subscribers can miss messages when the ring buffer wraps.
+
+# === Poll multiple subscribers ===
+poller = msgq.Poller()                           # Create a group of subscribers to watch
+sub = msgq.sub_sock("demo", poller=poller)       # Create and register a subscriber
+poller.registerSocket(sub)                       # Alternatively, register an existing socket
+poller.poll(1000)                                # Return readable sockets; timeout in milliseconds
+poller.poll(0)                                   # Check immediately; return [] if none are ready
+poller.poll(-1)                                  # Wait indefinitely for a readable socket
+
+# Register each socket once. Call receive() on the sockets returned by poll().
+
+# === Reader synchronization and errors ===
+pub.all_readers_updated()                        # Check whether tracked readers have caught up
+pub.wait_for_readers(timeout=1.0, interval=0.01) # Wait for that condition; times are in seconds
+msgq.IpcError                                    # Messaging failure exception
+msgq.MultiplePublishersError                     # Publisher conflict; subclass of IpcError
+
+# wait_for_readers() raises TimeoutError if its deadline expires.
+# Synchronization checks queue positions, not application processing. It requires
+# at least one tracked reader and ignores readers invalidated by an overwrite.
+```
+
+## Contributing
+
+Issues and pull requests are welcome on [GitHub](https://github.com/commaai/msgq). Run `./test.sh` to build, lint, and test the package.
+
+## License
+
+MSGQ is available under the [MIT License](https://github.com/commaai/msgq/blob/master/LICENSE).
+
+<details>
+<summary>Under the hood</summary>
+
+The message queue copies data on send and receive. A fake implementation is also available for deterministic testing.
+
+### Storage
 The storage for the queue consists of an area of metadata, and the actual buffer. The metadata contains:
 
 1. A counter to the number of readers that are active
@@ -18,7 +131,7 @@ The counter and the pointer are both 32 bit values, packed into 64 bit so they c
 The data buffer is a ring buffer. All messages are prefixed by an 8 byte size field, followed by the data. A size of -1 indicates a wrap-around, and means the next message is stored at the beginning of the buffer.
 
 
-## Writing
+### Writing
 Writing involves the following steps:
 
 1. Check if the area that is to be written overlaps with any of the read pointers, mark those readers as invalid by clearing the validity flag.
@@ -29,14 +142,14 @@ In case there is not enough space at the end of the buffer, a special empty mess
 
 There always needs to be 8 bytes of empty space at the end of the buffer. By doing this there is always space to write the -1.
 
-## Reset reader
+### Reset reader
 When the reader is lagging too much behind the read pointer becomes invalid and no longer points to the beginning of a valid message. To reset a reader to the current write pointer, the following steps are performed:
 
 1. Set valid flag
 2. Set read cycle counter to that of the writer
 3. Set read pointer to write pointer
 
-## Reading
+### Reading
 Reading involves the following steps:
 
 1. Read the size field at the current read pointer
@@ -52,3 +165,5 @@ If a writer overwrites the data while it's being copied out, the data will be in
 If at steps 2 or 5 the validity flag is not set, the reader is reset. Any data that was already read is discarded. After the reader is reset, the reading starts from the beginning.
 
 If a message with size -1 is encountered, step 3 and 4 are replaced by increasing the cycle counter and setting the read pointer to the beginning of the buffer. After that another read is performed.
+
+</details>

@@ -74,6 +74,8 @@ function bootstrap_runtime_dependencies {
 
   ensure_python_package brotli brotli 0
   ensure_python_package usb pyusb 0
+  # 콤마가 pyzmq 의존성을 제거해 AGNOS venv에 없을 수 있음 (carrot_man 7710 명령 소켓용)
+  ensure_python_package zmq pyzmq 0
 
   # carrot-wip pins this for its Xiaoge lane/BSD inference feature (not yet
   # ported to 196). Optional (0): harmless no-op until then.
@@ -94,6 +96,8 @@ function agnos_init {
   # udev does this, but sometimes we startup faster
   sudo chgrp gpu /dev/adsprpc-smd /dev/ion /dev/kgsl-3d0
   sudo chmod 660 /dev/adsprpc-smd /dev/ion /dev/kgsl-3d0
+  sudo chgrp audio /dev/snd/*C*
+  sudo chmod 660 /dev/snd/*C*
 
   # Check if AGNOS update is required
   if [ "$(< /VERSION)" != "$AGNOS_VERSION" ]; then

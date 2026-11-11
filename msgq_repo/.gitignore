@@ -10,7 +10,9 @@ __pycache__
 *.a
 uv.lock
 catch2/
-msgq.egg-info/
+*.egg-info/
+/build/
+/dist/
 
 test_runner
 
@@ -18,3 +20,6 @@ libmessaging.*
 libmessaging_shared.*
 .sconsign.dblite
 .mypy_cache/
+
+/msgq/_ipc.pyi
+/msgq/visionipc/_visionipc.pyi

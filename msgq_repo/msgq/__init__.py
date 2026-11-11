@@ -1,12 +1,10 @@
-# must be built with scons
-from msgq.ipc_pyx import Context, Poller, SubSocket, PubSocket, SocketEventHandle, toggle_fake_events, \
+from msgq._ipc import Poller, SubSocket, PubSocket, SocketEventHandle, toggle_fake_events, \
                                 set_fake_prefix, get_fake_prefix, delete_fake_prefix, wait_for_one_event
-from msgq.ipc_pyx import MultiplePublishersError, IpcError
+from msgq._ipc import MultiplePublishersError, IpcError
 
-from typing import Optional, List, Union
+from typing import Optional, List
 
 __all__ = [
-  "Context",
   "Poller",
   "SubSocket",
   "PubSocket",
@@ -19,7 +17,6 @@ __all__ = [
   "delete_fake_prefix",
   "wait_for_one_event",
   "NO_TRAVERSAL_LIMIT",
-  "context",
   "fake_event_handle",
   "pub_sock",
   "sub_sock",
@@ -28,10 +25,7 @@ __all__ = [
 
 NO_TRAVERSAL_LIMIT = 2**64-1
 
-context = Context()
-
-
-def fake_event_handle(endpoint: str, identifier: Optional[Union[str, bytes]] = None, override: bool = True, enable: bool = False) -> SocketEventHandle:
+def fake_event_handle(endpoint: str, identifier: Optional[str] = None, override: bool = True, enable: bool = False) -> SocketEventHandle:
   ident = identifier if identifier is not None else get_fake_prefix()
   handle = SocketEventHandle(endpoint, ident, override)
   if override:
@@ -41,14 +35,14 @@ def fake_event_handle(endpoint: str, identifier: Optional[Union[str, bytes]] = N
 
 def pub_sock(endpoint: str, segment_size: int = 0) -> PubSocket:
   sock = PubSocket()
-  sock.connect(context, endpoint, segment_size)
+  sock.connect(endpoint, segment_size)
   return sock
 
 
-def sub_sock(endpoint: str, poller: Optional[Poller] = None, addr: str = "127.0.0.1",
-             conflate: bool = False, timeout: Optional[int] = None, segment_size: int = 0) -> SubSocket:
+def sub_sock(endpoint: str, poller: Optional[Poller] = None, conflate: bool = False,
+             timeout: Optional[int] = None, segment_size: int = 0) -> SubSocket:
   sock = SubSocket()
-  sock.connect(context, endpoint, addr.encode('utf8'), conflate, segment_size)
+  sock.connect(endpoint, conflate, segment_size)
 
   if timeout is not None:
     sock.setTimeout(timeout)

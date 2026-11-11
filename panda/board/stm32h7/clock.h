@@ -82,6 +82,7 @@ void clock_init(void) {
   register_set_bits(&(RCC->CR), RCC_CR_HSI48ON);
   while ((RCC->CR & RCC_CR_HSI48RDY) == 0U);
   // Specify the frequency source for PLL1, divider for DIVM1, DIVM2, DIVM3 : HSE, 5, 5, 5
+  // PLL2 is reserved for the cuatro microphone clock: sound.h configures it and retunes its fraction at runtime from DIVM2's 5 MHz reference
   register_set(&(RCC->PLLCKSELR), RCC_PLLCKSELR_PLLSRC_HSE | RCC_PLLCKSELR_DIVM1_0 | RCC_PLLCKSELR_DIVM1_2 | RCC_PLLCKSELR_DIVM2_0 | RCC_PLLCKSELR_DIVM2_2 | RCC_PLLCKSELR_DIVM3_0 | RCC_PLLCKSELR_DIVM3_2, 0x3F3F3F3U);
 
   // *** PLL1 start ***
@@ -119,4 +120,40 @@ void clock_init(void) {
   register_set_bits(&(RCC->CR), RCC_CR_CSSHSEON);
   //Enable Vdd33usb supply level detector
   register_set_bits(&(PWR->CR3), PWR_CR3_USB33DEN);
+}
+
+// CLK_SM_3: TIM16 captures every 8th edge of the 32kHz LSI on the HSE derived timer clock
+#define LSI_COUNTS_NOMINAL (APB2_TIMER_FREQ * 250U)
+
+void clock_check_init(void) {
+  register_set_bits(&(RCC->CSR), RCC_CSR_LSION);
+  register_set(&(TIM16->TISEL), 1U, TIM_TISEL_TI1SEL);
+  register_set(&(TIM16->CCMR1), TIM_CCMR1_CC1S_0 | TIM_CCMR1_IC1PSC_1 | TIM_CCMR1_IC1PSC_0, 0xFFU);
+  register_set(&(TIM16->CCER), TIM_CCER_CC1E, 0xFU);
+  register_set(&(TIM16->PSC), 0U, 0xFFFFU);
+  register_set(&(TIM16->ARR), 0xFFFFU, 0xFFFFU);
+  register_set(&(TIM16->CR1), TIM_CR1_CEN, 0x3FU);
+}
+
+// waits up to 1ms for the next capture, an LSI/8 period is 250us
+static bool lsi_capture(uint16_t *count) {
+  uint32_t ts = microsecond_timer_get();
+  bool captured = false;
+  while (!captured && (get_ts_elapsed(microsecond_timer_get(), ts) < 1000U)) {
+    captured = (TIM16->SR & TIM_SR_CC1IF) != 0U;
+  }
+  *count = (uint16_t)TIM16->CCR1;
+  return captured;
+}
+
+// called at 1Hz, LSI isn't accurate so the window only catches gross errors
+void clock_check(void) {
+  // reading CCR1 clears CC1IF
+  uint16_t start = (uint16_t)TIM16->CCR1;
+  uint16_t end = 0U;
+  bool captured = lsi_capture(&end);
+  uint32_t counts = (uint16_t)(end - start);
+  if (!captured || (counts <= ((LSI_COUNTS_NOMINAL * 3U) / 4U)) || (counts >= ((LSI_COUNTS_NOMINAL * 5U) / 4U))) {
+    fault_occurred_value(FAULT_CLOCK, captured ? counts : 0U);
+  }
 }

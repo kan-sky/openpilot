@@ -1,10 +1,14 @@
+[build-system]
+requires = ["setuptools>=77", "nanobind>=2.12", "scons"]
+build-backend = "setuptools.build_meta"
+
 [project]
-name = "msgq"
-version = "0.0.1"
-description = "Lock-free IPC pub/sub message queue"
+name = "msgq-ipc"
+version = "1.1"
+description = "High-performance pub/sub messaging, made simple. For Python, C, and C++."
 readme = "README.md"
 requires-python = ">=3.11"
-license = {text = "MIT"}
+license = "MIT"
 authors = [{name = "comma.ai"}]
 classifiers = [
   "Natural Language :: English",
@@ -13,11 +17,18 @@ classifiers = [
 ]
 dependencies = []
 
+[project.urls]
+Repository = "https://github.com/commaai/msgq"
+
 [project.optional-dependencies]
-dev = [
-  "setuptools",  # for distutils
-  "Cython",
+# for building from source with SCons
+build = [
+  "nanobind>=2.12",
   "scons",
+]
+dev = [
+  "msgq-ipc[build]",
+  "setuptools",  # for distutils
   "ruff",
   "cppcheck",
   "cpplint",
@@ -26,8 +37,23 @@ dev = [
   "lefthook",
 ]
 
+[tool.setuptools]
+include-package-data = false
+
+[tool.setuptools.packages.find]
+include = ["msgq", "msgq.*"]
+namespaces = false
+
 [tool.setuptools.package-data]
-"*" = ["*.so"]
+"msgq" = ["*.pyi", "py.typed", "*.h"]
+"msgq.visionipc" = ["*.pyi", "*.h"]
+
+[tool.cibuildwheel]
+build = "cp311-* cp312-* cp313-* cp314-*"
+test-command = "python -m unittest discover -s msgq"
+
+[tool.cibuildwheel.macos.environment]
+MACOSX_DEPLOYMENT_TARGET = "10.13"
 
 # https://beta.ruff.rs/docs/configuration/#using-pyprojecttoml
 [tool.ruff]
@@ -37,10 +63,3 @@ lint.flake8-implicit-str-concat.allow-multiline=false
 
 line-length = 160
 target-version="py311"
-
-[tool.ty.src]
-exclude = ["site_scons/"]
-
-[tool.ty.rules]
-# Cython modules are compiled at build time, not available for static analysis
-unresolved-import = "ignore"

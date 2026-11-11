@@ -113,10 +113,6 @@ msgstr "CHANGER"
 msgid "CHECK"
 msgstr "VÉRIFIER"
 
-#: openpilot/selfdrive/ui/widgets/exp_mode_button.py
-msgid "CHILL MODE ON"
-msgstr "MODE CHILL ACTIVÉ"
-
 #: openpilot/selfdrive/ui/layouts/sidebar.py
 #: openpilot/system/ui/widgets/network.py
 msgid "CONNECT"
@@ -124,7 +120,7 @@ msgstr "CONNECTER"
 
 #: openpilot/system/ui/widgets/network.py
 msgid "CONNECTING..."
-msgstr "CONNECTER..."
+msgstr "CONNEXION..."
 
 #: openpilot/selfdrive/ui/layouts/settings/device.py
 msgid "Cabin Camera"
@@ -225,12 +221,7 @@ msgstr "ERREUR"
 msgid "ETH"
 msgstr "ETH"
 
-#: openpilot/selfdrive/ui/widgets/exp_mode_button.py
-msgid "EXPERIMENTAL MODE ON"
-msgstr "MODE EXPÉRIMENTAL ACTIVÉ"
-
 #: openpilot/selfdrive/ui/layouts/settings/developer.py
-#: openpilot/selfdrive/ui/layouts/settings/toggles.py
 msgid "Enable"
 msgstr "Activer"
 
@@ -244,7 +235,7 @@ msgstr "Activer les alertes de sortie de voie"
 
 #: openpilot/system/ui/widgets/network.py
 msgid "Enable Roaming"
-msgstr "Activer openpilot"
+msgstr "Activer l'itinérance"
 
 #: openpilot/selfdrive/ui/layouts/settings/developer.py
 msgid "Enable SSH"
@@ -252,7 +243,7 @@ msgstr "Activer SSH"
 
 #: openpilot/system/ui/widgets/network.py
 msgid "Enable Tethering"
-msgstr "Activer les alertes de sortie de voie"
+msgstr "Activer le partage de connexion"
 
 #: openpilot/selfdrive/ui/layouts/settings/toggles.py
 msgid "Enable driver monitoring even when openpilot is not engaged."
@@ -261,10 +252,6 @@ msgstr "Activer la surveillance du conducteur même lorsque openpilot n'est pas 
 #: openpilot/selfdrive/ui/layouts/settings/toggles.py
 msgid "Enable openpilot"
 msgstr "Activer openpilot"
-
-#: openpilot/selfdrive/ui/layouts/settings/toggles.py
-msgid "Enable the openpilot longitudinal control (alpha) toggle to allow Experimental mode."
-msgstr "Activez l'option de contrôle longitudinal openpilot (alpha) pour autoriser le mode expérimental."
 
 #: openpilot/system/ui/widgets/network.py
 msgid "Enter APN"
@@ -290,17 +277,9 @@ msgstr "Entrez votre nom d'utilisateur GitHub"
 msgid "Error"
 msgstr "Erreur"
 
-#: openpilot/selfdrive/ui/layouts/settings/toggles.py
-msgid "Experimental Mode"
-msgstr "Mode expérimental"
-
-#: openpilot/selfdrive/ui/layouts/settings/toggles.py
-msgid "Experimental mode is currently unavailable on this car since the car's stock ACC is used for longitudinal control."
-msgstr "Le mode expérimental est actuellement indisponible sur cette voiture car l'ACC d'origine est utilisé pour le contrôle longitudinal."
-
 #: openpilot/system/ui/widgets/network.py
 msgid "FORGETTING..."
-msgstr "OUBLIER..."
+msgstr "SUPPRESSION..."
 
 #: openpilot/selfdrive/ui/widgets/setup.py
 msgid "Finish Setup"
@@ -337,7 +316,7 @@ msgstr "ÉLEVÉ"
 
 #: openpilot/system/ui/widgets/network.py
 msgid "Hidden Network"
-msgstr "Réseau"
+msgstr "Réseau masqué"
 
 #: openpilot/selfdrive/ui/layouts/settings/software.py
 msgid "INSTALL"
@@ -346,6 +325,10 @@ msgstr "INSTALLER"
 #: openpilot/system/ui/widgets/network.py
 msgid "IP Address"
 msgstr "Adresse IP"
+
+#: openpilot/selfdrive/ui/layouts/settings/toggles.py
+msgid "Initial Max Speed"
+msgstr ""
 
 #: openpilot/selfdrive/ui/layouts/settings/software.py
 msgid "Install Update"
@@ -567,7 +550,7 @@ msgstr "Sélectionner une branche"
 
 #: openpilot/selfdrive/ui/layouts/settings/device.py
 msgid "Select a language"
-msgstr "Sélectionner un langage"
+msgstr "Sélectionner une langue"
 
 #: openpilot/selfdrive/ui/layouts/settings/device.py
 msgid "Serial"
@@ -721,6 +704,7 @@ msgstr "finalisation de la mise à jour..."
 msgid "for \"{}\""
 msgstr "pour \"{}\""
 
+#: openpilot/selfdrive/ui/layouts/settings/initial_cruise_speed.py
 #: openpilot/selfdrive/ui/onroad/hud_renderer.py
 msgid "km/h"
 msgstr "km/h"
@@ -737,6 +721,7 @@ msgstr "gauche"
 msgid "metered"
 msgstr "limité"
 
+#: openpilot/selfdrive/ui/layouts/settings/initial_cruise_speed.py
 #: openpilot/selfdrive/ui/onroad/hud_renderer.py
 msgid "mph"
 msgstr "mph"
@@ -756,10 +741,6 @@ msgstr "Contrôle longitudinal openpilot (Alpha)"
 #: openpilot/selfdrive/ui/onroad/alert_renderer.py
 msgid "openpilot Unavailable"
 msgstr "openpilot indisponible"
-
-#: openpilot/selfdrive/ui/layouts/settings/toggles.py
-msgid "openpilot longitudinal control may come in a future update."
-msgstr "Le contrôle longitudinal openpilot pourra arriver dans une future mise à jour."
 
 #: openpilot/selfdrive/ui/layouts/settings/device.py
 msgid "openpilot requires the device to be mounted within 4° left or right and within 5° up or 9° down."

@@ -26,7 +26,6 @@ JSON_FILE = os.path.join(LONG_MPC_DIR, "acados_ocp_long.json")
 SOURCES = ['lead0', 'lead1', 'cruise', 'e2e']
 
 X_DIM = 3
-U_DIM = 1
 PARAM_DIM = 8
 COST_E_DIM = 5
 COST_DIM = COST_E_DIM + 1

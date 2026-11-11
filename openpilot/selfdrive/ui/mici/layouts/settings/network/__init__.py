@@ -1,4 +1,4 @@
-import pyray as rl
+import raylib_nb as rl
 
 from openpilot.cereal import log
 from openpilot.selfdrive.ui.mici.layouts.settings.network.wifi_ui import WifiIcon
@@ -13,7 +13,7 @@ NetworkType = log.DeviceState.NetworkType
 
 
 class EsimNetworkButton(BigButton):
-  def __init__(self, cellular_manager: CellularManager):
+  def __init__(self, cellular_manager: CellularManager, *, description: str = ""):
     self._cellular_manager = cellular_manager
     self._cell_icons = {
       NetworkStrength.unknown: gui_app.texture("icons_mici/settings/network/cell_strength_none.png", 64, 47),
@@ -22,7 +22,7 @@ class EsimNetworkButton(BigButton):
       NetworkStrength.good: gui_app.texture("icons_mici/settings/network/cell_strength_high.png", 64, 47),
       NetworkStrength.great: gui_app.texture("icons_mici/settings/network/cell_strength_full.png", 64, 47),
     }
-    super().__init__("esim", "loading...", self._cell_icons[NetworkStrength.unknown], scroll=True)
+    super().__init__("esim", "loading...", self._cell_icons[NetworkStrength.unknown], scroll=True, description=description)
 
   def _update_state(self):
     super()._update_state()
@@ -54,7 +54,7 @@ class EsimNetworkButton(BigButton):
 
 
 class WifiNetworkButton(BigButton):
-  def __init__(self, wifi_manager: WifiManager):
+  def __init__(self, wifi_manager: WifiManager, *, description: str = ""):
     self._wifi_manager = wifi_manager
     self._lock_txt = gui_app.texture("icons_mici/settings/network/new/lock.png", 28, 36)
     self._draw_lock = False
@@ -64,7 +64,7 @@ class WifiNetworkButton(BigButton):
     self._wifi_medium_txt = gui_app.texture("icons_mici/settings/network/wifi_strength_medium.png", 64, 47)
     self._wifi_full_txt = gui_app.texture("icons_mici/settings/network/wifi_strength_full.png", 64, 47)
 
-    super().__init__("wi-fi", "not connected", self._wifi_slash_txt, scroll=True)
+    super().__init__("wi-fi", "not connected", self._wifi_slash_txt, scroll=True, description=description)
 
   def _update_state(self):
     super()._update_state()
@@ -104,4 +104,4 @@ class WifiNetworkButton(BigButton):
       icon_y = btn_y + 30
       lock_x = icon_x + self._txt_icon.width - self._lock_txt.width + 7
       lock_y = icon_y + self._txt_icon.height - self._lock_txt.height + 8
-      rl.draw_texture_ex(self._lock_txt, (lock_x, lock_y), 0.0, 1.0, rl.WHITE)
+      rl.draw_texture_ex(self._lock_txt, rl.Vector2(lock_x, lock_y), 0.0, 1.0, rl.WHITE)

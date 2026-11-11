@@ -107,14 +107,13 @@ class SelfdriveD:
     self.is_metric = self.params.get_bool("IsMetric")
     self.is_ldw_enabled = self.params.get_bool("IsLdwEnabled")
     self.disengage_on_accelerator = self.params.get_bool("DisengageOnAccelerator")
+    openpilot_enabled = self.params.get_bool("OpenpilotEnabledToggle")
 
     car_recognized = self.CP.brand != 'mock'
 
     # cleanup old params
     if not self.CP.alphaLongitudinalAvailable:
       self.params.remove("AlphaLongitudinalEnabled")
-    if not self.CP.openpilotLongitudinalControl:
-      self.params.remove("ExperimentalMode")
 
     self.CS_prev = car.CarState.new_message()
     self.auto_hold_frame = -1000  # Kans: 오토홀드 마지막 감지 프레임
@@ -136,9 +135,9 @@ class SelfdriveD:
     self.events_prev = []
     self.logged_comm_issue = None
     self.not_running_prev = None
-    self.experimental_mode = False
     self.personality = self.params.get("LongitudinalPersonality", return_default=True)
     self.recalibrating_seen = False
+    self.startup_cruise_checked = False
     self.dm_lockout_set = False
     self.dm_uncertain_alerted = False
     self.state_machine = StateMachine()
@@ -155,9 +154,9 @@ class SelfdriveD:
     elif self.CP.secOcRequired and not self.CP.secOcKeyAvailable:
       self.startup_event = EventName.startupNoSecOcKey
 
-    if not car_recognized:
+    set_offroad_alert("Offroad_CarUnrecognized", not car_recognized)
+    if not car_recognized and openpilot_enabled:
       self.events.add(EventName.carUnrecognized, static=True)
-      set_offroad_alert("Offroad_CarUnrecognized", True)
     elif self.CP.passive:
       self.events.add(EventName.dashcamMode, static=True)
 
@@ -282,6 +281,11 @@ class SelfdriveD:
       if auto_hold_on and not self.auto_hold_on_prev:
         self.events.add(EventName.autoHold)
       self.auto_hold_on_prev = auto_hold_on
+      # Audible alert when stock cruise was already on at startup, since openpilot will cancel it
+      if not self.startup_cruise_checked:
+        self.startup_cruise_checked = True
+        if CS.cruiseState.enabled and not self.events.contains(ET.ENABLE) and not REPLAY:
+          self.events.add(EventName.startupCruiseCanceled)
 
     # Create events for temperature, disk space, and memory
     if self.sm['deviceState'].thermalStatus >= ThermalStatus.overheated:
@@ -563,7 +567,6 @@ class SelfdriveD:
     ss.active = self.active
     ss.state = self.state_machine.state
     ss.engageable = not self.events.contains(ET.NO_ENTRY)
-    ss.experimentalMode = self.experimental_mode
     ss.personality = self.personality
     ss.distanceTraveled = float(self.distance_traveled_total)
 
@@ -601,7 +604,6 @@ class SelfdriveD:
       self.is_metric = self.params.get_bool("IsMetric")
       self.is_ldw_enabled = self.params.get_bool("IsLdwEnabled")
       self.disengage_on_accelerator = self.params.get_bool("DisengageOnAccelerator")
-      self.experimental_mode = self.params.get_bool("ExperimentalMode") and self.CP.openpilotLongitudinalControl
       self.personality = self.params.get("LongitudinalPersonality", return_default=True)
       time.sleep(0.1)
 

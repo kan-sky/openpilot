@@ -1,7 +1,7 @@
 from collections.abc import Callable
 from enum import IntEnum
 
-import pyray as rl
+import raylib_nb as rl
 
 from openpilot.system.ui.lib.application import gui_app, FontWeight, MousePos, TextAlignment
 from openpilot.system.ui.widgets import Widget
@@ -27,6 +27,7 @@ class ButtonStyle(IntEnum):
   RED = 13
   GRAY = 14
   GREEN = 15
+  PILL = 16  # For pill buttons in list items, for example the multiple button selector
 
 
 ICON_PADDING = 15
@@ -51,10 +52,12 @@ BUTTON_TEXT_COLOR = {
   ButtonStyle.RED: rl.Color(228, 228, 228, 255),
   ButtonStyle.GREEN: rl.Color(228, 228, 228, 255),
   ButtonStyle.GRAY: rl.Color(228, 228, 228, 255),
+  ButtonStyle.PILL: rl.Color(228, 228, 228, 255),
 }
 
 BUTTON_DISABLED_TEXT_COLORS = {
   ButtonStyle.TRANSPARENT_WHITE_TEXT: rl.WHITE,
+  ButtonStyle.PILL: rl.Color(150, 150, 150, 255),
 }
 
 BUTTON_BACKGROUND_COLORS = {
@@ -75,6 +78,7 @@ BUTTON_BACKGROUND_COLORS = {
   ButtonStyle.RED: rl.Color(250, 0, 0, 200),
   ButtonStyle.GREEN: rl.Color(65, 175, 57, 200),
   ButtonStyle.GRAY: rl.Color(155, 155, 155, 200),
+  ButtonStyle.PILL: rl.Color(57, 57, 57, 255),
 }
 
 BUTTON_PRESSED_BACKGROUND_COLORS = {
@@ -95,10 +99,12 @@ BUTTON_PRESSED_BACKGROUND_COLORS = {
   ButtonStyle.RED: rl.Color(250, 0, 0, 200),
   ButtonStyle.GREEN: rl.Color(65, 175, 57, 200),
   ButtonStyle.GRAY: rl.Color(155, 155, 155, 200),
+  ButtonStyle.PILL: rl.Color(74, 74, 74, 255),
 }
 
 BUTTON_DISABLED_BACKGROUND_COLORS = {
   ButtonStyle.TRANSPARENT_WHITE_TEXT: rl.BLANK,
+  ButtonStyle.PILL: rl.Color(57, 57, 57, 150),
 }
 
 

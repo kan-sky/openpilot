@@ -28,11 +28,10 @@ dependencies = [
   # vendored native dependencies
   "comma-deps-capnproto",
   "comma-deps-acados",
+  "Cython",  # acados solver python bindings
   "comma-deps-ffmpeg",
   "comma-deps-zstd",
-  "comma-deps-zeromq",
   "comma-deps-json11",
-  "comma-deps-git-lfs",
   "comma-deps-gcc-arm-none-eabi",
   "comma-deps-ncurses",
   "comma-deps-bzip2",
@@ -95,6 +94,9 @@ testing = [
 tools = [
   "matplotlib",
 
+  # LFS uploads (lfs.py pre-push)
+  "hf-xet==1.7.0",
+
   "comma-deps-imgui",
   "comma-deps-bootstrap-icons",
   "comma-deps-libusb",
@@ -105,7 +107,7 @@ tools = [
 ]
 
 submodules = [
-  "msgq",
+  "msgq-ipc[build]",
   "opendbc",
   "pandacan",
   "rednose",
@@ -129,6 +131,8 @@ build-backend = "hatchling.build"
 packages = [
   "openpilot",
 ]
+
+dev-mode-dirs = [".", "msgq_repo"]
 
 [tool.hatch.metadata]
 allow-direct-references = true
@@ -166,11 +170,11 @@ lint.flake8-implicit-str-concat.allow-multiline = false
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "time.time".msg = "Use time.monotonic. time.time can skip due to its reference clock, you probably want a monotonic clock"
-"pyray.measure_text_ex".msg = "Use openpilot.system.ui.lib.text_measure"
-"pyray.is_mouse_button_pressed".msg = "This can miss events. Use Widget._handle_mouse_press"
-"pyray.is_mouse_button_released".msg = "This can miss events. Use Widget._handle_mouse_release"
-"pyray.draw_text".msg = "Use a function (such as rl.draw_font_ex) that takes font as an argument"
-"pyray.draw_texture".msg = "Use rl.draw_texture_ex for float position support"
+"raylib_nb.measure_text_ex".msg = "Use openpilot.system.ui.lib.text_measure"
+"raylib_nb.is_mouse_button_pressed".msg = "This can miss events. Use Widget._handle_mouse_press"
+"raylib_nb.is_mouse_button_released".msg = "This can miss events. Use Widget._handle_mouse_release"
+"raylib_nb.draw_text".msg = "Use a function (such as rl.draw_font_ex) that takes font as an argument"
+"raylib_nb.draw_texture".msg = "Use rl.draw_texture_ex for float position support"
 
 [tool.ruff.format]
 quote-style = "preserve"
@@ -187,7 +191,8 @@ override-dependencies = [
 ]
 
 [tool.uv.sources]
-msgq = { path = "msgq_repo", editable = true }
+# SCons owns the native build; an editable install would shadow it with a stale .so
+msgq-ipc = { path = "msgq_repo", package = false }
 opendbc = { path = "opendbc_repo", editable = true }
 pandacan = { path = "panda", editable = true }
 rednose = { path = "rednose_repo", editable = true }

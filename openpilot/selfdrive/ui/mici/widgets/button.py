@@ -1,5 +1,5 @@
 import math
-import pyray as rl
+import raylib_nb as rl
 from typing import TYPE_CHECKING, Union
 from enum import Enum
 from collections.abc import Callable
@@ -29,9 +29,41 @@ class ScrollState(Enum):
   POST_SCROLL = 2
 
 
-class BigCircleButton(Widget):
-  def __init__(self, icon: rl.Texture, red: bool = False, icon_offset: tuple[int, int] = (0, 0)):
+class BaseButton(Widget):
+  def __init__(self, description: str, title: str, icon: Union[rl.Texture, None] = None):
     super().__init__()
+    self._shake_start: float | None = None
+    if description:
+      # Dialogs also use buttons; import lazily to avoid a circular import.
+      from openpilot.selfdrive.ui.mici.widgets.dialog import SettingDescriptionDialog
+      self.set_long_press_callback(lambda: gui_app.push_widget(SettingDescriptionDialog(title, description, icon)))
+    else:
+      self.set_long_press_callback(self.trigger_shake)
+
+  def trigger_shake(self):
+    self._shake_start = rl.get_time()
+
+  @property
+  def _shake_offset(self) -> float:
+    SHAKE_DURATION = 0.5
+    SHAKE_AMPLITUDE = 24.0
+    SHAKE_FREQUENCY = 32.0
+    if self._shake_start is None:
+      return 0.0
+    t = rl.get_time() - self._shake_start
+    if t > SHAKE_DURATION:
+      return 0.0
+    decay = 1.0 - t / SHAKE_DURATION
+    return decay * SHAKE_AMPLITUDE * math.sin(t * SHAKE_FREQUENCY)
+
+  def set_position(self, x: float, y: float) -> None:
+    super().set_position(x + self._shake_offset, y)
+
+class BigCircleButton(BaseButton):
+  def __init__(self, icon: rl.Texture, red: bool = False, icon_offset: tuple[int, int] = (0, 0),
+               *, description: str = "",
+               description_icon: Union[rl.Texture, None] = None, title: str = ""):
+    super().__init__(description, title, description_icon or icon)
     self._red = red
     self._icon_offset = icon_offset
 
@@ -53,7 +85,7 @@ class BigCircleButton(Widget):
   def _draw_content(self, btn_y: float):
     # draw icon
     icon_color = rl.Color(255, 255, 255, int(255 * 0.9)) if self.enabled else rl.Color(255, 255, 255, int(255 * 0.35))
-    rl.draw_texture_ex(self._txt_icon, (self._rect.x + (self._rect.width - self._txt_icon.width) / 2 + self._icon_offset[0],
+    rl.draw_texture_ex(self._txt_icon, rl.Vector2(self._rect.x + (self._rect.width - self._txt_icon.width) / 2 + self._icon_offset[0],
                                         btn_y + (self._rect.height - self._txt_icon.height) / 2 + self._icon_offset[1]), 0, 1.0, icon_color)
 
   def _render(self, _):
@@ -67,14 +99,15 @@ class BigCircleButton(Widget):
     scale = self._scale_filter.update(PRESSED_SCALE if self.is_pressed else 1.0)
     btn_x = self._rect.x + (self._rect.width * (1 - scale)) / 2
     btn_y = self._rect.y + (self._rect.height * (1 - scale)) / 2
-    rl.draw_texture_ex(txt_bg, (btn_x, btn_y), 0, scale, rl.WHITE)
+    rl.draw_texture_ex(txt_bg, rl.Vector2(btn_x, btn_y), 0, scale, rl.WHITE)
 
     self._draw_content(btn_y)
 
 
 class BigCircleToggle(BigCircleButton):
-  def __init__(self, icon: rl.Texture, toggle_callback: Callable | None = None, icon_offset: tuple[int, int] = (0, 0)):
-    super().__init__(icon, False, icon_offset=icon_offset)
+  def __init__(self, icon: rl.Texture, toggle_callback: Callable | None = None, icon_offset: tuple[int, int] = (0, 0),
+               *, description: str = "", description_icon: Union[rl.Texture, None] = None, title: str = ""):
+    super().__init__(icon, False, icon_offset=icon_offset, description=description, description_icon=description_icon, title=title)
     self._toggle_callback = toggle_callback
 
     # State
@@ -99,18 +132,20 @@ class BigCircleToggle(BigCircleButton):
 
     # draw status icon
     rl.draw_texture_ex(self._txt_toggle_enabled if self._checked else self._txt_toggle_disabled,
-                       (self._rect.x + (self._rect.width - self._txt_toggle_enabled.width) / 2, btn_y + 5),
+                       rl.Vector2(self._rect.x + (self._rect.width - self._txt_toggle_enabled.width) / 2, btn_y + 5),
                        0, 1.0, rl.WHITE)
 
 
-class BigButton(Widget):
+class BigButton(BaseButton):
   LABEL_HORIZONTAL_PADDING = 40
   LABEL_VERTICAL_PADDING = 23  # visually matches 30 in figma
 
   """A lightweight stand-in for the Qt BigButton, drawn & updated each frame."""
 
-  def __init__(self, text: str, value: str = "", icon: Union[rl.Texture, None] = None, scroll: bool = False):
-    super().__init__()
+  def __init__(self, text: str, value: str = "", icon: Union[rl.Texture, None] = None, scroll: bool = False,
+               *, description: str = "",
+               description_icon: Union[rl.Texture, None] = None):
+    super().__init__(description, text, description_icon or icon or None)
     self.set_rect(rl.Rectangle(0, 0, 402, 180))
     self.text = text
     self.value = value
@@ -119,7 +154,6 @@ class BigButton(Widget):
 
     self._scale_filter = BounceFilter(1.0, 0.1, 1 / gui_app.target_fps)
     self._click_delay = 0.075
-    self._shake_start: float | None = None
     self._grow_animation_until: float | None = None
 
     self._rotate_icon_t: float | None = None
@@ -184,30 +218,8 @@ class BigButton(Widget):
   def get_value(self) -> str:
     return self.value
 
-  def get_text(self):
-    return self.text
-
-  def trigger_shake(self):
-    self._shake_start = rl.get_time()
-
   def trigger_grow_animation(self, duration: float = 0.65):
     self._grow_animation_until = rl.get_time() + duration
-
-  @property
-  def _shake_offset(self) -> float:
-    SHAKE_DURATION = 0.5
-    SHAKE_AMPLITUDE = 24.0
-    SHAKE_FREQUENCY = 32.0
-    if self._shake_start is None:
-      return 0.0
-    t = rl.get_time() - self._shake_start
-    if t > SHAKE_DURATION:
-      return 0.0
-    decay = 1.0 - t / SHAKE_DURATION
-    return decay * SHAKE_AMPLITUDE * math.sin(t * SHAKE_FREQUENCY)
-
-  def set_position(self, x: float, y: float) -> None:
-    super().set_position(x + self._shake_offset, y)
 
   def _handle_background(self) -> tuple[rl.Texture, float, float, float]:
     if self._grow_animation_until is not None:
@@ -268,15 +280,17 @@ class BigButton(Widget):
       rl.draw_rectangle_rounded(scaled_rect, 0.4, 7, rl.Color(0, 0, 0, int(255 * 0.5)))
 
       self._draw_content(btn_y)
-      rl.draw_texture_ex(txt_bg, (btn_x, btn_y), 0, scale, rl.WHITE)
+      rl.draw_texture_ex(txt_bg, rl.Vector2(btn_x, btn_y), 0, scale, rl.WHITE)
     else:
-      rl.draw_texture_ex(txt_bg, (btn_x, btn_y), 0, scale, rl.WHITE)
+      rl.draw_texture_ex(txt_bg, rl.Vector2(btn_x, btn_y), 0, scale, rl.WHITE)
       self._draw_content(btn_y)
 
 
 class BigToggle(BigButton):
-  def __init__(self, text: str, value: str = "", initial_state: bool = False, toggle_callback: Callable | None = None):
-    super().__init__(text, value, "")
+  def __init__(self, text: str, value: str = "", initial_state: bool = False, toggle_callback: Callable | None = None,
+               *, description: str = "",
+               description_icon: Union[rl.Texture, None] = None):
+    super().__init__(text, value, "", description=description, description_icon=description_icon)
     self._checked = initial_state
     self._toggle_callback = toggle_callback
 
@@ -297,9 +311,9 @@ class BigToggle(BigButton):
   def _draw_pill(self, x: float, y: float, checked: bool):
     # draw toggle icon top right
     if checked:
-      rl.draw_texture_ex(self._txt_enabled_toggle, (x, y), 0, 1.0, rl.WHITE)
+      rl.draw_texture_ex(self._txt_enabled_toggle, rl.Vector2(x, y), 0, 1.0, rl.WHITE)
     else:
-      rl.draw_texture_ex(self._txt_disabled_toggle, (x, y), 0, 1.0, rl.WHITE)
+      rl.draw_texture_ex(self._txt_disabled_toggle, rl.Vector2(x, y), 0, 1.0, rl.WHITE)
 
   def _draw_content(self, btn_y: float):
     super()._draw_content(btn_y)
@@ -311,8 +325,8 @@ class BigToggle(BigButton):
 
 class BigMultiToggle(BigToggle):
   def __init__(self, text: str, options: list[str], toggle_callback: Callable | None = None,
-               select_callback: Callable | None = None):
-    super().__init__(text, "", toggle_callback=toggle_callback)
+               select_callback: Callable | None = None, *, description: str = "", description_icon: Union[rl.Texture, None] = None):
+    super().__init__(text, "", toggle_callback=toggle_callback, description=description, description_icon=description_icon)
     assert len(options) > 0
     self._options = options
     self._select_callback = select_callback
@@ -377,9 +391,9 @@ class GreyBigButton(BigButton):
 
 class BigMultiParamToggle(BigMultiToggle):
   def __init__(self, text: str, param: str, options: list[str], toggle_callback: Callable | None = None,
-               select_callback: Callable | None = None):
+               select_callback: Callable | None = None, *, description: str = "", description_icon: Union[rl.Texture, None] = None):
     assert Params is not None
-    super().__init__(text, options, toggle_callback, select_callback)
+    super().__init__(text, options, toggle_callback, select_callback, description=description, description_icon=description_icon)
     self._param = param
 
     self._params = Params()
@@ -395,9 +409,10 @@ class BigMultiParamToggle(BigMultiToggle):
 
 
 class BigParamControl(BigToggle):
-  def __init__(self, text: str, param: str, toggle_callback: Callable | None = None):
+  def __init__(self, text: str, param: str, toggle_callback: Callable | None = None, *, description: str = "",
+               description_icon: Union[rl.Texture, None] = None):
     assert Params is not None
-    super().__init__(text, "", toggle_callback=toggle_callback)
+    super().__init__(text, "", toggle_callback=toggle_callback, description=description, description_icon=description_icon)
     self.param = param
     self.params = Params()
     self.set_checked(self.params.get_bool(self.param, False))
@@ -413,9 +428,9 @@ class BigParamControl(BigToggle):
 # TODO: param control base class
 class BigCircleParamControl(BigCircleToggle):
   def __init__(self, icon: rl.Texture, param: str, toggle_callback: Callable | None = None,
-               icon_offset: tuple[int, int] = (0, 0)):
+               icon_offset: tuple[int, int] = (0, 0), *, description: str = "", description_icon: Union[rl.Texture, None] = None, title: str = ""):
     assert Params is not None
-    super().__init__(icon, toggle_callback, icon_offset=icon_offset)
+    super().__init__(icon, toggle_callback, icon_offset=icon_offset, description=description, description_icon=description_icon, title=title)
     self._param = param
     self.params = Params()
     self.set_checked(self.params.get_bool(self._param, False))

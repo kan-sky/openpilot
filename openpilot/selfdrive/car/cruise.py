@@ -310,14 +310,14 @@ class VCruiseHelper:
     self.cruise_state_available_last = CS.cruiseState.available
     self.enabled_last = CC.enabled
 
-  def initialize_v_cruise(self, CS, experimental_mode: bool) -> None:
+  def initialize_v_cruise(self, CS, initial_speed: int) -> None:
     # Initial set/resume speed is handled in update_v_cruise/_update_cruise_buttons.
 
     # Kans: PCM이 설정속도를 관리하는 경우(SpeedFromPCM == 1)에만 초기화 생략
     if self.CP.pcmCruise and self.speed_from_pcm == 1:
       return
 
-    initial = V_CRUISE_INITIAL_EXPERIMENTAL_MODE if experimental_mode else CS.vEgoCluster * CV.MS_TO_KPH
+    initial = CS.vEgoCluster * CV.MS_TO_KPH
 
     v_ego_kph = int(round(np.clip(CS.vEgoCluster * CV.MS_TO_KPH, initial, V_CRUISE_MAX)))
     if any(b.type in (ButtonType.accelCruise, ButtonType.resumeCruise) for b in CS.buttonEvents): # and self.v_cruise_initialized:

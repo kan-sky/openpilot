@@ -74,7 +74,7 @@ msgstr "เห็นด้วย"
 
 #: openpilot/selfdrive/ui/layouts/settings/toggles.py
 msgid "Always-On Driver Monitoring"
-msgstr "การตรวจสอบไดรเวอร์ตลอดเวลา"
+msgstr "การตรวจสอบผู้ขับขี่ตลอดเวลา"
 
 #: openpilot/selfdrive/ui/layouts/settings/device.py
 msgid "Are you sure you want to power off?"
@@ -113,10 +113,6 @@ msgstr "เปลี่ยน"
 msgid "CHECK"
 msgstr "ตรวจสอบ"
 
-#: openpilot/selfdrive/ui/widgets/exp_mode_button.py
-msgid "CHILL MODE ON"
-msgstr "เปิดโหมด Chill"
-
 #: openpilot/selfdrive/ui/layouts/sidebar.py
 #: openpilot/system/ui/widgets/network.py
 msgid "CONNECT"
@@ -151,7 +147,7 @@ msgstr "การเปลี่ยนการตั้งค่านี้จ
 
 #: openpilot/selfdrive/ui/widgets/pairing_dialog.py
 msgid "Click \"add new device\" and scan the QR code on the right"
-msgstr "คลิก \"เพิ่มอุปกรณ์ใหม่\" และสแกนโค้ด QR ทางด้านขวา"
+msgstr "คลิก \"add new device\" และสแกนโค้ด QR ทางด้านขวา"
 
 #: openpilot/selfdrive/ui/widgets/offroad_alerts.py
 msgid "Close"
@@ -225,12 +221,7 @@ msgstr "ข้อผิดพลาด"
 msgid "ETH"
 msgstr "ผลประโยชน์ทับซ้อน"
 
-#: openpilot/selfdrive/ui/widgets/exp_mode_button.py
-msgid "EXPERIMENTAL MODE ON"
-msgstr "โหมดทดลองเปิดอยู่"
-
 #: openpilot/selfdrive/ui/layouts/settings/developer.py
-#: openpilot/selfdrive/ui/layouts/settings/toggles.py
 msgid "Enable"
 msgstr "เปิดใช้งาน"
 
@@ -256,15 +247,11 @@ msgstr "เปิดใช้งานการปล่อยสัญญาณ
 
 #: openpilot/selfdrive/ui/layouts/settings/toggles.py
 msgid "Enable driver monitoring even when openpilot is not engaged."
-msgstr "เปิดใช้งานการตรวจสอบไดรเวอร์แม้ว่าจะไม่ได้ใช้งาน openpilot ก็ตาม"
+msgstr "เปิดใช้งานการตรวจสอบผู้ขับขี่แม้ว่าจะไม่ได้ใช้งาน openpilot ก็ตาม"
 
 #: openpilot/selfdrive/ui/layouts/settings/toggles.py
 msgid "Enable openpilot"
 msgstr "เปิดใช้งานโอเพ่นไพลอต"
-
-#: openpilot/selfdrive/ui/layouts/settings/toggles.py
-msgid "Enable the openpilot longitudinal control (alpha) toggle to allow Experimental mode."
-msgstr "เปิดใช้งานการสลับการควบคุมตามยาวของ openpilot (อัลฟา) เพื่ออนุญาตโหมดการทดลอง"
 
 #: openpilot/system/ui/widgets/network.py
 msgid "Enter APN"
@@ -289,14 +276,6 @@ msgstr "ป้อนชื่อผู้ใช้ GitHub ของคุณ"
 #: openpilot/system/ui/widgets/list_view.py
 msgid "Error"
 msgstr "ข้อผิดพลาด"
-
-#: openpilot/selfdrive/ui/layouts/settings/toggles.py
-msgid "Experimental Mode"
-msgstr "โหมดทดลอง"
-
-#: openpilot/selfdrive/ui/layouts/settings/toggles.py
-msgid "Experimental mode is currently unavailable on this car since the car's stock ACC is used for longitudinal control."
-msgstr "ขณะนี้โหมดทดลองไม่สามารถใช้งานได้บนรถคันนี้ เนื่องจาก ACC ในสต็อกของรถใช้สำหรับการควบคุมตามยาว"
 
 #: openpilot/system/ui/widgets/network.py
 msgid "FORGETTING..."
@@ -347,6 +326,10 @@ msgstr "ติดตั้ง"
 msgid "IP Address"
 msgstr "ที่อยู่ IP"
 
+#: openpilot/selfdrive/ui/layouts/settings/toggles.py
+msgid "Initial Max Speed"
+msgstr ""
+
 #: openpilot/selfdrive/ui/layouts/settings/software.py
 msgid "Install Update"
 msgstr "ติดตั้งอัปเดต"
@@ -369,7 +352,7 @@ msgstr ""
 
 #: openpilot/selfdrive/ui/layouts/settings/developer.py
 msgid "Longitudinal Maneuver Mode"
-msgstr "โหมดการซ้อมรบตามยาว"
+msgstr "โหมดทดสอบการควบคุมตามยาว"
 
 #: openpilot/selfdrive/ui/onroad/hud_renderer.py
 msgid "MAX"
@@ -721,6 +704,7 @@ msgstr "กำลังสรุปการอัปเดต..."
 msgid "for \"{}\""
 msgstr "สำหรับ \"{}\""
 
+#: openpilot/selfdrive/ui/layouts/settings/initial_cruise_speed.py
 #: openpilot/selfdrive/ui/onroad/hud_renderer.py
 msgid "km/h"
 msgstr "กม./ชม"
@@ -737,6 +721,7 @@ msgstr "ซ้าย"
 msgid "metered"
 msgstr "คิดค่าบริการตามปริมาณ"
 
+#: openpilot/selfdrive/ui/layouts/settings/initial_cruise_speed.py
 #: openpilot/selfdrive/ui/onroad/hud_renderer.py
 msgid "mph"
 msgstr "ไมล์/ชม."
@@ -756,10 +741,6 @@ msgstr "การควบคุมตามยาวของ openpilot (อั
 #: openpilot/selfdrive/ui/onroad/alert_renderer.py
 msgid "openpilot Unavailable"
 msgstr "openpilot ไม่พร้อมใช้งาน"
-
-#: openpilot/selfdrive/ui/layouts/settings/toggles.py
-msgid "openpilot longitudinal control may come in a future update."
-msgstr "ระบบควบคุมตามยาวของ openpilot อาจมาในการอัปเดตครั้งถัดไป"
 
 #: openpilot/selfdrive/ui/layouts/settings/device.py
 msgid "openpilot requires the device to be mounted within 4° left or right and within 5° up or 9° down."

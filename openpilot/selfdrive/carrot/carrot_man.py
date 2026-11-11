@@ -15,7 +15,11 @@ from typing import Any, Dict, List, Optional
 import ipaddress
 import numpy as np
 import psutil
-import zmq
+try:
+  import zmq
+except ImportError:
+  # 콤마가 pyzmq 의존성을 제거해 AGNOS venv에 없을 수 있음. 없으면 7710 명령 소켓만 끈다
+  zmq = None
 from aiohttp import web
 
 from openpilot.cereal import log
@@ -304,8 +308,11 @@ class CarrotMan:
 
     # devel background services. tizi keeps TMAP protocol-v2 in the separate carrot_navi process,
     # while these legacy/CarrotMan services use different ports and remain compatible.
-    self.carrot_zmq_thread = threading.Thread(target=self.carrot_cmd_zmq, args=[], daemon=True)
-    self.carrot_zmq_thread.start()
+    if zmq is not None:
+      self.carrot_zmq_thread = threading.Thread(target=self.carrot_cmd_zmq, args=[], daemon=True)
+      self.carrot_zmq_thread.start()
+    else:
+      print("carrot_cmd_zmq: pyzmq not installed, command socket disabled")
 
     self.carrot_panda_debug_thread = threading.Thread(target=self.carrot_panda_debug, args=[], daemon=True)
     self.carrot_panda_debug_thread.start()

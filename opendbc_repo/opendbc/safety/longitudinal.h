@@ -1,7 +1,7 @@
 #include "opendbc/safety/declarations.h"
 
 bool get_longitudinal_allowed(void) {
-  return controls_allowed && !gas_pressed_prev;
+  return safety.controls_allowed && !safety.gas_pressed_prev;
 }
 
 // Safety checks for longitudinal actuation
@@ -29,5 +29,5 @@ bool longitudinal_brake_checks(int desired_brake, const LongitudinalLimits limit
 }
 
 bool longitudinal_interceptor_checks(const CANPacket_t *msg) {
-  return (!get_longitudinal_allowed() || brake_pressed_prev) && (msg->data[0] || msg->data[1]);
+  return (!get_longitudinal_allowed() || safety.brake_pressed_prev) && (msg->data[0] || msg->data[1]);
 }
