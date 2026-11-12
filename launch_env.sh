@@ -32,3 +32,10 @@ export STAGING_ROOT="/data/safe_staging"
 # one partition confirmed spacious in both reports, instead of trusting
 # whatever $HOME resolves to.
 export XDG_CACHE_HOME="/data/.cache"
+
+# 기기에 /data/skip_fw_query 파일이 있으면 시동 시 VIN/펌웨어 조회(OBD multiplexing)를 건너뛴다.
+# OBD 포트 쪽 배선이 없는 DIY 하네스에서 조회 중 버스 1 stuff error 폭주로 interruptRateCan2 폴트가 걸리는 것 방지.
+# 차량 인식은 CAN 핑거프린트로 한다.
+if [ -f /data/skip_fw_query ]; then
+  export SKIP_FW_QUERY=1
+fi
