@@ -7,7 +7,7 @@ from openpilot.common.swaglog import cloudlog
 
 from openpilot.selfdrive.controls.lib.desire_lib.constants import (
   LaneChangeState, LaneChangeDirection, TurnDirection,
-  LANE_CHANGE_SPEED_MIN, LANE_CHANGE_TIME_MAX,
+  LANE_CHANGE_SPEED_MIN, LANE_CHANGE_TIME_MAX, ATC_TURN_MAX_SPEED,
   BLINKER_NONE, BLINKER_LEFT, BLINKER_RIGHT,
   DESIRES, TURN_DESIRES
 )
@@ -282,10 +282,20 @@ class DesireHelper:
       atc_enabled and
       self.atc_type in ("fork left", "fork right", "atc left", "atc right")
     )
+    # Kans: 옆 차선이 맨 끝 차선(진출로/갓길 쪽)이 아니면, 즉 그 너머에 차선이 더 있으면
+    # 짧은 구간에 연속 차선변경이 되므로 자동 차선변경은 막고 운전자 토크로만 시작한다.
+    atc_not_outermost = (
+      atc_enabled and
+      side is not None and
+      self.atc_type in ("fork right", "atc right") and
+      not side.adjacent_outermost
+    )
+    # Kans: 고속에서 들어온 좌/우회전 지시도 자동으로 움직이지 않고 운전자 토크로만 시작
+    atc_turn_high_speed = self.atc_type in ("turn left", "turn right") and v_ego >= ATC_TURN_MAX_SPEED
     atc_lane_change_manual_only = (
       atc_enabled and
       not driver_enabled and
-      self.atc_type in ("fork left", "atc left")
+      (self.atc_type in ("fork left", "atc left") or atc_not_outermost or atc_turn_high_speed)
     )
     atc_lane_change_only = atc_lane_change_requested and not driver_enabled
     # Do not treat a blocked->available retry as permission to cross solid/unknown lines.
@@ -506,6 +516,9 @@ class DesireHelper:
         f"maneuverType={self.maneuver_type} turnDirection={self.turn_direction} "
         f"turnDisableCount={self.turn_disable_count} turnDesireState={self.turn_desire_state} "
         f"distToEdgeFar={side.dist_to_edge_far if side else None} "
+        f"distToEdge={side.dist_to_edge if side else None} "
+        f"edgeBeyondAdjacent={side.edge_beyond_adjacent if side else None} "
+        f"adjacentOutermost={side.adjacent_outermost if side else None} "
         f"xDistToTurn={carrotMan.xDistToTurn} "
         f"steeringPressed={carstate.steeringPressed} steeringTorque={carstate.steeringTorque:.1f} "
         f"laneLineInfoMod={side.lane_line_info_mod if side else None} "

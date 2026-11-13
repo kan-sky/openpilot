@@ -1,6 +1,6 @@
 from openpilot.common.constants import CV
 from openpilot.common.realtime import DT_MDL
-from .constants import BLINKER_LEFT, BLINKER_RIGHT
+from .constants import BLINKER_LEFT, BLINKER_RIGHT, ATC_TURN_MAX_SPEED
 
 def classify_maneuver_type(blinker_state: int,
                            carstate,
@@ -32,7 +32,9 @@ def classify_maneuver_type(blinker_state: int,
     score_turn += 1
 
   if atc_type in ("turn left", "turn right"):
-    score_turn += 2
+    # Kans: 고속에서 들어온 회전 지시(고속도로 분기 등)로 회전 desire가 걸려 차선을 넘어가지 않게 저속에서만 가점
+    if carstate.vEgo < ATC_TURN_MAX_SPEED:
+      score_turn += 2
   elif atc_type in ("fork left", "fork right", "atc left", "atc right"):
     score_turn -= 2
 

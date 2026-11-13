@@ -19,6 +19,15 @@ LANE_CHANGE_TIME_MAX = 10.0
 # 있어야만 일어난다.
 EDGE_AVAILABLE_MEMORY_DIST = 215.0
 
+# Kans: 한국 차선폭(일반도로 3.0~3.5m, 고속(화)도로 3.5m)을 보수적으로 잡은 값.
+# 옆 차선 바깥선에서 도로 끝까지 이 폭 이상 남으면 옆 차선이 맨 끝 차선이 아니라고 본다.
+LANE_WIDTH_KR = 3.3
+# Kans: 옆 차선이 맨 끝 차선이라는 판단이 이 시간 이상 유지돼야 ATC 자동 차선변경을 허용
+OUTERMOST_LANE_SUSTAIN_SEC = 0.5
+# Kans: 내비 좌/우회전 지시라도 이 속도 이상이면 교차로 회전이 아니라(고속도로 분기 등) 회전 desire를 주지 않고,
+# 자동 차선변경도 하지 않는다 (운전자 토크로만 시작)
+ATC_TURN_MAX_SPEED = 40 * CV.KPH_TO_MS
+
 BLINKER_NONE = 0
 BLINKER_LEFT = 1
 BLINKER_RIGHT = 2

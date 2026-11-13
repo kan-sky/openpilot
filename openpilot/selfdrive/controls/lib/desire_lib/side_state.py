@@ -6,7 +6,7 @@ from openpilot.common.realtime import DT_MDL
 
 from .lane_math import calculate_lane_width
 from .hysteresis import ExistCounter
-from .constants import EDGE_AVAILABLE_MEMORY_DIST
+from .constants import EDGE_AVAILABLE_MEMORY_DIST, LANE_WIDTH_KR, OUTERMOST_LANE_SUSTAIN_SEC
 
 
 SIDE_LEAD_CLOSE_DREL = 5.0
@@ -50,6 +50,11 @@ class SideState:
   lane_available: bool = False
   edge_available: bool = False
   edge_seen_in_window: bool = False
+
+  # Kans: 옆 차선이 맨 끝 차선인지 (옆 차선 바깥으로 도로 끝까지 한 차선폭 미만)
+  edge_beyond_adjacent: float = 0.0
+  adjacent_outermost_frames: int = 0
+  adjacent_outermost: bool = False
 
   # smoothing
   lane_width_queue: deque = field(default_factory=lambda: deque(maxlen=int(1.0 / DT_MDL)))
@@ -115,6 +120,16 @@ class SideState:
     available_count = int(0.2 / DT_MDL)
     self.lane_available = self.lane_width_count.counter > available_count
     self.edge_available = (self.edge_count.counter > available_count) and (self.dist_to_edge_far > min_lane_width)
+
+    # Kans: 옆 차선 바깥선이 안 보이면 옆 차선 폭을 LANE_WIDTH_KR로 가정한다.
+    # 바깥선 너머 도로 끝까지 한 차선폭 이상 남으면 차선이 더 있는 것이므로 맨 끝 차선이 아니다.
+    adjacent_w = lane_w if lane_valid else LANE_WIDTH_KR
+    self.edge_beyond_adjacent = float(dist_edge) - adjacent_w
+    if self.edge_beyond_adjacent < LANE_WIDTH_KR:
+      self.adjacent_outermost_frames += 1
+    else:
+      self.adjacent_outermost_frames = 0
+    self.adjacent_outermost = self.adjacent_outermost_frames >= int(OUTERMOST_LANE_SUSTAIN_SEC / DT_MDL)
 
     self.cur_prob = float(cur_prob)
     self.current_lane_missing = self.cur_prob < 0.3
