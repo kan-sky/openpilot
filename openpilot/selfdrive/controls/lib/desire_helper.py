@@ -29,6 +29,8 @@ class DesireHelper:
     self.maneuver_type = "none"  # "none" / "turn" / "lane_change"
 
     self.desire = log.Desire.none
+    # Kans: 운전자 토크로만 시작하는 ATC 대기 중에는 modeld가 preLaneChange에서 주는 사전 차선변경 desire를 막는다
+    self.atc_pre_desire_blocked = False
     self.turn_direction = TurnDirection.none
     self.enable_turn_desires = True
     self.turn_desire_state = False
@@ -297,6 +299,17 @@ class DesireHelper:
       not driver_enabled and
       (self.atc_type in ("fork left", "atc left") or atc_not_outermost or atc_turn_high_speed)
     )
+    # Kans: 수동 대기 중 사전 desire를 받으면 모델이 혼자 그쪽으로 꺾었다가 되돌아오거나 차선을 넘어간다.
+    # 교차로 회전 준비(atc left/right)는 회전 desire와 이어져야 하므로 사전 desire를 유지한다.
+    # 분기(fork)는 맨 끝 차선에서 자동 차선변경이 무장(auto_lane_change_enable)된 경우에만 사전 desire를 준다.
+    atc_fork_waiting = (
+      atc_enabled and not driver_enabled and
+      self.atc_type in ("fork left", "fork right") and
+      (atc_lane_change_manual_only or not self.auto_lane_change_enable)
+    )
+    self.atc_pre_desire_blocked = atc_fork_waiting or (
+      atc_lane_change_manual_only and (atc_not_outermost or atc_turn_high_speed)
+    )
     atc_lane_change_only = atc_lane_change_requested and not driver_enabled
     # Do not treat a blocked->available retry as permission to cross solid/unknown lines.
     # Geometry-based ATC at the last lane still works when the lane/road edge opens up.
@@ -519,6 +532,7 @@ class DesireHelper:
         f"distToEdge={side.dist_to_edge if side else None} "
         f"edgeBeyondAdjacent={side.edge_beyond_adjacent if side else None} "
         f"adjacentOutermost={side.adjacent_outermost if side else None} "
+        f"preDesireBlocked={self.atc_pre_desire_blocked} "
         f"xDistToTurn={carrotMan.xDistToTurn} "
         f"steeringPressed={carstate.steeringPressed} steeringTorque={carstate.steeringTorque:.1f} "
         f"laneLineInfoMod={side.lane_line_info_mod if side else None} "
