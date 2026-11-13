@@ -22,7 +22,19 @@ from openpilot.common.swaglog import cloudlog
 from openpilot.common.gps import get_gps_location_service
 from openpilot.selfdrive.carrot.carrot_navi_control import CarrotNaviControl, parse_carrot_navi_control
 
-ROTARY_HOLD_SPEED_KPH = 22.0
+# Kans: 로터리 속도
+# 안내 지점 = 출구. 진입점 = 출구 - 가정반경 x 회전각 (6시 진입, 반시계 회전, 안내코드 131~142 = 1~12시 출구)
+# 진입점까지 ROTARY_ENTRY_SPEED_KPH로 감속, 회전 중에는 실제 주행 곡률로 소형/대형을 나눠 속도 유지
+ROTARY_ASSUMED_RADIUS = 10.0  # m, 진입 전에는 반경을 알 수 없어 소형 로터리로 가정
+ROTARY_ENTRY_SPEED_KPH = 40.0
+ROTARY_SMALL_SPEED_KPH = 25.0
+ROTARY_LARGE_SPEED_KPH = 30.0
+# 주행 경로 반경이 이 값 이하면 소형 로터리 (섬 반경 10m에 차로 중심까지 여유를 더한 값)
+ROTARY_SMALL_PATH_RADIUS = 15.0  # m
+# 안내 지점은 실제 출구를 지나 약 10m 뒤에서 풀린다
+ROTARY_NAV_PAST_EXIT = 10.0  # m
+# 출구 이 거리 전부터 로터리 저속을 풀어 설정속도로 가속 (출구 뒤 저속 주행은 후속차 방해)
+ROTARY_RELEASE_BEFORE_EXIT = 3.0  # m
 ROTARY_HOLD_START_DIST = 200.0  # m, 안내 지점(출구 뒤쪽)까지 이 거리 안에서만 시작
 ROTARY_HOLD_CURVATURE = 0.020  # 1/m
 ROTARY_HOLD_CLEAR_SEC = 0.5
@@ -218,6 +230,9 @@ class CarrotServ:
     self.rotary_hold_start_time = 0.0
     self.rotary_hold_clear_time = 0.0
     self.rotary_hold_dist_last = 0.0
+    self.rotary_entered = False
+    self.rotary_exit_released = False
+    self.rotary_max_left_curv = 0.0
     self.route_speed_kph = 300.0
     self.gas_override_speed = 0
     self.gas_pressed_state = False
@@ -1134,6 +1149,9 @@ class CarrotServ:
       self.rotary_hold_done = False
       self.rotary_hold_curve_seen = False
       self.rotary_hold_clear_time = 0.0
+      self.rotary_entered = False
+      self.rotary_exit_released = False
+      self.rotary_max_left_curv = 0.0
     self.rotary_hold_dist_last = x_dist_to_turn
     if x_turn_info != 5 or self.rotary_hold_done:
       return False
@@ -1165,6 +1183,22 @@ class CarrotServ:
       self.rotary_hold_active = False
       cloudlog.warning(f"[atc] rotary hold end: dist={x_dist_to_turn} curveSeen={self.rotary_hold_curve_seen}")
     return self.rotary_hold_active
+
+  @staticmethod
+  def _rotary_entry_dist(turn_type, exit_dist):
+    # 6시 진입 기준 반시계로 출구 시각까지 도는 각도 (6시 출구 = 유턴 360도), 알 수 없는 코드는 12시로 본다
+    clock = turn_type - 130 if 131 <= turn_type <= 142 else 12
+    arc_deg = ((6 - clock) % 12) * 30
+    if arc_deg == 0:
+      arc_deg = 360
+    return exit_dist - ROTARY_ASSUMED_RADIUS * math.radians(arc_deg)
+
+  def _rotary_inside_speed(self, sm, check_steer):
+    # 회전 중 측정한 최대 좌회전 곡률로 소형/대형 구분 (곡률 로그는 좌회전이 음수)
+    if check_steer:
+      self.rotary_max_left_curv = max(self.rotary_max_left_curv, -sm["controlsState"].curvature)
+    small = self.rotary_max_left_curv >= 1.0 / ROTARY_SMALL_PATH_RADIUS
+    return ROTARY_SMALL_SPEED_KPH if small else ROTARY_LARGE_SPEED_KPH
 
   def update_auto_turn(self, v_ego_kph, sm, x_turn_info, x_dist_to_turn, check_steer=False):
     turn_speed = v_ego_kph  # self.autoTurnControlSpeedTurn
@@ -1337,16 +1371,38 @@ class CarrotServ:
         atc_type += " canceled"
 
     atc_desired = 250
+    rotary_inside_speed = ROTARY_SMALL_SPEED_KPH
     if atc_speed > 0 and x_dist_raw > 0:
       decel = self.autoNaviSpeedDecelRate
       safe_sec = 2.0
-      atc_desired = min(atc_desired, self.calculate_current_speed(x_dist_to_turn - atc_dist, atc_speed, safe_sec, decel))
+      if is_rotary:
+        # Kans: 진입점까지 진입속도로 감속, 진입 후 출구까지는 회전속도
+        turn_type = self.nTBTTurnType if check_steer else self.nTBTTurnTypeNext
+        exit_dist = x_dist_raw - ROTARY_NAV_PAST_EXIT
+        entry_dist = self._rotary_entry_dist(turn_type, exit_dist)
+        if check_steer and entry_dist <= 0:
+          self.rotary_entered = True
+        if check_steer and exit_dist <= ROTARY_RELEASE_BEFORE_EXIT:
+          self.rotary_exit_released = True
+        rotary_inside_speed = self._rotary_inside_speed(sm, check_steer and self.rotary_entered)
+        # 출구 직전(exit_dist <= ROTARY_RELEASE_BEFORE_EXIT)부터는 ATC 속도 제한 없음
+        if entry_dist > 0:
+          atc_desired = min(atc_desired, self.calculate_current_speed(entry_dist, ROTARY_ENTRY_SPEED_KPH, safe_sec, decel))
+        elif exit_dist > ROTARY_RELEASE_BEFORE_EXIT:
+          atc_desired = min(atc_desired, rotary_inside_speed)
+      else:
+        atc_desired = min(atc_desired, self.calculate_current_speed(x_dist_to_turn - atc_dist, atc_speed, safe_sec, decel))
 
     if check_steer and self._update_rotary_passed(sm, x_turn_info, x_dist_raw):
       atc_desired = 250
 
-    if check_steer and self._update_rotary_hold(sm, x_turn_info, x_dist_raw):
-      atc_desired = min(atc_desired, ROTARY_HOLD_SPEED_KPH)
+    # Kans: 로터리 저속 유지는 진입 후(또는 로터리 곡선이 잡힌 뒤)에만 적용해 진입 전 진입속도를 막지 않는다
+    # 출구 직전 해제 후에는 곡률이 남아 있어도 저속 유지를 다시 걸지 않는다
+    if check_steer and self._update_rotary_hold(sm, x_turn_info, x_dist_raw) and \
+       (self.rotary_entered or self.rotary_hold_curve_seen) and not self.rotary_exit_released:
+      if not self.rotary_entered:
+        rotary_inside_speed = self._rotary_inside_speed(sm, True)
+      atc_desired = min(atc_desired, rotary_inside_speed)
 
     return atc_desired, atc_type, atc_speed, atc_dist
 
