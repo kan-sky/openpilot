@@ -430,7 +430,8 @@ def main(demo=False):
     # 차선변경 FSM이 off를 벗어나는 즉시(preLaneChange 포함) 모델에 미리 desire를 준다.
     # 교차로 회전에서는 이 사전 desire가 회전 desire와 이어져야 모델이 회전을 유지한다 (rlog20 성공 / rlog23 실패).
     # 사전 desire 시작 시점은 carrot_serv의 AutoTurnAtcDistLeft/Right(atc left/right 구간 길이)로 조정
-    if DH.lane_change_state != log.LaneChangeState.off:
+    if DH.lane_change_state != log.LaneChangeState.off and \
+       not (DH.lane_change_state == log.LaneChangeState.preLaneChange and DH.atc_pre_desire_blocked):
       if DH.lane_change_direction == log.LaneChangeDirection.left:
         desire = log.Desire.laneChangeLeft
       elif DH.lane_change_direction == log.LaneChangeDirection.right:
