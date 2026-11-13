@@ -20,7 +20,8 @@ class TogglesLayoutMici(NavScroller):
                                                                "Relaxed leaves more space.\n" +
                                                                "Use the steering wheel distance button on supported cars.")
     self._initial_cruise_speed = InitialCruiseSpeedButton()
-    self._initial_cruise_speed.set_visible(lambda: ui_state.CP is not None and ui_state.has_longitudinal_control and not ui_state.CP.pcmCruise)
+    # 캐럿 크루즈 로직은 SET 시 현재 속도를 쓰므로 초기 최대속도 설정이 반영되지 않아 메뉴를 숨긴다.
+    self._initial_cruise_speed.set_visible(False)
     is_metric_toggle = BigToggle("use metric units", initial_state=ui_state.params.get_bool("IsMetric"), toggle_callback=self._on_metric_toggle)
     ldw_toggle = BigParamControl("lane departure warnings", "IsLdwEnabled",
                                  description="Warn when you drift across a detected lane line.\n" +
