@@ -1181,6 +1181,10 @@ class CarrotServ:
 
     if self.rotary_hold_done:
       self.rotary_hold_active = False
+      # 로터리 곡선을 지나 곡률이 풀렸으면 출구를 나온 것으로 보고 바로 해제
+      # (안내 지점이 출구보다 수십 m 뒤에 있는 로터리도 있어 거리만으로는 출구를 알 수 없음)
+      if self.rotary_hold_curve_seen:
+        self.rotary_exit_released = True
       cloudlog.warning(f"[atc] rotary hold end: dist={x_dist_to_turn} curveSeen={self.rotary_hold_curve_seen}")
     return self.rotary_hold_active
 
@@ -1385,8 +1389,10 @@ class CarrotServ:
         if check_steer and exit_dist <= ROTARY_RELEASE_BEFORE_EXIT:
           self.rotary_exit_released = True
         rotary_inside_speed = self._rotary_inside_speed(sm, check_steer and self.rotary_entered)
-        # 출구 직전(exit_dist <= ROTARY_RELEASE_BEFORE_EXIT)부터는 ATC 속도 제한 없음
-        if entry_dist > 0:
+        # 출구 직전(exit_dist <= ROTARY_RELEASE_BEFORE_EXIT) 또는 곡선을 빠져나온 뒤에는 ATC 속도 제한 없음
+        if check_steer and self.rotary_exit_released:
+          pass
+        elif entry_dist > 0:
           atc_desired = min(atc_desired, self.calculate_current_speed(entry_dist, ROTARY_ENTRY_SPEED_KPH, safe_sec, decel))
         elif exit_dist > ROTARY_RELEASE_BEFORE_EXIT:
           atc_desired = min(atc_desired, rotary_inside_speed)
