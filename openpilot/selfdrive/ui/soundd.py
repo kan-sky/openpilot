@@ -7,6 +7,7 @@ import wave
 from openpilot.cereal import log, messaging
 from openpilot.common.basedir import BASEDIR
 from openpilot.common.filter_simple import FirstOrderFilter
+from openpilot.common.params import Params
 from openpilot.common.realtime import Ratekeeper
 from openpilot.common.utils import retry
 from openpilot.common.swaglog import cloudlog
@@ -17,7 +18,7 @@ from openpilot.common.hardware import HARDWARE
 SAMPLE_RATE = 48000
 SAMPLE_BUFFER = 4096 # (approx 100ms)
 MAX_VOLUME = 1.0
-MIN_VOLUME = 0.1
+MIN_VOLUME = 0.4
 ALERT_RAMP_TIME = 4 # seconds to ramp critical alerts to max volume
 ALERT_MAX_TIME = 8 # seconds before critical alerts switch to the max sound
 SELFDRIVE_STATE_TIMEOUT = 5 # 5 seconds
@@ -29,12 +30,13 @@ DB_SCALE = 30 # AMBIENT_DB + DB_SCALE is where MAX_VOLUME is applied
 VOLUME_BASE = 20
 if HARDWARE.get_device_type() == "tizi":
   AMBIENT_DB = 30
-  VOLUME_BASE = 10
+  VOLUME_BASE = 50
 
 AudibleAlert = log.SelfdriveState.AudibleAlert
 # internal sound keys, not AudibleAlerts
 CRITICAL_MAX = -1
 DM_CRITICAL_MAX = -2
+CARROT_SDI_INFORM = -3 # 내부 사운드 키: 카메라 카운트다운 시작 안내음
 
 
 sound_list: dict[int, tuple[str, int | None, float]] = {
@@ -54,6 +56,26 @@ sound_list: dict[int, tuple[str, int | None, float]] = {
   AudibleAlert.warningImmediateUser: ("dm_critical.wav", None, MAX_VOLUME),
   CRITICAL_MAX: ("critical_max.wav", None, MAX_VOLUME),
   DM_CRITICAL_MAX: ("dm_critical_max.wav", None, MAX_VOLUME),
+
+  AudibleAlert.autoHold: ("audio_auto_hold.wav", 1, MAX_VOLUME),  # Kans: GM 오토홀드
+  # Kans: 캐럿 신호정지/출발 안내음
+  AudibleAlert.trafficSignGreen: ("traffic_sign_green.wav", 1, MAX_VOLUME),
+  AudibleAlert.trafficSignChanged: ("traffic_sign_changed.wav", 1, MAX_VOLUME),
+  AudibleAlert.stopping: ("audio_stopping.wav", 1, MAX_VOLUME),
+  # Kans: 캐럿 내비 카운트다운 (carrotMan.leftSec: 11=안내음, 10~1=숫자, 0=지점 도달)
+  # 루프 사운드는 다음 프레임의 none에 즉시 끊기므로 한 번만 재생
+  CARROT_SDI_INFORM: ("prompt_distracted.wav", 1, MAX_VOLUME),
+  AudibleAlert.longDisengaged: ("tici_disengaged.wav", 1, MAX_VOLUME),
+  AudibleAlert.audio1: ("audio_1.wav", 1, MAX_VOLUME),
+  AudibleAlert.audio2: ("audio_2.wav", 1, MAX_VOLUME),
+  AudibleAlert.audio3: ("audio_3.wav", 1, MAX_VOLUME),
+  AudibleAlert.audio4: ("audio_4.wav", 1, MAX_VOLUME),
+  AudibleAlert.audio5: ("audio_5.wav", 1, MAX_VOLUME),
+  AudibleAlert.audio6: ("audio_6.wav", 1, MAX_VOLUME),
+  AudibleAlert.audio7: ("audio_7.wav", 1, MAX_VOLUME),
+  AudibleAlert.audio8: ("audio_8.wav", 1, MAX_VOLUME),
+  AudibleAlert.audio9: ("audio_9.wav", 1, MAX_VOLUME),
+  AudibleAlert.audio10: ("audio_10.wav", 1, MAX_VOLUME),
 }
 
 # critical alerts ramp up in volume, then switch to their max sound
@@ -72,6 +94,30 @@ def check_selfdrive_timeout_alert(sm):
 
   return False
 
+def linear_resample(samples, original_rate, new_rate):
+  if original_rate == new_rate:
+    return samples
+
+  # Calculate the resampling factor and the number of samples in the resampled signal
+  resampling_factor = float(new_rate) / original_rate
+  num_resampled_samples = int(len(samples) * resampling_factor)
+
+  # Create the resampled signal array
+  resampled = np.zeros(num_resampled_samples, dtype=np.float32)
+
+  for i in range(num_resampled_samples):
+    # Calculate the original sample index
+    orig_index = i / resampling_factor
+
+    # Find the two nearest original samples
+    lower_index = int(orig_index)
+    upper_index = min(lower_index + 1, len(samples) - 1)
+
+    # Perform linear interpolation
+    resampled[i] = (samples[lower_index] * (upper_index - orig_index) +
+                    samples[upper_index] * (orig_index - lower_index))
+
+  return resampled
 
 class Soundd:
   def __init__(self):
@@ -87,6 +133,7 @@ class Soundd:
 
     self.selfdrive_timeout_alert = False
     self.pending_stop = False
+    self.carrot_count_down = 0
 
     self.spl_filter_weighted = FirstOrderFilter(0, 2.5, FILTER_DT, initialized=False)
 
@@ -98,12 +145,21 @@ class Soundd:
       filename, play_count, volume = sound_list[sound]
 
       with wave.open(BASEDIR + "/openpilot/selfdrive/assets/sounds/" + filename, 'r') as wavefile:
-        assert wavefile.getnchannels() == 1
         assert wavefile.getsampwidth() == 2
-        assert wavefile.getframerate() == SAMPLE_RATE
+
+        actual_sample_rate = wavefile.getframerate()
+        nchannels = wavefile.getnchannels()
+        assert nchannels in [1, 2]
 
         length = wavefile.getnframes()
-        self.loaded_sounds[sound] = np.frombuffer(wavefile.readframes(length), dtype=np.int16).astype(np.float32) / (2**16/2)
+        samples = np.frombuffer(wavefile.readframes(length), dtype=np.int16)
+
+        if nchannels == 2:
+          samples = samples[0::2] / 2 + samples[1::2] / 2
+
+        resampled_samples = linear_resample(samples, actual_sample_rate, SAMPLE_RATE) * volume
+
+        self.loaded_sounds[sound] = resampled_samples.astype(np.float32) / (2**16/2)
 
   def get_sound_data(self, frames): # get "frames" worth of data from the current alert sound, looping when required
 
@@ -138,6 +194,9 @@ class Soundd:
     data_out[:frames, 0] = self.get_sound_data(frames)
 
   def update_alert(self, new_alert):
+    if new_alert != AudibleAlert.none and new_alert not in self.loaded_sounds:
+      cloudlog.error(f"soundd received unsupported alert {new_alert}")
+      new_alert = AudibleAlert.none
     current_alert_played_once = self.current_alert == AudibleAlert.none or self.current_sound_frame >= len(self.loaded_sounds[self.current_sound])
     # let looping sounds finish the current loop instead of cutting off mid tone
     if new_alert == AudibleAlert.none and self.current_alert != AudibleAlert.none and sound_list[self.current_alert][1] is None:
@@ -156,9 +215,24 @@ class Soundd:
       self.current_sound = new_alert
       self.current_sound_frame = 0
 
+  def update_carrot_alert(self, sm, new_alert):
+    # Kans: 다른 알림음이 없을 때만, leftSec이 바뀐 순간에 한 번 재생
+    if new_alert == AudibleAlert.none:
+      count_down = sm['carrotMan'].leftSec
+      if self.carrot_count_down != count_down:
+        self.carrot_count_down = count_down
+        if count_down == 0:
+          new_alert = AudibleAlert.longDisengaged
+        elif 0 < count_down <= 10:
+          new_alert = getattr(AudibleAlert, f'audio{count_down}')
+        elif count_down == 11:
+          new_alert = CARROT_SDI_INFORM
+    return new_alert
+
   def get_audible_alert(self, sm):
     if sm.updated['selfdriveState']:
       new_alert = sm['selfdriveState'].alertSound.raw
+      new_alert = self.update_carrot_alert(sm, new_alert)
       self.update_alert(new_alert)
     elif check_selfdrive_timeout_alert(sm):
       self.update_alert(AudibleAlert.warningImmediateSystem)
@@ -183,7 +257,7 @@ class Soundd:
     import sounddevice as sd
     micd.patch_sounddevice(sd)
 
-    sm = messaging.SubMaster(['selfdriveState', 'soundPressure'])
+    sm = messaging.SubMaster(['selfdriveState', 'soundPressure', 'carrotMan'])
 
     with self.get_stream(sd) as stream:
       rk = Ratekeeper(20)

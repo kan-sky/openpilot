@@ -3,9 +3,10 @@ from opendbc.car.gm.values import CAR
 
 
 def create_buttons(packer, bus, idx, button):
+  rc = int(idx) & 0x3
   values = {
     "ACCButtons": button,
-    "RollingCounter": idx,
+    "RollingCounter": rc,
     "ACCAlwaysOne": 1,
     "DistanceButton": 0,
   }
@@ -53,9 +54,10 @@ def create_adas_keepalive(bus):
 
 
 def create_gas_regen_command(packer, bus, throttle, idx, enabled, at_full_stop):
+  rc = int(idx) & 0x3  # 2-bit rolling counter
   values = {
     "GasRegenCmdActive": enabled,
-    "RollingCounter": idx,
+    "RollingCounter": rc,
     "GasRegenCmd": throttle,
     "GasRegenFullStopActive": at_full_stop,
     "GasRegenAccType": 1,
@@ -78,23 +80,26 @@ def create_friction_brake_command(packer, bus, apply_brake, idx, enabled, near_s
     mode = 0x9
 
   if apply_brake > 0:
-    mode = 0xa
+    mode = 0xA
     if at_full_stop:
-      mode = 0xd
+      mode = 0xD
 
     # TODO: this is to have GM bringing the car to complete stop,
     # but currently it conflicts with OP controls, so turned off. Not set by all cars
     #elif near_stop:
-    #  mode = 0xb
+    #  mode = 0xB
 
-  brake = (0x1000 - apply_brake) & 0xfff
-  checksum = (0x10000 - (mode << 12) - brake - idx) & 0xffff
+
+  apply_brake = max(0, min(0xFFF, int(apply_brake)))
+  brake = (0x1000 - apply_brake) & 0xFFF
+  rc = int(idx) & 0x3  # 2비트 롤링카운터
+  checksum = (0x10000 - (mode << 12) - brake - rc) & 0xFFFF
 
   values = {
-    "RollingCounter": idx,
+    "RollingCounter": rc,
     "FrictionBrakeMode": mode,
     "FrictionBrakeChecksum": checksum,
-    "FrictionBrakeCmd": -apply_brake
+    "FrictionBrakeCmd": brake,   # unsigned/raw DBC
   }
 
   return packer.make_can_msg("EBCMFrictionBrakeCmd", bus, values)

@@ -1,0 +1,1 @@
+rm -f /tmp/safe_staging_overlay.lock && sudo systemctl restart comma

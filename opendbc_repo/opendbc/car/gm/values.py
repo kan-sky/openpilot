@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from enum import Enum, IntFlag
+import numpy as np
 
 from opendbc.car import Bus, PlatformConfig, DbcDict, Platforms, CarSpecs
 from opendbc.car.structs import CarParams
@@ -58,16 +59,36 @@ class CarControllerParams:
     self.BRAKE_LOOKUP_BP = [self.ACCEL_MIN, max_regen_acceleration]
     self.BRAKE_LOOKUP_V = [self.MAX_BRAKE, 0.]
 
+  # Kans: EV 속도별 리젠/마찰브레이크 경계
+  # Volt를 L기어 리젠으로 89mph부터 정지시켜 측정, 극저속 양(+)의 값은 크리핑으로 측정
+  # 1.29m/s 이하에서는 경계 0 → 감속요청이 있으면 즉시 마찰브레이크 사용 (정지직전 리젠만으로 다시 굴러가는 현상 방지)
+  EV_GAS_BRAKE_THRESHOLD_BP = [1.29, 1.52, 1.55, 1.6, 1.7, 1.8, 2.0, 2.2, 2.5, 5.52, 9.6, 20.5, 23.5, 35.0] # [m/s]
+  EV_GAS_BRAKE_THRESHOLD_V = [0.0, -0.14, -0.16, -0.18, -0.215, -0.255, -0.32, -0.41, -0.5, -0.72, -0.905, -1.14, -1.16, -1.175] # [m/s^s]
+
+  def update_ev_gas_brake_threshold(self, v_ego):
+    gas_brake_threshold = np.interp(v_ego, self.EV_GAS_BRAKE_THRESHOLD_BP, self.EV_GAS_BRAKE_THRESHOLD_V)
+    self.EV_GAS_LOOKUP_BP = [(gas_brake_threshold - 1e-6), max(0., gas_brake_threshold), self.ACCEL_MAX]
+    self.EV_BRAKE_LOOKUP_BP = [self.ACCEL_MIN, gas_brake_threshold]
+
 
 class GMSafetyFlags(IntFlag):
+  # Kans: safety/modes/gm.h의 GM_PARAM_* 와 반드시 일치
   HW_CAM = 1
   HW_CAM_LONG = 2
-  EV = 4
+  HW_ASCM_LONG = 4
+  NO_ACC = 8
+  PEDAL_LONG = 16
+  GAS_INTERCEPTOR = 32
+  EV = 64
+  HW_SDGM = 128
+  ASCM_INT = 256
+  FORCE_BRAKE_C9 = 512
 
 
 class GMFlags(IntFlag):
   # Detected flags
   HAS_BSM = 1  # blind spot monitoring
+  NO_ACCELERATOR_POS_MSG = 2  # Kans: 0xBE(ECMAcceleratorPos) 없는 차량
 
 
 class Footnote(Enum):
@@ -108,15 +129,17 @@ class GMPlatformConfig(PlatformConfig):
 @dataclass
 class GMASCMPlatformConfig(GMPlatformConfig):
   def init(self):
-    # ASCM is supported, but due to a janky install and hardware configuration, we are not showing in the car docs
-    self.car_docs = []
+    # Kans: 차량 선택(SupportedCars_gm) 목록에 나오도록 docs 유지
+    #self.car_docs = []
+    pass
 
 
 @dataclass
 class GMSDGMPlatformConfig(GMPlatformConfig):
   def init(self):
-    # Don't show in docs until the harness is sold. See https://github.com/commaai/openpilot/issues/32471
-    self.car_docs = []
+    # Kans: 차량 선택(SupportedCars_gm) 목록에 나오도록 docs 유지
+    #self.car_docs = []
+    pass
 
 
 class CAR(Platforms):
@@ -290,3 +313,14 @@ SDGM_CAR = {CAR.CADILLAC_XT4, CAR.CHEVROLET_VOLT_2019, CAR.CHEVROLET_TRAVERSE}
 STEER_THRESHOLD = 1.0
 
 DBC = CAR.create_dbc_map()
+
+
+# Kans: 차량 선택 목록 출력 (python values.py)
+if __name__ == "__main__":
+  cars = []
+  for platform in CAR:
+    for doc in platform.config.car_docs:
+      cars.append(doc.name)
+  cars.sort()
+  for c in cars:
+    print(c)

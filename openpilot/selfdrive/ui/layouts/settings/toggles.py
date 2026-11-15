@@ -101,7 +101,8 @@ class TogglesLayout(Widget):
       action_item=InitialCruiseSpeedControl(),
       icon="speed_limit.png",
     )
-    self._initial_cruise_speed.set_visible(lambda: ui_state.CP is not None and ui_state.has_longitudinal_control and not ui_state.CP.pcmCruise)
+    # 캐럿 크루즈 로직은 SET 시 현재 속도를 쓰므로 초기 최대속도 설정이 반영되지 않아 메뉴를 숨긴다.
+    self._initial_cruise_speed.set_visible(False)
     self._locked_toggles = set()
     for param, (title, desc, icon, needs_restart) in self._toggle_defs.items():
       toggle = toggle_item(

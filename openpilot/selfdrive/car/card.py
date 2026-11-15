@@ -20,6 +20,7 @@ from opendbc.car.car_helpers import get_car, interfaces
 from opendbc.car.interfaces import CarInterfaceBase, RadarInterfaceBase
 from openpilot.selfdrive.pandad import can_capnp_to_list, can_list_to_can_capnp
 from openpilot.selfdrive.car.cruise import VCruiseHelper
+from openpilot.selfdrive.car.alternative_experience import get_alternative_experience
 
 REPLAY = "REPLAY" in os.environ
 
@@ -65,7 +66,8 @@ class Car:
 
   def __init__(self, CI=None, RI=None) -> None:
     self.can_sock = messaging.sub_sock('can', timeout=20)
-    self.sm = messaging.SubMaster(['pandaStates', 'carControl', 'onroadEvents'])
+    # Kans: 캐럿 크루즈(cruise.py)가 carrotMan/longitudinalPlan/radarState를 사용
+    self.sm = messaging.SubMaster(['pandaStates', 'carControl', 'onroadEvents', 'carrotMan', 'longitudinalPlan', 'modelV2', 'radarState'])
     self.pm = messaging.PubMaster(['sendcan', 'carState', 'carParams', 'carOutput', 'radarTracks'])
 
     self.can_rcv_cum_timeout_counter = 0
@@ -80,7 +82,7 @@ class Car:
 
     self.can_callbacks = can_comm_callbacks(self.can_sock, self.pm.sock['sendcan'])
 
-    is_release = self.params.get_bool("IsReleaseBranch")
+    is_release = True # Carrot: self.params.get_bool("IsReleaseBranch")
 
     if CI is None:
       # wait for one pandaState and one CAN packet
@@ -109,6 +111,7 @@ class Car:
       self.RI = RI
 
     self.CP.alternativeExperience = 0
+    self.CP.alternativeExperience = get_alternative_experience(self.params.get_bool("DisengageOnAccelerator"))
     openpilot_enabled_toggle = self.params.get_bool("OpenpilotEnabledToggle")
     controller_available = self.CI.CC is not None and openpilot_enabled_toggle and not self.CP.dashcamOnly
     self.CP.passive = not controller_available or self.CP.dashcamOnly
@@ -180,7 +183,7 @@ class Car:
     if can_rcv_valid and REPLAY:
       self.can_log_mono_time = messaging.log_from_bytes(can_strs[0]).logMonoTime
 
-    self.v_cruise_helper.update_v_cruise(CS, self.sm['carControl'].enabled, self.is_metric)
+    self.v_cruise_helper.update_v_cruise(CS, self.sm, self.is_metric)
     if self.sm['carControl'].enabled and not self.CC_prev.enabled:
       # Use CarState w/ buttons from the step selfdrived enables on
       self.v_cruise_helper.initialize_v_cruise(self.CS_prev, self.initial_cruise_speed)
@@ -188,6 +191,11 @@ class Car:
     # TODO: mirror the carState.cruiseState struct?
     CS.vCruise = float(self.v_cruise_helper.v_cruise_kph)
     CS.vCruiseCluster = float(self.v_cruise_helper.v_cruise_cluster_kph)
+    # Kans: 캐럿 크루즈 출력
+    CS.logCarrot = self.v_cruise_helper.log
+    # GM AutoCruise: keep only the activateCruise latch output.
+    CS.activateCruise = self.v_cruise_helper.get_activate_cruise()
+    CS.latEnabled = self.v_cruise_helper._lat_enabled
 
     return CS, RD
 
@@ -273,7 +281,7 @@ class Car:
 
 
 def main():
-  config_realtime_process(4, Priority.CTRL_HIGH)
+  config_realtime_process(4, Priority.CTRL_LOW)
   car = Car()
   car.card_thread()
 

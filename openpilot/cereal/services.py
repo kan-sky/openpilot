@@ -52,8 +52,6 @@ _services: dict[str, tuple] = {
   "procLog": (True, 0.5, 15, QueueSize.BIG),
   "gpsLocationExternal": (True, 10., 10),
   "gpsLocation": (True, 1., 1),
-  "navInstruction": (True, 1., 10),
-  "navRoute": (True, 0.),
   "ubloxGnss": (True, 10.),
   "qcomGnss": (True, 2.),
   "clocks": (True, 0.1, 1),
@@ -83,6 +81,14 @@ _services: dict[str, tuple] = {
   "cabinEncodeData": (False, 20., None, QueueSize.BIG),
   "wideRoadEncodeData": (False, 20., None, QueueSize.BIG),
   "qNarrowRoadEncodeData": (False, 20., None, QueueSize.BIG),
+
+  # navigation / Carrot Navi
+  "navInstruction": (True, 1., 10),
+  "navRoute": (True, 0.),
+  "navRouteNavd": (True, 0.),
+  "navInstructionCarrot": (True, 1., 10),
+  "carrotMan": (True, 0.),
+  "carrotNavi": (True, 2.),
 
   # debug
   "uiDebug": (True, 0., 1),

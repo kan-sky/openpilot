@@ -1,23 +1,64 @@
 #!/usr/bin/env python3
+import json
+import os
 from math import fabs, exp
 import numpy as np
 
 from opendbc.car import get_safety_config, structs
+from opendbc.car.common.basedir import BASEDIR
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.gm.carcontroller import CarController
 from opendbc.car.gm.carstate import CarState
+from opendbc.car.gm.auto_hold import update_auto_hold
 from opendbc.car.gm.radar_interface import RadarInterface, RADAR_HEADER_MSG, CAMERA_DATA_HEADER_MSG
 from opendbc.car.gm.values import CAR, CarControllerParams, EV_CAR, CAMERA_ACC_CAR, SDGM_CAR, ALT_ACCS, CanBus, GMFlags, GMSafetyFlags
 from opendbc.car.interfaces import CarInterfaceBase, TorqueFromLateralAccelCallbackType, LateralAccelFromTorqueCallbackType
 
 TransmissionType = structs.CarParams.TransmissionType
 NetworkLocation = structs.CarParams.NetworkLocation
+ACCELERATOR_POS_MSG = 0xbe
 
 NON_LINEAR_TORQUE_PARAMS = {
   CAR.CHEVROLET_BOLT_EUV: [2.6531724862969748, 1.0, 0.1919764879840985, 0.009054123646805178],
   CAR.GMC_ACADIA: [4.78003305, 1.0, 0.3122, 0.05591772],
   CAR.CHEVROLET_SILVERADO: [3.29974374, 1.0, 0.25571356, 0.0465122]
 }
+
+# Kans: NNFF (신경망 피드포워드) - 횡가속도 → 조향토크
+NEURAL_PARAMS_PATH = os.path.join(BASEDIR, 'torque_data/neural_ff_weights.json')
+NEURAL_FF_CARS = (CAR.CHEVROLET_VOLT,)
+# Kans: 실측상 NNFF는 조향 히스테리시스의 감김 쪽 토크를 예측하므로 중심값으로 내린다
+# 직진 부근은 유지하고, 차이가 작아지는 큰 횡가속(로터리/루프)에서는 토크가 모자라지 않게 줄인다
+NEURAL_FF_CENTER_OFFSET_BP = [0.0, 1.0, 1.75, 2.25, 3.0]  # |횡가속| m/s^2
+NEURAL_FF_CENTER_OFFSET_V = [0.0, 0.15, 0.15, 0.065, 0.0]  # 토크
+
+
+class NanoFFModel:
+  def __init__(self, platform):
+    with open(NEURAL_PARAMS_PATH) as f:
+      self.weights = {
+        k: np.asarray(v)
+        for k, v in json.load(f)[platform].items()
+      }
+
+  def predict(self, inputs):
+    w = self.weights
+    x = np.asarray(inputs, dtype=float)
+
+    x = (x - w["input_norm_mat"][:, 0]) / (
+      w["input_norm_mat"][:, 1] - w["input_norm_mat"][:, 0]
+    )
+
+    x = np.maximum(0.0, x @ w["w_1"] + w["b_1"])
+    x = np.maximum(0.0, x @ w["w_2"] + w["b_2"])
+    x = np.maximum(0.0, x @ w["w_3"] + w["b_3"])
+    x = x @ w["w_4"] + w["b_4"]
+
+    return float(
+      x[0] *
+      (w["output_norm_mat"][1] - w["output_norm_mat"][0]) +
+      w["output_norm_mat"][0]
+    )
 
 
 class CarInterface(CarInterfaceBase):
@@ -64,8 +105,31 @@ class CarInterface(CarInterfaceBase):
     assert min(torque_values) < -1 and max(torque_values) > 1, "The torque values should cover the range [-1, 1]"
     return torque_values, lataccel_values
 
+  # Kans: NNFF 입력(롤 보정, 속도, 가속도)은 latcontrol_torque가 매 프레임 넘겨준다
+  def set_torque_from_lateral_accel_context(self, roll_compensation: float, v_ego: float, a_ego: float) -> None:
+    self._nano_roll_compensation = float(roll_compensation)
+    self._nano_v_ego = float(v_ego)
+    self._nano_a_ego = float(a_ego)
+
+  def torque_from_lateral_accel_neural(self, lateral_acceleration: float,
+                                       torque_params: structs.CarParams.LateralTorqueTuning) -> float:
+    # 마찰 보상은 latcontrol_torque가 NNFF 출력 뒤 토크 공간에서 더한다
+    roll_compensation = getattr(self, "_nano_roll_compensation", 0.0)
+    total_lateral_accel = float(lateral_acceleration) + roll_compensation
+    inputs = [
+      total_lateral_accel,
+      roll_compensation,
+      getattr(self, "_nano_v_ego", 0.0),
+      getattr(self, "_nano_a_ego", 0.0),
+    ]
+    center_offset = np.sign(total_lateral_accel) * np.interp(abs(total_lateral_accel), NEURAL_FF_CENTER_OFFSET_BP, NEURAL_FF_CENTER_OFFSET_V)
+    return float(self.neural_ff_model.predict(inputs) - center_offset)
+
   def torque_from_lateral_accel(self) -> TorqueFromLateralAccelCallbackType:
-    if self.CP.carFingerprint in NON_LINEAR_TORQUE_PARAMS:
+    if self.CP.carFingerprint in NEURAL_FF_CARS:
+      self.neural_ff_model = NanoFFModel(str(self.CP.carFingerprint))
+      return self.torque_from_lateral_accel_neural
+    elif self.CP.carFingerprint in NON_LINEAR_TORQUE_PARAMS:
       torque_values, lataccel_values = self.get_lataccel_torque_siglin()
 
       def torque_from_lateral_accel_siglin(lateral_acceleration: float, torque_params: structs.CarParams.LateralTorqueTuning):
@@ -74,8 +138,29 @@ class CarInterface(CarInterfaceBase):
     else:
       return self.torque_from_lateral_accel_linear
 
+  # Kans: NNFF 역함수 - 현재 컨텍스트(롤/속도/가속도)에서 목표 토크가 되는 횡가속도를 이분탐색
+  # (선형식 latAccelFactor x 토크로 PID 상한을 잡으면 NNFF로는 토크 0.95까지만 도달해 긴 커브에서 언더스티어)
+  def lateral_accel_from_torque_neural(self, torque: float,
+                                       torque_params: structs.CarParams.LateralTorqueTuning) -> float:
+    lo, hi = -6.0, 6.0
+    if self.torque_from_lateral_accel_neural(hi, torque_params) <= torque:
+      return hi
+    if self.torque_from_lateral_accel_neural(lo, torque_params) >= torque:
+      return lo
+    for _ in range(16):
+      mid = 0.5 * (lo + hi)
+      if self.torque_from_lateral_accel_neural(mid, torque_params) < torque:
+        lo = mid
+      else:
+        hi = mid
+    return 0.5 * (lo + hi)
+
   def lateral_accel_from_torque(self) -> LateralAccelFromTorqueCallbackType:
-    if self.CP.carFingerprint in NON_LINEAR_TORQUE_PARAMS:
+    if self.CP.carFingerprint in NEURAL_FF_CARS:
+      if not hasattr(self, "neural_ff_model"):
+        self.neural_ff_model = NanoFFModel(str(self.CP.carFingerprint))
+      return self.lateral_accel_from_torque_neural
+    elif self.CP.carFingerprint in NON_LINEAR_TORQUE_PARAMS:
       torque_values, lataccel_values = self.get_lataccel_torque_siglin()
 
       def lateral_accel_from_torque_siglin(torque: float, torque_params: structs.CarParams.LateralTorqueTuning):
@@ -123,14 +208,15 @@ class CarInterface(CarInterfaceBase):
         ret.minEnableSpeed = -1.  # engage speed is decided by PCM
 
     else:  # ASCM, OBD-II harness
+      ret.safetyConfigs[0].safetyParam |= GMSafetyFlags.HW_ASCM_LONG.value
       ret.openpilotLongitudinalControl = True
       ret.networkLocation = NetworkLocation.gateway
       # LRR messages can take up to a few seconds to start sending after ignition, check camera data as well which starts earlier
-      ret.radarUnavailable = RADAR_HEADER_MSG not in fingerprint[CanBus.OBSTACLE] and CAMERA_DATA_HEADER_MSG not in fingerprint[CanBus.OBSTACLE] and not docs
+      ret.radarUnavailable = False # RADAR_HEADER_MSG not in fingerprint[CanBus.OBSTACLE] and CAMERA_DATA_HEADER_MSG not in fingerprint[CanBus.OBSTACLE] and not docs
       ret.pcmCruise = False  # stock non-adaptive cruise control is kept off
       # supports stop and go, but initial engage must (conservatively) be above 18mph
-      ret.minEnableSpeed = 18 * CV.MPH_TO_MS
-      ret.minSteerSpeed = 7 * CV.MPH_TO_MS
+      ret.minEnableSpeed = -1 * CV.MPH_TO_MS
+      ret.minSteerSpeed = 7.0 * CV.MPH_TO_MS
 
       # Tuning
       ret.longitudinalTuning.kiV = [2.4, 1.5]
@@ -138,25 +224,30 @@ class CarInterface(CarInterfaceBase):
     # These cars have been put into dashcam only due to both a lack of users and test coverage.
     # These cars likely still work fine. Once a user confirms each car works and a test route is
     # added to opendbc/car/tests/routes.py, we can remove it from this list.
-    ret.dashcamOnly = candidate in {CAR.CADILLAC_ATS, CAR.HOLDEN_ASTRA, CAR.CHEVROLET_MALIBU, CAR.BUICK_REGAL} or \
-                      (ret.networkLocation == NetworkLocation.gateway and ret.radarUnavailable)
+    #ret.dashcamOnly = candidate in {CAR.CADILLAC_ATS, CAR.HOLDEN_ASTRA, CAR.CHEVROLET_MALIBU, CAR.BUICK_REGAL} or \
+    #                  (ret.networkLocation == NetworkLocation.gateway and ret.radarUnavailable)
 
     # Start with a baseline tuning for all GM vehicles. Override tuning as needed in each model section below.
     ret.lateralTuning.pid.kiBP, ret.lateralTuning.pid.kpBP = [[0.], [0.]]
     ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.2], [0.00]]
     ret.lateralTuning.pid.kf = 0.00004   # full torque for 20 deg at 80mph means 0.00007818594
-    ret.steerActuatorDelay = 0.1  # Default delay, not measured yet
+    ret.steerActuatorDelay = 0.3  # Default delay, not measured yet
 
     ret.steerLimitTimer = 0.4
-    ret.longitudinalActuatorDelay = 0.5  # large delay to initially start braking
+    ret.longitudinalActuatorDelay = 0.3  # large delay to initially start braking
 
     if candidate == CAR.CHEVROLET_VOLT:
-      ret.lateralTuning.pid.kpBP = [0., 40.]
-      ret.lateralTuning.pid.kpV = [0., 0.17]
-      ret.lateralTuning.pid.kiBP = [0.]
-      ret.lateralTuning.pid.kiV = [0.]
-      ret.lateralTuning.pid.kf = 1.  # get_steer_feedforward_volt()
+      # Kans: 토크 횡제어 + NNFF (튜닝값은 LateralTorqueCustom 파라미터)
+      CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
       ret.steerActuatorDelay = 0.2
+      ret.minSteerSpeed = 6.7 * CV.MPH_TO_MS
+      # Kans: 오토리쥼 - starting 상태로 출발, RES/가스펄스는 auto_resume.py
+      ret.autoResumeSng = True
+      ret.startingState = True
+      ret.vEgoStarting = 0.35  # 출발상태로 판단하는 속도(값이 클수록 더 높은 속도까지 내주어서 출발가속이 강해질 수 있음)
+      ret.startAccel = 1.9
+      # Kans: 정지 직후 정지유지 감속(StoppingAccel)까지 끌어내리는 속도 (m/s^2/s)
+      ret.stoppingDecelRate = 1.2
 
     elif candidate == CAR.GMC_ACADIA:
       ret.minEnableSpeed = -1.  # engage speed is decided by pcm
@@ -218,4 +309,12 @@ class CarInterface(CarInterfaceBase):
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
       ret.dashcamOnly = True  # Needs steerRatio, tireStiffness, and lat accel factor tuning
 
+    # Kans: 0xBE(ECMAcceleratorPos) 없는 차량 표시 (오토홀드 브레이크 압력 기준)
+    if ACCELERATOR_POS_MSG not in fingerprint[CanBus.POWERTRAIN]:
+      ret.flags |= GMFlags.NO_ACCELERATOR_POS_MSG.value
     return ret
+
+  def apply(self, c, now_nanos=None):
+    # Kans hook: 오토홀드 판정(auto_hold.py) 후 carcontroller
+    update_auto_hold(self.CS, self.CP)
+    return super().apply(c, now_nanos)

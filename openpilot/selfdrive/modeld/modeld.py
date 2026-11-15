@@ -50,11 +50,35 @@ MIN_LAT_CONTROL_SPEED = 0.3
 BIG_MODEL_TIMEOUT = 60
 
 
+# Kans: 조향 스무딩(LatSmoothSec) - 모델 1초 뒤 횡위치 불확실성(std) 기반 동적 스무딩
+# LatSmoothSec=0.08 기준: std 0.15까지 0.08 유지, 0.15~0.30에서 증가, 0.20초에서 고정
+def get_lat_smooth_seconds_dynamic(model_output: dict[str, np.ndarray],
+                                   base_lat_smooth_seconds: float) -> tuple[float, float, float]:
+  if base_lat_smooth_seconds <= 0.0:
+    return 0.0, 0.0, 0.0
+
+  try:
+    y_std_1s = float(model_output['plan_stds'][0, 10, Plan.POSITION, 1])
+  except Exception:
+    y_std_1s = 0.0
+
+  max_lat_smooth_seconds = 0.20
+  extra_max = max(0.0, max_lat_smooth_seconds - base_lat_smooth_seconds)
+
+  extra_smooth_seconds = float(np.interp(y_std_1s, [0.15, 0.30], [0.0, extra_max]))
+  extra_smooth_seconds = float(np.clip(extra_smooth_seconds, 0.0, extra_max))
+
+  dynamic_lat_smooth_seconds = float(np.clip(base_lat_smooth_seconds + extra_smooth_seconds, 0.0, max_lat_smooth_seconds))
+
+  return dynamic_lat_smooth_seconds, y_std_1s, extra_smooth_seconds
+
+
 def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.ModelDataV2.Action,
-                          lat_action_t: float, long_action_t: float, v_ego: float) -> log.ModelDataV2.Action:
+                          lat_action_t: float, long_action_t: float, v_ego: float,
+                          lat_smooth_seconds: float = LAT_SMOOTH_SECONDS) -> log.ModelDataV2.Action:
   if 'action' not in model_output:
     plan = model_output['plan'][0]
-    desired_accel = get_accel_from_plan(plan[:,Plan.VELOCITY][:,0],
+    desired_accel, _, _, _ = get_accel_from_plan(plan[:,Plan.VELOCITY][:,0],
                                         plan[:,Plan.ACCELERATION][:,0],
                                         ModelConstants.T_IDXS,
                                         action_t=long_action_t)
@@ -68,10 +92,24 @@ def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.
     desired_curvature = model_output['action'][0,0] / (max(2.5, v_ego))**2
   stop = should_stop(v_ego, desired_accel)
   desired_accel = smooth_value(desired_accel, prev_action.desiredAcceleration, LONG_SMOOTH_SECONDS)
+
+  applied_lat_smooth_seconds = 0.0
+  if lat_smooth_seconds > 0.0:
+    # Kans: 곡률별/속도별 스무딩 상한 (큰 곡률·저속일수록 짧게)
+    curve_smooth_max = float(np.interp(abs(desired_curvature), [0.0005, 0.0015, 0.0040], [0.13, 0.11, 0.10]))
+    speed_smooth_max = float(np.interp(v_ego, [5.0, 15.0, 30.0], [0.08, 0.10, 0.18]))
+    applied_lat_smooth_seconds = float(np.clip(min(lat_smooth_seconds, curve_smooth_max, speed_smooth_max), 0.08, 0.18))
+
   if v_ego > MIN_LAT_CONTROL_SPEED:
-    desired_curvature = smooth_value(desired_curvature, prev_action.desiredCurvature, LAT_SMOOTH_SECONDS)
+    desired_curvature = smooth_value(desired_curvature, prev_action.desiredCurvature, applied_lat_smooth_seconds)
   else:
     desired_curvature = prev_action.desiredCurvature
+
+  # Kans: NaN 보호
+  desired_curvature = float(np.nan_to_num(desired_curvature, nan=prev_action.desiredCurvature,
+                                          posinf=prev_action.desiredCurvature, neginf=prev_action.desiredCurvature))
+  desired_accel = float(np.nan_to_num(desired_accel, nan=prev_action.desiredAcceleration,
+                                      posinf=prev_action.desiredAcceleration, neginf=prev_action.desiredAcceleration))
 
   return log.ModelDataV2.Action(desiredCurvature=float(desired_curvature),
                                 desiredAcceleration=float(desired_accel),
@@ -315,7 +353,7 @@ def main(demo=False):
   pub_socks = ["modelV2", "drivingModelData", "cameraOdometry"] + (["chestnutGpuState"] if CHESTNUT else [])
   pm = PubMaster(pub_socks)
   sm = SubMaster(["deviceState", "carState", "narrowRoadCameraState", "extrinsicsCalibration", "driverMonitoringState",
-                  "carControl", "controlsState", "lateralDelay"])
+                  "carControl", "controlsState", "lateralDelay", "carrotMan", "radarState"])
 
   publish_state = PublishState()
   params = Params()
@@ -346,6 +384,12 @@ def main(demo=False):
   prev_action = log.ModelDataV2.Action()
 
   DH = DesireHelper()
+
+  # Kans: LatSmoothSec / SteerActuatorDelay(0.01초 단위)는 1초마다 읽음
+  lat_smooth_seconds = LAT_SMOOTH_SECONDS
+  custom_lat_delay = 0.0
+  camera_yaw_trim_deg = params.get_float("CameraYawTrimDeg") * 0.01  # Kans: 카메라 YAW 보정(0.01도 단위, +: 오른쪽)
+  lat_smooth_param_frame = 0
 
   while True:
     # Keep receiving frames until we are at least 1 frame ahead of previous extra frame
@@ -382,12 +426,34 @@ def main(demo=False):
 
     sm.update(0)
     desire = DH.desire
+    # Kans: DH.desire는 laneChangeStarting에서야 laneChangeLeft/Right가 되므로,
+    # 차선변경 FSM이 off를 벗어나는 즉시(preLaneChange 포함) 모델에 미리 desire를 준다.
+    # 교차로 회전에서는 이 사전 desire가 회전 desire와 이어져야 모델이 회전을 유지한다 (rlog20 성공 / rlog23 실패).
+    # 사전 desire 시작 시점은 carrot_serv의 AutoTurnAtcDistLeft/Right(atc left/right 구간 길이)로 조정
+    if DH.lane_change_state != log.LaneChangeState.off and \
+       not (DH.lane_change_state == log.LaneChangeState.preLaneChange and DH.atc_pre_desire_blocked):
+      if DH.lane_change_direction == log.LaneChangeDirection.left:
+        desire = log.Desire.laneChangeLeft
+      elif DH.lane_change_direction == log.LaneChangeDirection.right:
+        desire = log.Desire.laneChangeRight
     is_rhd = sm["driverMonitoringState"].isRHD
     frame_id = sm["narrowRoadCameraState"].frameId
     v_ego = max(sm["carState"].vEgo, 0.)
-    lat_delay = sm["lateralDelay"].lateralDelay + LAT_SMOOTH_SECONDS
+    if lat_smooth_param_frame % int(1. / DT_MDL) == 0:
+      lat_smooth_seconds = params.get_float("LatSmoothSec") * 0.01
+      custom_lat_delay = params.get_float("SteerActuatorDelay") * 0.01
+      camera_yaw_trim_deg = params.get_float("CameraYawTrimDeg") * 0.01
+    lat_smooth_param_frame += 1
+    # Kans: 모델 입력 action_t에는 스무딩을 넣지 않음 (스무딩 보상은 곡률 계산에서만)
+    # SteerActuatorDelay가 0보다 크면 그 값, 0이면 학습된 지연(lateralDelay)
+    lat_delay = custom_lat_delay if custom_lat_delay > 0.0 else sm["lateralDelay"].lateralDelay
     if sm.updated["extrinsicsCalibration"] and sm.seen['narrowRoadCameraState'] and sm.seen['deviceState']:
       device_from_calib_euler = np.array(sm["extrinsicsCalibration"].rpyCalib, dtype=np.float32)
+      # Kans: 캘리브레이션 완료 후에만 YAW 보정 적용 (기기를 좌우로 돌린 것과 같은 효과)
+      calib_done = sm["extrinsicsCalibration"].calStatus == log.ExtrinsicsCalibration.Status.calibrated
+      applied_yaw_trim_deg = camera_yaw_trim_deg if calib_done else 0.0
+      if applied_yaw_trim_deg != 0.0:
+        device_from_calib_euler[2] -= np.radians(applied_yaw_trim_deg)
       dc = DEVICE_CAMERAS[(str(sm['deviceState'].deviceType), str(sm['narrowRoadCameraState'].sensor))]
       main_intrinsics = dc.wide_road.intrinsics if main_wide_camera else dc.narrow_road.intrinsics
       model_transform_main = get_warp_matrix(device_from_calib_euler, main_intrinsics, False).astype(np.float32)
@@ -451,7 +517,9 @@ def main(demo=False):
 
       if not sm['carControl'].latActive:
         prev_action.desiredCurvature = sm['controlsState'].curvature
-      action = get_action_from_model(model_output, prev_action, lat_action_t, long_action_t, v_ego)
+      lat_smooth_seconds_dynamic, _, _ = get_lat_smooth_seconds_dynamic(model_output, lat_smooth_seconds)
+      lat_action_t_smooth = lat_delay + lat_smooth_seconds_dynamic + frame_delay + action_delay
+      action = get_action_from_model(model_output, prev_action, lat_action_t_smooth, long_action_t, v_ego, lat_smooth_seconds_dynamic)
       prev_action = action
       fill_model_msg(modelv2_send, model_output, action,
                      publish_state, meta_main.frame_id, meta_extra.frame_id, frame_id,
@@ -462,9 +530,21 @@ def main(demo=False):
       l_lane_change_prob = desire_state[log.Desire.laneChangeLeft]
       r_lane_change_prob = desire_state[log.Desire.laneChangeRight]
       lane_change_prob = l_lane_change_prob + r_lane_change_prob
-      DH.update(sm['carState'], sm['carControl'].latActive, lane_change_prob)
+      # Kans: 캐럿 ATC/차선변경 (carrotMan 회전정보, 측면 레이더)
+      DH.update(sm['carState'], modelv2_send.modelV2, sm['carControl'].latActive, lane_change_prob, sm['carrotMan'], sm['radarState'])
       modelv2_send.modelV2.meta.laneChangeState = DH.lane_change_state
       modelv2_send.modelV2.meta.laneChangeDirection = DH.lane_change_direction
+      modelv2_send.modelV2.meta.desireLog = DH.desireLog
+      modelv2_send.modelV2.meta.laneWidthLeft = float(DH.left.lane_width)
+      modelv2_send.modelV2.meta.laneWidthRight = float(DH.right.lane_width)
+      modelv2_send.modelV2.meta.distanceToRoadEdgeLeft = float(DH.left.dist_to_edge)
+      modelv2_send.modelV2.meta.distanceToRoadEdgeRight = float(DH.right.dist_to_edge)
+      modelv2_send.modelV2.meta.desire = DH.desire
+      modelv2_send.modelV2.meta.laneChangeProb = DH.lane_change_ll_prob
+      # Kans: 모델 기반 커브 목표속도 (carrot_serv의 "model" 소스)
+      modelv2_send.modelV2.meta.modelTurnSpeed = float(DH.model_turn_speed)
+      modelv2_send.modelV2.meta.laneChangeAvailableLeft = DH.lane_change_available_left
+      modelv2_send.modelV2.meta.laneChangeAvailableRight = DH.lane_change_available_right
 
       fill_driving_model_data(drivingdata_send, modelv2_send)
       fill_pose_msg(posenet_send, model_output, meta_main.frame_id, vipc_dropped_frames, meta_main.timestamp_eof, extrinsics_calibration_seen)

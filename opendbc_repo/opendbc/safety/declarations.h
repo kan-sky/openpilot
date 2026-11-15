@@ -252,6 +252,7 @@ bool longitudinal_accel_checks(int desired_accel, const LongitudinalLimits limit
 bool longitudinal_speed_checks(int desired_speed, const LongitudinalLimits limits);
 bool longitudinal_gas_checks(int desired_gas, const LongitudinalLimits limits);
 bool longitudinal_brake_checks(int desired_brake, const LongitudinalLimits limits);
+bool longitudinal_interceptor_checks(const CANPacket_t *msg);
 void pcm_cruise_check(bool cruise_engaged);
 void speed_mismatch_check(const float speed_2);
 
@@ -268,7 +269,8 @@ typedef enum {
 
 typedef enum {
   GM_ASCM,
-  GM_CAM
+  GM_CAM,
+  GM_SDGM
 } GmHardware;
 
 typedef enum {HONDA_NIDEC, HONDA_BOSCH} HondaHw;
@@ -330,6 +332,8 @@ typedef struct {
 
   RxStatus rx_status[MAX_RX_CHECKS];  // dynamic state of current_safety_config.rx_checks
 
+  bool gm_prev_apply;  // 2CB apply 상승 에지 판정용 (AOL 권한 부여)
+
   int honda_brake;
   bool honda_brake_switch_prev;
   bool honda_fwd_brake;
@@ -363,6 +367,13 @@ typedef struct {
   GmHardware gm_hw;
   const LongitudinalLimits *gm_long_limits;
   bool gm_pcm_cruise;
+  bool gm_cam_long;
+  bool gm_has_acc;
+  bool gm_pedal_long;
+  bool gm_force_ascm;
+  bool gm_force_brake_c9;
+  bool gm_ev;
+  bool enable_gas_interceptor;
 
   bool honda_alt_brake_msg;
   bool honda_bosch_long;

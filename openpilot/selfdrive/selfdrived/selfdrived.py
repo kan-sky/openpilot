@@ -79,12 +79,18 @@ class SelfdriveD:
     self.sensor_packets = ["accelerometer", "gyroscope"]
     self.camera_packets = ["narrowRoadCameraState", "cabinCameraState", "wideRoadCameraState"]
 
+    # Kans: 운전자 모니터링 끄기 (DisableDM > 0)
+    self.disable_dm = self.params.get_int("DisableDM")
+
     # TODO: de-couple selfdrived with card/conflate on carState without introducing controls mismatches
     self.car_state_sock = messaging.sub_sock('carState', timeout=20)
 
     ignore = self.sensor_packets + self.gps_packets + ['alertDebug', 'lateralManeuverPlan']
     if SIMULATION:
       ignore += ['cabinCameraState', 'managerState']
+    elif self.disable_dm > 0:
+      self.camera_packets.remove("cabinCameraState")
+    ignore += ['driverMonitoringState']
     if REPLAY:
       # no vipc in replay will make them ignored anyways
       ignore += ['narrowRoadCameraState', 'wideRoadCameraState']
@@ -110,6 +116,8 @@ class SelfdriveD:
       self.params.remove("AlphaLongitudinalEnabled")
 
     self.CS_prev = car.CarState.new_message()
+    self.auto_hold_frame = -1000  # Kans: 오토홀드 마지막 감지 프레임
+    self.auto_hold_on_prev = False
     self.AM = AlertManager()
     self.events = Events()
 
@@ -120,6 +128,9 @@ class SelfdriveD:
     self.cruise_mismatch_counter = 0
     self.last_steering_pressed_frame = 0
     self.distance_traveled = 0
+    # Kans: 누적 주행거리 (selfdriveState.distanceTraveled) - carrot_serv가 네비 갱신 사이 회전/카메라 거리를 줄이는 데 사용
+    # distance_traveled는 GPS 정상이면 매 프레임 0으로 초기화되는 noGps 경고용이라 따로 둔다
+    self.distance_traveled_total = 0.
     self.last_functional_fan_frame = 0
     self.events_prev = []
     self.logged_comm_issue = None
@@ -133,7 +144,7 @@ class SelfdriveD:
     self.rk = Ratekeeper(100, print_delay_threshold=None)
 
     # Determine startup event
-    self.startup_event = EventName.startup if build_metadata.openpilot.comma_remote and build_metadata.tested_channel else EventName.startupMaster
+    self.startup_event = EventName.startup
     if HARDWARE.get_device_type() == 'mici':
       self.startup_event = None
     if not car_recognized:
@@ -242,6 +253,10 @@ class SelfdriveD:
       car_events = self.car_events.update(CS, self.CS_prev, self.sm['carControl']).to_msg()
       self.events.add_from_msg(car_events)
 
+      # Kans: 캐럿 플래너 알림(신호정지/출발 등)은 longitudinalPlan.events로 전달됨
+      if self.sm.alive['longitudinalPlan']:
+        self.events.add_from_msg(self.sm['longitudinalPlan'].events)
+
       if self.CP.notCar:
         # wait for everything to init first
         if self.sm.frame > int(2. / DT_CTRL) and self.initialized:
@@ -254,6 +269,18 @@ class SelfdriveD:
         (CS.regenBraking and (not self.CS_prev.regenBraking or not CS.standstill)):
         self.events.add(EventName.pedalPressed)
 
+      # Kans: 캐럿 크루즈 횡제어 on/off 안내음
+      if CS.latEnabled != self.CS_prev.latEnabled:
+        self.events.add(EventName.audioPrompt)
+
+      # Kans: GM 오토홀드 - 운전자 브레이크로 크루즈가 꺼진 상태에서 진입하므로 PERMANENT 알림으로 홀드 진입 시 1회 표시
+      # (autoHoldActivated가 프레임마다 깜빡일 수 있어 최근 0.2초 내 감지되면 홀드 중으로 판단)
+      if CS.autoHoldActivated:
+        self.auto_hold_frame = self.sm.frame
+      auto_hold_on = (self.sm.frame - self.auto_hold_frame) * DT_CTRL < 0.2
+      if auto_hold_on and not self.auto_hold_on_prev:
+        self.events.add(EventName.autoHold)
+      self.auto_hold_on_prev = auto_hold_on
       # Audible alert when stock cruise was already on at startup, since openpilot will cancel it
       if not self.startup_cruise_checked:
         self.startup_cruise_checked = True
@@ -338,6 +365,7 @@ class SelfdriveD:
                           pandaState.alternativeExperience != self.CP.alternativeExperience
       else:
         safety_mismatch = pandaState.safetyModel not in IGNORED_SAFETY_MODES
+        safety_mismatch  = False #carrot
 
       # safety mismatch allows some time for pandad to set the safety mode and publish it back from panda
       if (safety_mismatch and self.sm.frame*DT_CTRL > 10.) or pandaState.safetyRxChecksInvalid or self.mismatch_counter >= 200:
@@ -369,7 +397,7 @@ class SelfdriveD:
           self.events.add(EventName.cameraFrameRate)
     if not REPLAY and self.rk.lagging:
       self.events.add(EventName.selfdrivedLagging)
-    if self.CP.openpilotLongitudinalControl:
+    if not self.CP.radarUnavailable:
       if self.sm['radarState'].radarErrors.canError:
         self.events.add(EventName.canError)
       elif self.sm['radarState'].radarErrors.radarUnavailableTemporary:
@@ -456,6 +484,7 @@ class SelfdriveD:
     if gps_ok:
       self.distance_traveled = 0
     self.distance_traveled += abs(CS.vEgo) * DT_CTRL
+    self.distance_traveled_total += abs(CS.vEgo) * DT_CTRL
 
     # TODO: fix simulator
     if not SIMULATION or REPLAY:
@@ -539,6 +568,7 @@ class SelfdriveD:
     ss.state = self.state_machine.state
     ss.engageable = not self.events.contains(ET.NO_ENTRY)
     ss.personality = self.personality
+    ss.distanceTraveled = float(self.distance_traveled_total)
 
     ss.alertText1 = self.AM.current_alert.alert_text_1
     ss.alertText2 = self.AM.current_alert.alert_text_2

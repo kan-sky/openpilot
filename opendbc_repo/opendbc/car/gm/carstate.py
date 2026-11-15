@@ -1,15 +1,18 @@
 import copy
+import time
 from opendbc.can import CANDefine, CANParser
 from opendbc.car import Bus, create_button_events, structs
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.interfaces import CarStateBase
-from opendbc.car.gm.values import DBC, AccState, CruiseButtons, STEER_THRESHOLD, SDGM_CAR, ALT_ACCS, GMFlags
+from opendbc.car.gm.values import DBC, AccState, CruiseButtons, STEER_THRESHOLD, SDGM_CAR, ALT_ACCS, GMFlags, EV_CAR
 
 ButtonType = structs.CarState.ButtonEvent.Type
 TransmissionType = structs.CarParams.TransmissionType
 NetworkLocation = structs.CarParams.NetworkLocation
 
 STANDSTILL_THRESHOLD = 10 * 0.0311
+# Kans: Volt EBCM 브레이크 페달 센서(0xF1) 밟힘 임계값 - gm.h와 동일
+VOLT_EBCM_BRAKE_PRESSED_THRESHOLD = 6
 
 BUTTONS_DICT = {CruiseButtons.RES_ACCEL: ButtonType.accelCruise, CruiseButtons.DECEL_SET: ButtonType.decelCruise,
                 CruiseButtons.MAIN: ButtonType.mainCruise, CruiseButtons.CANCEL: ButtonType.cancel}
@@ -29,7 +32,17 @@ class CarState(CarStateBase):
     self.cam_lka_steering_cmd_counter = 0
     self.buttons_counter = 0
 
+    # Kans: autoHold
+    self.autoHold = True
+    self.autoHoldActive = False
+    self.autoHoldActivated = False
+
     self.distance_button = 0
+    self.lfa_button = None  # Kans: 현대 LFA 버튼과 같은 역할 (GM DBC: ASCMSteeringButton.LKAButton, 토글 상태값)
+
+    # Kans: accFault delay
+    self.startup_time = time.monotonic()
+    self._acc_faulted_last = False
 
   def update_button_enable(self, buttonEvents: list[structs.CarState.ButtonEvent]):
     if not self.CP.pcmCruise:
@@ -49,8 +62,10 @@ class CarState(CarStateBase):
 
     prev_cruise_buttons = self.cruise_buttons
     prev_distance_button = self.distance_button
+    prev_lfa_button = self.lfa_button
     self.cruise_buttons = pt_cp.vl["ASCMSteeringButton"]["ACCButtons"]
     self.distance_button = pt_cp.vl["ASCMSteeringButton"]["DistanceButton"]
+    self.lfa_button = pt_cp.vl["ASCMSteeringButton"]["LKAButton"]  # Kans: LKA 버튼 → 캐럿 LFA 버튼으로 사용
     self.buttons_counter = pt_cp.vl["ASCMSteeringButton"]["RollingCounter"]
     self.pscm_status = copy.copy(pt_cp.vl["PSCMStatus"])
 
@@ -82,6 +97,12 @@ class CarState(CarStateBase):
     else:
       ret.gearShifter = self.parse_gear_shifter(self.shifter_values.get(pt_cp.vl["ECMPRDNL2"]["PRNDL2"], None))
 
+    # Kans: 브레이크 페달 위치
+    if self.CP.flags & GMFlags.NO_ACCELERATOR_POS_MSG.value:
+      ret.brake = pt_cp.vl["EBCMBrakePedalPosition"]["BrakePedalPosition"] / 0xd0
+    else:
+      ret.brake = pt_cp.vl["ECMAcceleratorPos"]["BrakePedalPos"]
+
     if self.CP.networkLocation == NetworkLocation.fwdCamera:
       ret.brakePressed = pt_cp.vl["ECMEngineStatus"]["BrakePressed"] != 0
     else:
@@ -89,13 +110,20 @@ class CarState(CarStateBase):
       # that the brake is being intermittently pressed without user interaction.
       # To avoid a cruise fault we need to use a conservative brake position threshold
       # https://static.nhtsa.gov/odi/tsbs/2017/MC-10137629-9999.pdf
-      ret.brakePressed = pt_cp.vl["ECMAcceleratorPos"]["BrakePedalPos"] >= 8
+      if self.CP.carFingerprint in EV_CAR:
+        # Kans: ASCM EV(Volt)는 EBCM 브레이크 페달 센서(0xF1)로 판정
+        # safety/modes/gm.h의 (gm_hw == GM_ASCM) && gm_ev 분기(data[1] >= 6)와 반드시 일치
+        ret.brakePressed = pt_cp.vl["EBCMBrakePedalPosition"]["BrakePedalPosition"] >= VOLT_EBCM_BRAKE_PRESSED_THRESHOLD
+      else:
+        ret.brakePressed = pt_cp.vl["ECMAcceleratorPos"]["BrakePedalPos"] >= 8
 
     # Regen braking is braking
     if self.CP.transmissionType == TransmissionType.direct:
       ret.regenBraking = pt_cp.vl["EBCMRegenPaddle"]["RegenPaddle"] != 0
 
-    ret.gasPressed = pt_cp.vl["AcceleratorPedal2"]["AcceleratorPedal2"] / 254. > 1e-5
+    # Kans: 가스페달 위치 (캐럿 크루즈 가스톡 판정용)
+    ret.gas = pt_cp.vl["AcceleratorPedal2"]["AcceleratorPedal2"] / 254.
+    ret.gasPressed = ret.gas > 1e-5
 
     ret.steeringAngleDeg = pt_cp.vl["PSCMSteeringAngle"]["SteeringWheelAngle"]
     ret.steeringRateDeg = pt_cp.vl["PSCMSteeringAngle"]["SteeringWheelRate"]
@@ -120,10 +148,18 @@ class CarState(CarStateBase):
     ret.rightBlinker = pt_cp.vl["BCMTurnSignals"]["TurnSignals"] == 2
 
     ret.parkingBrake = pt_cp.vl["BCMGeneralPlatformStatus"]["ParkBrakeSwActive"] == 1
-    ret.cruiseState.available = pt_cp.vl["ECMEngineStatus"]["CruiseMainOn"] != 0
+    # Kans:
+    ecu_cruise_main = pt_cp.vl["ECMEngineStatus"]["CruiseMainOn"] != 0
+    ret.cruiseState.available = ecu_cruise_main
+    self.cruiseMain_on = ret.cruiseState.available
     ret.espDisabled = pt_cp.vl["ESPStatus"]["TractionControlOn"] != 1
-    ret.accFaulted = (pt_cp.vl["AcceleratorPedal2"]["CruiseState"] == AccState.FAULTED or
-                      pt_cp.vl["EBCMFrictionBrakeStatus"]["FrictionBrakeUnavailable"] == 1)
+
+    # Kans: 부팅초기 레이더/ACC 웜업 중 Cruise FAULT 무시
+    cruise_faulted = pt_cp.vl["AcceleratorPedal2"]["CruiseState"] == AccState.FAULTED
+    friction_brake_unavailable = pt_cp.vl["EBCMFrictionBrakeStatus"]["FrictionBrakeUnavailable"] == 1
+    startup_fault_ignore = (time.monotonic() - self.startup_time) < 60.0
+    ret.accFaulted = ((cruise_faulted and not startup_fault_ignore) or friction_brake_unavailable)
+    self._acc_faulted_last = ret.accFaulted
 
     ret.cruiseState.enabled = pt_cp.vl["AcceleratorPedal2"]["CruiseState"] != AccState.OFF
     ret.cruiseState.standstill = pt_cp.vl["AcceleratorPedal2"]["CruiseState"] == AccState.STANDSTILL
@@ -146,16 +182,32 @@ class CarState(CarStateBase):
       ret.rightBlindspot = pt_cp.vl["BCMBlindSpotMonitor"]["RightBSM"] == 1
 
     # Don't add event if transitioning from INIT, unless it's to an actual button
+    button_events = []
     if self.cruise_buttons != CruiseButtons.UNPRESS or prev_cruise_buttons != CruiseButtons.INIT:
-      ret.buttonEvents = [
+      button_events = [
         *create_button_events(self.cruise_buttons, prev_cruise_buttons, BUTTONS_DICT,
                               unpressed_btn=CruiseButtons.UNPRESS),
         *create_button_events(self.distance_button, prev_distance_button,
-                              {1: ButtonType.gapAdjustCruise})
+                              {1: ButtonType.gapAdjustCruise}),
       ]
 
-    if ret.vEgo < self.CP.minSteerSpeed:
-      ret.lowSpeedAlert = True
+    # Kans: Volt LKA 버튼은 켜짐/꺼짐이 유지되는 토글 상태값(오파 연결시 기본 1) →
+    # 상태가 바뀔 때마다 LFA 버튼 '눌렀다 뗌' 1회로 변환 (Toyota lkas와 같은 방식).
+    # 첫 값은 기준값으로만 사용. 눌린 채로 두면 cruise.py가 다른 버튼을 모두 무시함.
+    if prev_lfa_button is not None and self.lfa_button != prev_lfa_button:
+      button_events += create_button_events(1, 0, {1: ButtonType.lfaButton}) + \
+                       create_button_events(0, 1, {1: ButtonType.lfaButton})
+
+    if button_events:
+      ret.buttonEvents = button_events
+
+    # Kans: 저속(minSteerSpeed 미만) 조향불가 경고 끔 - 조향 해제는 controlsd에서 그대로 처리
+    #if ret.vEgo < self.CP.minSteerSpeed:
+    #  ret.lowSpeedAlert = True
+
+    # Kans: autoHold
+    self.autoHold = True
+    ret.autoHoldActivated = self.autoHoldActivated
 
     return ret
 

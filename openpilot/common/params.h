@@ -63,7 +63,16 @@ public:
   inline bool getBool(const std::string &key, bool block = false) {
     return get(key, block) == "1";
   }
+  inline int getInt(const std::string &key, bool block = false) {
+    std::string value = get(key, block);
+    return value.empty() ? 0 : std::stoi(value);
+  }
+  inline float getFloat(const std::string &key, bool block = false) {
+    std::string value = get(key, block);
+    return value.empty() ? 0.0F : std::stof(value);
+  }
   std::map<std::string, std::string> readAll();
+
 
   // helpers for writing values
   int put(const char *key, const char *val, size_t value_size);
@@ -73,10 +82,26 @@ public:
   inline int putBool(const std::string &key, bool val) {
     return put(key.c_str(), val ? "1" : "0", 1);
   }
+  inline int putInt(const std::string &key, int val) {
+    const std::string value = std::to_string(val);
+    return put(key.c_str(), value.data(), value.size());
+  }
+  inline int putFloat(const std::string &key, float val) {
+    const std::string value = std::to_string(val);
+    return put(key.c_str(), value.data(), value.size());
+  }
+
   void putNonBlocking(const std::string &key, const std::string &val);
   inline void putBoolNonBlocking(const std::string &key, bool val) {
     putNonBlocking(key, val ? "1" : "0");
   }
+  inline void putIntNonBlocking(const std::string &key, int val) {
+    putNonBlocking(key, std::to_string(val));
+  }
+  inline void putFloatNonBlocking(const std::string &key, float val) {
+    putNonBlocking(key, std::to_string(val));
+  }
+
 
 private:
   void asyncWriteThread();

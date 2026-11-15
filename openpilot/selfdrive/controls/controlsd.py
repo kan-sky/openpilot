@@ -32,6 +32,10 @@ ACTUATOR_FIELDS = tuple(car.CarControl.Actuators.schema.fields.keys())
 class Controls:
   def __init__(self) -> None:
     self.params = Params()
+    self.lat_smooth_seconds = LAT_SMOOTH_SECONDS  # Kans: LatSmoothSec
+    self.steer_actuator_delay = self.params.get_float("SteerActuatorDelay") * 0.01
+    self.steer_ratio_rate = self.params.get_float("SteerRatioRate") / 100.0
+    self.custom_sr = self.params.get_float("CustomSR") / 10.0
     cloudlog.info("controlsd is waiting for CarParams")
     self.CP = messaging.log_from_bytes(self.params.get("CarParams", block=True), car.CarParams)
     cloudlog.info("controlsd got CarParams")
@@ -40,7 +44,7 @@ class Controls:
 
     self.sm = messaging.SubMaster(['lateralDelay', 'vehicleParameters', 'lateralTorqueParameters', 'modelV2', 'selfdriveState',
                                    'extrinsicsCalibration', 'deviceMotion', 'longitudinalPlan', 'lateralManeuverPlan', 'carState', 'carOutput',
-                                   'driverMonitoringState', 'onroadEvents', 'driverAssistance'], poll='selfdriveState')
+                                   'driverMonitoringState', 'onroadEvents', 'driverAssistance', 'carrotMan'], poll='selfdriveState')
     self.pm = messaging.PubMaster(['carControl', 'controlsState'])
 
     self.steer_limited_by_safety = False
@@ -76,7 +80,12 @@ class Controls:
     # Update VehicleModel
     lp = self.sm['vehicleParameters']
     x = max(lp.stiffnessFactor, 0.1)
-    sr = max(lp.steerRatio, 0.1)
+    # Kans: 조향비 - CustomSR(0.1 단위)이 1.0보다 크면 그 값, 아니면 학습 조향비 x SteerRatioRate(%)
+    if self.sm.frame % 100 == 0:
+      self.steer_ratio_rate = self.params.get_float("SteerRatioRate") / 100.0
+      self.custom_sr = self.params.get_float("CustomSR") / 10.0
+    sr = max(lp.steerRatio, 0.1) * self.steer_ratio_rate
+    sr = max(self.custom_sr if self.custom_sr > 1.0 else sr, 0.1)
     self.VM.update_params(x, sr)
 
     steer_angle_without_offset = math.radians(CS.steeringAngleDeg - lp.angleOffsetDeg)
@@ -95,10 +104,16 @@ class Controls:
     CC = car.CarControl.new_message()
     CC.enabled = self.sm['selfdriveState'].enabled
 
+    # carrot
+    gear = car.CarState.GearShifter
+    driving_gear = CS.gearShifter not in (gear.neutral, gear.park, gear.reverse, gear.unknown)
+    lateral_enabled = driving_gear and self.params.get_bool("AlwaysLateral")
     # Check which actuators can be enabled
     standstill = abs(CS.vEgo) <= max(self.CP.minSteerSpeed, 0.3) or CS.standstill
-    CC.latActive = self.sm['selfdriveState'].active and not CS.steerFaultTemporary and not CS.steerFaultPermanent and \
-                   (not standstill or self.CP.steerAtStandstill)
+    # Kans: cruise.py의 latEnabled(CS.latEnabled)가 꺼지면 횡제어 해제
+    CC.latActive = ((self.sm['selfdriveState'].active or lateral_enabled) and CS.latEnabled and \
+                   not CS.steerFaultTemporary and not CS.steerFaultPermanent and \
+                   (not standstill or self.CP.steerAtStandstill))
     CC.longActive = CC.enabled and not any(e.overrideLongitudinal for e in self.sm['onroadEvents']) and self.CP.openpilotLongitudinalControl
 
     actuators = CC.actuators
@@ -125,7 +140,13 @@ class Controls:
     else:
       new_desired_curvature = model_v2.action.desiredCurvature if CC.latActive else self.curvature
     self.desired_curvature, curvature_limited = clip_curvature(CS.vEgo, self.desired_curvature, new_desired_curvature, lp.roll)
-    lat_delay = self.sm["lateralDelay"].lateralDelay + LAT_SMOOTH_SECONDS
+    # Kans: modeld와 같은 조향 스무딩 시간(LatSmoothSec, 0.01초 단위)을 지연에 반영 (1초마다 읽음)
+    if self.sm.frame % 100 == 0:
+      self.lat_smooth_seconds = self.params.get_float("LatSmoothSec") * 0.01
+      self.steer_actuator_delay = self.params.get_float("SteerActuatorDelay") * 0.01
+    # SteerActuatorDelay가 0보다 크면 그 값, 0이면 학습된 지연(lateralDelay)
+    steer_actuator_delay = self.steer_actuator_delay if self.steer_actuator_delay > 0.0 else self.sm["lateralDelay"].lateralDelay
+    lat_delay = steer_actuator_delay + self.lat_smooth_seconds
 
     actuators.curvature = self.desired_curvature
     steer, lateral_output, lac_log = self.LaC.update(CC.latActive, CS, self.VM, lp,
@@ -160,15 +181,42 @@ class Controls:
 
     CC.cruiseControl.override = CC.enabled and not CC.longActive and self.CP.openpilotLongitudinalControl
     CC.cruiseControl.cancel = CS.cruiseState.enabled and (not CC.enabled or not self.CP.pcmCruise)
-    CC.cruiseControl.resume = CC.enabled and CS.cruiseState.standstill and not self.sm['longitudinalPlan'].shouldStop
+    # Kans: 리쥼조건을 플래너 미래속도의 마지막값[-1]으로 판단 (GM 오토리쥼)
+    # 스톡 플래너는 speeds[-1]이 0.1 근처에서 흔들리는 동안에도 shouldStop이 유지될 수 있어 not shouldStop을 함께 확인
+    # (rlog11: shouldStop=1인데 speeds[-1]=0.12로 리쥼 → ECM ACTIVE 후 롱컨이 stopping에 머물러 0.5초 뒤 Cruise Fault)
+    long_plan = self.sm['longitudinalPlan']
+    speeds = long_plan.speeds
+    CC.cruiseControl.resume = (CC.enabled and CS.cruiseState.standstill and len(speeds) > 0 and speeds[-1] > 0.1 and
+                               not long_plan.shouldStop)
+
+    # Kans: 클러스터 설정속도 표시 - carrotMan 목표속도 반영, 신호정지(xState 3) 중엔 플래너 목표속도
+    desired_kph = min(CS.vCruiseCluster, self.sm['carrotMan'].desiredSpeed)
+    setSpeed = float(desired_kph * CV.KPH_TO_MS)
+    if len(speeds):
+      vCluRatio = CS.vCluRatio if CS.vCluRatio > 0.5 else 1.0
+      setSpeed = speeds[-1] / vCluRatio
 
     hudControl = CC.hudControl
-    hudControl.setSpeed = float(CS.vCruiseCluster * CV.KPH_TO_MS)
+    lp = long_plan
+    if self.CP.pcmCruise:
+      speed_from_pcm = self.params.get_int("SpeedFromPCM")
+      if speed_from_pcm == 1:  # toyota
+        hudControl.setSpeed = float(CS.vCruiseCluster * CV.KPH_TO_MS)
+      elif speed_from_pcm == 2:
+        hudControl.setSpeed = float(max(30 / 3.6, desired_kph * CV.KPH_TO_MS))
+      elif speed_from_pcm == 3:  # honda
+        hudControl.setSpeed = setSpeed if lp.xState == 3 else float(desired_kph * CV.KPH_TO_MS)
+      else:
+        hudControl.setSpeed = float(max(30 / 3.6, setSpeed))
+    else:
+      hudControl.setSpeed = setSpeed if lp.xState == 3 else float(desired_kph * CV.KPH_TO_MS)
     hudControl.speedVisible = CC.enabled
     hudControl.lanesVisible = CC.enabled
     hudControl.leadVisible = self.sm['longitudinalPlan'].hasLead
     hudControl.leadDistanceBars = self.sm['selfdriveState'].personality.raw + 1
     hudControl.visualAlert = self.sm['selfdriveState'].alertHudVisual
+    # Kans: 차선변경 desire를 carcontroller에 전달 (GM 차선변경용 조향 변화율)
+    hudControl.modelDesire = self.sm['modelV2'].meta.desire.raw
 
     hudControl.rightLaneVisible = True
     hudControl.leftLaneVisible = True
@@ -200,8 +248,11 @@ class Controls:
     cs.upAccelCmd = float(self.LoC.pid.p)
     cs.uiAccelCmd = float(self.LoC.pid.i)
     cs.ufAccelCmd = float(self.LoC.pid.f)
-    cs.forceDecel = bool(self.sm['driverMonitoringState'].noResponseForceDecel or
-                         (self.sm['selfdriveState'].state == State.softDisabling))
+    # Kans: DM 꺼짐(DisableDM > 0)이면 DM 무응답 강제감속 안 함
+    cs.forceDecel = False
+    if self.params.get_int("DisableDM") == 0:
+      cs.forceDecel = bool(self.sm['driverMonitoringState'].noResponseForceDecel or
+                           (self.sm['selfdriveState'].state == State.softDisabling))
 
     # trigger the car's stock driver monitoring escalation
     CC.driverMonitoringEscalation = cs.forceDecel

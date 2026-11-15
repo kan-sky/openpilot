@@ -1,10 +1,14 @@
 import numpy as np
+from openpilot.common.params import Params
 from opendbc.can import CANPacker
-from opendbc.car import Bus, DT_CTRL, structs
+from opendbc.car import Bus, DT_CTRL, structs, ACCELERATION_DUE_TO_GRAVITY
+from opendbc.car.common.filter_simple import FirstOrderFilter
 from opendbc.car.lateral import apply_driver_steer_torque_limits
 from opendbc.car.gm import gmcan
+from opendbc.car.gm.auto_resume import GMAutoResume
+from opendbc.car.gm.auto_hold import GMAutoHold
 from opendbc.car.common.conversions import Conversions as CV
-from opendbc.car.gm.values import DBC, CanBus, CarControllerParams, CruiseButtons
+from opendbc.car.gm.values import DBC, CanBus, CarControllerParams, CruiseButtons, EV_CAR
 from opendbc.car.interfaces import CarControllerBase
 
 VisualAlert = structs.CarControl.HUDControl.VisualAlert
@@ -15,6 +19,27 @@ LongCtrlState = structs.CarControl.Actuators.LongControlState
 CAMERA_CANCEL_DELAY_FRAMES = 10
 # Enforce a minimum interval between steering messages to avoid a fault
 MIN_STEER_MSG_INTERVAL_MS = 15
+
+# Kans: 경사(피치)보상 상수
+PITCH_DEADZONE = 0.01 # [radians] 0.01 ≈ 1% 경사, 이하 무시
+BRAKE_PITCH_FACTOR_BP = [5., 10.] # [m/s] 저속에서는 브레이크측 경사보상을 서서히 제거 (계획 감속 그대로)
+BRAKE_PITCH_FACTOR_V = [0., 1.] # [0~1 배율]; 건드리지 말 것
+
+
+def apply_deadzone(error, deadzone):
+  # Kans: 데드존 밖의 값만 남김 (drive_helpers.apply_deadzone와 동일)
+  if error > deadzone:
+    error -= deadzone
+  elif error < - deadzone:
+    error += deadzone
+  else:
+    error = 0.
+  return error
+
+
+# Kans: panda gm.h GM_STEERING_LIMITS의 max_rate_up/max_rate_down
+PANDA_STEER_RATE_UP = 20
+PANDA_STEER_RATE_DOWN = 25
 
 
 class CarController(CarControllerBase):
@@ -32,14 +57,55 @@ class CarController(CarControllerBase):
     self.lka_icon_status_last = (False, False)
 
     self.params = CarControllerParams(self.CP)
+    self.params_ = Params()
+
+    # Kans: 조향 한계 실시간 튜닝 (CustomSteerMax/DeltaUp/DeltaDown, 차선변경 중 LC값)
+    self.steerMaxOrg = self.params.STEER_MAX
+    self.steerDeltaUpOrg = self.steerDeltaUp = self.steerDeltaUpLC = self.params.STEER_DELTA_UP
+    self.steerDeltaDownOrg = self.steerDeltaDown = self.steerDeltaDownLC = self.params.STEER_DELTA_DOWN
+
+    # Kans: 롱피치(경사보상) / EV 리젠·브레이크 경계표 - 파라미터 LongPitch, EVTable
+    self.long_pitch = self.params_.get_bool("LongPitch")
+    self.use_ev_tables = self.params_.get_bool("EVTable")
+    self.pitch = FirstOrderFilter(0., 0.09 * 4, DT_CTRL * 4)  # 25Hz로 갱신
+    self.accel_g = 0.0
+
+    # Kans hook: 오토리쥼 모듈
+    self.auto_resume = GMAutoResume(self.CP, self.params)
+    self.auto_hold = GMAutoHold()  # Kans hook: 오토홀드 모듈
+    self.btn_rc_pt = -1
+    self.btn_rc_cam = -1
 
     self.packer_pt = CANPacker(DBC[self.CP.carFingerprint][Bus.pt])
     self.packer_obj = CANPacker(DBC[self.CP.carFingerprint][Bus.radar])
     self.packer_ch = CANPacker(DBC[self.CP.carFingerprint][Bus.chassis])
 
   def update(self, CC, CS, now_nanos):
+    # Kans: 0.5초마다 조향 한계 파라미터 반영 (0 이하면 기본값). STEER_MAX는 panda 한계(300)를 넘지 않게 제한
+    if self.frame % 50 == 0:
+      steerMax = self.params_.get_int("CustomSteerMax")
+      steerDeltaUp = self.params_.get_int("CustomSteerDeltaUp")
+      steerDeltaDown = self.params_.get_int("CustomSteerDeltaDown")
+      steerDeltaUpLC = self.params_.get_int("CustomSteerDeltaUpLC")
+      steerDeltaDownLC = self.params_.get_int("CustomSteerDeltaDownLC")
+
+      # panda gm.h 한계(max_rate_up 20, max_rate_down 25) 안으로 제한 (이 포크 gm.h는 위반 시 차단하지 않으므로 여기서 지킴)
+      self.params.STEER_MAX = min(steerMax, self.steerMaxOrg) if steerMax > 0 else self.steerMaxOrg
+      self.steerDeltaUp = min(steerDeltaUp, PANDA_STEER_RATE_UP) if steerDeltaUp > 0 else self.steerDeltaUpOrg
+      self.steerDeltaDown = min(steerDeltaDown, PANDA_STEER_RATE_DOWN) if steerDeltaDown > 0 else self.steerDeltaDownOrg
+      self.steerDeltaUpLC = min(steerDeltaUpLC, PANDA_STEER_RATE_UP) if steerDeltaUpLC > 0 else self.steerDeltaUp
+      self.steerDeltaDownLC = min(steerDeltaDownLC, PANDA_STEER_RATE_DOWN) if steerDeltaDownLC > 0 else self.steerDeltaDown
+
     actuators = CC.actuators
     hud_control = CC.hudControl
+
+    # Kans: 차선변경 중(desire laneChangeLeft/Right = 3/4)에는 LC 변화율 사용
+    if hud_control.modelDesire in (3, 4):
+      self.params.STEER_DELTA_UP = self.steerDeltaUpLC
+      self.params.STEER_DELTA_DOWN = self.steerDeltaDownLC
+    else:
+      self.params.STEER_DELTA_UP = self.steerDeltaUp
+      self.params.STEER_DELTA_DOWN = self.steerDeltaDown
     hud_alert = hud_control.visualAlert
     hud_v_cruise = hud_control.setSpeed
     if hud_v_cruise > 70:
@@ -85,13 +151,33 @@ class CarController(CarControllerBase):
       # Gas/regen, brakes, and UI commands - all at 25Hz
       if self.frame % 4 == 0:
         stopping = actuators.longControlState == LongCtrlState.stopping
+
+        # Kans: 파라미터는 1초마다 갱신
+        if self.frame % 100 == 0:
+          self.long_pitch = self.params_.get_bool("LongPitch")
+          self.use_ev_tables = self.params_.get_bool("EVTable")
+
+        # Kans: 롱피치 - 오르막(+)/내리막(-) 중력성분을 가스측에 더해 PID 적분항 부담을 덜어줌
+        accel = brake_accel = actuators.accel
+        if self.long_pitch and len(CC.orientationNED) == 3:
+          self.pitch.update(CC.orientationNED[1])
+          self.accel_g = ACCELERATION_DUE_TO_GRAVITY * apply_deadzone(self.pitch.x, PITCH_DEADZONE)
+          accel += self.accel_g
+          brake_accel = actuators.accel + self.accel_g * np.interp(CS.out.vEgo, BRAKE_PITCH_FACTOR_BP, BRAKE_PITCH_FACTOR_V)
+
         if not CC.longActive:
           # ASCM sends max regen when not enabled
           self.apply_gas = self.params.INACTIVE_REGEN
           self.apply_brake = 0
         else:
-          self.apply_gas = float(np.interp(actuators.accel, self.params.GAS_LOOKUP_BP, self.params.GAS_LOOKUP_V))
-          self.apply_brake = int(round(np.interp(actuators.accel, self.params.BRAKE_LOOKUP_BP, self.params.BRAKE_LOOKUP_V)))
+          # Kans: EV는 속도별 리젠/브레이크 경계 사용
+          if self.CP.carFingerprint in EV_CAR and self.use_ev_tables:
+            self.params.update_ev_gas_brake_threshold(CS.out.vEgo)
+            gas_bp, brake_bp = self.params.EV_GAS_LOOKUP_BP, self.params.EV_BRAKE_LOOKUP_BP
+          else:
+            gas_bp, brake_bp = self.params.GAS_LOOKUP_BP, self.params.BRAKE_LOOKUP_BP
+          self.apply_gas = float(np.interp(accel, gas_bp, self.params.GAS_LOOKUP_V))
+          self.apply_brake = int(round(np.interp(brake_accel, brake_bp, self.params.BRAKE_LOOKUP_V)))
           # Don't allow any gas above inactive regen while stopping
           # FIXME: brakes aren't applied immediately when enabling at a stop
           if stopping:
@@ -100,6 +186,7 @@ class CarController(CarControllerBase):
         idx = (self.frame // 4) % 4
 
         at_full_stop = CC.longActive and CS.out.standstill
+
         near_stop = CC.longActive and (abs(CS.out.vEgo) < self.params.NEAR_STOP_BRAKE_PHASE)
         friction_brake_bus = CanBus.CHASSIS
         # GM Camera exceptions
@@ -108,10 +195,25 @@ class CarController(CarControllerBase):
           at_full_stop = at_full_stop and stopping
           friction_brake_bus = CanBus.POWERTRAIN
 
+        # Kans hook: 오토홀드
+        auto_hold_cmd = self.auto_hold.update(CC, CS, self.frame)
+
+        # Kans hook: 오토리쥼/오토크루즈 (auto_resume.py)
+        send_gas, self.apply_brake, at_full_stop, acc_engaged = self.auto_resume.update(
+          CC, CS, self.frame, self.apply_gas, self.apply_brake, at_full_stop, lambda btn: self.send_btn(CS, can_sends, btn))
+
         # GasRegenCmdActive needs to be 1 to avoid cruise faults. It describes the ACC state, not actuation
-        can_sends.append(gmcan.create_gas_regen_command(self.packer_pt, CanBus.POWERTRAIN, self.apply_gas, idx, CC.enabled, at_full_stop))
-        can_sends.append(gmcan.create_friction_brake_command(self.packer_ch, friction_brake_bus, self.apply_brake,
-                                                             idx, CC.enabled, near_stop, at_full_stop, self.CP))
+        can_sends.append(gmcan.create_gas_regen_command(self.packer_pt, CanBus.POWERTRAIN, send_gas, idx, acc_engaged, at_full_stop))
+        if auto_hold_cmd:
+          # Kans hook: 오토홀드 브레이크
+          hold_brake = max(self.apply_brake, self.params.NEAR_STOP_BRAKE_PHASE)
+          hold_near_stop = CS.out.vEgo < self.params.NEAR_STOP_BRAKE_PHASE
+          can_sends.append(gmcan.create_friction_brake_command(self.packer_ch, friction_brake_bus, hold_brake, idx, False, hold_near_stop, False, self.CP))
+          CS.autoHoldActivated = True
+        else:
+          can_sends.append(gmcan.create_friction_brake_command(self.packer_ch, friction_brake_bus, self.apply_brake,
+                                                               idx, CC.enabled, near_stop, at_full_stop, self.CP))
+          CS.autoHoldActivated = False
 
         # Send dashboard UI commands (ACC status)
         send_fcw = hud_alert == VisualAlert.fcw
@@ -142,9 +244,12 @@ class CarController(CarControllerBase):
       # A delayed cancellation allows camera to cancel and avoids a fault when user depresses brake quickly
       self.cancel_counter = self.cancel_counter + 1 if CC.cruiseControl.cancel else 0
 
+      # Kans: 오토크루즈 '진입시도'중엔 CANCEL 송신금지
+      auto_cruise_trying = (CS.out.activateCruise and not CS.out.cruiseState.enabled)
+
       # Stock longitudinal, integrated at camera
       if (self.frame - self.last_button_frame) * DT_CTRL > 0.04:
-        if self.cancel_counter > CAMERA_CANCEL_DELAY_FRAMES:
+        if self.cancel_counter > CAMERA_CANCEL_DELAY_FRAMES and (not auto_cruise_trying):
           self.last_button_frame = self.frame
           can_sends.append(gmcan.create_buttons(self.packer_pt, CanBus.CAMERA, CS.buttons_counter, CruiseButtons.CANCEL))
 
@@ -161,3 +266,22 @@ class CarController(CarControllerBase):
 
     self.frame += 1
     return new_actuators, can_sends
+
+  # Kans: 버튼 송신 (첫 송신때만 BCM 카운터를 읽고 이후 자체 증가)
+  def send_btn(self, CS, can_sends, cruise_btn, bus=None):
+    if bus is None:
+      bus = self.auto_resume.button_bus()
+
+    if bus == CanBus.CAMERA:
+      if self.btn_rc_cam < 0:
+        self.btn_rc_cam = int(CS.buttons_counter) & 0x3
+      self.btn_rc_cam = (self.btn_rc_cam + 1) & 0x3
+      rc = self.btn_rc_cam
+    elif bus == CanBus.POWERTRAIN:
+      if self.btn_rc_pt < 0:
+        self.btn_rc_pt = int(CS.buttons_counter) & 0x3
+      self.btn_rc_pt = (self.btn_rc_pt + 1) & 0x3
+      rc = self.btn_rc_pt
+    else:
+      raise ValueError(f"Unsupported bus: {bus}")
+    can_sends.append(gmcan.create_buttons(self.packer_pt, bus, rc, cruise_btn))

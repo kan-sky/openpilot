@@ -21,7 +21,13 @@ class ButtonStyle(IntEnum):
   NO_EFFECT = 6
   KEYBOARD = 7
   FORGET_WIFI = 8
-  PILL = 11  # For pill buttons in list items, for example the multiple button selector
+  # Kans
+  ORANGE =11
+  BLUE = 12
+  RED = 13
+  GRAY = 14
+  GREEN = 15
+  PILL = 16  # For pill buttons in list items, for example the multiple button selector
 
 
 ICON_PADDING = 15
@@ -40,6 +46,12 @@ BUTTON_TEXT_COLOR = {
   ButtonStyle.NO_EFFECT: rl.Color(228, 228, 228, 255),
   ButtonStyle.KEYBOARD: rl.Color(221, 221, 221, 255),
   ButtonStyle.FORGET_WIFI: rl.Color(51, 51, 51, 255),
+  # Kans
+  ButtonStyle.ORANGE: rl.Color(228, 228, 228, 255),
+  ButtonStyle.BLUE: rl.Color(228, 228, 228, 255),
+  ButtonStyle.RED: rl.Color(228, 228, 228, 255),
+  ButtonStyle.GREEN: rl.Color(228, 228, 228, 255),
+  ButtonStyle.GRAY: rl.Color(228, 228, 228, 255),
   ButtonStyle.PILL: rl.Color(228, 228, 228, 255),
 }
 
@@ -60,6 +72,12 @@ BUTTON_BACKGROUND_COLORS = {
   ButtonStyle.NO_EFFECT: rl.Color(51, 51, 51, 255),
   ButtonStyle.KEYBOARD: rl.Color(68, 68, 68, 255),
   ButtonStyle.FORGET_WIFI: rl.Color(189, 189, 189, 255),
+  # Kans
+  ButtonStyle.ORANGE: rl.Color(255, 184, 0, 200),
+  ButtonStyle.BLUE: rl.Color(1, 0, 225, 200),
+  ButtonStyle.RED: rl.Color(250, 0, 0, 200),
+  ButtonStyle.GREEN: rl.Color(65, 175, 57, 200),
+  ButtonStyle.GRAY: rl.Color(155, 155, 155, 200),
   ButtonStyle.PILL: rl.Color(57, 57, 57, 255),
 }
 
@@ -75,6 +93,12 @@ BUTTON_PRESSED_BACKGROUND_COLORS = {
   ButtonStyle.NO_EFFECT: rl.Color(51, 51, 51, 255),
   ButtonStyle.KEYBOARD: rl.Color(51, 51, 51, 255),
   ButtonStyle.FORGET_WIFI: rl.Color(130, 130, 130, 255),
+  # Kans
+  ButtonStyle.ORANGE: rl.Color(250, 185, 0, 200),
+  ButtonStyle.BLUE: rl.Color(1, 0, 225, 200),
+  ButtonStyle.RED: rl.Color(250, 0, 0, 200),
+  ButtonStyle.GREEN: rl.Color(65, 175, 57, 200),
+  ButtonStyle.GRAY: rl.Color(155, 155, 155, 200),
   ButtonStyle.PILL: rl.Color(74, 74, 74, 255),
 }
 
