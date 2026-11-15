@@ -12,6 +12,10 @@ LongCtrlState = structs.CarControl.Actuators.LongControlState
 # 정지 직후에는 레이더 앞차 속도가 흔들려 앞차 출발로 오검출된다 - 이 시간 동안 정지를 유지해야 Creep Release 허용
 CREEP_RELEASE_MIN_STANDSTILL = 1.0  # s
 
+# 오토크루즈: ECM 활성 후 SET 인식을 기다리는 최대 시간 (ECM은 약 0.5초 뒤 FAULTED 전환)
+AUTO_CRUISE_SET_ACCEPT_TIMEOUT = 0.30  # s
+AUTO_CRUISE_MAX_TRIES = 3  # 0.12초 간격 -> 0, 0.12, 0.24초
+
 # Kans: GM 오토리쥼/오토크루즈 모듈
 # - carcontroller 25Hz 블록에서 가스/브레이크 계산 직후, 2CB/브레이크 송신 직전에 호출
 # - 앞차 정보는 이 모듈에서 radarState를 직접 구독
@@ -196,31 +200,42 @@ class GMAutoResume:
       else:
         self.resume_fault_guard = 0
 
-    # AutoCruise: 크루즈 OFF 상태에서, 메인 활성(activateCruise) 신호가 있을 때
-    if auto_cruise_enabled and self._pending_activateCruise and not CS.out.cruiseState.enabled:
-      # Kans: AutoCruise (0.25초 윈도 안에 최대 2회 버튼 시도)
+    # AutoCruise: 크루즈 OFF 상태에서 메인 활성(activateCruise) 신호가 있을 때 SET 송신.
+    # 2CB apply로 ECM이 먼저 활성(1)이 되어도 SET 인식(CruiseSetAccepted)이 0.5초 안에 없으면 FAULTED가 되므로
+    # 인식될 때까지 창을 유지하며 SET을 재송신한다.
+    waiting_set_accept = self.autoCruise_activate and CS.out.cruiseState.enabled and not CS.cruise_set_accepted
+    if auto_cruise_enabled and self._pending_activateCruise and (not CS.out.cruiseState.enabled or waiting_set_accept):
       if not self.autoCruise_activate:
         self.autoCruise_activate = True
         self.autoCruise_frame = frame
         self.autoCruise_try_count = 0
 
       if self.autoCruise_activate:
-        within_window = (frame - self.autoCruise_frame) * DT_CTRL <= self.cruiseDelay_time  # 예: 0.25초
+        elapsed = (frame - self.autoCruise_frame) * DT_CTRL
+        if CS.out.cruiseState.enabled:
+          # ECM 활성 후: SET 인식 대기 (FAULTED 전환 0.5초 전까지)
+          within_window = elapsed <= AUTO_CRUISE_SET_ACCEPT_TIMEOUT
+          max_tries = AUTO_CRUISE_MAX_TRIES
+        else:
+          within_window = elapsed <= self.cruiseDelay_time  # 예: 0.25초
+          max_tries = 2
 
-        if within_window and self.autoCruise_try_count < 2:
+        if within_window and self.autoCruise_try_count < max_tries:
           # Kans: GM의 RESUME은 완전 정지 후 크루즈를 복구하지 못하고 SET만 된다 (실차 확인) - 자동체결은 DECEL_SET
           # ON 요청(1)이 유지될 때만 송신
           if (frame - self.last_button_frame) * DT_CTRL >= 0.12 and CS.out.activateCruise == 1:
             btn = CruiseButtons.DECEL_SET
-            cloudlog.warning(f"[gm autocruise] send btn={btn} try={self.autoCruise_try_count} activateCruise={CS.out.activateCruise}")
+            cloudlog.warning(f"[gm autocruise] send btn={btn} try={self.autoCruise_try_count} activateCruise={CS.out.activateCruise} "
+                             f"cruiseState.enabled={CS.out.cruiseState.enabled}")
             send_btn(btn)
             self.last_button_frame = frame
             self.autoCruise_try_count += 1
 
-        # 종료 조건: 시간 초과 / 2회 시도 완료 / 크루즈 실제 ON
-        if (not within_window) or (self.autoCruise_try_count >= 2) or CS.out.cruiseState.enabled:
+        # 종료 조건: SET 인식 / 시간 초과
+        if CS.cruise_set_accepted or not within_window:
           cloudlog.warning(f"[gm autocruise] window closed: tries={self.autoCruise_try_count} "
-                           f"cruiseState.enabled={CS.out.cruiseState.enabled} timed_out={not within_window}")
+                           f"cruiseState.enabled={CS.out.cruiseState.enabled} setAccepted={CS.cruise_set_accepted} "
+                           f"timed_out={not within_window}")
           self.autoCruise_activate = False
           self.autoCruise_frame = 0
           self.autoCruise_try_count = 0
