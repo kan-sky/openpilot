@@ -33,8 +33,10 @@ if HARDWARE.get_device_type() == "tizi":
   VOLUME_BASE = 50
 
 AudibleAlert = log.SelfdriveState.AudibleAlert
-CRITICAL_MAX = -1 # internal sound key, not an AudibleAlert
-CARROT_SDI_INFORM = -2 # 내부 사운드 키: 카메라 카운트다운 시작 안내음
+# internal sound keys, not AudibleAlerts
+CRITICAL_MAX = -1
+DM_CRITICAL_MAX = -2
+CARROT_SDI_INFORM = -3 # 내부 사운드 키: 카메라 카운트다운 시작 안내음
 
 
 sound_list: dict[int, tuple[str, int | None, float]] = {
@@ -50,8 +52,10 @@ sound_list: dict[int, tuple[str, int | None, float]] = {
   AudibleAlert.preAlert: ("pre_alert.wav", 1, MAX_VOLUME),
 
   AudibleAlert.warningSoft: ("critical.wav", None, MAX_VOLUME),
-  AudibleAlert.warningImmediate: ("dm_critical.wav", None, MAX_VOLUME),
-  CRITICAL_MAX: ("dm_critical_max.wav", None, MAX_VOLUME),
+  AudibleAlert.warningImmediateSystem: ("critical.wav", None, MAX_VOLUME),
+  AudibleAlert.warningImmediateUser: ("dm_critical.wav", None, MAX_VOLUME),
+  CRITICAL_MAX: ("critical_max.wav", None, MAX_VOLUME),
+  DM_CRITICAL_MAX: ("dm_critical_max.wav", None, MAX_VOLUME),
 
   AudibleAlert.autoHold: ("audio_auto_hold.wav", 1, MAX_VOLUME),  # Kans: GM 오토홀드
   # Kans: 캐럿 신호정지/출발 안내음
@@ -72,6 +76,13 @@ sound_list: dict[int, tuple[str, int | None, float]] = {
   AudibleAlert.audio8: ("audio_8.wav", 1, MAX_VOLUME),
   AudibleAlert.audio9: ("audio_9.wav", 1, MAX_VOLUME),
   AudibleAlert.audio10: ("audio_10.wav", 1, MAX_VOLUME),
+}
+
+# critical alerts ramp up in volume, then switch to their max sound
+critical_max_sounds = {
+  AudibleAlert.warningSoft: CRITICAL_MAX,
+  AudibleAlert.warningImmediateSystem: CRITICAL_MAX,
+  AudibleAlert.warningImmediateUser: DM_CRITICAL_MAX,
 }
 
 def check_selfdrive_timeout_alert(sm):
@@ -197,7 +208,7 @@ class Soundd:
       return
     self.pending_stop = False
     if self.current_alert != new_alert and (new_alert != AudibleAlert.none or current_alert_played_once):
-      if new_alert in (AudibleAlert.warningSoft, AudibleAlert.warningImmediate):
+      if new_alert in critical_max_sounds:
         self.ramp_start_volume = self.current_volume
         self.ramp_start_time = time.monotonic()
       self.current_alert = new_alert
@@ -224,7 +235,7 @@ class Soundd:
       new_alert = self.update_carrot_alert(sm, new_alert)
       self.update_alert(new_alert)
     elif check_selfdrive_timeout_alert(sm):
-      self.update_alert(AudibleAlert.warningImmediate)
+      self.update_alert(AudibleAlert.warningImmediateSystem)
       self.selfdrive_timeout_alert = True
     elif self.selfdrive_timeout_alert:
       self.update_alert(AudibleAlert.none)
@@ -263,12 +274,13 @@ class Soundd:
 
         self.get_audible_alert(sm)
 
-        if self.current_alert in (AudibleAlert.warningSoft, AudibleAlert.warningImmediate):
+        if self.current_alert in critical_max_sounds:
           elapsed = time.monotonic() - self.ramp_start_time
           ramp_vol = float(np.interp(elapsed, [0, ALERT_RAMP_TIME], [self.ramp_start_volume, MAX_VOLUME]))
           self.current_volume = max(self.current_volume, ramp_vol)
-          if elapsed >= ALERT_MAX_TIME and self.current_sound != CRITICAL_MAX:
-            self.current_sound = CRITICAL_MAX
+          max_sound = critical_max_sounds[self.current_alert]
+          if elapsed >= ALERT_MAX_TIME and self.current_sound != max_sound:
+            self.current_sound = max_sound
             self.current_sound_frame = 0
 
         rk.keep_time()

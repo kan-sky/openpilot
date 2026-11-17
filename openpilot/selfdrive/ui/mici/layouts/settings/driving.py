@@ -1,7 +1,7 @@
 from openpilot.cereal import log
 
 from openpilot.system.ui.widgets.scroller import NavScroller
-from openpilot.selfdrive.ui.mici.widgets.button import BigToggle, BigParamControl, BigMultiParamToggle
+from openpilot.selfdrive.ui.mici.widgets.button import BigParamControl, BigMultiParamToggle
 from openpilot.system.ui.lib.application import gui_app
 from openpilot.selfdrive.ui.layouts.settings.common import restart_needed_callback
 from openpilot.selfdrive.ui.ui_state import ui_state
@@ -10,7 +10,7 @@ from openpilot.selfdrive.ui.mici.layouts.settings.initial_cruise_speed import In
 PERSONALITY_TO_INT = log.LongitudinalPersonality.schema.enumerants
 
 
-class TogglesLayoutMici(NavScroller):
+class DrivingLayoutMici(NavScroller):
   def __init__(self):
     super().__init__()
 
@@ -22,18 +22,10 @@ class TogglesLayoutMici(NavScroller):
     self._initial_cruise_speed = InitialCruiseSpeedButton()
     # 캐럿 크루즈 로직은 SET 시 현재 속도를 쓰므로 초기 최대속도 설정이 반영되지 않아 메뉴를 숨긴다.
     self._initial_cruise_speed.set_visible(False)
-    is_metric_toggle = BigToggle("use metric units", initial_state=ui_state.params.get_bool("IsMetric"), toggle_callback=self._on_metric_toggle)
     ldw_toggle = BigParamControl("lane departure warnings", "IsLdwEnabled",
                                  description="Warn when you drift across a detected lane line.\n" +
                                              "Only above 31 mph (50 km/h), with no turn signal.")
     always_on_dm_toggle = BigParamControl("always-on driver monitor", "AlwaysOnDM", description="Monitor the driver even when openpilot is not engaged.")
-    record_front = BigParamControl("record & upload cabin camera", "RecordFront",
-                                   description_icon=gui_app.texture("icons_mici/settings/device/cameras.png", 64, 64),
-                                   toggle_callback=restart_needed_callback, description="Upload cabin camera data to help improve driver monitoring.")
-    record_mic = BigParamControl("record & upload mic audio", "RecordAudio", description_icon=gui_app.texture("icons_mici/microphone.png", 64, 64),
-                                 toggle_callback=restart_needed_callback,
-                                 description="Record microphone audio while driving.\n" +
-                                             "Audio is included in dashcam videos in comma connect.")
     enable_openpilot = BigParamControl("enable openpilot", "OpenpilotEnabledToggle", toggle_callback=restart_needed_callback,
                                        description="Enable to use openpilot driver assistance.\n" +
                                                    "Disable to use your car's stock driver assistance.")
@@ -41,28 +33,20 @@ class TogglesLayoutMici(NavScroller):
     self._scroller.add_widgets([
       self._personality_toggle,
       self._initial_cruise_speed,
-      is_metric_toggle,
       ldw_toggle,
       always_on_dm_toggle,
-      record_front,
-      record_mic,
       enable_openpilot,
     ])
 
     # Toggle lists
     self._refresh_toggles = (
-      ("IsMetric", is_metric_toggle),
       ("IsLdwEnabled", ldw_toggle),
       ("AlwaysOnDM", always_on_dm_toggle),
-      ("RecordFront", record_front),
-      ("RecordAudio", record_mic),
       ("OpenpilotEnabledToggle", enable_openpilot),
     )
 
     enable_openpilot.set_enabled(lambda: not ui_state.engaged)
     always_on_dm_toggle.set_enabled(not ui_state.params.get_bool("AlwaysOnDMLock"))
-    record_front.set_enabled(False if ui_state.params.get_bool("RecordFrontLock") else (lambda: not ui_state.engaged))
-    record_mic.set_enabled(lambda: not ui_state.engaged)
 
     if ui_state.params.get_bool("ShowDebugInfo"):
       gui_app.set_show_touches(True)
@@ -81,10 +65,6 @@ class TogglesLayoutMici(NavScroller):
 
   def show_event(self):
     super().show_event()
-    self._update_toggles()
-
-  def _on_metric_toggle(self, state: bool):
-    ui_state.params.put_bool("IsMetric", state, block=True)
     self._update_toggles()
 
   def _update_toggles(self):

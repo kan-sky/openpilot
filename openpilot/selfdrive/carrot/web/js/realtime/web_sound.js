@@ -41,6 +41,7 @@
     31: { file: "audio_8.wav" },
     32: { file: "audio_9.wav" },
     33: { file: "audio_10.wav" },
+    37: { file: "warning_immediate.wav" },
   });
 
   let enabled = loadEnabled();

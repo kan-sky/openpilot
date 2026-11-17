@@ -106,7 +106,7 @@ async def _send_sound_states(ws: web.WebSocketResponse) -> None:
       missing_for = 0.0
     if missing_for > SELFDRIVE_STATE_TIMEOUT:
       if enabled and missing_for < SELFDRIVE_STATE_TIMEOUT + 10.0:
-        alert = _enum_raw(AudibleAlert.warningImmediate)
+        alert = _enum_raw(AudibleAlert.warningImmediateSystem)
       else:
         alert = _enum_raw(AudibleAlert.none)
 
