@@ -43,6 +43,8 @@ class CarState(CarStateBase):
     # Kans: accFault delay
     self.startup_time = time.monotonic()
     self._acc_faulted_last = False
+    # ECM이 SET 요청을 받아들였는지 (0x1C4 byte1 bit4). 오토크루즈 진입 후 0.5초 안에 안 켜지면 ECM이 FAULTED로 전환
+    self.cruise_set_accepted = False
 
   def update_button_enable(self, buttonEvents: list[structs.CarState.ButtonEvent]):
     if not self.CP.pcmCruise:
@@ -160,6 +162,7 @@ class CarState(CarStateBase):
     startup_fault_ignore = (time.monotonic() - self.startup_time) < 60.0
     ret.accFaulted = ((cruise_faulted and not startup_fault_ignore) or friction_brake_unavailable)
     self._acc_faulted_last = ret.accFaulted
+    self.cruise_set_accepted = pt_cp.vl["AcceleratorPedal2"]["CruiseSetAccepted"] == 1
 
     ret.cruiseState.enabled = pt_cp.vl["AcceleratorPedal2"]["CruiseState"] != AccState.OFF
     ret.cruiseState.standstill = pt_cp.vl["AcceleratorPedal2"]["CruiseState"] == AccState.STANDSTILL
