@@ -31,6 +31,7 @@ class CarState(CarStateBase):
     self.pt_lka_steering_cmd_counter = 0
     self.cam_lka_steering_cmd_counter = 0
     self.buttons_counter = 0
+    self.buttons_frame_fresh = False
 
     # Kans: autoHold
     self.autoHold = True
@@ -69,6 +70,8 @@ class CarState(CarStateBase):
     self.distance_button = pt_cp.vl["ASCMSteeringButton"]["DistanceButton"]
     self.lfa_button = pt_cp.vl["ASCMSteeringButton"]["LKAButton"]  # Kans: LKA 버튼 → 캐럿 LFA 버튼으로 사용
     self.buttons_counter = pt_cp.vl["ASCMSteeringButton"]["RollingCounter"]
+    # 이번 주기에 BCM 버튼 프레임(0x1E1, 약 30ms 주기)이 새로 들어왔는지. 직후에 보낸 버튼만 다음 BCM 프레임에 덮이지 않는다
+    self.buttons_frame_fresh = len(pt_cp.vl_all["ASCMSteeringButton"]["RollingCounter"]) > 0
     self.pscm_status = copy.copy(pt_cp.vl["PSCMStatus"])
 
     # Variables used for avoiding LKAS faults

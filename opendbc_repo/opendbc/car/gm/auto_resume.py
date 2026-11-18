@@ -223,7 +223,8 @@ class GMAutoResume:
         if within_window and self.autoCruise_try_count < max_tries:
           # Kans: GM의 RESUME은 완전 정지 후 크루즈를 복구하지 못하고 SET만 된다 (실차 확인) - 자동체결은 DECEL_SET
           # ON 요청(1)이 유지될 때만 송신
-          if (frame - self.last_button_frame) * DT_CTRL >= 0.12 and CS.out.activateCruise == 1:
+          # BCM 버튼 프레임 직후에만 송신: 다음 BCM 프레임 직전에 보내면 곧바로 '버튼 없음'으로 덮여 ECM이 SET을 놓친다
+          if (frame - self.last_button_frame) * DT_CTRL >= 0.12 and CS.out.activateCruise == 1 and CS.buttons_frame_fresh:
             btn = CruiseButtons.DECEL_SET
             cloudlog.warning(f"[gm autocruise] send btn={btn} try={self.autoCruise_try_count} activateCruise={CS.out.activateCruise} "
                              f"cruiseState.enabled={CS.out.cruiseState.enabled}")
@@ -316,6 +317,10 @@ class GMAutoResume:
     # resume_active는 "가스 펄스" 조건 -> starting/크루즈ON 게이트
     resume_active = ((self.resume_frame != 0) and auto_longcontrol and (CS.out.vEgo < 3.5) and lead_ok and
                      (starting or CS.out.cruiseState.enabled) and (CS.out.standstill or CS.out.cruiseState.standstill))
+
+    # 오토크루즈 첫 SET을 보내기 전에는 2CB 활성 엣지를 내지 않는다 (SET보다 먼저 ECM이 활성되지 않도록, 최대 1 BCM 주기)
+    if self.autoCruise_activate and self.autoCruise_try_count == 0 and not CS.out.cruiseState.enabled:
+      acc_engaged = False
 
     # 2CB: 실제 가스 송신
     if resume_active:
