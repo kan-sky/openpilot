@@ -7,7 +7,7 @@ from openpilot.common.swaglog import cloudlog
 
 from openpilot.selfdrive.controls.lib.desire_lib.constants import (
   LaneChangeState, LaneChangeDirection, TurnDirection,
-  LANE_CHANGE_SPEED_MIN, LANE_CHANGE_TIME_MAX, ATC_TURN_MAX_SPEED,
+  LANE_CHANGE_SPEED_MIN, LANE_CHANGE_TIME_MAX, ATC_TURN_MAX_SPEED, LAST_LANE_HOLD_SEC,
   BLINKER_NONE, BLINKER_LEFT, BLINKER_RIGHT,
   DESIRES, TURN_DESIRES
 )
@@ -228,6 +228,10 @@ class DesireHelper:
     self.left.update_triggers()
     self.right.update_triggers()
 
+    hold_frames = int(LAST_LANE_HOLD_SEC / DT_MDL)
+    for s in (self.left, self.right):
+      s.last_lane_hold_frames = hold_frames if self._is_last_lane(s) else max(0, s.last_lane_hold_frames - 1)
+
     # externally readable
     self.lane_change_available_left = self.left.lane_change_available
     self.lane_change_available_right = self.right.lane_change_available
@@ -247,6 +251,11 @@ class DesireHelper:
   @staticmethod
   def _is_last_lane(side: SideState) -> bool:
     return side.lane_exist_count.counter <= 0 and not side.lane_change_available_geom
+
+  @classmethod
+  def _was_last_lane(cls, side: SideState) -> bool:
+    # 옆 차선선 없이 도로 끝 쪽 공간만 열린 경우(진출로가 벌어지는 중)는 직전까지 맨 끝 차선이었으면 인정
+    return cls._is_last_lane(side) or (side.lane_exist_count.counter <= 0 and side.last_lane_hold_frames > 0)
 
   # ─────────────────────────────────────────────
   # main update
@@ -415,7 +424,7 @@ class DesireHelper:
 
             # 맨 끝 차선이 아니면, ATC 자동 차선변경 비활성
             # (원본 유지: 차선 존재하거나 geom 가능하면 auto off, 아니면 on)
-            self.auto_lane_change_enable = self._is_last_lane(side)
+            self.auto_lane_change_enable = self._was_last_lane(side)
             self.next_lane_change = False
 
         elif self.lane_change_state == LaneChangeState.preLaneChange:
@@ -447,7 +456,7 @@ class DesireHelper:
 
             # Arm automatic ATC only after this side has actually become the last lane.
             # Keep it latched so a newly appearing lane can start the maneuver later.
-            if atc_lane_change_only and self._is_last_lane(side):
+            if atc_lane_change_only and self._was_last_lane(side):
               self.auto_lane_change_enable = True
 
             if not desire_enabled or (below_lane_change_speed and not atc_lane_change_only):
@@ -529,6 +538,7 @@ class DesireHelper:
         f"laneAvailTrigger={side.lane_available_trigger if side else None} "
         f"laneAppeared={side.lane_appeared if side else None} "
         f"laneExistCount={side.lane_exist_count.counter if side else None} "
+        f"lastLaneHold={side.last_lane_hold_frames if side else None} "
         f"sideObjDetected={side.side_object_detected if side else None} "
         f"bsdHold={side.bsd_hold_counter if side else None} "
         f"laneChangeAvail={side.lane_change_available if side else None} "

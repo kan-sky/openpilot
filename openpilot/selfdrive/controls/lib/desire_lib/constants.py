@@ -24,6 +24,9 @@ EDGE_AVAILABLE_MEMORY_DIST = 215.0
 LANE_WIDTH_KR = 3.3
 # Kans: 옆 차선이 맨 끝 차선이라는 판단이 이 시간 이상 유지돼야 ATC 자동 차선변경을 허용
 OUTERMOST_LANE_SUSTAIN_SEC = 0.5
+# Kans: 분기 준비(prepare) 중 진출 공간이 먼저 열리면 지시가 올 때는 이미 맨 끝 차선이 아니다.
+# 옆 차선선이 없는 상태에서 이 시간 안에 맨 끝 차선이었으면 맨 끝 차선으로 본다
+LAST_LANE_HOLD_SEC = 3.0
 # Kans: 내비 좌/우회전 지시라도 이 속도 이상이면 교차로 회전이 아니라(고속도로 분기 등) 회전 desire를 주지 않고,
 # 자동 차선변경도 하지 않는다 (운전자 토크로만 시작)
 ATC_TURN_MAX_SPEED = 40 * CV.KPH_TO_MS

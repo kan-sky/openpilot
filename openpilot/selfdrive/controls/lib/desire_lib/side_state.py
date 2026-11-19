@@ -55,6 +55,8 @@ class SideState:
   edge_beyond_adjacent: float = 0.0
   adjacent_outermost_frames: int = 0
   adjacent_outermost: bool = False
+  # Kans: 마지막으로 맨 끝 차선이었던 뒤 남은 유지 프레임
+  last_lane_hold_frames: int = 0
 
   # smoothing
   lane_width_queue: deque = field(default_factory=lambda: deque(maxlen=int(1.0 / DT_MDL)))
