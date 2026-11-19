@@ -50,6 +50,7 @@ class DesireHelper:
     self.atc_type = ""
     self.atc_active = 0  # 0: 없음, 1: ATC 동작, 2: 충돌
     self.atc_done_type = ""  # 차선변경을 마친 ATC 지시 (같은 지시가 끝날 때까지 재시도 안 함)
+    self.atc_x_dist_last = 0  # 직전 프레임의 안내 지점까지 남은 거리
 
     # auto lane change
     self.auto_lane_change_enable = False
@@ -126,6 +127,12 @@ class DesireHelper:
     # 완료된 ATC 지시는 다른 지시로 바뀌면 해제 ("fork right" ↔ "fork right prepare"는 같은 지시)
     if self.atc_done_type and atc_type.replace(" prepare", "") != self.atc_done_type:
       self.atc_done_type = ""
+    # 같은 방향 분기가 연달아 오면 지시 이름이 같으므로, 남은 거리가 크게 늘어나면 새 안내 지점으로 보고 해제
+    x_dist = carrotMan.xDistToTurn
+    if self.atc_done_type and x_dist > self.atc_x_dist_last + 50:
+      cloudlog.warning(f"[desire atc] new guidance point ({self.atc_x_dist_last} -> {x_dist} m), clear done: {self.atc_done_type}")
+      self.atc_done_type = ""
+    self.atc_x_dist_last = x_dist
 
     # 유지 카운트는 DesireHelper에서 관리
     if self.carrot_lane_change_count > 0:
