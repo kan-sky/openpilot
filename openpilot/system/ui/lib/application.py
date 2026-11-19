@@ -666,7 +666,7 @@ class GuiApplication:
       chars.update(TRANSLATIONS_DIR.joinpath(f"app_{language}.po").read_text(encoding="utf-8"))
       codepoints = sorted(map(ord, chars))
       with as_file(FONT_DIR) as fspath:
-        font = rl.load_font_ex(fspath / NOTO_FONTS.get(language, NOTO_FONTS["ko"])).as_posix(), 48,
+        font = rl.load_font_ex((fspath / NOTO_FONTS.get(language, NOTO_FONTS["ko"])).as_posix(), 48,
                                codepoints, len(codepoints))
       rl.set_texture_filter(font.texture, rl.TextureFilter.TEXTURE_FILTER_BILINEAR)
       self._fallback_fonts[language] = font
