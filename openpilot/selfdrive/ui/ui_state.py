@@ -74,6 +74,8 @@ class UIState:
         "carOutput",
         "carControl",
         "vehicleParameters",
+        "lateralDelay",
+        "lateralTorqueParameters",
         "testJoystick",
         "rawAudioData",
       ]

@@ -1,6 +1,10 @@
+import time
 import numpy as np
 import raylib_nb as rl
 from openpilot.cereal import log
+from openpilot.common.params import Params
+from openpilot.common.filter_simple import FirstOrderFilter
+from openpilot.common.realtime import DT_MDL
 from openpilot.cereal.visionipc import VisionStreamType
 from openpilot.selfdrive.ui import UI_BORDER_SIZE
 from openpilot.selfdrive.ui.ui_state import ui_state, UIStatus
@@ -9,7 +13,8 @@ from openpilot.selfdrive.ui.onroad.driver_state import DriverStateRenderer
 from openpilot.selfdrive.ui.onroad.hud_renderer import HudRenderer
 from openpilot.selfdrive.ui.onroad.model_renderer import ModelRenderer
 from openpilot.selfdrive.ui.onroad.cameraview import CameraView
-from openpilot.system.ui.lib.application import gui_app
+from openpilot.system.ui.lib.application import gui_app, FontWeight
+from openpilot.system.ui.lib.text_measure import measure_text_cached
 from openpilot.common.transformations.camera import DEVICE_CAMERAS, DeviceCameraConfig, view_frame_from_device_frame
 from openpilot.common.transformations.orientation import rot_from_euler
 
@@ -28,6 +33,7 @@ BORDER_COLORS = {
 WIDE_CAM_MAX_SPEED = 5.0  # m/s (11 mph)
 ROAD_CAM_MIN_SPEED = 10.0  # m/s (22 mph)
 INF_POINT = np.array([1000.0, 0.0, 0.0])
+BORDER_FONT_SIZE = 26
 
 
 class AugmentedRoadView(CameraView):
@@ -47,6 +53,14 @@ class AugmentedRoadView(CameraView):
     self._hud_renderer = HudRenderer()
     self.alert_renderer = AlertRenderer()
     self.driver_state_renderer = DriverStateRenderer()
+
+    # 테두리 정보 표시용
+    self._border_font = gui_app.font(FontWeight.MEDIUM)
+    self._params_memory = Params("/dev/shm/params")
+    self._border_params_next_t = 0.0
+    self._git_branch = ""
+    self._network_address = ""
+    self._lane_width_filter = FirstOrderFilter(3.2, 3.0, DT_MDL)
 
   def _render(self, rect):
     # Only render when system is started to avoid invalid data access
@@ -92,6 +106,7 @@ class AugmentedRoadView(CameraView):
 
     # Draw colored border based on driving state
     self._draw_border(rect)
+    self._draw_border_info(rect)
 
   def _handle_mouse_press(self, _):
     if self._click_callback is not None:
@@ -108,6 +123,80 @@ class AugmentedRoadView(CameraView):
     border_rect = rl.Rectangle(rect.x + UI_BORDER_SIZE, rect.y + UI_BORDER_SIZE,
                                rect.width - 2 * UI_BORDER_SIZE, rect.height - 2 * UI_BORDER_SIZE)
     rl.draw_rectangle_rounded_lines_ex(border_rect, border_roundness, 10, UI_BORDER_SIZE, border_color)
+
+  def _refresh_border_params(self):
+    # 파라미터 파일 읽기는 2초에 한 번만
+    now = time.monotonic()
+    if now < self._border_params_next_t:
+      return
+    self._border_params_next_t = now + 2.0
+    try:
+      self._git_branch = ui_state.params.get("GitBranch") or ""
+      self._network_address = self._params_memory.get("NetworkAddress") or ""
+    except Exception:
+      pass
+
+  def _border_text(self, text: str, x: float, y: float, align: str):
+    if not text:
+      return
+    font = self._border_font if text.isascii() else gui_app.fallback_font()
+    size = measure_text_cached(font, text, BORDER_FONT_SIZE)
+    if align == "center":
+      x -= size.x / 2
+    elif align == "right":
+      x -= size.x
+    rl.draw_text_ex(font, text, rl.Vector2(x + 2, y + 2), BORDER_FONT_SIZE, 0, rl.Color(0, 0, 0, 200))
+    rl.draw_text_ex(font, text, rl.Vector2(x, y), BORDER_FONT_SIZE, 0, rl.WHITE)
+
+  def _draw_border_info(self, rect: rl.Rectangle):
+    # 테두리 위아래에 차량/보정/장치 상태를 표시
+    sm = ui_state.sm
+    self._refresh_border_params()
+
+    top_left = top_center = top_right = bottom_center = device_text = ""
+    try:
+      cp = sm["carParams"]
+      top_left = str(cp.carFingerprint) + (" - OP Long" if cp.openpilotLongitudinalControl else "")
+      top_center = str(sm["carState"].logCarrot)
+
+      parts = []
+      if sm.valid["lateralDelay"] and sm.recv_frame["lateralDelay"] > 0:
+        ld = sm["lateralDelay"]
+        parts.append(f"LD[{ld.calPerc}%,{ld.lateralDelay:.2f}]")
+      if sm.valid["lateralTorqueParameters"] and sm.recv_frame["lateralTorqueParameters"] > 0:
+        lt = sm["lateralTorqueParameters"]
+        parts.append(f"LT[{lt.calPerc}%,{'ON' if lt.valid else 'OFF'}]({lt.latAccelFactorFiltered:.2f}/{lt.frictionCoefficientFiltered:.2f})")
+      if sm.recv_frame["vehicleParameters"] > 0:
+        parts.append(f"SR({sm['vehicleParameters'].steerRatio:.1f})")
+      top_right = ", ".join(parts)
+
+      ds = sm["deviceState"]
+      cpu_usage = list(ds.cpuUsagePercent)
+      cpu_temp = list(ds.cpuTempC)
+      cpu_text = f"{sum(cpu_usage) / len(cpu_usage):.0f}%" if cpu_usage else "--"
+      if cpu_temp:
+        cpu_text += f",{max(cpu_temp):.0f}°C"
+      device_text = f"MEM:{ds.memoryUsagePercent}% DISK:{100 - ds.freeSpacePercent:.0f}% CPU:{cpu_text}"
+
+      # 차선폭: 왼쪽 | 내 차선 | 오른쪽
+      md = sm["modelV2"]
+      if sm.updated["modelV2"] and len(md.laneLines) >= 4 and len(md.laneLineProbs) >= 4:
+        if md.laneLineProbs[1] > 0.5 and md.laneLineProbs[2] > 0.5:
+          self._lane_width_filter.update(abs(md.laneLines[2].y[0] - md.laneLines[1].y[0]))
+      bottom_center = f"{md.meta.laneWidthLeft:.1f}m | {self._lane_width_filter.x:.1f}m | {md.meta.laneWidthRight:.1f}m"
+    except Exception:
+      pass
+
+    margin = 40.0
+    top_y = rect.y + (UI_BORDER_SIZE - BORDER_FONT_SIZE) / 2
+    bottom_y = rect.y + rect.height - UI_BORDER_SIZE + (UI_BORDER_SIZE - BORDER_FONT_SIZE) / 2
+    self._border_text(top_left, rect.x + margin, top_y, "left")
+    self._border_text(top_center, rect.x + rect.width / 2, top_y, "center")
+    self._border_text(top_right, rect.x + rect.width - margin, top_y, "right")
+    self._border_text(device_text, rect.x + rect.width - margin, top_y + UI_BORDER_SIZE + 6, "right")
+    self._border_text(self._git_branch, rect.x + margin, bottom_y, "left")
+    self._border_text(bottom_center, rect.x + rect.width / 2, bottom_y, "center")
+    self._border_text(self._network_address, rect.x + rect.width - margin, bottom_y, "right")
 
   def _switch_stream_if_needed(self, sm):
     if sm['carParams'].openpilotLongitudinalControl and WIDE_CAM in self.available_streams:
