@@ -195,7 +195,7 @@ class CarInterface(CarInterfaceBase):
       ret.minSteerSpeed = 10 * CV.KPH_TO_MS
 
       # Tuning for experimental long
-      ret.longitudinalTuning.kiV = [2.0, 1.5]
+      ret.longitudinalTuning.kiV = [0.5, 1.5]
 
       if alpha_long:
         ret.pcmCruise = False
@@ -219,7 +219,8 @@ class CarInterface(CarInterfaceBase):
       ret.minSteerSpeed = 7.0 * CV.MPH_TO_MS
 
       # Tuning
-      ret.longitudinalTuning.kiV = [2.4, 1.5]
+      # Kans: 저속 적분값 2.4는 브레이크 지연(0.4~0.5초)과 맞물려 정지직전 감속/가속을 2~3회 반복하므로 사용하지 않는다
+      ret.longitudinalTuning.kiV = [0.34, 1.2]
 
     # These cars have been put into dashcam only due to both a lack of users and test coverage.
     # These cars likely still work fine. Once a user confirms each car works and a test route is
