@@ -94,7 +94,9 @@ class GMAutoResume:
       at_full_stop = at_full_stop and not resume
 
     if CC.cruiseControl.resume and pcm_standstill:
-      if self.CP.carFingerprint in EV_CAR:
+      # 2CB를 끄면 ECM은 OFF로 내려가고, 이어서 RES 버튼을 받아야 다시 체결된다. RES는 실제 정지 상태에서만
+      # 보내므로, 굴러가는 중(ECM은 아직 정지 상태)에 끄면 RES 없이 재활성되어 0.5초 뒤 Cruise Fault가 난다
+      if self.CP.carFingerprint in EV_CAR and CS.out.standstill:
         acc_engaged = False
       else:
         acc_engaged = CC.enabled
