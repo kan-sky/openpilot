@@ -1,4 +1,5 @@
 import atexit
+import datetime
 import math
 import os
 import queue
@@ -244,6 +245,15 @@ class GuiApplication:
     self._render_profiler = None
     self._render_profile_start_time = None
 
+    # 화면 녹화(ScreenRecord): 3프레임마다 한 장씩, 60초마다 새 파일
+    self._record_enabled = False
+    self._record_dir = Path("/data/media/0/videos")
+    self._record_max_sec = 60
+    self._record_every_n = 3
+    self._record_t0 = 0.0
+    self._record_start_t = 0.0
+    self._record_frame_idx = 0
+
   @property
   def frame(self):
     return self._frame
@@ -375,6 +385,89 @@ class GuiApplication:
         continue
       except Exception:
         break
+
+  def _new_record_path(self) -> Path:
+    self._record_dir.mkdir(parents=True, exist_ok=True)
+    return self._record_dir / (datetime.datetime.now().strftime("%Y%m%d-%H%M%S") + ".mp4")
+
+  def _init_record_ffmpeg(self, out_path: Path):
+    fps = self._target_fps if self._target_fps > 0 else _DEFAULT_FPS
+    # ffmpeg에는 n프레임마다 한 장만 들어가므로 입력 fps도 그만큼 낮춰야 재생 속도가 맞다
+    capture_fps = fps / max(1, self._record_every_n)
+    ffmpeg_args = [
+      'ffmpeg',
+      '-v', 'warning',
+      '-nostats',
+      '-f', 'rawvideo',
+      '-pix_fmt', 'rgba',
+      '-s', 'x'.join(map(str, rl.cpu.screen().shape[1::-1])),
+      '-r', f"{capture_fps:g}",
+      '-i', 'pipe:0',
+      '-vf', 'vflip,format=yuv420p',
+      '-c:v', 'libx264',
+      '-preset', 'ultrafast',
+      '-crf', '23',
+      '-y',
+      '-f', 'mp4',
+      str(out_path),
+    ]
+    self._ffmpeg_proc = subprocess.Popen(ffmpeg_args, stdin=subprocess.PIPE)
+    self._ffmpeg_queue = queue.Queue(maxsize=8)  # 메모리 사용을 줄이기 위해 작은 버퍼
+    self._ffmpeg_stop_event = threading.Event()
+    self._ffmpeg_thread = threading.Thread(target=self._ffmpeg_writer_thread, daemon=True)
+    self._ffmpeg_thread.start()
+
+  def start_recording(self):
+    # RECORD 환경변수 녹화와 ffmpeg 자원을 같이 쓰므로 동시에 켜지 않는다
+    if self._record_enabled or RECORD:
+      return
+    try:
+      out_path = self._new_record_path()
+      self._init_record_ffmpeg(out_path)
+    except Exception:
+      cloudlog.exception("screen record start failed")
+      self.close_ffmpeg()
+      return
+    self._record_enabled = True
+    self._record_frame_idx = 0
+    self._record_t0 = time.monotonic()
+    if self._record_start_t == 0.0:
+      self._record_start_t = self._record_t0
+    cloudlog.info(f"[REC] start -> {out_path}")
+
+  def stop_recording(self):
+    if not self._record_enabled:
+      return
+    self._record_enabled = False
+    self._record_start_t = 0.0
+    self.close_ffmpeg()
+    cloudlog.info("[REC] stop")
+
+  def toggle_recording(self):
+    if self._record_enabled:
+      self.stop_recording()
+    else:
+      self.start_recording()
+
+  def is_recording(self) -> bool:
+    return self._record_enabled
+
+  def recording_elapsed(self) -> float:
+    # 파일이 60초마다 바뀌어도 녹화를 켠 시점부터의 시간
+    return time.monotonic() - self._record_start_t if self._record_enabled else 0.0
+
+  def _record_frame(self):
+    self._record_frame_idx += 1
+    if self._record_frame_idx % self._record_every_n == 0 and self._ffmpeg_queue is not None and not self._ffmpeg_queue.full():
+      self._ffmpeg_queue.put_nowait(rl.cpu.screen().tobytes())
+
+    if time.monotonic() - self._record_t0 >= self._record_max_sec:
+      # 파일 교체: 시작 시각은 유지
+      start_t = self._record_start_t
+      self.stop_recording()
+      self.start_recording()
+      if self._record_enabled:
+        self._record_start_t = start_t
 
   def push_widget(self, widget: object):
     if widget in self._nav_stack:
@@ -530,17 +623,29 @@ class GuiApplication:
     if self._ffmpeg_thread is not None:
       # Signal thread to stop, send sentinel, then wait for it to drain
       self._ffmpeg_stop_event.set()
-      self._ffmpeg_queue.put(None)
+      try:
+        self._ffmpeg_queue.put(None, timeout=1.0)
+      except queue.Full:
+        pass
       self._ffmpeg_thread.join(timeout=30)
 
     if self._ffmpeg_proc is not None:
-      self._ffmpeg_proc.stdin.flush()
-      self._ffmpeg_proc.stdin.close()
+      try:
+        self._ffmpeg_proc.stdin.flush()
+        self._ffmpeg_proc.stdin.close()
+      except Exception:
+        pass
       try:
         self._ffmpeg_proc.wait(timeout=30)
       except subprocess.TimeoutExpired:
         self._ffmpeg_proc.terminate()
         self._ffmpeg_proc.wait()
+
+    # 화면 녹화는 여러 번 켜고 끄므로 다음 시작을 위해 비운다
+    self._ffmpeg_proc = None
+    self._ffmpeg_queue = None
+    self._ffmpeg_thread = None
+    self._ffmpeg_stop_event = None
 
   def close(self):
     if not rl.is_window_ready():
@@ -632,6 +737,8 @@ class GuiApplication:
 
         if RECORD:
           self._ffmpeg_queue.put(rl.cpu.screen().tobytes())  # Async write via background thread
+        elif self._record_enabled:
+          self._record_frame()
 
         if BURN_IN_MODE:
           screen = rl.cpu.screen()

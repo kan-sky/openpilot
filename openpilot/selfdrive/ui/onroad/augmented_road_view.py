@@ -33,7 +33,7 @@ BORDER_COLORS = {
 WIDE_CAM_MAX_SPEED = 5.0  # m/s (11 mph)
 ROAD_CAM_MIN_SPEED = 10.0  # m/s (22 mph)
 INF_POINT = np.array([1000.0, 0.0, 0.0])
-BORDER_FONT_SIZE = 26
+BORDER_FONT_SIZE = 38
 
 
 class AugmentedRoadView(CameraView):
@@ -136,9 +136,9 @@ class AugmentedRoadView(CameraView):
     except Exception:
       pass
 
-  def _border_text(self, text: str, x: float, y: float, align: str):
+  def _border_text(self, text: str, x: float, y: float, align: str, color: rl.Color = rl.WHITE) -> float:
     if not text:
-      return
+      return 0.0
     font = self._border_font if text.isascii() else gui_app.fallback_font()
     size = measure_text_cached(font, text, BORDER_FONT_SIZE)
     if align == "center":
@@ -146,7 +146,19 @@ class AugmentedRoadView(CameraView):
     elif align == "right":
       x -= size.x
     rl.draw_text_ex(font, text, rl.Vector2(x + 2, y + 2), BORDER_FONT_SIZE, 0, rl.Color(0, 0, 0, 200))
-    rl.draw_text_ex(font, text, rl.Vector2(x, y), BORDER_FONT_SIZE, 0, rl.WHITE)
+    rl.draw_text_ex(font, text, rl.Vector2(x, y), BORDER_FONT_SIZE, 0, color)
+    return size.x
+
+  def _draw_record_indicator(self, x: float, y: float):
+    # 화면 녹화 중이면 깜빡이는 빨간 점과 경과 시간 표시
+    if not gui_app.is_recording():
+      return
+    elapsed = int(gui_app.recording_elapsed())
+    radius = BORDER_FONT_SIZE * 0.3
+    cy = y + BORDER_FONT_SIZE / 2
+    if elapsed % 2 == 0:
+      rl.draw_circle(int(x + radius), int(cy), radius, rl.Color(255, 40, 40, 255))
+    self._border_text(f"REC {elapsed // 60:02d}:{elapsed % 60:02d}", x + radius * 2 + 10, y, "left", rl.Color(255, 90, 90, 255))
 
   def _draw_border_info(self, rect: rl.Rectangle):
     # 테두리 위아래에 차량/보정/장치 상태를 표시
@@ -187,13 +199,16 @@ class AugmentedRoadView(CameraView):
     except Exception:
       pass
 
+    # 글자가 테두리보다 커서 위는 테두리 상단, 아래는 테두리 하단에 맞춘다
     margin = 40.0
-    top_y = rect.y + (UI_BORDER_SIZE - BORDER_FONT_SIZE) / 2
-    bottom_y = rect.y + rect.height - UI_BORDER_SIZE + (UI_BORDER_SIZE - BORDER_FONT_SIZE) / 2
+    line_h = BORDER_FONT_SIZE + 4
+    top_y = rect.y + 2
+    bottom_y = rect.y + rect.height - BORDER_FONT_SIZE - 2
     self._border_text(top_left, rect.x + margin, top_y, "left")
     self._border_text(top_center, rect.x + rect.width / 2, top_y, "center")
     self._border_text(top_right, rect.x + rect.width - margin, top_y, "right")
-    self._border_text(device_text, rect.x + rect.width - margin, top_y + UI_BORDER_SIZE + 6, "right")
+    self._border_text(device_text, rect.x + rect.width - margin, top_y + line_h, "right")
+    self._draw_record_indicator(rect.x + margin, top_y + line_h)
     self._border_text(self._git_branch, rect.x + margin, bottom_y, "left")
     self._border_text(bottom_center, rect.x + rect.width / 2, bottom_y, "center")
     self._border_text(self._network_address, rect.x + rect.width - margin, bottom_y, "right")

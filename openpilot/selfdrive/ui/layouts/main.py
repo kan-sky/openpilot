@@ -1,3 +1,4 @@
+import time
 import raylib_nb as rl
 from enum import IntEnum
 import openpilot.cereal.messaging as messaging
@@ -50,9 +51,30 @@ class MainLayout(Widget):
     if not self._onboarding_window.completed:
       gui_app.push_widget(self._onboarding_window)
 
+    self._screen_record_next_t = 0.0
+
   def _render(self, _):
     self._handle_onroad_transition()
     self._render_main_content()
+    self._update_screen_record()
+
+  def _update_screen_record(self):
+    # 웹의 녹화 버튼이 ScreenRecord 파라미터를 바꾸면 화면 녹화를 켜고 끈다 (1초마다 확인)
+    now = time.monotonic()
+    if now < self._screen_record_next_t:
+      return
+    self._screen_record_next_t = now + 1.0
+
+    requested = ui_state.params.get_bool("ScreenRecord")
+    if requested and ui_state.started:
+      gui_app.start_recording()
+    else:
+      gui_app.stop_recording()
+
+    # 시작 실패 등으로 실제 상태가 다르면 파라미터를 맞춰 웹 버튼에도 반영
+    recording = gui_app.is_recording()
+    if requested != recording:
+      ui_state.params.put_bool_nonblocking("ScreenRecord", recording)
 
   def _setup_callbacks(self):
     self._sidebar.set_callbacks(on_settings=self._on_settings_clicked,
