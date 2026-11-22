@@ -34,6 +34,9 @@ WIDE_CAM_MAX_SPEED = 5.0  # m/s (11 mph)
 ROAD_CAM_MIN_SPEED = 10.0  # m/s (22 mph)
 INF_POINT = np.array([1000.0, 0.0, 0.0])
 BORDER_FONT_SIZE = 38
+TPMS_FONT_SIZE = 40
+TPMS_NORMAL_COLOR = rl.Color(255, 255, 255, 220)
+TPMS_LOW_COLOR = rl.Color(255, 90, 90, 220)
 
 
 class AugmentedRoadView(CameraView):
@@ -56,6 +59,7 @@ class AugmentedRoadView(CameraView):
 
     # 테두리 정보 표시용
     self._border_font = gui_app.font(FontWeight.MEDIUM)
+    self._tpms_font = gui_app.font(FontWeight.DISPLAY)
     self._params_memory = Params("/dev/shm/params")
     self._border_params_next_t = 0.0
     self._git_branch = ""
@@ -100,6 +104,7 @@ class AugmentedRoadView(CameraView):
 
     # Custom UI extension point - add custom overlays here
     # Use self._content_rect for positioning within camera bounds
+    self._draw_tpms(self._content_rect)
 
     # End clipping region
     rl.end_scissor_mode()
@@ -148,6 +153,48 @@ class AugmentedRoadView(CameraView):
     rl.draw_text_ex(font, text, rl.Vector2(x + 2, y + 2), BORDER_FONT_SIZE, 0, rl.Color(0, 0, 0, 200))
     rl.draw_text_ex(font, text, rl.Vector2(x, y), BORDER_FONT_SIZE, 0, color)
     return size.x
+
+  @staticmethod
+  def _get_tpms_color(tpms: float) -> rl.Color:
+    if tpms < 5 or tpms > 60:
+      return TPMS_NORMAL_COLOR
+    if tpms < 31:
+      return TPMS_LOW_COLOR
+    return TPMS_NORMAL_COLOR
+
+  @staticmethod
+  def _get_tpms_text(tpms: float) -> str:
+    if tpms < 5 or tpms > 60:
+      return '  -'
+    return f'{round(tpms):.0f}'
+
+  def _draw_tpms(self, rect: rl.Rectangle):
+    # 카메라 화면 오른쪽 위에 네 바퀴 공기압(psi)을 차 모양 배치로 표시
+    try:
+      tpms = ui_state.sm['carState'].tpms
+      fl = float(tpms.fl)
+      fr = float(tpms.fr)
+      rl_v = float(tpms.rl)
+      rr = float(tpms.rr)
+    except Exception:
+      return
+
+    bx = rect.x + rect.width - 125
+    by = rect.y + 130
+    dw = 80
+    self._draw_tpms_value(fl, bx - dw, by - 55)
+    self._draw_tpms_value(fr, bx + dw, by - 55)
+    self._draw_tpms_value(rl_v, bx - dw, by + 70)
+    self._draw_tpms_value(rr, bx + dw, by + 70)
+
+  def _draw_tpms_value(self, value: float, cx: float, bottom_y: float):
+    # 가운데 정렬, 글자 아래쪽을 bottom_y 에 맞추고 그림자를 깐다
+    text = self._get_tpms_text(value)
+    size = measure_text_cached(self._tpms_font, text, TPMS_FONT_SIZE)
+    x = cx - size.x / 2
+    y = bottom_y - size.y
+    rl.draw_text_ex(self._tpms_font, text, rl.Vector2(x + 4, y + 4), TPMS_FONT_SIZE, 0, rl.Color(0, 0, 0, 160))
+    rl.draw_text_ex(self._tpms_font, text, rl.Vector2(x, y), TPMS_FONT_SIZE, 0, self._get_tpms_color(value))
 
   def _draw_record_indicator(self, x: float, y: float):
     # 화면 녹화 중이면 깜빡이는 빨간 점과 경과 시간 표시
@@ -212,7 +259,6 @@ class AugmentedRoadView(CameraView):
     self._border_text(self._git_branch, rect.x + margin, bottom_y, "left")
     self._border_text(bottom_center, rect.x + rect.width / 2, bottom_y, "center")
     self._border_text(self._network_address, rect.x + rect.width - margin, bottom_y, "right")
-
   def _switch_stream_if_needed(self, sm):
     if sm['carParams'].openpilotLongitudinalControl and WIDE_CAM in self.available_streams:
       v_ego = sm['carState'].vEgo

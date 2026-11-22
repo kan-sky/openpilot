@@ -13,6 +13,7 @@ NetworkLocation = structs.CarParams.NetworkLocation
 STANDSTILL_THRESHOLD = 10 * 0.0311
 # Kans: Volt EBCM 브레이크 페달 센서(0xF1) 밟힘 임계값 - gm.h와 동일
 VOLT_EBCM_BRAKE_PRESSED_THRESHOLD = 6
+KPA_TO_PSI = 0.1450377
 
 BUTTONS_DICT = {CruiseButtons.RES_ACCEL: ButtonType.accelCruise, CruiseButtons.DECEL_SET: ButtonType.decelCruise,
                 CruiseButtons.MAIN: ButtonType.mainCruise, CruiseButtons.CANCEL: ButtonType.cancel}
@@ -183,6 +184,13 @@ class CarState(CarStateBase):
       if self.CP.carFingerprint not in SDGM_CAR:
         ret.stockAeb = cam_cp.vl["AEBCmd"]["AEBCmdActive"] != 0
 
+    # Kans: TPMS 0x52A (계기판과 같은 kPa, 온도 보정 없음) → psi. 수신 전에는 0
+    tpms = pt_cp.vl["TPMS"]
+    ret.tpms.fl = tpms["PRESSURE_FL"] * KPA_TO_PSI
+    ret.tpms.fr = tpms["PRESSURE_FR"] * KPA_TO_PSI
+    ret.tpms.rl = tpms["PRESSURE_RL"] * KPA_TO_PSI
+    ret.tpms.rr = tpms["PRESSURE_RR"] * KPA_TO_PSI
+
     if self.CP.flags & GMFlags.HAS_BSM:
       ret.leftBlindspot = pt_cp.vl["BCMBlindSpotMonitor"]["LeftBSM"] == 1
       ret.rightBlindspot = pt_cp.vl["BCMBlindSpotMonitor"]["RightBSM"] == 1
@@ -219,7 +227,10 @@ class CarState(CarStateBase):
 
   @staticmethod
   def get_can_parsers(CP):
-    pt_messages = []
+    # Kans: TPMS 는 1 Hz 이고 없는 차량도 있어서 수신 여부로 CAN 오류를 내지 않는다
+    pt_messages = [
+      ("TPMS", float('nan')),
+    ]
     if CP.networkLocation == NetworkLocation.fwdCamera:
       pt_messages += [
         ("ASCMLKASteeringCmd", float('nan')),
