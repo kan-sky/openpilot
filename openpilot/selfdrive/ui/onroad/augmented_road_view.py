@@ -35,6 +35,10 @@ ROAD_CAM_MIN_SPEED = 10.0  # m/s (22 mph)
 INF_POINT = np.array([1000.0, 0.0, 0.0])
 BORDER_FONT_SIZE = 38
 TPMS_FONT_SIZE = 40
+TPMS_Y_SHIFT = 50
+RECORD_BTN_W = 240
+RECORD_BTN_H = 90
+RECORD_BTN_FONT_SIZE = 40
 TPMS_NORMAL_COLOR = rl.Color(255, 255, 255, 220)
 TPMS_LOW_COLOR = rl.Color(255, 90, 90, 220)
 
@@ -60,6 +64,7 @@ class AugmentedRoadView(CameraView):
     # 테두리 정보 표시용
     self._border_font = gui_app.font(FontWeight.MEDIUM)
     self._tpms_font = gui_app.font(FontWeight.DISPLAY)
+    self._record_btn_rect = rl.Rectangle(0, 0, 0, 0)
     self._params_memory = Params("/dev/shm/params")
     self._border_params_next_t = 0.0
     self._git_branch = ""
@@ -105,6 +110,7 @@ class AugmentedRoadView(CameraView):
     # Custom UI extension point - add custom overlays here
     # Use self._content_rect for positioning within camera bounds
     self._draw_tpms(self._content_rect)
+    self._draw_record_button(self._content_rect)
 
     # End clipping region
     rl.end_scissor_mode()
@@ -113,9 +119,56 @@ class AugmentedRoadView(CameraView):
     self._draw_border(rect)
     self._draw_border_info(rect)
 
-  def _handle_mouse_press(self, _):
+  def _handle_mouse_press(self, mouse_pos):
+    # 녹화 버튼을 누르면 녹화만 켜고 끄고, 사이드바 토글(클릭 콜백)은 하지 않는다
+    if rl.check_collision_point_rec(rl.Vector2(mouse_pos.x, mouse_pos.y), self._record_btn_rect):
+      self._toggle_screen_record()
+      return
     if self._click_callback is not None:
       self._click_callback()
+
+  def _toggle_screen_record(self):
+    # 웹 버튼과 같은 ScreenRecord 파라미터를 먼저 바꿔 1초 주기 동기화(main.py)와 어긋나지 않게 한다
+    want = not gui_app.is_recording()
+    try:
+      ui_state.params.put_bool("ScreenRecord", want, block=True)
+    except Exception:
+      return
+    if want:
+      gui_app.start_recording()
+    else:
+      gui_app.stop_recording()
+
+  def _draw_record_button(self, rect: rl.Rectangle):
+    # 오른쪽 아래(IP 표시 위), TPMS 와 같은 가로 중심에 녹화 버튼
+    w, h = RECORD_BTN_W, RECORD_BTN_H
+    cx = rect.x + rect.width - 125
+    self._record_btn_rect = rl.Rectangle(cx - w / 2, rect.y + rect.height - h - 30, w, h)
+    btn = self._record_btn_rect
+    recording = gui_app.is_recording()
+
+    fill = rl.Color(200, 30, 30, 200) if recording else rl.Color(0, 0, 0, 150)
+    rl.draw_rectangle_rounded(btn, 0.4, 10, fill)
+    rl.draw_rectangle_rounded_lines_ex(btn, 0.4, 10, 4, rl.Color(255, 255, 255, 120))
+
+    if recording:
+      elapsed = int(gui_app.recording_elapsed())
+      label = f"STOP {elapsed // 60:02d}:{elapsed % 60:02d}"
+    else:
+      label = "REC"
+    size = measure_text_cached(self._tpms_font, label, RECORD_BTN_FONT_SIZE)
+    dot_r = RECORD_BTN_FONT_SIZE * 0.32
+    gap = 14
+    total_w = dot_r * 2 + gap + size.x
+    x = btn.x + (btn.width - total_w) / 2
+    cy = btn.y + btn.height / 2
+    if recording:
+      # 녹화 중: 흰 사각형(정지 표시)
+      rl.draw_rectangle(int(x), int(cy - dot_r), int(dot_r * 2), int(dot_r * 2), rl.WHITE)
+    else:
+      rl.draw_circle(int(x + dot_r), int(cy), dot_r, rl.Color(255, 50, 50, 255))
+    rl.draw_text_ex(self._tpms_font, label, rl.Vector2(x + dot_r * 2 + gap, cy - size.y / 2),
+                    RECORD_BTN_FONT_SIZE, 0, rl.WHITE)
 
   def _handle_mouse_release(self, _):
     # We only call click callback on press
@@ -180,7 +233,8 @@ class AugmentedRoadView(CameraView):
       return
 
     bx = rect.x + rect.width - 125
-    by = rect.y + 130
+    # 테두리 두 번째 줄(MEM/DISK/CPU) 아래로 내린다
+    by = rect.y + 130 + TPMS_Y_SHIFT
     dw = 80
     self._draw_tpms_value(fl, bx - dw, by - 55)
     self._draw_tpms_value(fr, bx + dw, by - 55)
@@ -234,7 +288,8 @@ class AugmentedRoadView(CameraView):
       cpu_temp = list(ds.cpuTempC)
       cpu_text = f"{sum(cpu_usage) / len(cpu_usage):.0f}%" if cpu_usage else "--"
       if cpu_temp:
-        cpu_text += f",{max(cpu_temp):.0f}°C"
+        # ASCII 만 써야 위 줄과 같은 글꼴/크기로 그려진다
+        cpu_text += f",{max(cpu_temp):.0f}C"
       device_text = f"MEM:{ds.memoryUsagePercent}% DISK:{100 - ds.freeSpacePercent:.0f}% CPU:{cpu_text}"
 
       # 차선폭: 왼쪽 | 내 차선 | 오른쪽
