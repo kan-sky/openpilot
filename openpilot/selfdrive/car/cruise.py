@@ -317,6 +317,12 @@ class VCruiseHelper:
     if self.CP.pcmCruise and self.speed_from_pcm == 1:
       return
 
+    # Kans: openpilot 종방향(pcmCruise 아님)은 캐롯처럼 활성화 순간에 설정속도를 다시 잡지 않는다.
+    # SET/RES 버튼과 자동 크루즈 ON 경로가 이미 설정속도를 정하므로, 여기서 현재속도로 덮으면
+    # 오토홀드 후 신호 출발처럼 정지 상태에서 켜질 때 최저속도(5)로 떨어진다.
+    if not self.CP.pcmCruise:
+      return
+
     initial = CS.vEgoCluster * CV.MS_TO_KPH
 
     v_ego_kph = int(round(np.clip(CS.vEgoCluster * CV.MS_TO_KPH, initial, V_CRUISE_MAX)))
