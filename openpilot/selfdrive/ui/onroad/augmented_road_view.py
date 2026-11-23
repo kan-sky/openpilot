@@ -36,6 +36,8 @@ INF_POINT = np.array([1000.0, 0.0, 0.0])
 BORDER_FONT_SIZE = 38
 TPMS_FONT_SIZE = 40
 TPMS_Y_SHIFT = 50
+TPMS_CAR_W = 260
+TPMS_CAR_H = 195
 RECORD_BTN_W = 240
 RECORD_BTN_H = 90
 RECORD_BTN_FONT_SIZE = 40
@@ -65,6 +67,7 @@ class AugmentedRoadView(CameraView):
     self._border_font = gui_app.font(FontWeight.MEDIUM)
     self._tpms_font = gui_app.font(FontWeight.DISPLAY)
     self._record_btn_rect = rl.Rectangle(0, 0, 0, 0)
+    self._tpms_car_tex = None
     self._params_memory = Params("/dev/shm/params")
     self._border_params_next_t = 0.0
     self._git_branch = ""
@@ -236,6 +239,16 @@ class AugmentedRoadView(CameraView):
     # 테두리 두 번째 줄(MEM/DISK/CPU) 아래로 내린다
     by = rect.y + 130 + TPMS_Y_SHIFT
     dw = 80
+
+    # 자동차 아이콘: 네 바퀴의 검은 칸이 숫자 위치(좌우 ±dw, 위아래 두 줄)에 오도록 크기를 맞춘다
+    if self._tpms_car_tex is None:
+      try:
+        self._tpms_car_tex = gui_app.texture("images/tpms_toy_car.png", TPMS_CAR_W, TPMS_CAR_H)
+      except Exception:
+        self._tpms_car_tex = False
+    if self._tpms_car_tex:
+      car_cy = by - 12.5
+      rl.draw_texture(self._tpms_car_tex, int(bx - TPMS_CAR_W / 2), int(car_cy - TPMS_CAR_H / 2), rl.Color(255, 255, 255, 230))
     self._draw_tpms_value(fl, bx - dw, by - 55)
     self._draw_tpms_value(fr, bx + dw, by - 55)
     self._draw_tpms_value(rl_v, bx - dw, by + 70)
