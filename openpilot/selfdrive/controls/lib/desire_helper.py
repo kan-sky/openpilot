@@ -7,7 +7,7 @@ from openpilot.common.swaglog import cloudlog
 
 from openpilot.selfdrive.controls.lib.desire_lib.constants import (
   LaneChangeState, LaneChangeDirection, TurnDirection,
-  LANE_CHANGE_SPEED_MIN, LANE_CHANGE_TIME_MAX, ATC_TURN_MAX_SPEED, LAST_LANE_HOLD_SEC,
+  LANE_CHANGE_SPEED_MIN, LANE_CHANGE_TIME_MAX, ATC_TURN_MAX_SPEED, LAST_LANE_HOLD_SEC, LANE_WIDTH_KR,
   BLINKER_NONE, BLINKER_LEFT, BLINKER_RIGHT,
   DESIRES, TURN_DESIRES
 )
@@ -250,7 +250,10 @@ class DesireHelper:
 
   @staticmethod
   def _is_last_lane(side: SideState) -> bool:
-    return side.lane_exist_count.counter <= 0 and not side.lane_change_available_geom
+    # Kans: 옆 차선선이 없고 도로 끝까지가 한 차선폭(LANE_WIDTH_KR)이 안 되면 갓길로 보고 맨 끝 차선으로 친다.
+    # 폭 2.5 m 정도의 넓은 갓길이 geom 가능으로 잡혀 분기 준비 내내 맨 끝 차선이 아닌 것으로 되는 것을 막는다.
+    return side.lane_exist_count.counter <= 0 and \
+           (not side.lane_change_available_geom or side.dist_to_edge < LANE_WIDTH_KR)
 
   @classmethod
   def _was_last_lane(cls, side: SideState) -> bool:
