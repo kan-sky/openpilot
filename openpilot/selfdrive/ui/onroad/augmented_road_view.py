@@ -156,13 +156,21 @@ class AugmentedRoadView(CameraView):
 
     if recording:
       elapsed = int(gui_app.recording_elapsed())
-      label = f"STOP {elapsed // 60:02d}:{elapsed % 60:02d}"
+      # 흰 사각형이 정지 표시이므로 시간만 표시
+      label = f"{elapsed // 60:02d}:{elapsed % 60:02d}"
     else:
       label = "REC"
-    size = measure_text_cached(self._tpms_font, label, RECORD_BTN_FONT_SIZE)
-    dot_r = RECORD_BTN_FONT_SIZE * 0.32
-    gap = 14
-    total_w = dot_r * 2 + gap + size.x
+    # 버튼 폭을 넘으면 글자 크기를 줄인다
+    font_size = RECORD_BTN_FONT_SIZE
+    max_w = w - 30
+    while True:
+      size = measure_text_cached(self._tpms_font, label, font_size)
+      dot_r = font_size * 0.32
+      gap = 14
+      total_w = dot_r * 2 + gap + size.x
+      if total_w <= max_w or font_size <= 24:
+        break
+      font_size -= 2
     x = btn.x + (btn.width - total_w) / 2
     cy = btn.y + btn.height / 2
     if recording:
@@ -171,7 +179,7 @@ class AugmentedRoadView(CameraView):
     else:
       rl.draw_circle(int(x + dot_r), int(cy), dot_r, rl.Color(255, 50, 50, 255))
     rl.draw_text_ex(self._tpms_font, label, rl.Vector2(x + dot_r * 2 + gap, cy - size.y / 2),
-                    RECORD_BTN_FONT_SIZE, 0, rl.WHITE)
+                    font_size, 0, rl.WHITE)
 
   def _handle_mouse_release(self, _):
     # We only call click callback on press
