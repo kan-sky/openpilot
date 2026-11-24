@@ -1081,17 +1081,17 @@
     {
       "group": "조향일반",
       "name": "AutoTurnPassSpeedRight",
-      "title": "ATC: 우회전 통과속도(20)km/h",
+      "title": "ATC: 우회전 통과속도(18)km/h",
       "descr": "우회전 지점을 통과하는 목표속도. 우회전은 반경이 작아(약 12 m) 빠르면 조향토크가 모자라 크게 돔",
       "egroup": "LATSET",
-      "etitle": "ATC: Right Turn Pass Speed(20)km/h",
+      "etitle": "ATC: Right Turn Pass Speed(18)km/h",
       "edescr": "Target speed through the right turn point. Right turns are tight (about 12 m radius), too fast runs out of steering torque and turns wide",
       "cgroup": "转向设置",
-      "ctitle": "ATC: 右转通过速度(20)km/h",
+      "ctitle": "ATC: 右转通过速度(18)km/h",
       "cdescr": "右转通过目标速度。右转半径小(约12米)，过快转向扭矩不足会转大弯",
       "min": 10,
       "max": 40,
-      "default": 20,
+      "default": 18,
       "unit": 1
     },
     {
