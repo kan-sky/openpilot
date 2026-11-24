@@ -282,9 +282,13 @@ class CarrotServ:
     self.autoTurnAtcDistLeft = max(0, self.params.get_int("AutoTurnAtcDistLeft"))
     self.autoTurnAtcDistRight = max(0, self.params.get_int("AutoTurnAtcDistRight"))
     # Kans: ATC 좌/우회전 통과속도(km/h), 0 이하면 15
+    # 우회전은 반경이 작아(약 12 m) 같은 속도에서 필요한 횡가속도가 커서 따로 둔다
     self.autoTurnPassSpeed = self.params.get_int("AutoTurnPassSpeed")
     if self.autoTurnPassSpeed <= 0:
       self.autoTurnPassSpeed = 15
+    self.autoTurnPassSpeedRight = self.params.get_int("AutoTurnPassSpeedRight")
+    if self.autoTurnPassSpeedRight <= 0:
+      self.autoTurnPassSpeedRight = 15
     #self.autoNaviSpeedDecelRate = float(self.params.get_int("AutoNaviSpeedDecelRate")) * 0.01
     self.autoCurveSpeedLowerLimit = int(self.params.get("AutoCurveSpeedLowerLimit"))
     self.is_metric = self.params.get_bool("IsMetric")
@@ -1228,8 +1232,8 @@ class CarrotServ:
       fork_speed = turn_speed
 
       if is_turn:
-        # 일반 좌/우회전: 접근 중에는 현재속도 비율, 턴 직전에는 통과속도(AutoTurnPassSpeed, 기본 23km/h)
-        pass_speed = float(self.autoTurnPassSpeed)
+        # 일반 좌/우회전: 접근 중에는 현재속도 비율, 턴 직전에는 통과속도(좌 AutoTurnPassSpeed 23, 우 AutoTurnPassSpeedRight 20 km/h)
+        pass_speed = float(self.autoTurnPassSpeedRight if x_turn_info == 2 else self.autoTurnPassSpeed)
         approach_speed = max(pass_speed, min(35.0, apply_speed))
         # 교차로 중앙 15m 전부터 회전이 끝나는 네비 지점까지 통과속도
         turn_speed = pass_speed if x_dist_raw > 0 and x_dist_to_turn <= 15.0 else approach_speed

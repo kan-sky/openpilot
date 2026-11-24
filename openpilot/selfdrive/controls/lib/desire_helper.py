@@ -391,11 +391,26 @@ class DesireHelper:
       else:
         new_type = "none"
 
+      # Kans: 내비 회전 안내(turn left/right) 구간에서 운전자가 같은 방향 깜빡이를 켜면 운전자 확인으로 보고 곧바로 회전한다.
+      # 자동으로는 옆 공간이 4 m 넘게 열릴 때까지 기다리거나(rlog77, 17 m 앞에서 시작) 직전 atc 차선변경이
+      # 끝나기를 기다려(rlog76, 5 m 앞에서 시작) 회전이 늦어진다. 깜빡이를 미리 켜는 경우를 고려해 atc left/right 구간은 제외
+      nav_turn_blinker = BLINKER_LEFT if self.atc_type == "turn left" else \
+                         BLINKER_RIGHT if self.atc_type == "turn right" else BLINKER_NONE
+      driver_turn_confirm = (driver_enabled and blinker_state == nav_turn_blinker and
+                             v_ego < ATC_TURN_MAX_SPEED and not trailer_maneuver_blocked)
+      if driver_turn_confirm:
+        new_type = "turn"
+
       if trailer_maneuver_blocked and new_type in ("lane_change", "turn"):
         new_type = "none"
 
       # switching rules
-      if self.maneuver_type == "lane_change" and new_type == "turn" and self.lane_change_state not in (
+      if driver_turn_confirm and self.maneuver_type != "turn":
+        cloudlog.warning(f"[desire atc] driver blinker confirmed nav turn: atcType={self.atc_type} "
+                         f"xDistToTurn={carrotMan.xDistToTurn} laneChangeState={self.lane_change_state} vEgo={v_ego:.1f}")
+        self.maneuver_type = "turn"
+        self.lane_change_state = LaneChangeState.off
+      elif self.maneuver_type == "lane_change" and new_type == "turn" and self.lane_change_state not in (
         LaneChangeState.preLaneChange, LaneChangeState.laneChangeStarting
       ):
         self.maneuver_type = "turn"
