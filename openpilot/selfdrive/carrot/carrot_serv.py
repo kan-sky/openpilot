@@ -1212,7 +1212,9 @@ class CarrotServ:
     is_lane_change = x_turn_info in [3, 4]  # 포크/분기/차선변경
     is_rotary = x_turn_info == 5
     is_tg = x_turn_info == 6
-    is_highway_like = self.roadcate in [0, 1] or self.nRoadLimitSpeed >= 70
+    # Kans: 진출로 진입 직후에는 제한속도가 램프값(40)으로 바뀌어도 실제로는 고속으로 달리고 있으므로,
+    # 현재속도 70km/h 이상이면 고속도로 기준 시작거리를 쓴다 (차선변경에 필요한 시간은 도로종류와 무관)
+    is_highway_like = self.roadcate in [0, 1] or self.nRoadLimitSpeed >= 70 or v_ego_kph >= 70
 
     # Kans: 네비 좌/우회전 지점은 교차로 중앙이 아니라 회전 후 도로 시작점이다.
     # 좌/우회전은 AutoTurnDistOffset만큼 앞당긴 거리(교차로 중앙 기준)로 감속/회전 시점을 판단한다.
