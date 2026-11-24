@@ -38,7 +38,10 @@ def long_control_state_trans(CP, active, long_control_state, v_ego, should_stop,
           long_control_state = LongCtrlState.pid
 
     elif long_control_state in [LongCtrlState.starting, LongCtrlState.pid]:
-      if should_stop:
+      # Kans: 앞차가 천천히 움직여 shouldStop 없이 ECM이 정지(standstill)로 들어가면 pid에 머물러 starting으로 못 넘어가고,
+      # 리쥼 시 2CB만 꺼졌다 켜지고 RES가 나가지 않아 0.5초 뒤 Cruise Fault가 난다 (rlog75).
+      # 이 경우 stopping으로 보내 stopping -> starting -> RES 경로를 타게 한다
+      if should_stop or (CP.startingState and long_control_state == LongCtrlState.pid and cruise_standstill):
         long_control_state = LongCtrlState.stopping
       elif started_condition:
         long_control_state = LongCtrlState.pid
