@@ -76,12 +76,13 @@ def get_lat_smooth_seconds_dynamic(model_output: dict[str, np.ndarray],
 def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.ModelDataV2.Action,
                           lat_action_t: float, long_action_t: float, v_ego: float,
                           lat_smooth_seconds: float = LAT_SMOOTH_SECONDS) -> log.ModelDataV2.Action:
+  plan = model_output['plan'][0]
+  # Kans: 목표속도(desiredVelocity)는 모델 종류와 관계없이 plan에서 구한다 (플래너 blended 모드에서 사용)
+  desired_accel, _, _, desired_velocity_now = get_accel_from_plan(plan[:,Plan.VELOCITY][:,0],
+                                                                  plan[:,Plan.ACCELERATION][:,0],
+                                                                  ModelConstants.T_IDXS,
+                                                                  action_t=long_action_t)
   if 'action' not in model_output:
-    plan = model_output['plan'][0]
-    desired_accel, _, _, _ = get_accel_from_plan(plan[:,Plan.VELOCITY][:,0],
-                                        plan[:,Plan.ACCELERATION][:,0],
-                                        ModelConstants.T_IDXS,
-                                        action_t=long_action_t)
     desired_curvature = get_curvature_from_plan(plan[:,Plan.T_FROM_CURRENT_EULER][:,2],
                                                 plan[:,Plan.ORIENTATION_RATE][:,2],
                                                 ModelConstants.T_IDXS,
@@ -92,6 +93,7 @@ def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.
     desired_curvature = model_output['action'][0,0] / (max(2.5, v_ego))**2
   stop = should_stop(v_ego, desired_accel)
   desired_accel = smooth_value(desired_accel, prev_action.desiredAcceleration, LONG_SMOOTH_SECONDS)
+  desired_velocity_now = smooth_value(desired_velocity_now, prev_action.desiredVelocity, LONG_SMOOTH_SECONDS)
 
   applied_lat_smooth_seconds = 0.0
   if lat_smooth_seconds > 0.0:
@@ -110,10 +112,13 @@ def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.
                                           posinf=prev_action.desiredCurvature, neginf=prev_action.desiredCurvature))
   desired_accel = float(np.nan_to_num(desired_accel, nan=prev_action.desiredAcceleration,
                                       posinf=prev_action.desiredAcceleration, neginf=prev_action.desiredAcceleration))
+  desired_velocity_now = float(np.nan_to_num(desired_velocity_now, nan=prev_action.desiredVelocity,
+                                             posinf=prev_action.desiredVelocity, neginf=prev_action.desiredVelocity))
 
   return log.ModelDataV2.Action(desiredCurvature=float(desired_curvature),
                                 desiredAcceleration=float(desired_accel),
-                                shouldStop=bool(stop))
+                                shouldStop=bool(stop),
+                                desiredVelocity=float(desired_velocity_now))
 
 
 class ChestnutGpuState:
@@ -390,6 +395,8 @@ def main(demo=False):
   custom_lat_delay = 0.0
   camera_yaw_trim_deg = params.get_float("CameraYawTrimDeg") * 0.01  # Kans: 카메라 YAW 보정(0.01도 단위, +: 오른쪽)
   lat_smooth_param_frame = 0
+  # Kans: 모델이 곡률을 직접 내는 경우(action 출력) 직전 프레임의 동적 스무딩 시간을 모델 입력 action_t에 더한다
+  lat_smooth_seconds_dynamic = 0.0
 
   while True:
     # Keep receiving frames until we are at least 1 frame ahead of previous extra frame
@@ -444,9 +451,12 @@ def main(demo=False):
       custom_lat_delay = params.get_float("SteerActuatorDelay") * 0.01
       camera_yaw_trim_deg = params.get_float("CameraYawTrimDeg") * 0.01
     lat_smooth_param_frame += 1
-    # Kans: 모델 입력 action_t에는 스무딩을 넣지 않음 (스무딩 보상은 곡률 계산에서만)
-    # SteerActuatorDelay가 0보다 크면 그 값, 0이면 학습된 지연(lateralDelay)
+    # Kans: SteerActuatorDelay가 0보다 크면 그 값, 0이면 학습된 지연(lateralDelay)
+    # plan 기반 모델은 action_t에 스무딩을 넣지 않고 곡률 계산에서 보상하고,
+    # action 출력 모델은 곡률 계산을 거치지 않으므로 action_t에 스무딩 시간을 더해 보상한다
     lat_delay = custom_lat_delay if custom_lat_delay > 0.0 else sm["lateralDelay"].lateralDelay
+    if 'action' in model.output_slices:
+      lat_delay += lat_smooth_seconds_dynamic
     if sm.updated["extrinsicsCalibration"] and sm.seen['narrowRoadCameraState'] and sm.seen['deviceState']:
       device_from_calib_euler = np.array(sm["extrinsicsCalibration"].rpyCalib, dtype=np.float32)
       # Kans: 캘리브레이션 완료 후에만 YAW 보정 적용 (기기를 좌우로 돌린 것과 같은 효과)
