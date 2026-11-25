@@ -39,6 +39,10 @@ ROTARY_HOLD_START_DIST = 200.0  # m, 안내 지점(출구 뒤쪽)까지 이 거�
 ROTARY_HOLD_CURVATURE = 0.020  # 1/m
 ROTARY_HOLD_CLEAR_SEC = 0.5
 ROTARY_HOLD_TIMEOUT_SEC = 25.0  # 22km/h로 시작거리 전체를 지나는 시간 이상
+# Kans: 고속도로를 벗어난 뒤 이 거리 안의 우측 분기는 진출 램프 안의 연속 진출로 본다
+HIGHWAY_CONTEXT_DIST = 1000.0  # m
+# 앞 분기점과 다음 우측 분기점 사이가 이 거리 이상이면 110 m, 미만이면 80 m 앞에서 차선변경 시작
+HIGHWAY_EXIT_FORK_GAP = 150.0  # m
 
 nav_type_mapping = {
   12: ("turn", "left", 1),
@@ -154,6 +158,9 @@ class CarrotServ:
     self.vpPosPointLat = 0.0
     self.vpPosPointLon = 0.0
     self.roadcate = 8
+    # Kans: 고속도로/고속화도로(내비 기준)를 벗어난 뒤 주행거리 - 진출 램프의 연속 분기 판정용
+    self.dist_since_highway = 1e9
+    self.highway_track_time = 0.0
 
     self.nPosSpeed = 0.0
     self.nPosAngle = 0.0
@@ -1216,9 +1223,13 @@ class CarrotServ:
     is_lane_change = x_turn_info in [3, 4]  # 포크/분기/차선변경
     is_rotary = x_turn_info == 5
     is_tg = x_turn_info == 6
-    # Kans: 진출로 진입 직후에는 제한속도가 램프값(40)으로 바뀌어도 실제로는 고속으로 달리고 있으므로,
-    # 현재속도 70km/h 이상이면 고속도로 기준 시작거리를 쓴다 (차선변경에 필요한 시간은 도로종류와 무관)
-    is_highway_like = self.roadcate in [0, 1] or self.nRoadLimitSpeed >= 70 or v_ego_kph >= 70
+    is_highway_like = self.roadcate in [0, 1] or self.nRoadLimitSpeed >= 70
+    # Kans: 고속도로에서 진출한 직후의 램프는 내비가 제한속도 40, 일반도로(roadcate 2)로 알려주므로
+    # 램프 안의 다음 우측 분기(연속 진출)가 일반분기 거리로 늦게 시작한다 (rlog74/78).
+    # 좌측 분기(고속도로 아래 굴다리 등)는 반대편 차량이 있을 수 있어 서행해야 하므로 일반분기로 둔다.
+    # 속도로는 판단하지 않는다(정체 시 저속 진출)
+    is_highway_exit_fork = (x_turn_info == 4 and not is_highway_like and
+                            self.dist_since_highway < HIGHWAY_CONTEXT_DIST)
 
     # Kans: 네비 좌/우회전 지점은 교차로 중앙이 아니라 회전 후 도로 시작점이다.
     # 좌/우회전은 AutoTurnDistOffset만큼 앞당긴 거리(교차로 중앙 기준)로 감속/회전 시점을 판단한다.
@@ -1288,6 +1299,12 @@ class CarrotServ:
         start_fork_dist = float(np.interp(v_ego_kph, [70, 90, 110], [110, 130, 150]))
         atc_debug = "Hwy"
 
+      elif is_highway_exit_fork:
+        # 앞 분기점(고속도로를 벗어난 지점)부터 다음 분기점까지의 간격
+        fork_gap = self.dist_since_highway + max(x_dist_to_turn, 0.0)
+        start_fork_dist = 110.0 if fork_gap >= HIGHWAY_EXIT_FORK_GAP else 80.0
+        atc_debug = "HwX"
+
       else:
         # Kans: 일반 분기
         # 저속에서는 짧게, 60~70km/h에서는 더 일찍 차선변경
@@ -1314,7 +1331,7 @@ class CarrotServ:
       if lane_change_info is not None and lane_change_info != self._prev_atc_lane_change_info:
         cloudlog.warning(f"[carrot atc-dist] fork/lane-change maneuver appeared: turnInfo={x_turn_info} "
                           f"navType={self.navType} roadcate={self.roadcate} nRoadLimitSpeed={self.nRoadLimitSpeed:.0f} "
-                          f"isHighwayLike={is_highway_like} startForkDist={start_fork_dist:.1f} "
+                          f"isHighwayLike={is_highway_like} highwayExitFork={is_highway_exit_fork} distSinceHighway={min(self.dist_since_highway, 99999):.0f} startForkDist={start_fork_dist:.1f} "
                           f"xDistToTurn={x_dist_to_turn:.0f} vEgoKph={v_ego_kph:.1f} atcDebug={atc_debug}")
       self._prev_atc_lane_change_info = lane_change_info
 
@@ -1568,6 +1585,14 @@ class CarrotServ:
     #print(f"sdi_speed: {sdi_speed}, hda_active: {hda_active}, xSpdType: {self.xSpdType}, xSpdDist: {self.xSpdDist}, active_carrot: {self.active_carrot}, v_ego_kph: {v_ego_kph}, nRoadLimitSpeed: {self.nRoadLimitSpeed}")
     ### TBT 속도제어
     self.route_speed_kph = route_speed * self.mapTurnSpeedFactor
+    # Kans: 고속도로를 벗어난 뒤 주행거리 누적 (고속도로 위에서는 0)
+    now = time.monotonic()
+    dt = min(max(now - self.highway_track_time, 0.0), 1.0) if self.highway_track_time > 0 else 0.0
+    self.highway_track_time = now
+    if self.roadcate in [0, 1] or self.nRoadLimitSpeed >= 70:
+      self.dist_since_highway = 0.0
+    else:
+      self.dist_since_highway += v_ego * dt
     atc_desired, atc_type, self.atcSpeed, self.atcDist = self.update_auto_turn(v_ego * 3.6, sm, self.xTurnInfo, self.xDistToTurn, True)
     # Kans: 분기후 이어지는 차선변경안내(atc_type_next) 추가
     atc_desired_next, atc_type_next, _, _ = self.update_auto_turn(v_ego * 3.6, sm, self.xTurnInfoNext, self.xDistToTurnNext, False)
